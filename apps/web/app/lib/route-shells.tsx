@@ -379,7 +379,8 @@ const entries: ShellEntry[] = [
     render: (_m, sp) => <FinanceOverviewLoadingShell filters={parseDateFilters(sp)} />,
   },
   {
-    match: /^\/admin\/finance\/accounts$/,
+    // Account Config (the Accounts tab is the default) + legacy accounts path.
+    match: /^\/admin\/finance\/(accounts|account-mappings)$/,
     render: () => <ChartOfAccountsLoadingShell />,
   },
   {

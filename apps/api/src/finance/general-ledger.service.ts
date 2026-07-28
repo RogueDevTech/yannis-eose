@@ -22,6 +22,7 @@ import {
   type CreateAccountInput,
   type UpdateAccountInput,
   type DeactivateAccountInput,
+  type ReactivateAccountInput,
   type ListFiscalYearsInput,
   type CreateFiscalYearInput,
   type CloseFiscalYearInput,
@@ -1924,6 +1925,28 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       const [updated] = await tx
         .update(schema.accounts)
         .set({ isActive: false })
+        .where(eq(schema.accounts.id, input.accountId))
+        .returning();
+      return updated;
+    });
+  }
+
+  async reactivateAccount(input: ReactivateAccountInput, actor: Actor) {
+    return withActor(this.db, actor, async (tx) => {
+      const [existing] = await tx
+        .select({ id: schema.accounts.id, isActive: schema.accounts.isActive })
+        .from(schema.accounts)
+        .where(eq(schema.accounts.id, input.accountId))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Account not found.' });
+      }
+      if (existing.isActive) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Account is already active.' });
+      }
+      const [updated] = await tx
+        .update(schema.accounts)
+        .set({ isActive: true })
         .where(eq(schema.accounts.id, input.accountId))
         .returning();
       return updated;

@@ -9,10 +9,7 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { useFetcherToast } from '~/components/ui/toast';
 import { Tabs } from '~/components/ui/tabs';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
-import { Modal } from '~/components/ui/modal';
-import { TextInput } from '~/components/ui/text-input';
-import { FormSelect } from '~/components/ui/form-select';
-import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { ChartOfAccountsPage, type AccountRow } from './ChartOfAccountsPage';
 
 export interface AccountMappingRow {
   mappingKey: string;
@@ -36,7 +33,11 @@ export interface AccountOption {
 
 interface Props {
   mappings: AccountMappingRow[];
+  /** Leaf-only option list for the mapping selectors. */
   accounts: AccountOption[];
+  /** Full account rows (incl. inactive) for the Accounts tab tree + CRUD. */
+  accountRows: AccountRow[];
+  hasOpeningBalances: boolean;
   canWrite: boolean;
 }
 
@@ -49,28 +50,6 @@ const CATEGORY_ORDER = [
   'Expenses',
   'Other',
 ];
-
-const ROOT_TYPES = [
-  { value: 'ASSET', label: 'Asset' },
-  { value: 'LIABILITY', label: 'Liability' },
-  { value: 'EQUITY', label: 'Equity' },
-  { value: 'INCOME', label: 'Income' },
-  { value: 'EXPENSE', label: 'Expense' },
-];
-
-const ACCOUNT_TYPES = [
-  'BANK', 'CASH', 'RECEIVABLE', 'PAYABLE', 'STOCK', 'COST_OF_GOODS_SOLD',
-  'TAX', 'FIXED_ASSET', 'INDIRECT_EXPENSE', 'INDIRECT_INCOME', 'DIRECT_INCOME',
-  'EQUITY', 'ROUND_OFF', 'TEMPORARY', 'DEPRECIATION', 'EXPENSE_ACCOUNT',
-  'CHARGEABLE', 'STOCK_RECEIVED_BUT_NOT_BILLED',
-].map((v) => ({ value: v, label: v.replace(/_/g, ' ') }));
-
-/** Prefill hints when creating an account for a missing mapping. */
-const CREATE_PRESETS: Record<string, { code: string; name: string; rootType: string; accountType: string }> = {
-  CASH_PETTY: { code: '1111', name: 'Cash on Hand (Petty Cash)', rootType: 'ASSET', accountType: 'CASH' },
-  BANK_PRIMARY: { code: '1112', name: 'Cash at Bank — Primary Account', rootType: 'ASSET', accountType: 'BANK' },
-  BANK_SECONDARY: { code: '1113', name: 'Cash at Bank — Secondary Account', rootType: 'ASSET', accountType: 'BANK' },
-};
 
 function displayName(name: string): string {
   return name.replace(/\s*[—–]\s*/g, ' · ');
@@ -90,16 +69,13 @@ interface AccountTypeRow {
   rootTypes: string;
 }
 
-interface CreateDraft {
-  mappingKey?: string;
-  code: string;
-  name: string;
-  rootType: string;
-  accountType: string;
-  parentAccountId: string;
-}
-
-export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
+export function AccountConfigPage({
+  mappings,
+  accounts,
+  accountRows,
+  hasOpeningBalances,
+  canWrite,
+}: Props) {
   const revalidator = useRevalidator();
   const totalCount = mappings.length;
   const customCount = mappings.filter((m) => m.isCustom).length;
@@ -110,46 +86,7 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
   const saveFetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(saveFetcher.data, { successMessage: 'Mappings saved successfully' });
 
-  const createFetcher = useFetcher<{
-    success?: boolean;
-    error?: string;
-    intent?: string;
-    account?: { id: string; code: string; name: string };
-    assignToMappingKey?: string;
-  }>();
-  useFetcherToast(createFetcher.data, { successMessage: 'Account created' });
-
   const dirtyCount = Object.keys(localOverrides).length;
-
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createDraft, setCreateDraft] = useState<CreateDraft>({
-    code: '',
-    name: '',
-    rootType: 'ASSET',
-    accountType: 'BANK',
-    parentAccountId: '',
-  });
-  const [parentId, setParentId] = useState('');
-
-  useCloseOnFetcherSuccess(createFetcher, () => {
-    setCreateOpen(false);
-    setParentId('');
-  });
-
-  // After create (+ optional assign), clear dirty for that key and refresh loader data.
-  useEffect(() => {
-    if (!createFetcher.data?.success || createFetcher.state !== 'idle') return;
-    const created = createFetcher.data.account;
-    const assignKey = createFetcher.data.assignToMappingKey;
-    if (created && assignKey) {
-      setLocalOverrides((prev) => {
-        const next = { ...prev };
-        delete next[assignKey];
-        return next;
-      });
-    }
-    revalidator.revalidate();
-  }, [createFetcher.data, createFetcher.state, revalidator]);
 
   useEffect(() => {
     if (saveFetcher.data?.success && saveFetcher.state === 'idle') {
@@ -178,24 +115,15 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
     );
   }, [saveFetcher, localOverrides, dirtyCount]);
 
-  const openCreate = useCallback((opts?: { mappingKey?: string }) => {
-    const preset = opts?.mappingKey ? CREATE_PRESETS[opts.mappingKey] : undefined;
-    const mapping = opts?.mappingKey
-      ? mappings.find((m) => m.mappingKey === opts.mappingKey)
-      : undefined;
-    setCreateDraft({
-      mappingKey: opts?.mappingKey,
-      code: preset?.code ?? mapping?.defaultCode ?? '',
-      name: preset?.name ?? (mapping ? mapping.label : ''),
-      rootType: preset?.rootType ?? 'ASSET',
-      accountType: preset?.accountType ?? '',
-      parentAccountId: '',
-    });
-    setParentId('');
-    setCreateOpen(true);
-  }, [mappings]);
+  const [activeTab, setActiveTab] = useState<'accounts' | 'mappings' | 'categories' | 'rules'>(
+    'accounts',
+  );
 
-  const [activeTab, setActiveTab] = useState<'mappings' | 'categories' | 'rules'>('mappings');
+  /** Account IDs referenced by a mapping — powers the deactivate warning. */
+  const mappedAccountIds = useMemo(
+    () => new Set(mappings.map((m) => m.accountId).filter(Boolean)),
+    [mappings],
+  );
 
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(CATEGORY_ORDER),
@@ -235,20 +163,6 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
           description: a.rootType,
         })),
     [leafAccounts],
-  );
-
-  const parentOptions = useMemo(
-    () =>
-      accounts
-        .filter((a) => a.isGroup)
-        .slice()
-        .sort((a, b) => a.code.localeCompare(b.code))
-        .map((a) => ({
-          value: a.id,
-          label: `${a.code} · ${displayName(a.name)}`,
-          description: a.rootType,
-        })),
-    [accounts],
   );
 
   const accountTypeRows = useMemo<AccountTypeRow[]>(() => {
@@ -301,86 +215,70 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Account Mappings"
+        title="Account Config"
         mobileInlineActions
-        description="Map system posting keys to leaf accounts so auto-posting hits the right GL. Create tree structure on Chart of Accounts."
+        description="Manage the chart of accounts and wire posting keys to the right GL accounts."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
-            triggerAriaLabel="Account mappings toolbar"
+            triggerAriaLabel="Account config toolbar"
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />
-                <Link to="/admin/finance/accounts" className="btn-secondary btn-sm inline-flex items-center">
-                  Chart of Accounts
-                </Link>
-                {canWrite && (
-                  <Button type="button" size="sm" onClick={() => openCreate()}>
-                    New Leaf
-                  </Button>
-                )}
               </div>
             }
-            sheet={({ closeSheet }) => (
-              <div className="space-y-2">
-                <Link
-                  to="/admin/finance/accounts"
-                  className="btn-secondary w-full flex items-center justify-center h-12"
-                  onClick={() => closeSheet()}
-                >
-                  Chart of Accounts
-                </Link>
-                {canWrite && (
-                  <Button
-                    type="button"
-                    className="w-full h-12"
-                    onClick={() => {
-                      closeSheet();
-                      openCreate();
-                    }}
-                  >
-                    New Leaf
-                  </Button>
-                )}
-              </div>
-            )}
           />
         }
       />
 
-      <OverviewStatStrip
-        mobileGrid
-        mobileGridCols={missingCount > 0 ? 4 : 3}
-        items={[
-          { label: 'Total', value: totalCount },
-          { label: 'Custom', value: customCount, valueClassName: customCount > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg' },
-          { label: 'Default', value: defaultCount },
-          ...(missingCount > 0
-            ? [{ label: 'Unmapped', value: missingCount, valueClassName: 'text-danger-600 dark:text-danger-400' }]
-            : []),
-        ]}
-      />
+      {activeTab === 'mappings' && (
+        <>
+          <OverviewStatStrip
+            mobileGrid
+            mobileGridCols={missingCount > 0 ? 2 : 3}
+            items={[
+              { label: 'Total', value: totalCount },
+              { label: 'Custom', value: customCount, valueClassName: customCount > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg' },
+              { label: 'Default', value: defaultCount },
+              ...(missingCount > 0
+                ? [{ label: 'Unmapped', value: missingCount, valueClassName: 'text-danger-600 dark:text-danger-400' }]
+                : []),
+            ]}
+          />
 
-      {missingCount > 0 && (
-        <div className="rounded-lg border border-warning-200 dark:border-warning-800 bg-warning-50/60 dark:bg-warning-900/20 px-4 py-3">
-          <p className="text-sm font-medium text-warning-800 dark:text-warning-200">
-            {missingCount} mapping{missingCount !== 1 ? 's' : ''} have no matching account
-          </p>
-          <p className="text-xs text-warning-700 dark:text-warning-300 mt-0.5">
-            Create a leaf (suggested code is filled in) or remap to an existing one, then save. Use Chart of Accounts for groups.
-          </p>
-        </div>
+          {missingCount > 0 && (
+            <div className="rounded-lg border border-warning-200 dark:border-warning-800 bg-warning-50/60 dark:bg-warning-900/20 px-4 py-3">
+              <p className="text-sm font-medium text-warning-800 dark:text-warning-200">
+                {missingCount} mapping{missingCount !== 1 ? 's' : ''} have no matching account
+              </p>
+              <p className="text-xs text-warning-700 dark:text-warning-300 mt-0.5">
+                Remap each to an existing account, then save. Add new accounts on the Accounts tab.
+              </p>
+            </div>
+          )}
+        </>
       )}
 
       <Tabs
         value={activeTab}
         onChange={(v) => setActiveTab(v as typeof activeTab)}
         tabs={[
+          { value: 'accounts', label: `Accounts (${accountRows.length})` },
           { value: 'mappings', label: `Mappings (${totalCount})` },
           { value: 'categories', label: `Account Types (${accountTypeRows.length})` },
           { value: 'rules', label: 'Posting Rules' },
         ]}
       />
+
+      {activeTab === 'accounts' && (
+        <ChartOfAccountsPage
+          accounts={accountRows}
+          canWrite={canWrite}
+          hasOpeningBalances={hasOpeningBalances}
+          mappedAccountIds={mappedAccountIds}
+          embedded
+        />
+      )}
 
       {activeTab === 'mappings' && (
         <>
@@ -427,7 +325,6 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
                             accountOptions={accountOptions}
                             canWrite={canWrite}
                             onChange={handleMappingChange}
-                            onCreateAccount={() => openCreate({ mappingKey: mapping.mappingKey })}
                           />
                         ))}
                       </div>
@@ -463,7 +360,7 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
       {activeTab === 'categories' && (
         <div className="space-y-3">
           <p className="text-xs text-app-fg-muted px-0.5">
-            Account types tag leaf accounts for reports and Cash Flow (BANK / CASH). Create accounts from Mappings or Chart of Accounts to add more of a type.
+            Account types tag leaf accounts for reports and Cash Flow (BANK / CASH). Add accounts on the Accounts tab to add more of a type.
           </p>
           <CompactTable
             columns={accountTypeColumns}
@@ -477,76 +374,6 @@ export function AccountMappingsPage({ mappings, accounts, canWrite }: Props) {
 
       {activeTab === 'rules' && (
         <PostingRulesTab onJumpToMappings={() => setActiveTab('mappings')} />
-      )}
-
-      {createOpen && (
-        <Modal open onClose={() => setCreateOpen(false)} maxWidth="max-w-md">
-          <div className="p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-app-fg">New Leaf Account</h2>
-            {createDraft.mappingKey && (
-              <p className="text-xs text-app-fg-muted">
-                Creating for mapping <span className="font-mono">{createDraft.mappingKey}</span>. After save it will be assigned automatically.
-              </p>
-            )}
-            {!createDraft.mappingKey && (
-              <p className="text-xs text-app-fg-muted">
-                Creates a postable leaf. For groups, use Chart of Accounts. Assign it to a mapping key below or after save.
-              </p>
-            )}
-            <createFetcher.Form method="post" className="space-y-3">
-              <input type="hidden" name="intent" value="createAccount" />
-              <input type="hidden" name="isGroup" value="false" />
-              {createDraft.mappingKey && (
-                <input type="hidden" name="assignToMappingKey" value={createDraft.mappingKey} />
-              )}
-              <input type="hidden" name="parentAccountId" value={parentId} />
-              <TextInput
-                label="Code"
-                name="code"
-                required
-                defaultValue={createDraft.code}
-                placeholder="e.g. 1113"
-              />
-              <TextInput
-                label="Name"
-                name="name"
-                required
-                defaultValue={createDraft.name}
-              />
-              <FormSelect
-                name="rootType"
-                label="Root type"
-                options={ROOT_TYPES}
-                required
-                defaultValue={createDraft.rootType}
-              />
-              <FormSelect
-                name="accountType"
-                label="Account type (optional)"
-                options={[{ value: '', label: 'None' }, ...ACCOUNT_TYPES]}
-                defaultValue={createDraft.accountType}
-              />
-              <SearchableSelect
-                label="Parent account (optional)"
-                value={parentId}
-                onChange={setParentId}
-                options={parentOptions}
-                clearable
-              />
-              {createFetcher.data?.error && (
-                <p className="text-sm text-danger-600">{createFetcher.data.error}</p>
-              )}
-              <div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={createFetcher.state !== 'idle'}>
-                  {createFetcher.state !== 'idle' ? 'Saving...' : 'Create'}
-                </Button>
-              </div>
-            </createFetcher.Form>
-          </div>
-        </Modal>
       )}
     </div>
   );
@@ -763,14 +590,12 @@ function MappingRow({
   accountOptions,
   canWrite,
   onChange,
-  onCreateAccount,
 }: {
   mapping: AccountMappingRow;
   localValue?: string;
   accountOptions: Array<{ value: string; label: string; description?: string }>;
   canWrite: boolean;
   onChange: (mappingKey: string, accountId: string) => void;
-  onCreateAccount: () => void;
 }) {
   const currentValue = localValue ?? mapping.accountId;
   const isDirty = localValue !== undefined;
@@ -829,17 +654,12 @@ function MappingRow({
             value={currentValue}
             onChange={(v) => onChange(mapping.mappingKey, v)}
             options={accountOptions}
-            placeholder={isMissing ? 'Select or create account...' : 'Select account...'}
+            placeholder={isMissing ? 'Select an account...' : 'Select account...'}
             searchPlaceholder="Search by code or name..."
             disabled={!canWrite}
             controlSize="sm"
           />
         </div>
-        {canWrite && isMissing && (
-          <Button type="button" size="sm" variant="secondary" onClick={onCreateAccount}>
-            Create
-          </Button>
-        )}
       </div>
     </div>
   );

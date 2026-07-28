@@ -357,8 +357,8 @@ const navStructure: NavGroupDef[] = [
     group: 'Accounting',
     items: [
       {
-        label: 'Chart of Accounts',
-        href: '/admin/finance/accounts',
+        label: 'Account Config',
+        href: '/admin/finance/account-mappings',
         icon: SidebarIcons.chartOfAccounts,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
@@ -418,12 +418,6 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.trendUp,
         permission: 'finance.ledger.read',
         roles: ['AUDITOR'],
-      },
-      {
-        label: 'Account Mappings',
-        href: '/admin/finance/account-mappings',
-        icon: SidebarIcons.settings,
-        permission: 'finance.ledger.write',
       },
     ],
   },

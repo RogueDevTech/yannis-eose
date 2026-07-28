@@ -124,6 +124,11 @@ export const deactivateAccountSchema = z.object({
 });
 export type DeactivateAccountInput = z.infer<typeof deactivateAccountSchema>;
 
+export const reactivateAccountSchema = z.object({
+  accountId: z.string().uuid(),
+});
+export type ReactivateAccountInput = z.infer<typeof reactivateAccountSchema>;
+
 // ─── Fiscal Years ──────────────────────────────────────────────────────────────
 
 export const listFiscalYearsSchema = z.object({

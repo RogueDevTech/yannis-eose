@@ -20,26 +20,22 @@ export function AccountMappingsLoadingShell({ canWrite: _canWrite }: { canWrite:
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
-        title="Account Mappings"
+        title="Account Config"
         mobileInlineActions
-        description="Configure which GL accounts the auto-posting engine uses."
+        description="Manage the chart of accounts and wire posting keys to the right GL accounts."
       />
 
       <OverviewStatStrip
         items={[
           { label: 'TOTAL', value: <StatValuePulse /> },
-          { label: 'CUSTOM', value: <StatValuePulse /> },
-          { label: 'DEFAULT', value: <StatValuePulse /> },
+          { label: 'ACTIVE', value: <StatValuePulse /> },
+          { label: 'GROUPS', value: <StatValuePulse /> },
+          { label: 'POSTABLE', value: <StatValuePulse /> },
         ]}
       />
 
-      <div className="space-y-6">
-        {['Assets', 'Liabilities', 'Equity'].map((cat) => (
-          <div key={cat}>
-            <h3 className="text-sm font-semibold text-app-fg-muted mb-2">{cat}</h3>
-            <CardPulseRows count={3} />
-          </div>
-        ))}
+      <div className="space-y-2">
+        <CardPulseRows count={8} />
       </div>
     </div>
   );

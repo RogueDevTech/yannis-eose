@@ -19,6 +19,8 @@ import { CacheService } from '../common/cache/cache.service';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { EventsService } from '../events/events.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { InventoryService } from '../inventory/inventory.service';
+import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { randomUUID } from 'node:crypto';
 
 /** Valid values for the order_timeline_events.event_type enum.
@@ -51,6 +53,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly cache: CacheService,
     private readonly events: EventsService,
+    private readonly inventoryService: InventoryService,
+    private readonly generalLedger: GeneralLedgerService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -2053,7 +2057,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     // Use the real actor who triggered the DELIVERED transition when available,
     // falling back to SYSTEM_ACTOR_ID for boot-time retries.
-    await withActor(this.db, { id: actorId ?? SYSTEM_ACTOR_ID }, async (tx) => {
+    const graduatedOrderId = await withActor(this.db, { id: actorId ?? SYSTEM_ACTOR_ID }, async (tx) => {
       // Insert into orders table as a delivered follow-up order
       const [graduated] = await tx
         .insert(schema.orders)
@@ -2207,6 +2211,58 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     });
 
     this.logger.log(`Follow-up order ${followUpOrderId} graduated to orders table`);
+
+    // Deduct stock + post the sale to the GL — exactly once per graduation.
+    // Graduation inserts directly into the orders table, bypassing
+    // orders.transitionStatus (which normally handles delivery stock + GL), so
+    // this block closes that gap. Runs after the tx commits; guarded against
+    // double-deduction by the graduation status/link set inside the tx (a
+    // re-run short-circuits earlier). Non-fatal — a stock/GL problem must never
+    // block graduation. Note: many follow-up orders have logisticsLocationId
+    // = null (they were never allocated to a location), in which case the
+    // deduction is skipped with a warning rather than throwing.
+    if (graduatedOrderId) {
+      await this.applyGraduationStockAndLedger(graduatedOrderId, fuOrder.logisticsLocationId);
+    }
+  }
+
+  /**
+   * Post-graduation delivery side effects: single stock deduction + GL sale.
+   * Mirror of the cart-orders graduation helper. Never throws — logs and moves
+   * on. Exactly-once is guaranteed by the caller's graduation guard.
+   */
+  private async applyGraduationStockAndLedger(
+    orderId: string,
+    logisticsLocationId: string | null,
+  ): Promise<void> {
+    if (!logisticsLocationId) {
+      this.logger.warn(
+        `Graduated follow-up order ${orderId} has no logisticsLocationId — skipping stock deduction; needs manual inventory reconciliation.`,
+      );
+      return;
+    }
+
+    const systemActor = { id: SYSTEM_ACTOR_ID } as SessionUser;
+
+    try {
+      await this.inventoryService.completeDeliveryInventory(
+        orderId,
+        logisticsLocationId,
+        systemActor,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Follow-up graduation stock deduction failed for order ${orderId}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+
+    try {
+      await this.generalLedger.postSalesInvoice(orderId, systemActor);
+    } catch (err) {
+      this.logger.warn(
+        `Follow-up graduation GL sales-invoice post failed for order ${orderId}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   // ── Transfer Follow-Up Order Between Branches ──────────────────────

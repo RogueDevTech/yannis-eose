@@ -10,6 +10,8 @@ import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { InventoryService } from '../inventory/inventory.service';
+import { GeneralLedgerService } from '../finance/general-ledger.service';
 // uuidv7() is now called as a PostgreSQL 18 built-in function in raw SQL
 // instead of JS-side generation. The import was removed to avoid TS6133.
 
@@ -38,6 +40,8 @@ export class CartOrdersService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     @Inject(PG_CLIENT_RAW) private readonly pg: ReturnType<typeof postgres>,
+    private readonly inventoryService: InventoryService,
+    private readonly generalLedger: GeneralLedgerService,
   ) {
     // One-time backfill: set media_buyer_id on cart_orders that are missing it
     // by looking up the source cart abandonment's campaign → mediaBuyerId.
@@ -888,7 +892,7 @@ export class CartOrdersService {
       }
     }
 
-    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+    const graduatedOrderId = await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
       const [graduated] = await tx
         .insert(schema.orders)
         .values({
@@ -1044,6 +1048,68 @@ export class CartOrdersService {
     });
 
     this.logger.log(`Cart order ${cartOrderId} graduated to orders table`);
+
+    // Deduct stock + post the sale to the GL — exactly once per graduation.
+    // The graduation insert above bypasses orders.transitionStatus (the funnel
+    // path that normally does this), so without this block a recovered-cart
+    // delivery would ship product without ever moving stock or hitting the
+    // ledger. This runs AFTER the tx commits (completeDeliveryInventory opens
+    // its own tx and reads the just-inserted order + items) and is guarded
+    // against double-deduction by the `graduatedOrderId` check at the top of
+    // this method — a re-run returns early before reaching here. Both calls
+    // are NON-FATAL: a stock/GL hiccup must never break cart recovery.
+    if (graduatedOrderId) {
+      await this.applyGraduationStockAndLedger(graduatedOrderId, co.logisticsLocationId);
+    }
+  }
+
+  /**
+   * Post-graduation delivery side effects: single stock deduction + GL sale.
+   * Shared shape for cart and follow-up graduation. Never throws — logs and
+   * moves on, so a delivery is never blocked by an inventory/ledger problem.
+   *
+   * IMPORTANT (exactly-once): the only caller sites are guarded by the source
+   * row's `graduatedOrderId` link, which is set inside the graduation tx. A
+   * second graduation attempt short-circuits before calling this, so stock is
+   * deducted exactly once. `completeDeliveryInventory` also releases only
+   * `min(lineQty, reservedCount)`, so it is safe even though cart/follow-up
+   * orders were never reserved (reservedCount is 0 for them).
+   */
+  private async applyGraduationStockAndLedger(
+    orderId: string,
+    logisticsLocationId: string | null,
+  ): Promise<void> {
+    if (!logisticsLocationId) {
+      // No fulfillment location recorded — we cannot know which location the
+      // stock left from. Skip the deduction (do not guess) and leave a trail
+      // for manual reconciliation rather than throwing.
+      this.logger.warn(
+        `Graduated order ${orderId} has no logisticsLocationId — skipping stock deduction; needs manual inventory reconciliation.`,
+      );
+      return;
+    }
+
+    const systemActor = { id: SYSTEM_ACTOR_ID } as SessionUser;
+
+    try {
+      await this.inventoryService.completeDeliveryInventory(
+        orderId,
+        logisticsLocationId,
+        systemActor,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Graduation stock deduction failed for order ${orderId}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+
+    try {
+      await this.generalLedger.postSalesInvoice(orderId, systemActor);
+    } catch (err) {
+      this.logger.warn(
+        `Graduation GL sales-invoice post failed for order ${orderId}: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   // ── Get Single Cart Order ────────────────────────────────────────────

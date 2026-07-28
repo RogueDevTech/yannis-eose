@@ -14,6 +14,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { RealMoneyTag } from '~/components/ui/real-money-tag';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { ActionDropdown } from '~/components/ui/action-dropdown';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
@@ -41,6 +42,18 @@ export interface ChartOfAccountsPageProps {
   accounts: AccountRow[];
   canWrite: boolean;
   hasOpeningBalances?: boolean;
+  /**
+   * IDs of accounts referenced by an active posting-key mapping. Used to warn
+   * before deactivating a still-wired account. Empty when mappings aren't
+   * available to this surface (standalone page); populated on Account Config.
+   */
+  mappedAccountIds?: Set<string>;
+  /**
+   * When rendered inside the Account Config page's Accounts tab, suppress the
+   * page-level header (the host page owns title/description) and render a
+   * compact toolbar instead.
+   */
+  embedded?: boolean;
 }
 
 const ROOT_TYPES = [
@@ -50,6 +63,10 @@ const ROOT_TYPES = [
   { value: 'INCOME', label: 'Income' },
   { value: 'EXPENSE', label: 'Expense' },
 ];
+
+const ROOT_TYPE_LABEL: Record<string, string> = Object.fromEntries(
+  ROOT_TYPES.map((r) => [r.value, r.label]),
+);
 
 const ACCOUNT_TYPES = [
   'BANK', 'CASH', 'RECEIVABLE', 'PAYABLE', 'STOCK', 'COST_OF_GOODS_SOLD',
@@ -115,20 +132,26 @@ export function ChartOfAccountsPage({
   accounts: accountsProp,
   canWrite,
   hasOpeningBalances = false,
+  mappedAccountIds,
+  embedded = false,
 }: ChartOfAccountsPageProps) {
   const revalidator = useRevalidator();
   const serverAccounts = Array.isArray(accountsProp) ? accountsProp : [];
   const [createOpen, setCreateOpen] = useState(false);
   /** Explicit kind: group = header only; leaf = postable. */
   const [createKind, setCreateKind] = useState<'leaf' | 'group'>('leaf');
+  /** Controlled root type so we can flag parent/root mismatches live. */
+  const [createRootType, setCreateRootType] = useState('ASSET');
   const [editAccount, setEditAccount] = useState<AccountRow | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<AccountRow | null>(null);
+  const [reactivateTarget, setReactivateTarget] = useState<AccountRow | null>(null);
   const [parentId, setParentId] = useState('');
   const [search, setSearch] = useState('');
   const [rootTypeFilter, setRootTypeFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [postableOnly, setPostableOnly] = useState(false);
   const [statusFilter, setStatusFilter] = useState('active');
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
     // Start with only the first top-level group (Assets) expanded
     for (const a of serverAccounts) {
@@ -148,22 +171,31 @@ export function ChartOfAccountsPage({
   const openCreate = (kind: 'leaf' | 'group', parentAccountId = '') => {
     setCreateKind(kind);
     setParentId(parentAccountId);
+    // Inherit the parent's root type when opening under an existing group.
+    const parent = parentAccountId
+      ? serverAccounts.find((a) => a.id === parentAccountId)
+      : undefined;
+    setCreateRootType(parent?.rootType ?? 'ASSET');
     setCreateOpen(true);
   };
 
   const createFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const deactivateFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const reactivateFetcher = useFetcher<{ success?: boolean; error?: string }>();
 
   useFetcherToast(createFetcher.data);
   useFetcherToast(editFetcher.data);
   useFetcherToast(deactivateFetcher.data);
+  useFetcherToast(reactivateFetcher.data);
 
   useCloseOnFetcherSuccess(createFetcher, () => {
     setCreateOpen(false);
     setParentId('');
     setCreateKind('leaf');
+    setCreateRootType('ASSET');
     invalidateCachedLoader('/admin/finance/accounts');
+    invalidateCachedLoader('/admin/finance/account-mappings');
     revalidator.revalidate();
   });
   useCloseOnFetcherSuccess(editFetcher, () => setEditAccount(null));
@@ -205,6 +237,12 @@ export function ChartOfAccountsPage({
     if (!id) return null;
     return [{ id, patch: { isActive: false } }];
   }, []);
+  const buildReactivatePatches = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'reactivateAccount') return null;
+    const id = fd.get('accountId')?.toString();
+    if (!id) return null;
+    return [{ id, patch: { isActive: true } }];
+  }, []);
 
   const optimisticCreated = useOptimisticListMerge<AccountRow>(createFetcher, buildCreateRows);
   const editPatches = useOptimisticListPatches<AccountRow>(editFetcher, buildEditPatches);
@@ -212,11 +250,16 @@ export function ChartOfAccountsPage({
     deactivateFetcher,
     buildDeactivatePatches,
   );
+  const reactivatePatches = useOptimisticListPatches<AccountRow>(
+    reactivateFetcher,
+    buildReactivatePatches,
+  );
   const accounts = useMemo(() => {
     const merged = [...optimisticCreated, ...serverAccounts];
     const afterEdit = applyOptimisticPatches(merged, editPatches);
-    return applyOptimisticPatches(afterEdit, deactivatePatches);
-  }, [optimisticCreated, serverAccounts, editPatches, deactivatePatches]);
+    const afterDeactivate = applyOptimisticPatches(afterEdit, deactivatePatches);
+    return applyOptimisticPatches(afterDeactivate, reactivatePatches);
+  }, [optimisticCreated, serverAccounts, editPatches, deactivatePatches, reactivatePatches]);
 
   // Apply status filter first (active/inactive/all)
   const statusFiltered = useMemo(() => {
@@ -274,9 +317,21 @@ export function ChartOfAccountsPage({
     () =>
       accounts
         .filter((a) => a.isGroup)
-        .map((a) => ({ value: a.id, label: `${a.code} ${displayName(a.name)}` })),
+        .map((a) => ({
+          value: a.id,
+          label: `${a.code} ${displayName(a.name)}`,
+          description: ROOT_TYPE_LABEL[a.rootType] ?? a.rootType,
+        })),
     [accounts],
   );
+
+  /** Selected parent (in the create modal), for root-type mismatch checks. */
+  const selectedParent = useMemo(
+    () => (parentId ? accounts.find((a) => a.id === parentId) ?? null : null),
+    [accounts, parentId],
+  );
+  const parentRootMismatch =
+    selectedParent != null && selectedParent.rootType !== createRootType;
 
   const groupCount = statusFiltered.filter((a) => a.isGroup).length;
   const activeCount = accounts.filter((a) => a.isActive).length;
@@ -290,6 +345,21 @@ export function ChartOfAccountsPage({
     );
     setDeactivateTarget(null);
   }, [deactivateFetcher, deactivateTarget]);
+
+  const handleReactivateConfirm = useCallback(() => {
+    if (!reactivateTarget) return;
+    reactivateFetcher.submit(
+      { intent: 'reactivateAccount', accountId: reactivateTarget.id },
+      { method: 'post' },
+    );
+    setReactivateTarget(null);
+  }, [reactivateFetcher, reactivateTarget]);
+
+  // Warnings surfaced in the deactivate confirm (deactivate-only, warn not block).
+  const deactivateIsMapped =
+    deactivateTarget != null && (mappedAccountIds?.has(deactivateTarget.id) ?? false);
+  const deactivateHasBalance =
+    deactivateTarget != null && Number(deactivateTarget.balance) !== 0;
 
   const hasFilters = Boolean(rootTypeFilter || categoryFilter || postableOnly || statusFilter !== 'active' || search.trim());
   const filtersBadgeCount =
@@ -345,6 +415,31 @@ export function ChartOfAccountsPage({
 
   return (
     <div className="space-y-4">
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <PageRefreshButton />
+          {canWrite && (
+            <Link to="/admin/finance/opening-balances" className="btn-secondary btn-sm inline-flex items-center">
+              {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
+            </Link>
+          )}
+          {canWrite && (
+            <ActionDropdown
+              id="coa-add-account-embedded"
+              openMenuId={openMenuId}
+              setOpenMenuId={setOpenMenuId}
+              trigger="button"
+              triggerVariant="primary"
+              triggerLabel="Add Account"
+              items={[
+                { label: 'Leaf (postable)', onClick: () => openCreate('leaf') },
+                { label: 'Group (header)', onClick: () => openCreate('group') },
+              ]}
+            />
+          )}
+        </div>
+      ) : (
+      <>
       <PageHeader
         title="Chart of Accounts"
         description="Create groups and leaf accounts here. Wire leaves to auto-posting on Account Mappings."
@@ -376,14 +471,18 @@ export function ChartOfAccountsPage({
                   </Link>
                 )}
                 {canWrite ? (
-                  <>
-                    <Button type="button" size="sm" variant="secondary" onClick={() => openCreate('group')}>
-                      New Group
-                    </Button>
-                    <Button type="button" size="sm" onClick={() => openCreate('leaf')}>
-                      New Leaf
-                    </Button>
-                  </>
+                  <ActionDropdown
+                    id="coa-add-account"
+                    openMenuId={openMenuId}
+                    setOpenMenuId={setOpenMenuId}
+                    trigger="button"
+                    triggerVariant="primary"
+                    triggerLabel="Add Account"
+                    items={[
+                      { label: 'Leaf (postable)', onClick: () => openCreate('leaf') },
+                      { label: 'Group (header)', onClick: () => openCreate('group') },
+                    ]}
+                  />
                 ) : null}
               </div>
             }
@@ -393,12 +492,20 @@ export function ChartOfAccountsPage({
                   <Link to="/admin/finance/opening-balances" className="btn-secondary w-full flex items-center justify-center">
                     {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
                   </Link>
-                  <Button type="button" variant="secondary" className="w-full" onClick={() => openCreate('group')}>
-                    New Group
-                  </Button>
-                  <Button type="button" className="w-full" onClick={() => openCreate('leaf')}>
-                    New Leaf
-                  </Button>
+                  <ActionDropdown
+                    id="coa-add-account-sheet"
+                    openMenuId={openMenuId}
+                    setOpenMenuId={setOpenMenuId}
+                    trigger="button"
+                    triggerVariant="primary"
+                    triggerLabel="Add Account"
+                    triggerClassName="w-full justify-center"
+                    align="start"
+                    items={[
+                      { label: 'Leaf (postable)', onClick: () => openCreate('leaf') },
+                      { label: 'Group (header)', onClick: () => openCreate('group') },
+                    ]}
+                  />
                 </>
               ) : undefined
             }
@@ -416,17 +523,27 @@ export function ChartOfAccountsPage({
                   Post Opening Balances
                 </Link>
               )}
-              <Button type="button" variant="secondary" className="w-full" onClick={() => openCreate('group')}>
-                New Group
-              </Button>
-              <Button type="button" className="w-full" onClick={() => openCreate('leaf')}>
-                New Leaf
-              </Button>
+              <ActionDropdown
+                id="coa-add-account-datefilter"
+                openMenuId={openMenuId}
+                setOpenMenuId={setOpenMenuId}
+                trigger="button"
+                triggerVariant="primary"
+                triggerLabel="Add Account"
+                triggerClassName="w-full justify-center"
+                align="start"
+                items={[
+                  { label: 'Leaf (postable)', onClick: () => openCreate('leaf') },
+                  { label: 'Group (header)', onClick: () => openCreate('group') },
+                ]}
+              />
             </>
           ) : undefined
         }
         actionsSheetTitle="Actions"
       />
+      </>
+      )}
 
       <OverviewStatStrip
         items={[
@@ -500,7 +617,7 @@ export function ChartOfAccountsPage({
       {accounts.length === 0 ? (
         <EmptyState
           title="No accounts yet"
-          description="The chart seeds on server boot. Use New Group / New Leaf to add accounts, then map leaves on Account Mappings for auto-posting."
+          description="The chart seeds on server boot. Use Add Account to add a group or leaf, then map leaves on Account Mappings for auto-posting."
         />
       ) : rows.length === 0 ? (
         <EmptyState title="No matches" description="No accounts match the current filters." />
@@ -588,6 +705,29 @@ export function ChartOfAccountsPage({
                             <NairaPrice amount={r.balance} />
                           </span>
                         )}
+                        {!r.isActive && (
+                          <span className="rounded bg-app-hover px-1.5 py-0.5 text-[10px] uppercase">
+                            inactive
+                          </span>
+                        )}
+                        {canWrite &&
+                          (r.isActive ? (
+                            <button
+                              type="button"
+                              onClick={() => setDeactivateTarget(r)}
+                              className="font-medium text-app-fg-muted hover:text-danger-600 dark:hover:text-danger-400"
+                            >
+                              Deactivate
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setReactivateTarget(r)}
+                              className="font-medium text-success-600 dark:text-success-400"
+                            >
+                              Reactivate
+                            </button>
+                          ))}
                       </div>
                     </div>
 
@@ -606,24 +746,42 @@ export function ChartOfAccountsPage({
                       <span className="text-xs font-medium tabular-nums shrink-0 text-right w-28">
                         {balanceNonZero ? <NairaPrice amount={r.balance} /> : null}
                       </span>
-                      {!r.isGroup ? (
-                        <Link
-                          to={`/admin/finance/accounts/${r.id}`}
-                          className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline shrink-0 w-10 text-right"
-                        >
-                          View
-                        </Link>
-                      ) : canWrite ? (
-                        <button
-                          type="button"
-                          onClick={() => openCreate('leaf', r.id)}
-                          className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline shrink-0 text-right"
-                        >
-                          Add leaf
-                        </button>
-                      ) : (
-                        <span className="w-10 shrink-0" aria-hidden />
-                      )}
+                      <div className="flex items-center justify-end gap-3 shrink-0">
+                        {!r.isGroup ? (
+                          <Link
+                            to={`/admin/finance/accounts/${r.id}`}
+                            className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline shrink-0"
+                          >
+                            View
+                          </Link>
+                        ) : canWrite ? (
+                          <button
+                            type="button"
+                            onClick={() => openCreate('leaf', r.id)}
+                            className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline shrink-0"
+                          >
+                            Add leaf
+                          </button>
+                        ) : null}
+                        {canWrite &&
+                          (r.isActive ? (
+                            <button
+                              type="button"
+                              onClick={() => setDeactivateTarget(r)}
+                              className="text-xs font-medium text-app-fg-muted hover:text-danger-600 dark:hover:text-danger-400 hover:underline shrink-0"
+                            >
+                              Deactivate
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setReactivateTarget(r)}
+                              className="text-xs font-medium text-success-600 dark:text-success-400 hover:underline shrink-0"
+                            >
+                              Reactivate
+                            </button>
+                          ))}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -640,6 +798,7 @@ export function ChartOfAccountsPage({
             setCreateOpen(false);
             setParentId('');
             setCreateKind('leaf');
+            setCreateRootType('ASSET');
           }}
           maxWidth="max-w-md"
         >
@@ -682,7 +841,14 @@ export function ChartOfAccountsPage({
               <input type="hidden" name="parentAccountId" value={parentId} />
               <TextInput label="Code" name="code" required placeholder={createKind === 'group' ? 'e.g. 1100' : 'e.g. 1113'} />
               <TextInput label="Name" name="name" required placeholder={createKind === 'group' ? 'e.g. Current Assets' : 'e.g. Secondary Bank'} />
-              <FormSelect name="rootType" label="Root type" options={ROOT_TYPES} required />
+              <FormSelect
+                name="rootType"
+                label="Root type"
+                options={ROOT_TYPES}
+                required
+                value={createRootType}
+                onChange={(e) => setCreateRootType(e.target.value)}
+              />
               {createKind === 'leaf' && (
                 <FormSelect
                   name="accountType"
@@ -697,6 +863,19 @@ export function ChartOfAccountsPage({
                 options={parentOptions}
                 clearable
               />
+              {parentRootMismatch && selectedParent && (
+                <div className="rounded-md border border-warning-200 dark:border-warning-800 bg-warning-50/60 dark:bg-warning-900/20 px-3 py-2">
+                  <p className="text-xs text-warning-800 dark:text-warning-200">
+                    <span className="font-medium">Root type mismatch.</span> This account is{' '}
+                    {ROOT_TYPE_LABEL[createRootType] ?? createRootType}, but the parent{' '}
+                    <span className="font-mono">{selectedParent.code}</span> is{' '}
+                    {ROOT_TYPE_LABEL[selectedParent.rootType] ?? selectedParent.rootType}. It will
+                    roll up under the wrong section on the financials. Pick a{' '}
+                    {ROOT_TYPE_LABEL[createRootType] ?? createRootType} parent, or leave it blank to
+                    make this a top-level account.
+                  </p>
+                </div>
+              )}
               {createFetcher.data?.error && (
                 <p className="text-sm text-danger-600">{createFetcher.data.error}</p>
               )}
@@ -708,6 +887,7 @@ export function ChartOfAccountsPage({
                     setCreateOpen(false);
                     setParentId('');
                     setCreateKind('leaf');
+                    setCreateRootType('ASSET');
                   }}
                 >
                   Cancel
@@ -727,13 +907,49 @@ export function ChartOfAccountsPage({
         title="Deactivate account"
         description={
           deactivateTarget
-            ? `Deactivate "${deactivateTarget.code} ${deactivateTarget.name.replace(/\s*[—–]\s*/g, ' · ')}"? It will no longer be selectable for new postings.`
+            ? `Deactivate "${deactivateTarget.code} ${deactivateTarget.name.replace(/\s*[—–]\s*/g, ' · ')}"? It will no longer be selectable for new postings. Existing history is kept, and you can reactivate it later.`
             : ''
+        }
+        details={
+          deactivateIsMapped || deactivateHasBalance ? (
+            <ul className="space-y-1 text-xs">
+              {deactivateIsMapped && (
+                <li>
+                  This account is still wired to a posting mapping. Auto-posting to it will fail
+                  until you remap that key on the Mappings tab.
+                </li>
+              )}
+              {deactivateHasBalance && deactivateTarget && (
+                <li>
+                  It has a nonzero balance of{' '}
+                  <span className="font-medium tabular-nums">
+                    <NairaPrice amount={deactivateTarget.balance} />
+                  </span>
+                  . The balance stays on the books but the account drops off active pickers.
+                </li>
+              )}
+            </ul>
+          ) : undefined
         }
         confirmLabel="Deactivate"
         variant="danger"
         loading={deactivateFetcher.state !== 'idle'}
         onConfirm={handleDeactivateConfirm}
+      />
+
+      <ConfirmActionModal
+        open={!!reactivateTarget}
+        onClose={() => setReactivateTarget(null)}
+        title="Reactivate account"
+        description={
+          reactivateTarget
+            ? `Reactivate "${reactivateTarget.code} ${reactivateTarget.name.replace(/\s*[—–]\s*/g, ' · ')}"? It becomes selectable for new postings and mappings again.`
+            : ''
+        }
+        confirmLabel="Reactivate"
+        variant="archive"
+        loading={reactivateFetcher.state !== 'idle'}
+        onConfirm={handleReactivateConfirm}
       />
 
       {editAccount && (

@@ -12,13 +12,15 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { AccountMappingsLoadingShell } from '~/features/accounting/AccountMappingsLoadingShell';
 import {
-  AccountMappingsPage,
+  AccountConfigPage,
   type AccountMappingRow,
   type AccountOption,
 } from '~/features/accounting/AccountMappingsPage';
+import type { AccountRow } from '~/features/accounting/ChartOfAccountsPage';
+import { extractTrpc } from '~/lib/trpc-extract.server';
 
 export const meta: MetaFunction = () => [
-  { title: 'Account Mappings — Accounting — Yannis EOSE' },
+  { title: 'Account Config — Accounting — Yannis EOSE' },
 ];
 
 export { cachedClientLoader as clientLoader };
@@ -47,13 +49,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const shell = { canWrite };
 
   const pageData = (async () => {
-    const [mappingsRes, accountsRes] = await Promise.all([
+    const [mappingsRes, accountsRes, jeRes] = await Promise.all([
       apiRequest<unknown>(
         `/trpc/generalLedger.listAccountMappings?input=${encodeURIComponent(JSON.stringify({}))}`,
         { method: 'GET', cookie },
       ),
+      // Full rows incl. inactive: the Accounts tab needs balance/isActive/parent,
+      // and must show inactive accounts so they can be reactivated.
       apiRequest<unknown>(
-        `/trpc/generalLedger.listAccounts?input=${encodeURIComponent(JSON.stringify({ includeInactive: false }))}`,
+        `/trpc/generalLedger.listAccounts?input=${encodeURIComponent(JSON.stringify({ includeInactive: true }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/generalLedger.listJournalEntries?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 1, search: 'Opening balances (cutover)', status: 'POSTED' }))}`,
         { method: 'GET', cookie },
       ),
     ]);
@@ -73,20 +81,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
         )
       : [];
 
-    const accounts: AccountOption[] = accountsRes.ok
-      ? (
-          (accountsRes.data as { result?: { data?: Array<{ id: string; code: string; name: string; isGroup: boolean; rootType: string; accountType?: string | null }> } })?.result?.data ?? []
-        ).map((a) => ({
-          id: a.id,
-          code: a.code,
-          name: a.name,
-          rootType: a.rootType,
-          accountType: a.accountType ?? undefined,
-          isGroup: a.isGroup,
-        }))
+    const accountRows = accountsRes.ok
+      ? extractTrpc<AccountRow[] | null>(accountsRes, null) ?? []
       : [];
+    // Leaf/group option list for the mapping selectors (active only).
+    const accounts: AccountOption[] = accountRows
+      .filter((a) => a.isActive)
+      .map((a) => ({
+        id: a.id,
+        code: a.code,
+        name: a.name,
+        rootType: a.rootType,
+        accountType: a.accountType ?? undefined,
+        isGroup: a.isGroup,
+      }));
 
-    return { mappings, accounts };
+    const jePayload = extractTrpc<{ records?: unknown[] } | null>(jeRes, null);
+    const hasOpeningBalances = (jePayload?.records?.length ?? 0) > 0;
+
+    return { mappings, accounts, accountRows, hasOpeningBalances };
   })();
 
   return defer({ shell, pageData });
@@ -209,10 +222,53 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  // ── Account lifecycle intents (Accounts tab) ──────────────────────────────
+  if (intent === 'updateAccount') {
+    const body = {
+      accountId: formData.get('accountId')?.toString() ?? '',
+      name: formData.get('name')?.toString() ?? '',
+    };
+    const res = await apiRequest<unknown>('/trpc/generalLedger.updateAccount', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data) }, { status: 400 });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'deactivateAccount') {
+    const body = { accountId: formData.get('accountId')?.toString() ?? '' };
+    const res = await apiRequest<unknown>('/trpc/generalLedger.deactivateAccount', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data) }, { status: 400 });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'reactivateAccount') {
+    const body = { accountId: formData.get('accountId')?.toString() ?? '' };
+    const res = await apiRequest<unknown>('/trpc/generalLedger.reactivateAccount', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data) }, { status: 400 });
+    }
+    return json({ success: true });
+  }
+
   return json({ error: 'Unknown intent' }, { status: 400 });
 }
 
-export default function AccountMappingsRoute() {
+export default function AccountConfigRoute() {
   const { shell, pageData } = useLoaderData<typeof loader>();
 
   return (
@@ -221,9 +277,11 @@ export default function AccountMappingsRoute() {
       fallback={<AccountMappingsLoadingShell canWrite={shell.canWrite} />}
     >
       {(data) => (
-        <AccountMappingsPage
+        <AccountConfigPage
           mappings={data.mappings}
           accounts={data.accounts}
+          accountRows={data.accountRows}
+          hasOpeningBalances={data.hasOpeningBalances}
           canWrite={shell.canWrite}
         />
       )}

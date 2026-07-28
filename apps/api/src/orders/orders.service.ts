@@ -4153,12 +4153,10 @@ export class OrdersService {
     // Phone is always visible once loaded — no status restriction.
     // VOIP gate + role/assignment gate above are sufficient.
 
-    const elevatedPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
-    const isElevated =
-      actor.role === 'SUPER_ADMIN' ||
-      elevatedPerms.includes(canonicalPermissionCode('cs.scope.global')) ||
-      elevatedPerms.includes(canonicalPermissionCode('orders.update.any_branch'));
-    if (!isElevated && order.assignedCsId !== actor.id) return null;
+    // Phone is visible to all roles except marketing (MEDIA_BUYER, HEAD_OF_MARKETING)
+    // who shouldn't have direct customer contact info.
+    const MARKETING_ROLES = new Set(['MEDIA_BUYER', 'HEAD_OF_MARKETING']);
+    if (MARKETING_ROLES.has(actor.role)) return null;
 
     const rawPhone = order.customerPhone?.trim();
     if (rawPhone) return { phone: rawPhone, isDialable: true };

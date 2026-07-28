@@ -10,6 +10,7 @@ import {
   createAccountSchema,
   updateAccountSchema,
   deactivateAccountSchema,
+  reactivateAccountSchema,
   listFiscalYearsSchema,
   createFiscalYearSchema,
   closeFiscalYearSchema,
@@ -234,6 +235,12 @@ export const generalLedgerRouter = router({
     .input(deactivateAccountSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().deactivateAccount(input, { id: ctx.user.id });
+    }),
+
+  reactivateAccount: permissionProcedure('finance.ledger.write')
+    .input(reactivateAccountSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getGeneralLedgerService().reactivateAccount(input, { id: ctx.user.id });
     }),
 
   // ─── Fiscal Years ────────────────────────────────────────────────────────
