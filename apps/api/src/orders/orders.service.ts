@@ -5051,7 +5051,11 @@ export class OrdersService {
         actor.role === 'SUPPORT' ||
         actor.role === 'HEAD_OF_CS' ||
         actor.role === 'HEAD_OF_LOGISTICS' ||
-        hasFinanceAccess(actor);
+        // Retrack reverses GL vouchers and re-adjusts inventory — a WRITE action.
+        // Use hasFinanceWriteAccess (excludes read-only AUDITOR) not hasFinanceAccess.
+        // AUDITOR must never reverse the financial timeline; SUPPORT is retained
+        // explicitly above.
+        hasFinanceWriteAccess(actor);
       if (!canRetrack) {
         throw new TRPCError({
           code: 'FORBIDDEN',
