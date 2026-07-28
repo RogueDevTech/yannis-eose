@@ -1548,13 +1548,40 @@ export class FinanceService {
 
   async getGeneralLedger(
     input: GeneralLedgerInput,
-    _branchId?: string | null,
-    _effectiveBranchIds?: string[] | null,
+    branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     const { startDate, endDate, entryType, search, page, limit } = input;
 
+    // ── Company scoping ──
+    // gl_entries carry a group_id (company). Without this filter the ledger
+    // returned every company's entries to any finance.read user (cross-company
+    // leak). Resolve the company group(s) from the caller's branch scope and
+    // constrain gl_entries.group_id. A null scope (SUPER_ADMIN / SUPPORT with no
+    // company selected) intentionally sees all companies.
+    const scopeBranchIds =
+      branchId ? [branchId] : (effectiveBranchIds && effectiveBranchIds.length ? effectiveBranchIds : null);
+    let scopedGroupIds: string[] | null = null;
+    if (scopeBranchIds) {
+      const gRows = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(inArray(schema.branches.id, scopeBranchIds));
+      const ids = [...new Set(gRows.map((r) => r.groupId).filter((g): g is string => !!g))];
+      // Non-empty branch scope that resolves to no group → match nothing rather
+      // than fall through to org-wide (prevents an empty-scope leak).
+      scopedGroupIds = ids;
+    }
+
     // ── Query gl_entries directly — single source of truth ──
     const conditions: SQL[] = [];
+    if (scopedGroupIds !== null) {
+      conditions.push(
+        scopedGroupIds.length
+          ? inArray(schema.glEntries.groupId, scopedGroupIds)
+          : sql`false`,
+      );
+    }
     if (startDate) conditions.push(gte(schema.glEntries.postingDate, startDate));
     if (endDate) conditions.push(lte(schema.glEntries.postingDate, endDate));
     if (entryType && entryType !== 'all') {
