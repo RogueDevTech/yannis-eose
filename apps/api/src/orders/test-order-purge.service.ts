@@ -284,7 +284,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
 
   /**
    * Universal 7-day dedup flagging (CEO directive 2026-05-26):
-   * Same phone + any overlapping product within 7 days = duplicate.
+   * Same phone + any overlapping product within 14 days = duplicate.
    * Winner: highest lifecycle status, ties → oldest created_at.
    * Loser: flagged as duplicate (isDuplicate='FLAGGED') but NEVER deleted —
    * orders must never disappear from the system. CFA row recorded for MB
@@ -299,7 +299,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       : sql`loser.created_at >= NOW() - INTERVAL '48 hours'`;
 
     // Find losers: orders that have a better match (higher lifecycle rank or
-    // older at same rank) on same phone + overlapping product within 7 days.
+    // older at same rank) on same phone + overlapping product within 14 days.
     const losers = await this.db.execute<{
       loser_id: string;
       loser_customer_name: string;
@@ -348,6 +348,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         AND loser.deleted_at IS NULL
         AND winner.status NOT IN ('CANCELLED', 'DELETED')
         AND winner.deleted_at IS NULL
+        AND ABS(EXTRACT(EPOCH FROM (loser.created_at - winner.created_at))) <= 14 * 86400
         AND (
           COALESCE(sr_winner.rank, 0) > COALESCE(sr_loser.rank, 0)
           OR (COALESCE(sr_winner.rank, 0) = COALESCE(sr_loser.rank, 0) AND winner.created_at < loser.created_at)
@@ -468,8 +469,8 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
             actorId: null,
             actorName: 'System' as const,
             description: wasSoftDeleted
-              ? `Auto-deleted duplicate: same phone + product within 7 days (winner: ${winnerLabel})`
-              : `Flagged as duplicate: same phone + product within 7 days (winner: ${winnerLabel})`,
+              ? `Auto-deleted duplicate: same phone + product within 14 days (winner: ${winnerLabel})`
+              : `Flagged as duplicate: same phone + product within 14 days (winner: ${winnerLabel})`,
             metadata: { winnerId: e.winnerId },
             branchId: e.branchId ?? null,
           };

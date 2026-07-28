@@ -2454,7 +2454,7 @@ export class OrdersService {
       });
     }
 
-    // Universal 7-day dedup — same phone + overlapping product within 7 days
+    // Universal 14-day dedup — same phone + overlapping product within 14 days
     // blocks the offline order outright (CEO 2026-05-26). Previously only
     // edge-form orders were blocked; offline relied on a 2h cron, which let
     // duplicates slip through to logistics before being caught.
@@ -2769,7 +2769,7 @@ export class OrdersService {
       });
     }
 
-    // 7-day dedup
+    // 14-day dedup
     const productIds = input.items.map((i) => i.productId);
     const existingWinner = await this.findExistingOrderForDedup(customerPhoneHash, productIds);
     if (existingWinner) {
@@ -9791,10 +9791,9 @@ export class OrdersService {
   ): Promise<{ id: string; mediaBuyerId: string | null; status: string; createdAt: Date } | null> {
     if (!phoneHash || productIds.length === 0) return null;
 
-    // No time limit — any existing order for the same phone + product is a
-    // duplicate. MBs accused the system of "swallowing orders" when the old
-    // 7-day window let repeats through; unlimited window ensures every repeat
-    // goes to cross_funnel_attempts for MB visibility.
+    // 14-day window: same phone + overlapping product within 14 days = duplicate.
+    // Beyond 14 days, treat as a legitimate repeat purchase.
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
     // Step 1: find candidates across orders, cart_orders, and follow_up_orders.
     type Candidate = { id: string; mediaBuyerId: string | null; status: string; createdAt: Date; source: 'orders' | 'cart_orders' | 'follow_up_orders' };
@@ -9813,6 +9812,7 @@ export class OrdersService {
             eq(schema.orders.customerPhoneHash, phoneHash),
             notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
             isNull(schema.orders.deletedAt),
+            gte(schema.orders.createdAt, fourteenDaysAgo),
           ),
         )
         .orderBy(desc(schema.orders.createdAt))
@@ -9832,6 +9832,7 @@ export class OrdersService {
                 eq(schema.cartOrders.customerPhoneHash, phoneHash),
                 notInArray(schema.cartOrders.status, ['CANCELLED', 'DELETED']),
                 isNull(schema.cartOrders.deletedAt),
+                gte(schema.cartOrders.createdAt, fourteenDaysAgo),
               ),
             )
             .orderBy(desc(schema.cartOrders.createdAt))
@@ -9849,6 +9850,7 @@ export class OrdersService {
             eq(schema.followUpOrders.customerPhoneHash, phoneHash),
             notInArray(schema.followUpOrders.status, ['CANCELLED', 'DELETED']),
             isNull(schema.followUpOrders.deletedAt),
+            gte(schema.followUpOrders.createdAt, fourteenDaysAgo),
           ),
         )
         .orderBy(desc(schema.followUpOrders.createdAt))
