@@ -1,5 +1,49 @@
 import { describe, it, expect } from 'vitest';
-import { hasFinanceAccess, stripFinanceFields } from './strip-finance-fields';
+import { hasFinanceAccess, hasFinanceWriteAccess, stripFinanceFields } from './strip-finance-fields';
+
+// ---------------------------------------------------------------------------
+// hasFinanceWriteAccess — the WRITE gate. Security-critical: it backs the
+// order retrack guard (only finance-write may reverse GL/inventory) and the
+// REMITTED transition gate. Unlike hasFinanceAccess (the READ gate), it MUST
+// exclude read-only roles (AUDITOR, SUPPORT). These assertions lock that in so
+// a future refactor can't silently re-grant a read-only role write power.
+// ---------------------------------------------------------------------------
+
+describe('hasFinanceWriteAccess', () => {
+  it('grants SUPER_ADMIN', () => {
+    expect(hasFinanceWriteAccess({ role: 'SUPER_ADMIN' })).toBe(true);
+  });
+
+  it('grants ADMIN', () => {
+    expect(hasFinanceWriteAccess({ role: 'ADMIN' })).toBe(true);
+  });
+
+  it('grants FINANCE_OFFICER', () => {
+    expect(hasFinanceWriteAccess({ role: 'FINANCE_OFFICER' })).toBe(true);
+  });
+
+  it('grants a holder of finance.costView', () => {
+    expect(hasFinanceWriteAccess({ role: 'CS_CLOSER', permissions: ['finance.costView'] })).toBe(true);
+  });
+
+  it('DENIES AUDITOR (read-only) — must not reverse GL/inventory via retrack', () => {
+    // hasFinanceAccess would return true for AUDITOR; the write gate must not.
+    expect(hasFinanceAccess({ role: 'AUDITOR' })).toBe(true);
+    expect(hasFinanceWriteAccess({ role: 'AUDITOR' })).toBe(false);
+  });
+
+  it('DENIES SUPPORT (read-only) at the finance-write predicate', () => {
+    expect(hasFinanceWriteAccess({ role: 'SUPPORT' })).toBe(false);
+  });
+
+  it('DENIES a plain CS_CLOSER (cannot self-remit / retrack)', () => {
+    expect(hasFinanceWriteAccess({ role: 'CS_CLOSER' })).toBe(false);
+  });
+
+  it('DENIES MEDIA_BUYER', () => {
+    expect(hasFinanceWriteAccess({ role: 'MEDIA_BUYER' })).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // hasFinanceAccess
