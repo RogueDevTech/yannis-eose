@@ -120,9 +120,10 @@ export class ReportsService {
     private readonly productsService: ProductsService,
   ) {}
 
-  async exportCsv(input: ExportReportInput, user: SessionUser, currentBranchId: string | null, effectiveBranchIds?: string[] | null): Promise<{ filename: string; csvContent: string }> {
+  async exportCsv(input: ExportReportInput, user: SessionUser, currentBranchId: string | null, effectiveBranchIds?: string[] | null, activeGroupId?: string | null): Promise<{ filename: string; csvContent: string }> {
     const date = todayISODate();
     const eIds = effectiveBranchIds ?? null;
+    const groupId = activeGroupId ?? null;
     switch (input.reportKey) {
       case 'cs_orders':
         return this.exportCsOrders(input as Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user, currentBranchId, date, eIds);
@@ -135,15 +136,15 @@ export class ReportsService {
       case 'disbursements':
         return this.exportDisbursements(input as Extract<ExportReportInput, { reportKey: 'disbursements' }>, user, currentBranchId, date, eIds);
       case 'inventory':
-        return this.exportInventory(input as Extract<ExportReportInput, { reportKey: 'inventory' }>, user, date);
+        return this.exportInventory(input as Extract<ExportReportInput, { reportKey: 'inventory' }>, user, date, groupId, eIds);
       case 'finance_invoices':
-        return this.exportFinanceInvoices(input as Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user, date);
+        return this.exportFinanceInvoices(input as Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user, currentBranchId, date, eIds);
       case 'cross_funnel':
         return this.exportCrossFunnel(input as Extract<ExportReportInput, { reportKey: 'cross_funnel' }>, user, currentBranchId, date, eIds);
       case 'logistics_locations':
-        return this.exportLogisticsLocations(input as Extract<ExportReportInput, { reportKey: 'logistics_locations' }>, user, date);
+        return this.exportLogisticsLocations(input as Extract<ExportReportInput, { reportKey: 'logistics_locations' }>, user, date, groupId, eIds);
       case 'logistics_partners':
-        return this.exportLogisticsPartners(input as Extract<ExportReportInput, { reportKey: 'logistics_partners' }>, user, date);
+        return this.exportLogisticsPartners(input as Extract<ExportReportInput, { reportKey: 'logistics_partners' }>, user, date, groupId);
       case 'cart_orders':
         return this.exportCartOrders(input as Extract<ExportReportInput, { reportKey: 'cart_orders' }>, user, currentBranchId, date, eIds);
       case 'follow_up_orders':
@@ -159,7 +160,7 @@ export class ReportsService {
       case 'expenses':
         return this.exportExpenses(input as Extract<ExportReportInput, { reportKey: 'expenses' }>, user, date);
       case 'products':
-        return this.exportProducts(input as Extract<ExportReportInput, { reportKey: 'products' }>, user, date);
+        return this.exportProducts(input as Extract<ExportReportInput, { reportKey: 'products' }>, user, date, groupId);
       case 'shipments':
         return this.exportShipments(input as Extract<ExportReportInput, { reportKey: 'shipments' }>, user, date);
       default:
@@ -525,7 +526,7 @@ export class ReportsService {
     return { filename: `disbursements-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 
-  private async exportInventory(input: Extract<ExportReportInput, { reportKey: 'inventory' }>, user: SessionUser, date: string) {
+  private async exportInventory(input: Extract<ExportReportInput, { reportKey: 'inventory' }>, user: SessionUser, date: string, groupId?: string | null, effectiveBranchIds?: string[] | null) {
     this.ensureExportPermission(user, 'inventory.read', 'inventory.export');
     if (user.role !== 'SUPER_ADMIN' && !(user.permissions ?? []).includes('inventory.intake')) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Inventory export requires inventory.intake permission' });
@@ -541,7 +542,7 @@ export class ReportsService {
         ...(input.filters?.locationId ? { locationId: input.filters.locationId } : {}),
         ...(input.filters?.search ? { search: input.filters.search } : {}),
       });
-      const levels = await this.inventoryService.listLevels(levelsInput);
+      const levels = await this.inventoryService.listLevels(levelsInput, groupId, effectiveBranchIds);
       const batch = levels.levels ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) break;
@@ -578,7 +579,7 @@ export class ReportsService {
     return { filename: `inventory-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
   }
 
-  private async exportFinanceInvoices(input: Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user: SessionUser, date: string) {
+  private async exportFinanceInvoices(input: Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user: SessionUser, currentBranchId: string | null, date: string, effectiveBranchIds?: string[] | null) {
     this.ensureExportPermission(user, 'finance.read', 'finance.export');
     const { startDate, endDate } = resolveDateRange(input.dateRange);
     const all: Awaited<ReturnType<FinanceService['listInvoices']>>['invoices'] = [];
@@ -590,7 +591,7 @@ export class ReportsService {
         ...(startDate ? { startDate } : {}),
         ...(endDate ? { endDate } : {}),
       });
-      const list = await this.financeService.listInvoices(invoicesInput);
+      const list = await this.financeService.listInvoices(invoicesInput, currentBranchId, effectiveBranchIds);
       const batch = list.invoices ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) break;
@@ -697,6 +698,8 @@ export class ReportsService {
     input: Extract<ExportReportInput, { reportKey: 'logistics_locations' }>,
     user: SessionUser,
     date: string,
+    groupId?: string | null,
+    effectiveBranchIds?: string[] | null,
   ) {
     this.ensureExportPermission(user, 'logistics.providers.view', 'logistics.export');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -708,7 +711,7 @@ export class ReportsService {
         ...(input.filters?.providerId ? { providerId: input.filters.providerId } : {}),
         ...(input.filters?.status ? { status: input.filters.status } : {}),
       });
-      const result = await this.logisticsService.listLocations(parsed);
+      const result = await this.logisticsService.listLocations(parsed, groupId, effectiveBranchIds);
       const batch = result.locations ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) break;
@@ -775,6 +778,7 @@ export class ReportsService {
     input: Extract<ExportReportInput, { reportKey: 'logistics_partners' }>,
     user: SessionUser,
     date: string,
+    groupId?: string | null,
   ) {
     this.ensureExportPermission(user, 'logistics.providers.view', 'logistics.export');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -785,7 +789,7 @@ export class ReportsService {
         limit: EXPORT_PAGE_LIMIT,
         ...(input.filters?.status ? { status: input.filters.status } : {}),
       });
-      const result = await this.logisticsService.listProviders(parsed);
+      const result = await this.logisticsService.listProviders(parsed, groupId);
       const batch = result.providers ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) break;
@@ -1246,6 +1250,7 @@ export class ReportsService {
     input: Extract<ExportReportInput, { reportKey: 'products' }>,
     user: SessionUser,
     date: string,
+    groupId?: string | null,
   ) {
     this.ensureExportPermission(user, 'inventory.read', 'inventory.export');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1260,7 +1265,7 @@ export class ReportsService {
         ...(input.filters?.search ? { search: input.filters.search } : {}),
         ...(input.filters?.categoryId ? { categoryId: input.filters.categoryId } : {}),
       });
-      const result = await this.productsService.list(parsed, user.id, user.role);
+      const result = await this.productsService.list(parsed, user.id, user.role, groupId);
       const batch = result.products ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) break;
