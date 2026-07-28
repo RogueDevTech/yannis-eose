@@ -68,7 +68,7 @@ export function OpeningBalancesPage({
 
   useCloseOnFetcherSuccess(fetcher, () => {
     setShowPostConfirm(false);
-    navigate('/admin/finance/accounts');
+    navigate('/admin/accounting/accounts');
   });
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() =>
     alreadyPosted ? new Set(ROOT_TYPE_ORDER) : new Set(['ASSET']),
@@ -135,12 +135,12 @@ export function OpeningBalancesPage({
     <div className="space-y-4">
       <PageHeader
         title={alreadyPosted ? 'Opening Balances' : 'Post Opening Balances'}
-        backTo="/admin/finance/accounts"
+        backTo="/admin/accounting/accounts"
         description={alreadyPosted ? 'Opening balances posted on ' + (postedDate ?? 'unknown date') + '.' : 'Enter each account\'s balance at go-live. Any residual posts to Opening Balance Equity.'}
         actions={
           alreadyPosted ? (
             <div className="hidden md:flex">
-              <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/admin/finance/accounts')}>
+              <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/admin/accounting/accounts')}>
                 Back to Accounts
               </Button>
             </div>
@@ -150,7 +150,7 @@ export function OpeningBalancesPage({
               triggerAriaLabel="Opening balances tools"
               desktop={
                 <div className="flex items-center gap-2">
-                  <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/admin/finance/accounts')}>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/admin/accounting/accounts')}>
                     Cancel
                   </Button>
                   <Button type="button" size="sm" onClick={() => setShowPostConfirm(true)} disabled={!hasAny || fetcher.state !== 'idle'}>
@@ -160,7 +160,7 @@ export function OpeningBalancesPage({
               }
               sheet={
                 <>
-                  <Button type="button" className="w-full" variant="secondary" onClick={() => navigate('/admin/finance/accounts')}>
+                  <Button type="button" className="w-full" variant="secondary" onClick={() => navigate('/admin/accounting/accounts')}>
                     Cancel
                   </Button>
                   <Button type="button" className="w-full" onClick={() => setShowPostConfirm(true)} disabled={!hasAny || fetcher.state !== 'idle'}>
@@ -180,7 +180,7 @@ export function OpeningBalancesPage({
           <p className="text-sm font-medium text-success-800 dark:text-success-200">Opening balances posted (cutover date: {postedDate})</p>
           <p className="text-xs text-success-700 dark:text-success-300 mt-0.5">
             These values are read-only. If you need to correct them, find the "Opening balances (cutover)" entry in{' '}
-            <Link to="/admin/finance/journal-entries" className="underline font-medium">Journal Entries</Link>
+            <Link to="/admin/accounting/journal-entries" className="underline font-medium">Journal Entries</Link>
             , reverse it, then post new opening balances.
           </p>
         </div>

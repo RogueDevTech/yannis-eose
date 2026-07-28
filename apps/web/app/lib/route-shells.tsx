@@ -35,6 +35,7 @@ import {
   TrialBalanceLoadingShell,
   WhtCertificatesLoadingShell,
 } from '~/features/accounting/AccountingDeferredLoadingShells';
+import { AccountMappingsLoadingShell } from '~/features/accounting/AccountMappingsLoadingShell';
 import {
   DeliveryRemittanceDetailLoadingShell,
   DeliveryRemittancesLoadingShell,
@@ -379,66 +380,69 @@ const entries: ShellEntry[] = [
     render: (_m, sp) => <FinanceOverviewLoadingShell filters={parseDateFilters(sp)} />,
   },
   {
-    // Account Config (the Accounts tab is the default) + legacy accounts path.
-    match: /^\/admin\/finance\/(accounts|account-mappings)$/,
+    match: /^\/admin\/accounting\/accounts$/,
     render: () => <ChartOfAccountsLoadingShell />,
   },
   {
-    match: /^\/admin\/finance\/journal-entries\/new$/,
+    match: /^\/admin\/accounting\/account-config$/,
+    render: () => <AccountMappingsLoadingShell canWrite={false} />,
+  },
+  {
+    match: /^\/admin\/accounting\/journal-entries\/new$/,
     render: () => <JournalEntryCreateLoadingShell />,
   },
   {
-    match: /^\/admin\/finance\/journal-entries$/,
+    match: /^\/admin\/accounting\/journal-entries$/,
     render: (_m, sp) => <JournalEntriesLoadingShell filters={parseDateFilters(sp)} />,
   },
   {
-    match: /^\/admin\/finance\/trial-balance$/,
+    match: /^\/admin\/accounting\/trial-balance$/,
     render: (_m, sp) => <TrialBalanceLoadingShell filters={parseFinanceDefaultMonthDateFilters(sp)} />,
   },
   {
-    match: /^\/admin\/finance\/profit-loss$/,
+    match: /^\/admin\/accounting\/profit-loss$/,
     render: (_m, sp) => <ProfitAndLossLoadingShell filters={parseFinanceDefaultMonthDateFilters(sp)} />,
   },
   {
-    match: /^\/admin\/finance\/balance-sheet$/,
+    match: /^\/admin\/accounting\/balance-sheet$/,
     render: (_m, sp) => <BalanceSheetLoadingShell filters={parseFinanceDefaultMonthDateFilters(sp)} />,
   },
   {
-    match: /^\/admin\/finance\/cash-flow$/,
+    match: /^\/admin\/accounting\/cash-flow$/,
     render: (_m, sp) => <CashFlowLoadingShell filters={parseFinanceDefaultMonthDateFilters(sp)} />,
   },
   {
-    match: /^\/admin\/finance\/budget-report$/,
+    match: /^\/admin\/accounting\/budget-report$/,
     render: (_m, sp) => <BudgetVsActualLoadingShell filters={parseDateFilters(sp)} />,
   },
   {
-    match: /^\/admin\/finance\/bank-reconciliation$/,
+    match: /^\/admin\/accounting\/bank-reconciliation$/,
     render: () => <BankReconciliationLoadingShell />,
   },
   {
-    match: /^\/admin\/finance\/tax-returns$/,
+    match: /^\/admin\/accounting\/tax-returns$/,
     render: (_m, sp) => <TaxReturnsLoadingShell filters={parseFinanceDefaultMonthDateFilters(sp)} />,
   },
   {
-    match: /^\/admin\/finance\/wht-certificates$/,
+    match: /^\/admin\/accounting\/wht-certificates$/,
     render: () => <WhtCertificatesLoadingShell />,
   },
   {
-    match: /^\/admin\/finance\/opening-balances$/,
+    match: /^\/admin\/accounting\/opening-balances$/,
     render: () => <OpeningBalancesLoadingShell />,
   },
   {
-    match: /^\/admin\/finance\/aging$/,
+    match: /^\/admin\/accounting\/aging$/,
     render: (_m, sp) => (
       <AgingLoadingShell kind={sp.get('kind') === 'PAYABLE' ? 'PAYABLE' : 'RECEIVABLE'} />
     ),
   },
   {
-    match: /^\/admin\/finance\/assets$/,
+    match: /^\/admin\/accounting\/assets$/,
     render: () => <AssetRegisterLoadingShell />,
   },
   {
-    match: /^\/admin\/finance\/expenses$/,
+    match: /^\/admin\/accounting\/expenses$/,
     render: () => <ExpenseSubmissionsLoadingShell />,
   },
 

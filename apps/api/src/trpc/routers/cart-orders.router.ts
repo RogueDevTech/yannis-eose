@@ -181,15 +181,26 @@ export const cartOrdersRouter = router({
       const isCloser = ctx.user.role === 'CS_CLOSER';
       const isMB = ctx.user.role === 'MEDIA_BUYER';
       const isMarketingRole = ctx.user.role === 'HEAD_OF_MARKETING' || isMB;
+      const isMarketingSupervisor = isMB &&
+        (ctx.user as { isMarketingTeamSupervisorOnActiveBranch?: boolean }).isMarketingTeamSupervisorOnActiveBranch === true;
+      // Supervisor: scope to team's media buyer IDs (not just own ID).
+      let mediaBuyerIds: string[] | null = null;
+      if (isMarketingSupervisor && ctx.currentBranchId) {
+        const { getBranchTeamsService } = await import('./branches.router');
+        const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, ctx.currentBranchId);
+        mediaBuyerIds = scope.marketingUserIds.length > 0 ? scope.marketingUserIds : [ctx.user.id];
+        if (!mediaBuyerIds.includes(ctx.user.id)) mediaBuyerIds.push(ctx.user.id);
+      }
       return getCartOrdersService().getStatusCounts(
         ctx.currentBranchId,
         isCloser ? ctx.user.id : undefined,
         input?.startDate,
         input?.endDate,
         ctx.effectiveBranchIds,
-        isMB ? ctx.user.id : undefined,
+        isMB && !isMarketingSupervisor ? ctx.user.id : undefined,
         undefined,
         isMarketingRole ? 'marketing' : 'servicing',
+        mediaBuyerIds,
       );
     }),
 

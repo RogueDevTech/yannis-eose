@@ -113,26 +113,33 @@ describe.skipIf(SKIP_IF_NO_DB)('General Ledger — Permission Gates (Integration
 
   // ── Layer 2: the catalog actually grants the codes to the right roles ─────────
 
-  it('FINANCE_OFFICER resolves finance.ledger.read + write from the seeded catalog', async () => {
+  it('FINANCE_OFFICER resolves accounting.read + write from the seeded catalog', async () => {
     const fo = await createTestUser(db as never, { role: 'FINANCE_OFFICER' });
     const perms = await computeEffectivePermissionsLegacyUnion(db as never, fo.id);
+    // Canonical codes (source of truth after the Accounting split).
+    expect(perms.has('accounting.read')).toBe(true);
+    expect(perms.has('accounting.write')).toBe(true);
+    expect(perms.has('accounting.export')).toBe(true);
+    // Legacy aliases still resolve for backward compatibility.
     expect(perms.has('finance.ledger.read')).toBe(true);
     expect(perms.has('finance.ledger.write')).toBe(true);
     expect(perms.has('finance.ledger.export')).toBe(true);
   });
 
-  it('a non-finance role does NOT resolve finance.ledger.* codes', async () => {
+  it('a non-finance role does NOT resolve accounting.* codes', async () => {
     const mb = await createTestUser(db as never, { role: 'MEDIA_BUYER' });
     const perms = await computeEffectivePermissionsLegacyUnion(db as never, mb.id);
+    expect(perms.has('accounting.read')).toBe(false);
+    expect(perms.has('accounting.write')).toBe(false);
     expect(perms.has('finance.ledger.read')).toBe(false);
     expect(perms.has('finance.ledger.write')).toBe(false);
   });
 
-  it('SUPER_ADMIN resolves all codes incl. finance.ledger.*', async () => {
+  it('SUPER_ADMIN resolves all codes incl. accounting.*', async () => {
     const sa = await createTestUser(db as never, { role: 'SUPER_ADMIN' });
     const perms = await computeEffectivePermissionsLegacyUnion(db as never, sa.id);
-    expect(perms.has('finance.ledger.read')).toBe(true);
-    expect(perms.has('finance.ledger.write')).toBe(true);
+    expect(perms.has('accounting.read')).toBe(true);
+    expect(perms.has('accounting.write')).toBe(true);
   });
 
   // ── Layer 3: real resolved perms drive the real gate ──────────────────────────

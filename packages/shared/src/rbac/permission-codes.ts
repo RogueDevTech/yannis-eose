@@ -95,6 +95,11 @@ export const LEGACY_PERMISSION_CODE_MAP: Record<string, string> = {
   'hr.onboarding.read': 'hr.onboarding.read',
   'hr.onboarding.write': 'hr.onboarding.write',
   'hr.onboarding.approve': 'hr.onboarding.approve',
+  // Accounting split from Finance: the GL/double-entry trio moved to its own
+  // `accounting.*` namespace. Old grants resolve forward automatically.
+  'finance.ledger.read': 'accounting.read',
+  'finance.ledger.write': 'accounting.write',
+  'finance.ledger.export': 'accounting.export',
 };
 
 const LEGACY_BY_CANONICAL = new Map<string, string[]>();

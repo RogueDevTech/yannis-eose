@@ -18,8 +18,8 @@ interface AccountOpt {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
-    permission: 'finance.ledger.write',
+    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER', 'ACCOUNTANT'],
+    permission: 'accounting.write',
   });
   const cookie = getSessionCookie(request);
 
@@ -60,7 +60,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to post entry') }, { status: 400 });
     }
-    return redirect('/admin/finance/journal-entries');
+    return redirect('/admin/accounting/journal-entries');
   }
 
   return json({ error: 'Unknown action' }, { status: 400 });

@@ -13,6 +13,7 @@ export const userRoleSchema = z.enum([
   'HEAD_OF_CS',
   'CS_CLOSER',
   'FINANCE_OFFICER',
+  'ACCOUNTANT',
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
   'TPL_MANAGER',

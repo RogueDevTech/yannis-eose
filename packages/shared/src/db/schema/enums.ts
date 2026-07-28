@@ -32,6 +32,10 @@ export const userRoleEnum = pgEnum('user_role', [
   // audit log payloads stay frozen as the truthful name at write time.
   'CS_CLOSER',
   'FINANCE_OFFICER',
+  // ACCOUNTANT = bookkeeping role. Full accounting.* (GL, chart of accounts,
+  // journals, reports) + read context. No money movement (no approve/disburse/
+  // cash-remittance). Separated from FINANCE_OFFICER's operational finance hat.
+  'ACCOUNTANT',
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
   'TPL_MANAGER',

@@ -127,7 +127,7 @@ function resolveGroupId(
 
 export const generalLedgerRouter = router({
   // ─── Journal Entries ─────────────────────────────────────────────────────
-  createJournalEntry: permissionProcedure('finance.ledger.write')
+  createJournalEntry: permissionProcedure('accounting.write')
     .input(createJournalEntrySchema)
     .mutation(async ({ input, ctx }) => {
       const groupId = resolveGroupId(input.groupId, ctx.activeGroupId, ctx.user.role);
@@ -149,14 +149,18 @@ export const generalLedgerRouter = router({
       );
     }),
 
-  approveJournalEntry: permissionProcedure('finance.ledger.write')
+  approveJournalEntry: permissionProcedure('accounting.write')
     .input(approveJournalEntrySchema)
     .mutation(async ({ input, ctx }) => {
-      // Only admin-level roles or FINANCE_OFFICER can approve journal entries.
-      if (!isAdminLevel(ctx.user) && ctx.user.role !== 'FINANCE_OFFICER') {
+      // Only admin-level roles, FINANCE_OFFICER, or ACCOUNTANT can approve journal entries.
+      if (
+        !isAdminLevel(ctx.user) &&
+        ctx.user.role !== 'FINANCE_OFFICER' &&
+        ctx.user.role !== 'ACCOUNTANT'
+      ) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Only administrators or finance officers can approve journal entries.',
+          message: 'Only administrators, finance officers, or accountants can approve journal entries.',
         });
       }
       return getGeneralLedgerService().approveJournalEntry(
@@ -166,26 +170,30 @@ export const generalLedgerRouter = router({
       );
     }),
 
-  rejectJournalEntry: permissionProcedure('finance.ledger.write')
+  rejectJournalEntry: permissionProcedure('accounting.write')
     .input(rejectJournalEntrySchema)
     .mutation(async ({ input, ctx }) => {
-      // Only admin-level roles or FINANCE_OFFICER can reject journal entries.
-      if (!isAdminLevel(ctx.user) && ctx.user.role !== 'FINANCE_OFFICER') {
+      // Only admin-level roles, FINANCE_OFFICER, or ACCOUNTANT can reject journal entries.
+      if (
+        !isAdminLevel(ctx.user) &&
+        ctx.user.role !== 'FINANCE_OFFICER' &&
+        ctx.user.role !== 'ACCOUNTANT'
+      ) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Only administrators or finance officers can reject journal entries.',
+          message: 'Only administrators, finance officers, or accountants can reject journal entries.',
         });
       }
       return getGeneralLedgerService().rejectJournalEntry(input, { id: ctx.user.id });
     }),
 
-  reverseJournalEntry: permissionProcedure('finance.ledger.write')
+  reverseJournalEntry: permissionProcedure('accounting.write')
     .input(reverseJournalEntrySchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().reverseJournalEntry(input, { id: ctx.user.id });
     }),
 
-  listJournalEntries: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  listJournalEntries: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(listJournalEntriesSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listJournalEntries({
@@ -194,14 +202,14 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  getJournalEntry: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  getJournalEntry: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(getJournalEntrySchema)
     .query(async ({ input }) => {
       return getGeneralLedgerService().getJournalEntry(input);
     }),
 
   // ─── Accounts (Chart of Accounts) ────────────────────────────────────────
-  listAccounts: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  listAccounts: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(listAccountsSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listAccounts({
@@ -210,13 +218,13 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  getAccountLedger: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  getAccountLedger: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(getAccountLedgerSchema)
     .query(async ({ input }) => {
       return getGeneralLedgerService().getAccountLedger(input);
     }),
 
-  createAccount: permissionProcedure('finance.ledger.write')
+  createAccount: permissionProcedure('accounting.write')
     .input(createAccountSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().createAccount(
@@ -225,26 +233,26 @@ export const generalLedgerRouter = router({
       );
     }),
 
-  updateAccount: permissionProcedure('finance.ledger.write')
+  updateAccount: permissionProcedure('accounting.write')
     .input(updateAccountSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().updateAccount(input, { id: ctx.user.id });
     }),
 
-  deactivateAccount: permissionProcedure('finance.ledger.write')
+  deactivateAccount: permissionProcedure('accounting.write')
     .input(deactivateAccountSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().deactivateAccount(input, { id: ctx.user.id });
     }),
 
-  reactivateAccount: permissionProcedure('finance.ledger.write')
+  reactivateAccount: permissionProcedure('accounting.write')
     .input(reactivateAccountSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().reactivateAccount(input, { id: ctx.user.id });
     }),
 
   // ─── Fiscal Years ────────────────────────────────────────────────────────
-  listFiscalYears: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  listFiscalYears: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(listFiscalYearsSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listFiscalYears({
@@ -253,7 +261,7 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  createFiscalYear: permissionProcedure('finance.ledger.write')
+  createFiscalYear: permissionProcedure('accounting.write')
     .input(createFiscalYearSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().createFiscalYear(
@@ -262,14 +270,14 @@ export const generalLedgerRouter = router({
       );
     }),
 
-  closeFiscalYear: permissionProcedure('finance.ledger.write')
+  closeFiscalYear: permissionProcedure('accounting.write')
     .input(closeFiscalYearSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().closeFiscalYear(input, { id: ctx.user.id });
     }),
 
   /** Reopen a closed fiscal year. SuperAdmin-only gate in the router. */
-  reopenFiscalYear: permissionProcedure('finance.ledger.write')
+  reopenFiscalYear: permissionProcedure('accounting.write')
     .input(reopenFiscalYearSchema)
     .mutation(async ({ input, ctx }) => {
       // Only admin-level roles can reopen a closed year.
@@ -283,7 +291,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Trial Balance ─────────────────────────────────────────────────────────
-  trialBalance: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  trialBalance: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(trialBalanceSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().trialBalance({
@@ -293,7 +301,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Financial statements ────────────────────────────────────────────────
-  profitAndLoss: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  profitAndLoss: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(profitAndLossSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().profitAndLoss({
@@ -302,7 +310,7 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  balanceSheet: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  balanceSheet: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(balanceSheetSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().balanceSheet({
@@ -311,7 +319,7 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  cashFlow: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  cashFlow: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(cashFlowSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().cashFlow({
@@ -320,7 +328,7 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  aging: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  aging: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(agingSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().aging({
@@ -330,7 +338,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Financial KPIs (Phase 5A) ────────────────────────────────────────────
-  financialKPIs: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  financialKPIs: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(financialKPIsSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().financialKPIs(
@@ -340,7 +348,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Cutover: opening balances ─────────────────────────────────────────────
-  postOpeningBalances: permissionProcedure('finance.ledger.write')
+  postOpeningBalances: permissionProcedure('accounting.write')
     .input(postOpeningBalancesSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().postOpeningBalances(
@@ -350,19 +358,19 @@ export const generalLedgerRouter = router({
     }),
 
   /** Idempotent repair for paid batches that missed payroll GL auto-post. */
-  repostPayrollBatch: permissionProcedure('finance.ledger.write')
+  repostPayrollBatch: permissionProcedure('accounting.write')
     .input(repostPayrollBatchSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().postPayrollBatch(input.batchId, { id: ctx.user.id });
     }),
 
-  backfillPaidPayrollGl: permissionProcedure('finance.ledger.write')
+  backfillPaidPayrollGl: permissionProcedure('accounting.write')
     .mutation(async ({ ctx }) => {
       return getGeneralLedgerService().backfillPaidPayrollGlPosts({ id: ctx.user.id });
     }),
 
   // ─── Chart of Accounts seeding (admin / on-demand) ───────────────────────
-  seedChartOfAccounts: permissionProcedure('finance.ledger.write')
+  seedChartOfAccounts: permissionProcedure('accounting.write')
     .input(seedChartOfAccountsSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().seedChartOfAccounts(
@@ -372,7 +380,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Asset Register (Phase 4A) ──────────────────────────────────────────
-  listAssets: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  listAssets: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(listAssetsSchema)
     .query(async ({ input, ctx }) => {
       return getAssetRegisterService().listAssets({
@@ -381,13 +389,13 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  getAsset: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  getAsset: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(getAssetSchema)
     .query(async ({ input }) => {
       return getAssetRegisterService().getAsset(input);
     }),
 
-  createAsset: permissionProcedure('finance.ledger.write')
+  createAsset: permissionProcedure('accounting.write')
     .input(createAssetSchema)
     .mutation(async ({ input, ctx }) => {
       return getAssetRegisterService().createAsset(
@@ -396,13 +404,13 @@ export const generalLedgerRouter = router({
       );
     }),
 
-  disposeAsset: permissionProcedure('finance.ledger.write')
+  disposeAsset: permissionProcedure('accounting.write')
     .input(disposeAssetSchema)
     .mutation(async ({ input, ctx }) => {
       return getAssetRegisterService().disposeAsset(input, { id: ctx.user.id });
     }),
 
-  runDepreciation: permissionProcedure('finance.ledger.write')
+  runDepreciation: permissionProcedure('accounting.write')
     .input(runDepreciationSchema)
     .mutation(async ({ input, ctx }) => {
       return getAssetRegisterService().runMonthlyDepreciation(
@@ -424,13 +432,13 @@ export const generalLedgerRouter = router({
       );
     }),
 
-  approveExpense: permissionProcedure('finance.ledger.write')
+  approveExpense: permissionProcedure('accounting.write')
     .input(approveExpenseSchema)
     .mutation(async ({ input, ctx }) => {
       return getExpenseSubmissionService().approveExpense(input, { id: ctx.user.id });
     }),
 
-  rejectExpense: permissionProcedure('finance.ledger.write')
+  rejectExpense: permissionProcedure('accounting.write')
     .input(rejectExpenseSchema)
     .mutation(async ({ input, ctx }) => {
       return getExpenseSubmissionService().rejectExpense(input, { id: ctx.user.id });
@@ -445,14 +453,14 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  getExpense: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  getExpense: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(getExpenseSchema)
     .query(async ({ input }) => {
       return getExpenseSubmissionService().getExpense(input);
     }),
 
   // ─── Phase 6A: Budget vs Actual ─────────────────────────────────────────
-  budgetVsActual: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  budgetVsActual: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(budgetVsActualSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().budgetVsActual(
@@ -463,7 +471,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Phase 6B: WHT Deductions ──────────────────────────────────────────
-  recordWht: permissionProcedure('finance.ledger.write')
+  recordWht: permissionProcedure('accounting.write')
     .input(recordWhtSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().recordWhtDeduction(
@@ -472,7 +480,7 @@ export const generalLedgerRouter = router({
       );
     }),
 
-  listWht: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  listWht: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(listWhtSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listWhtDeductions({
@@ -481,7 +489,7 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  generateWhtCertificate: permissionProcedure('finance.ledger.write')
+  generateWhtCertificate: permissionProcedure('accounting.write')
     .input(generateWhtCertificateSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().generateWhtCertificate(
@@ -491,7 +499,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Phase 6C: VAT Return Summary ─────────────────────────────────────
-  vatReturnSummary: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  vatReturnSummary: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(vatReturnSummarySchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().vatReturnSummary(
@@ -502,7 +510,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── Phase 6D: Bank Reconciliation ────────────────────────────────────
-  createBankReconciliation: permissionProcedure('finance.ledger.write')
+  createBankReconciliation: permissionProcedure('accounting.write')
     .input(createBankReconciliationSchema)
     .mutation(async ({ input, ctx }) => {
       return getBankReconciliationService().createReconciliation(
@@ -511,25 +519,25 @@ export const generalLedgerRouter = router({
       );
     }),
 
-  matchBankReconLine: permissionProcedure('finance.ledger.write')
+  matchBankReconLine: permissionProcedure('accounting.write')
     .input(matchLineSchema)
     .mutation(async ({ input, ctx }) => {
       return getBankReconciliationService().matchLine(input, { id: ctx.user.id });
     }),
 
-  unmatchBankReconLine: permissionProcedure('finance.ledger.write')
+  unmatchBankReconLine: permissionProcedure('accounting.write')
     .input(unmatchLineSchema)
     .mutation(async ({ input, ctx }) => {
       return getBankReconciliationService().unmatchLine(input, { id: ctx.user.id });
     }),
 
-  completeBankReconciliation: permissionProcedure('finance.ledger.write')
+  completeBankReconciliation: permissionProcedure('accounting.write')
     .input(completeBankReconciliationSchema)
     .mutation(async ({ input, ctx }) => {
       return getBankReconciliationService().completeReconciliation(input, { id: ctx.user.id });
     }),
 
-  listBankReconciliations: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  listBankReconciliations: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(listBankReconciliationsSchema)
     .query(async ({ input, ctx }) => {
       return getBankReconciliationService().listReconciliations({
@@ -538,14 +546,14 @@ export const generalLedgerRouter = router({
       });
     }),
 
-  getBankReconciliation: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  getBankReconciliation: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(getBankReconciliationSchema)
     .query(async ({ input }) => {
       return getBankReconciliationService().getReconciliation(input);
     }),
 
   // ─── Phase 6E: Consolidated Multi-Company Reports ────────────────────
-  consolidatedPL: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  consolidatedPL: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(consolidatedPLSchema)
     .query(async ({ ctx, input }) => {
       if (!isAdminLevel(ctx.user)) {
@@ -554,7 +562,7 @@ export const generalLedgerRouter = router({
       return getGeneralLedgerService().consolidatedProfitAndLoss(input.startDate, input.endDate);
     }),
 
-  consolidatedBS: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  consolidatedBS: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(consolidatedBSSchema)
     .query(async ({ ctx, input }) => {
       if (!isAdminLevel(ctx.user)) {
@@ -563,7 +571,7 @@ export const generalLedgerRouter = router({
       return getGeneralLedgerService().consolidatedBalanceSheet(input.asOfDate);
     }),
 
-  consolidatedCF: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  consolidatedCF: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(consolidatedCFSchema)
     .query(async ({ ctx, input }) => {
       if (!isAdminLevel(ctx.user)) {
@@ -573,7 +581,7 @@ export const generalLedgerRouter = router({
     }),
 
   // ─── GL Account Mappings ─────────────────────────────────────────────────
-  listAccountMappings: permissionProcedure('finance.ledger.read', 'finance.audit.read')
+  listAccountMappings: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(listAccountMappingsSchema)
     .query(async ({ input, ctx }) => {
       return getGeneralLedgerService().listAccountMappings(
@@ -581,7 +589,7 @@ export const generalLedgerRouter = router({
       );
     }),
 
-  updateAccountMapping: permissionProcedure('finance.ledger.write')
+  updateAccountMapping: permissionProcedure('accounting.write')
     .input(updateAccountMappingSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().updateAccountMapping(
@@ -590,7 +598,7 @@ export const generalLedgerRouter = router({
       );
     }),
 
-  resetAccountMapping: permissionProcedure('finance.ledger.write')
+  resetAccountMapping: permissionProcedure('accounting.write')
     .input(resetAccountMappingSchema)
     .mutation(async ({ input, ctx }) => {
       return getGeneralLedgerService().resetAccountMapping(
