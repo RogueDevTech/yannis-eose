@@ -373,20 +373,7 @@ export function StaffOnboardingDocumentsPage({
               </p>
             </Link>
           )}
-          pagination={
-            totalCount > 0
-              ? {
-                  page,
-                  totalPages,
-                  showWhenSinglePage: true,
-                  summary: (
-                    <p className="text-sm text-app-fg-muted">
-                      Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalCount)} of {totalCount}
-                    </p>
-                  ),
-                }
-              : undefined
-          }
+          pagination={undefined}
         />
       </div>
     </div>
