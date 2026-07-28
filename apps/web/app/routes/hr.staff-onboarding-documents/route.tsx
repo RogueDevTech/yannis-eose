@@ -18,8 +18,8 @@ import { StaffOnboardingDocsLoadingShell } from '~/features/hr/HRDeferredLoading
 
 export const meta: MetaFunction = () => [{ title: 'Staff onboarding documents — Yannis EOSE' }];
 
-/** Fixed page size for this directory — kept in sync with the UI summary line. */
-const STAFF_ONBOARDING_DOCUMENTS_PAGE_SIZE = 20;
+/** Show all staff — no pagination, matches the users page pattern. */
+const STAFF_ONBOARDING_DOCUMENTS_PAGE_SIZE = 10_000;
 
 type ListPayload = {
   rows: StaffOnboardingDocumentRow[];
