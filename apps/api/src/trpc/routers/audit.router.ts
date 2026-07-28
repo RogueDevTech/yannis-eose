@@ -46,8 +46,10 @@ function getImportHistoryService(): ImportHistoryService {
 const ACTOR_FILTER_TTL_SECONDS = 300;
 
 /**
- * Audit router — `recordHistory` / `timeTravel` stay authed-only (record-scoped by domain loaders).
- * Global log + mirror list require `audit.read` or admin/finance (see `canAccessGlobalAuditLog`).
+ * Audit router — every read (incl. `recordHistory` / `timeTravel`) requires
+ * `audit.read` or admin/finance via `canAccessGlobalAuditLog`. Record history
+ * exposes raw `*_history` rows (customer PII, password hashes), so it must never
+ * be reachable by an arbitrary authenticated user.
  * Column-level security: `stripFinanceFields` on `authedProcedure` strips cost/margin in payloads.
  */
 export const auditRouter = router({
@@ -63,7 +65,14 @@ export const auditRouter = router({
         limit: z.number().int().min(1).max(100).default(20),
       }),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // Same gate as the global log — a record's raw history (e.g. orders_history
+      // customer fields, users_history password_hash) must not be readable by any
+      // authenticated user. The old "record-scoped by domain loaders" assumption
+      // was a UI convention, not a server-side control.
+      if (!canAccessGlobalAuditLog(ctx.user)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to view record history.' });
+      }
       return getAuditService().getRecordHistory(
         input.tableName,
         input.recordId,
@@ -110,7 +119,10 @@ export const auditRouter = router({
         asOf: z.string(),
       }),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (!canAccessGlobalAuditLog(ctx.user)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to view record history.' });
+      }
       return getAuditService().timeTravel(
         input.tableName,
         input.recordId,
