@@ -1424,9 +1424,13 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     actor: Actor,
     reason?: string,
   ): Promise<{ reversed: boolean; reason?: string }> {
-    const sliceVoucherId = `${remittanceId}:${orderId}`;
+    // gl_entries.voucher_id is a uuid column, so the slice voucher is keyed by
+    // the orderId (a real uuid) under the JOURNAL_ENTRY voucher type. That type
+    // keeps it distinct from this order's SALES_INVOICE reversal (same orderId,
+    // different type) and from the batch PAYMENT voucher (keyed by remittanceId),
+    // while giving a stable idempotency key: one slice reversal per order.
     return withActor(this.db, actor, async (tx) => {
-      if (await this.alreadyPosted(tx, 'PAYMENT', sliceVoucherId)) {
+      if (await this.alreadyPosted(tx, 'JOURNAL_ENTRY', orderId)) {
         return { reversed: false, reason: 'already-reversed' };
       }
 
@@ -1449,14 +1453,12 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       const bank = await this.resolveAccountForPosting(tx, groupId, 'BANK_PRIMARY');
       if (!debtors || !bank) return { reversed: false, reason: 'missing-debtors-or-bank-account' };
 
-      const remark = `Remittance slice reversal: ${reason ?? 'order retracted/deleted out of REMITTED'}`;
+      const remark = `Remittance slice reversal (${remittanceId}): ${reason ?? 'order retracted/deleted out of REMITTED'}`;
       await this.postVoucher(tx, {
         groupId,
         postingDate: new Date().toISOString().slice(0, 10),
-        // Post under PAYMENT so it shares the remittance's voucher type but a
-        // distinct, per-order voucherId — keeps it out of the batch voucher.
-        voucherType: 'PAYMENT',
-        voucherId: sliceVoucherId,
+        voucherType: 'JOURNAL_ENTRY',
+        voucherId: orderId,
         lines: [
           { accountId: debtors.id, debit: amt, credit: 0, partyType: 'CUSTOMER', remarks: remark },
           { accountId: bank.id, debit: 0, credit: amt, remarks: remark },
