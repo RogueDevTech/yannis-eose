@@ -4353,6 +4353,8 @@ export class OrdersService {
       excludeCartGraduated?: boolean;
       /** Team filter: only orders assigned to these CS user IDs. Resolved from teamId at the router. */
       teamMemberIds?: string[];
+      /** When true, include raw customerPhone in results (for exports). Caller must gate on export permission. */
+      includeRawPhone?: boolean;
     },
   ) {
     // Skip the exclusion gate when explicitly querying DELETED orders —
@@ -4795,6 +4797,7 @@ export class OrdersService {
         return {
           ...orderRest,
           customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash),
+          ...(listOpts?.includeRawPhone ? { customerPhone } : {}),
           mediaBuyerName: order.mediaBuyerId ? userNamesById.get(order.mediaBuyerId) ?? null : null,
           assignedCsName: order.assignedCsId ? userNamesById.get(order.assignedCsId) ?? null : null,
           primaryProductId: primary?.productId ?? null,

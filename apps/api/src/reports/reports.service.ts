@@ -191,6 +191,7 @@ export class ReportsService {
     base: Omit<ListOrdersInput, 'page' | 'limit'>,
     branchId: string | null,
     effectiveBranchIds?: string[] | null,
+    listOpts?: { includeRawPhone?: boolean },
   ): Promise<Awaited<ReturnType<OrdersService['list']>>['orders']> {
     const all: Awaited<ReturnType<OrdersService['list']>>['orders'] = [];
     for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
@@ -201,7 +202,7 @@ export class ReportsService {
         sortBy: base.sortBy ?? 'createdAt',
         sortOrder: base.sortOrder ?? 'desc',
       });
-      const result = await this.ordersService.list(listInput, branchId, { effectiveBranchIds });
+      const result = await this.ordersService.list(listInput, branchId, { effectiveBranchIds, ...listOpts });
       const batch = result.orders ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) return all;
@@ -227,12 +228,13 @@ export class ReportsService {
       },
       currentBranchId,
       effectiveBranchIds,
+      { includeRawPhone: true },
     );
     const rows = orders.map((o) => ({
       id: o.id,
       customer: o.customerName,
       assignedCs: o.assignedCsName ?? '—',
-      phone: o.customerPhoneDisplay ?? '',
+      phone: (o as unknown as { customerPhone?: string }).customerPhone ?? o.customerPhoneDisplay ?? '',
       status: o.status,
       amount: o.totalAmount ?? '',
       created: new Date(o.createdAt).toLocaleDateString(),
