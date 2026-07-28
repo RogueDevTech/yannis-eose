@@ -27,7 +27,7 @@ import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { isAdminLevel } from '../common/authz';
-import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
+import { hasFinanceAccess, hasFinanceWriteAccess } from '../common/utils/strip-finance-fields';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { EventsService } from '../events/events.service';
@@ -5100,6 +5100,25 @@ export class OrdersService {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'You do not have permission to delete orders. Request the orders.delete permission from an Admin.',
+        });
+      }
+    }
+
+    // → REMITTED: accountant/finance-write only. The canonical path is the
+    // accountant-led Cash Remittance flow (logistics.markReceived, which gates on
+    // hasFinanceWriteAccess || finance.cashRemittance.markReceived and posts the
+    // settlement voucher). Marking REMITTED directly via orders.transition would
+    // otherwise be ungated — a plain CS closer could self-remit their own order,
+    // skipping the cash-remittance record AND the GL PAYMENT settlement. Enforce
+    // the same finance gate here. ("CS never marks REMITTED — accountant only.")
+    if (newStatus === 'REMITTED') {
+      const canRemit =
+        hasFinanceWriteAccess(actor) || hasPerm('finance.cashRemittance.markReceived');
+      if (!canRemit) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            'Only Finance can mark an order Remitted. Use the Cash Remittance flow (accountant-led close-out).',
         });
       }
     }
