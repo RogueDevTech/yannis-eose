@@ -35,6 +35,7 @@ import { Pagination } from '~/components/ui/pagination';
 import { TableRowActionsSheet, type TableRowSheetAction } from '~/components/ui/table-row-actions-sheet';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type {
@@ -767,6 +768,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           />
         }
       />
+
+      <MobileDateFilterRow hideDate hideRefresh />
 
       <ExportModal
         open={showExport}
