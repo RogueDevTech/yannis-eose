@@ -36,15 +36,15 @@ interface MappingResult {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
-    permission: 'finance.ledger.read',
+    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER', 'ACCOUNTANT'],
+    permission: 'accounting.read',
   });
   const cookie = getSessionCookie(request);
   const perms = (user as { permissions?: string[] }).permissions ?? [];
   const canWrite =
     isAdminLevel(user) ||
     user.role === 'FINANCE_OFFICER' ||
-    perms.includes('finance.ledger.write');
+    perms.includes('accounting.write');
 
   const shell = { canWrite };
 

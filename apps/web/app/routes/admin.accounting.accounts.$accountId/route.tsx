@@ -52,8 +52,8 @@ const EMPTY: LedgerResponse = {
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
-    permission: 'finance.ledger.read',
+    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER', 'ACCOUNTANT'],
+    permission: 'accounting.read',
   });
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
@@ -68,7 +68,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const { perPage } = parsePerPage(url.searchParams, { defaultPerPage: 50 });
 
   const perms = (user as { permissions?: string[] } | null)?.permissions ?? [];
-  const canWrite = isAdminLevel(user) || user?.role === 'FINANCE_OFFICER' || perms.includes('finance.ledger.write');
+  const canWrite = isAdminLevel(user) || user?.role === 'FINANCE_OFFICER' || perms.includes('accounting.write');
 
   const filters = {
     startDate: startDate ?? '',

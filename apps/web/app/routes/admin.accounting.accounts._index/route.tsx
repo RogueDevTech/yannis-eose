@@ -1,13 +1,156 @@
-import type { LoaderFunctionArgs } from '@remix-run/node';
-import { redirect } from '@remix-run/node';
+import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
+import { useLoaderData } from '@remix-run/react';
+import {
+  apiRequest,
+  getSessionCookie,
+  requirePermissionOrRoles,
+} from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
+import { extractApiErrorMessage } from '~/lib/api-error';
+import { extractTrpc } from '~/lib/trpc-extract.server';
+import { cachedClientLoader } from '~/lib/loader-cache';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { ChartOfAccountsLoadingShell } from '~/features/accounting/AccountingDeferredLoadingShells';
+import {
+  ChartOfAccountsPage,
+  type AccountRow,
+} from '~/features/accounting/ChartOfAccountsPage';
 
-/**
- * The standalone Chart of Accounts page was folded into Account Config
- * (`/admin/finance/account-mappings`) as its "Accounts" tab. Redirect any
- * old links (including OpeningBalances back-navigation) there.
- */
+export const meta: MetaFunction = () => [{ title: 'Chart of Accounts — Accounting — Yannis EOSE' }];
+
+export { cachedClientLoader as clientLoader };
+
 export async function loader({ request }: LoaderFunctionArgs) {
-  const url = new URL(request.url);
-  const search = url.search ?? '';
-  return redirect(`/admin/finance/account-mappings${search}`);
+  const user = await requirePermissionOrRoles(request, {
+    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER', 'ACCOUNTANT'],
+    permission: 'accounting.read',
+  });
+  const cookie = getSessionCookie(request);
+  const perms = (user as { permissions?: string[] }).permissions ?? [];
+  const canWrite = isAdminLevel(user) || user.role === 'FINANCE_OFFICER' || perms.includes('accounting.write');
+
+  const shell = { canWrite };
+
+  const pageData = (async () => {
+    const [accountsRes, jeRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/generalLedger.listAccounts?input=${encodeURIComponent(JSON.stringify({ includeInactive: true }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/generalLedger.listJournalEntries?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 1, search: 'Opening balances (cutover)', status: 'POSTED' }))}`,
+        { method: 'GET', cookie },
+      ),
+    ]);
+    // Fail loud: a silent [] here gets snapshotted by CachedAwait and looks like
+    // "no CoA seeded" after an API blip (common during local turbo restarts).
+    if (!accountsRes.ok) {
+      throw new Error(extractApiErrorMessage(accountsRes.data, 'Failed to load chart of accounts'));
+    }
+    const accountsRaw = extractTrpc<AccountRow[] | null>(accountsRes, null);
+    const accounts = Array.isArray(accountsRaw) ? accountsRaw : [];
+    const jePayload = extractTrpc<{ records?: unknown[] } | null>(jeRes, null);
+    const hasOpeningBalances = (jePayload?.records?.length ?? 0) > 0;
+    return { accounts, hasOpeningBalances };
+  })();
+
+  return defer({ shell, pageData });
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  const cookie = getSessionCookie(request);
+  if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
+
+  const formData = await request.formData();
+  const intent = formData.get('intent')?.toString();
+
+  if (intent === 'createAccount') {
+    const accountTypeRaw = formData.get('accountType')?.toString() || '';
+    const parentRaw = formData.get('parentAccountId')?.toString() || '';
+    const isGroupRaw = formData.get('isGroup')?.toString();
+    const body = {
+      code: formData.get('code')?.toString() ?? '',
+      name: formData.get('name')?.toString() ?? '',
+      rootType: formData.get('rootType')?.toString() ?? '',
+      accountType: accountTypeRaw || null,
+      isGroup: isGroupRaw === 'true',
+      parentAccountId: parentRaw || null,
+    };
+    const res = await apiRequest<unknown>('/trpc/generalLedger.createAccount', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data) }, { status: 400 });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'updateAccount') {
+    const body = {
+      accountId: formData.get('accountId')?.toString() ?? '',
+      name: formData.get('name')?.toString()?.trim() ?? '',
+    };
+    const res = await apiRequest<unknown>('/trpc/generalLedger.updateAccount', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data) }, { status: 400 });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'deactivateAccount') {
+    const body = {
+      accountId: formData.get('accountId')?.toString() ?? '',
+    };
+    const res = await apiRequest<unknown>('/trpc/generalLedger.deactivateAccount', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data) }, { status: 400 });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'postOpening') {
+    const payloadRaw = formData.get('payload')?.toString() ?? '{}';
+    let payload: { postingDate?: string; lines?: Array<{ accountId: string; debit: number; credit: number }> };
+    try {
+      payload = JSON.parse(payloadRaw);
+    } catch {
+      return json({ error: 'Invalid payload' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/generalLedger.postOpeningBalances', {
+      method: 'POST',
+      cookie,
+      body: payload,
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to post opening balances') }, { status: 400 });
+    }
+    return json({ success: true, intent: 'postOpening' });
+  }
+
+  return json({ error: 'Unknown action' }, { status: 400 });
+}
+
+export default function ChartOfAccountsRoute() {
+  const { shell, pageData } = useLoaderData<typeof loader>();
+  return (
+    <CachedAwait
+      resolve={pageData}
+      fallback={<ChartOfAccountsLoadingShell />}
+      loaderShell={{ shell }}
+      deferredKey="pageData"
+    >
+      {(data) => <ChartOfAccountsPage accounts={data.accounts} canWrite={shell.canWrite} hasOpeningBalances={data.hasOpeningBalances} readOnly />}
+    </CachedAwait>
+  );
 }

@@ -29,7 +29,7 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
   const navigate = useNavigate();
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(fetcher.data);
-  useCloseOnFetcherSuccess(fetcher, () => navigate('/admin/finance/journal-entries'));
+  useCloseOnFetcherSuccess(fetcher, () => navigate('/admin/accounting/journal-entries'));
 
   const today = new Date().toISOString().slice(0, 10);
   const [postingDate, setPostingDate] = useState(today);
@@ -98,7 +98,7 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
       <PageHeader
         title="New Journal Entry"
         description="Post a balanced entry to the general ledger."
-        backTo="/admin/finance/journal-entries"
+        backTo="/admin/accounting/journal-entries"
       />
 
       <div className="card space-y-4">
@@ -264,7 +264,7 @@ export function JournalEntryCreatePage({ accounts }: JournalEntryCreatePageProps
 
       <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3">
         <Link
-          to="/admin/finance/journal-entries"
+          to="/admin/accounting/journal-entries"
           className="btn-secondary w-full sm:w-auto inline-flex items-center justify-center"
         >
           Cancel

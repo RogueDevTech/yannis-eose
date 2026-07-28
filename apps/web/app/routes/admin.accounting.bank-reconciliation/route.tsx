@@ -16,8 +16,8 @@ export { cachedClientLoader as clientLoader };
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
-    permission: 'finance.ledger.read',
+    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER', 'ACCOUNTANT'],
+    permission: 'accounting.read',
   });
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
@@ -85,8 +85,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export async function action({ request }: ActionFunctionArgs) {
   await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'],
-    permission: 'finance.ledger.write',
+    roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER', 'ACCOUNTANT'],
+    permission: 'accounting.write',
   });
   const cookie = getSessionCookie(request);
   const form = await request.formData();

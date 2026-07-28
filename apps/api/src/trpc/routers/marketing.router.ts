@@ -1145,6 +1145,7 @@ export const marketingRouter = router({
           ordersScope.mediaBuyerId,
           undefined,
           'marketing',
+          supervisorBuyerIds,
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
@@ -1339,7 +1340,7 @@ export const marketingRouter = router({
         getMarketingService().getProfitabilityConfig(),
         // Cart order status counts — only DELIVERED/REMITTED count toward marketing total.
         // Marketing surface: scope by branchId (campaign attribution).
-        getCartOrdersService().getStatusCounts(branchId, undefined, input.startDate, input.endDate, ctx.effectiveBranchIds, undefined, undefined, 'marketing'),
+        getCartOrdersService().getStatusCounts(branchId, undefined, input.startDate, input.endDate, ctx.effectiveBranchIds, undefined, undefined, 'marketing', restrictMbIds),
       ]);
 
       // Merge: date-filtered received/spent/distributed with all-time balance

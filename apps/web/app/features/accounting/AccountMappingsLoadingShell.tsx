@@ -25,6 +25,13 @@ export function AccountMappingsLoadingShell({ canWrite: _canWrite }: { canWrite:
         description="Manage the chart of accounts and wire posting keys to the right GL accounts."
       />
 
+      {/* Tabs bar (fixed position under the header) */}
+      <div className="flex gap-4 border-b border-app-border pb-2">
+        {['Accounts', 'Mappings', 'Account Types', 'Posting Rules'].map((t) => (
+          <div key={t} className="h-4 w-20 rounded bg-app-hover/40 animate-pulse" aria-hidden />
+        ))}
+      </div>
+
       <OverviewStatStrip
         items={[
           { label: 'TOTAL', value: <StatValuePulse /> },

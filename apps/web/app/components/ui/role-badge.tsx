@@ -39,6 +39,8 @@ const ROLE_COLOR_MAP: Record<string, RoleColor> = {
   STOCK_MANAGER: 'green',
   // Finance
   FINANCE_OFFICER: 'indigo',
+  // Accounting (bookkeeping / GL)
+  ACCOUNTANT: 'indigo',
   // HR
   HR_MANAGER: 'purple',
   // Tech support (read-only admin visibility)
