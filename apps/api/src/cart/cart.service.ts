@@ -339,11 +339,11 @@ export class CartService {
   }
 
   /**
-   * Collapse duplicate carts — one customer (campaign + phone hash) should have
-   * exactly one open cart. Deletes every non-CONVERTED cart that has a newer
-   * sibling for the same campaign + phone, keeping only the most recently
-   * updated row (the freshest captured info — "the last one stays"). Runs on the
-   * abandonment cron so duplicates from a save race never linger.
+   * Collapse duplicate carts globally by phone hash. One customer should have
+   * exactly one open cart across ALL campaigns. Deletes every non-CONVERTED
+   * cart that has a newer sibling for the same phone hash, keeping only the
+   * most recently updated row. Runs on the abandonment cron so duplicates
+   * from save races or cross-campaign submissions never linger.
    *
    * CONVERTED carts are never touched — they are the audit link to a real order.
    */
@@ -354,8 +354,7 @@ export class CartService {
         WHERE ca.status IN ('PENDING', 'ABANDONED')
           AND EXISTS (
             SELECT 1 FROM cart_abandonments AS newer
-            WHERE newer.campaign_id = ca.campaign_id
-              AND newer.customer_phone_hash = ca.customer_phone_hash
+            WHERE newer.customer_phone_hash = ca.customer_phone_hash
               AND newer.status IN ('PENDING', 'ABANDONED')
               AND (newer.updated_at, newer.id) > (ca.updated_at, ca.id)
           )

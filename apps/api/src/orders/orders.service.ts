@@ -3078,20 +3078,11 @@ export class OrdersService {
   ): Promise<{ succeeded: number; failed: number; orderIds: string[] }> {
     if (cartIds.length === 0) return { succeeded: 0, failed: 0, orderIds: [] };
 
-    // ── 1. Batch-fetch carts + products ──────────────────────────
+    // ── 1. Batch-fetch carts ────────────────────────────────────
     const carts = await this.db
       .select()
       .from(schema.cartAbandonments)
       .where(inArray(schema.cartAbandonments.id, cartIds));
-
-    const productIds = [...new Set(carts.map((c) => c.productId).filter(Boolean))] as string[];
-    const products = productIds.length > 0
-      ? await this.db
-          .select({ id: schema.products.id, baseSalePrice: schema.products.baseSalePrice })
-          .from(schema.products)
-          .where(inArray(schema.products.id, productIds))
-      : [];
-    const priceMap = new Map(products.map((p) => [p.id, Number(p.baseSalePrice ?? 0)]));
 
     // ── 2. Batch-resolve branches (campaign → branch) ────────────
     const campaignIds = [...new Set(carts.map((c) => c.campaignId).filter(Boolean))] as string[];
@@ -3103,7 +3094,7 @@ export class OrdersService {
       : [];
     const campaignBranchMap = new Map(campaignBranches.map((c) => [c.id, c.branchId]));
 
-    // ── 3. Build valid cart rows ─────────────────────────────────
+    // ── 3. Build valid cart rows (resolve offer-aware prices) ────
     type PreparedCart = {
       cart: (typeof carts)[0];
       phoneHash: string;
@@ -3121,7 +3112,22 @@ export class OrdersService {
         continue;
       }
       const quantity = cart.quantity ?? 1;
-      const unitPrice = priceMap.get(cart.productId) ?? 0;
+      // Resolve the real tier price (offer group → offer template → embedded
+      // offers → baseSalePrice) instead of using baseSalePrice directly.
+      let unitPrice = 0;
+      try {
+        unitPrice = cart.campaignId
+          ? await this.resolveCartTierPrice({
+              campaignId: cart.campaignId,
+              productId: cart.productId,
+              offerLabel: cart.offerLabel,
+              quantity,
+            })
+          : 0;
+      } catch {
+        // Price resolution failed (campaign deleted, etc.) — proceed with 0
+        // so the order still gets created; CS can fix the amount manually.
+      }
       prepared.push({
         cart,
         phoneHash: this.hashPhone(cart.customerPhone),

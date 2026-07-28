@@ -269,7 +269,7 @@ export class CartOrdersService {
               productName: schema.products.name,
             })
             .from(schema.cartOrderItems)
-            .innerJoin(schema.products, eq(schema.products.id, schema.cartOrderItems.productId))
+            .leftJoin(schema.products, eq(schema.products.id, schema.cartOrderItems.productId))
             .where(inArray(schema.cartOrderItems.cartOrderId, orderIds))
         : Promise.resolve([]),
     ]);
@@ -1067,7 +1067,7 @@ export class CartOrdersService {
           productName: schema.products.name,
         })
         .from(schema.cartOrderItems)
-        .innerJoin(schema.products, eq(schema.products.id, schema.cartOrderItems.productId))
+        .leftJoin(schema.products, eq(schema.products.id, schema.cartOrderItems.productId))
         .where(eq(schema.cartOrderItems.cartOrderId, id)),
       this.db
         .select()
@@ -1520,7 +1520,10 @@ export class CartOrdersService {
 
     const sourceIdList = inserted.map((r) => `'${r.source_cart_id}'`).join(', ');
 
-    // Step B: Create cart_order_items from product catalog
+    // Step B: Create cart_order_items from product catalog.
+    // INNER JOIN products to skip carts whose product was deleted — a dangling
+    // product_id FK would cause the entire batch INSERT to fail, leaving all
+    // cart orders in the batch without items.
     const items = await this.pg.unsafe<Array<{ id: string }>>(`
       ${actorSetSql}
       INSERT INTO cart_order_items (
@@ -1541,7 +1544,7 @@ export class CartOrdersService {
         ca.offer_label
       FROM cart_orders co
       JOIN cart_abandonments ca ON ca.id = co.source_cart_id
-      LEFT JOIN products p ON p.id = ca.product_id
+      JOIN products p ON p.id = ca.product_id
       WHERE co.source_cart_id IN (${sourceIdList})
         AND NOT EXISTS (
           SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
