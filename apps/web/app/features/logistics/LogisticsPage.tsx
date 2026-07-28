@@ -769,7 +769,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         }
       />
 
-      <MobileDateFilterRow hideDate hideRefresh />
+      <MobileDateFilterRow hideDate />
 
       <ExportModal
         open={showExport}
