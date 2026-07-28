@@ -1395,6 +1395,78 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     });
   }
 
+  /**
+   * Reverse a SINGLE order's settlement slice out of a multi-order remittance.
+   *
+   * The remittance PAYMENT voucher covers many orders under one voucherId
+   * (= remittanceId), so `reverseVoucher('PAYMENT', remittanceId)` can only
+   * reverse the WHOLE batch. When just one order is retracted/deleted out of
+   * REMITTED, reversing the whole batch would wrongly un-settle the others,
+   * while reversing nothing (the old behaviour) left that order's SALES_INVOICE
+   * reversed (Cr Debtors) with its settlement Cr Debtors still live — driving
+   * Debtors negative.
+   *
+   * This posts a small, idempotent compensating JE for that order's slice:
+   *   Dr Debtors (AR)  amt      — re-open the receivable the settlement cleared
+   *   Cr Bank          amt      — remove the cash we no longer hold for it
+   * keyed under a distinct voucherId (`REMITTANCE_SLICE` : `<remittanceId>:<orderId>`)
+   * so it nets cleanly with the SALES_INVOICE reversal and can't double-apply.
+   *
+   * `amt` is the order's totalAmount (the exact figure credited to Debtors for
+   * this order in postRemittanceSettlement). Fee proration on the original batch
+   * is not unwound here — the Debtors (AR) invariant is restored exactly; any
+   * residual fee delta stays in the batch and is a known, logged approximation
+   * rather than a silent imbalance.
+   */
+  async reverseRemittanceOrderSlice(
+    remittanceId: string,
+    orderId: string,
+    actor: Actor,
+    reason?: string,
+  ): Promise<{ reversed: boolean; reason?: string }> {
+    const sliceVoucherId = `${remittanceId}:${orderId}`;
+    return withActor(this.db, actor, async (tx) => {
+      if (await this.alreadyPosted(tx, 'PAYMENT', sliceVoucherId)) {
+        return { reversed: false, reason: 'already-reversed' };
+      }
+
+      const [row] = await tx
+        .select({
+          totalAmount: schema.orders.totalAmount,
+          groupId: schema.branches.groupId,
+        })
+        .from(schema.orders)
+        .leftJoin(schema.branches, eq(schema.orders.servicingBranchId, schema.branches.id))
+        .where(eq(schema.orders.id, orderId))
+        .limit(1);
+      if (!row) return { reversed: false, reason: 'order-not-found' };
+
+      const amt = Math.round(Number(row.totalAmount ?? 0) * 100) / 100;
+      if (amt <= 0) return { reversed: false, reason: 'zero-amount' };
+
+      const groupId = row.groupId ?? null;
+      const debtors = await this.resolveAccountByType(tx, groupId, 'RECEIVABLE', ACCT.AR_CUSTOMERS);
+      const bank = await this.resolveAccountForPosting(tx, groupId, 'BANK_PRIMARY');
+      if (!debtors || !bank) return { reversed: false, reason: 'missing-debtors-or-bank-account' };
+
+      const remark = `Remittance slice reversal: ${reason ?? 'order retracted/deleted out of REMITTED'}`;
+      await this.postVoucher(tx, {
+        groupId,
+        postingDate: new Date().toISOString().slice(0, 10),
+        // Post under PAYMENT so it shares the remittance's voucher type but a
+        // distinct, per-order voucherId — keeps it out of the batch voucher.
+        voucherType: 'PAYMENT',
+        voucherId: sliceVoucherId,
+        lines: [
+          { accountId: debtors.id, debit: amt, credit: 0, partyType: 'CUSTOMER', remarks: remark },
+          { accountId: bank.id, debit: 0, credit: amt, remarks: remark },
+        ],
+      });
+
+      return { reversed: true };
+    });
+  }
+
   // ─── Journal Entries ───────────────────────────────────────────────────────
 
   /** Approval threshold: JEs above this amount (₦500,000) require approval unless the actor has write permission. */

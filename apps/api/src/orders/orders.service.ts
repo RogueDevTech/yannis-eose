@@ -1507,8 +1507,14 @@ export class OrdersService {
         if (n === 1) {
           await this.generalLedger.reverseVoucher('PAYMENT', r.id, actor, 'delivered order deleted');
         } else {
-          this.logger.warn(
-            `Deleted delivered order ${orderId} is on remittance ${r.id} covering ${n} orders — settlement JE not auto-reversed; manual finance adjustment required.`,
+          // Multi-order remittance: reverse only this order's settlement slice
+          // (see reverseRemittanceOrderSlice) so Debtors stays balanced against
+          // the SALES_INVOICE reversal below.
+          await this.generalLedger.reverseRemittanceOrderSlice(
+            r.id,
+            orderId,
+            actor,
+            'delivered order deleted',
           );
         }
       }
@@ -8914,8 +8920,14 @@ export class OrdersService {
             if (n === 1) {
               await this.generalLedger.reverseVoucher('PAYMENT', r.id, actor, 'order retracted out of REMITTED');
             } else {
-              this.logger.warn(
-                `Order ${updatedOrder.id} retracted out of REMITTED but its remittance ${r.id} covers ${n} orders — settlement JE not auto-reversed; manual finance adjustment required.`,
+              // Multi-order remittance: can't reverse the whole batch voucher.
+              // Reverse only this order's settlement slice so Debtors stays
+              // balanced against the SALES_INVOICE reversal below.
+              await this.generalLedger.reverseRemittanceOrderSlice(
+                r.id,
+                updatedOrder.id,
+                actor,
+                'order retracted out of REMITTED',
               );
             }
           }
