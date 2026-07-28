@@ -43,6 +43,8 @@ const MAX_PER_RUN = 200;
  * trailing whitespace in the stored name.
  */
 const TEST_NAME_MATCH = sql`btrim(${schema.orders.customerName}) ~* '(^|[^[:alpha:]])test([^[:alpha:]]|$)'`;
+const TEST_NAME_MATCH_CART = sql`btrim(${schema.cartOrders.customerName}) ~* '(^|[^[:alpha:]])test([^[:alpha:]]|$)'`;
+const TEST_NAME_MATCH_FU = sql`btrim(${schema.followUpOrders.customerName}) ~* '(^|[^[:alpha:]])test([^[:alpha:]]|$)'`;
 
 /**
  * TestOrderPurgeService — scheduled auto-deletion of test orders.
@@ -108,6 +110,8 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     };
 
     await drain('test-orders', this.purgeTestOrders);
+    await drain('test-cart-orders', this.purgeTestCartOrders);
+    await drain('test-follow-up-orders', this.purgeTestFollowUpOrders);
     // Universal dedup sweep skipped on boot — migration 0159 handles the
     // historical cleanup, and the 2-hour cron with a 48h window catches
     // ongoing slips. The full-table self-join is too heavy to run on every
@@ -123,6 +127,16 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       await this.purgeTestOrders();
     } catch (err) {
       this.logger.error(`Test-order purge run failed: ${(err as Error)?.message ?? err}`);
+    }
+    try {
+      await this.purgeTestCartOrders();
+    } catch (err) {
+      this.logger.error(`Test cart-order purge run failed: ${(err as Error)?.message ?? err}`);
+    }
+    try {
+      await this.purgeTestFollowUpOrders();
+    } catch (err) {
+      this.logger.error(`Test follow-up order purge run failed: ${(err as Error)?.message ?? err}`);
     }
     try {
       await this.purgeUniversalDuplicates();
@@ -280,6 +294,123 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         (targets.length > 30 ? ` … +${targets.length - 30} more` : ''),
     );
     return { deleted: targets.length, cancelled: targets.length, skipped: stockMoved.length };
+  }
+
+  /**
+   * Purge test orders from the cart_orders table. Same logic as purgeTestOrders
+   * but targets the cart_orders + cart_order_timeline_events tables.
+   * Cart orders use plain text status (not enum), same lifecycle states.
+   */
+  async purgeTestCartOrders(
+    allDates = false,
+  ): Promise<{ deleted: number }> {
+    const dateFilter = allDates
+      ? undefined
+      : gte(schema.cartOrders.createdAt, new Date(Date.now() - 48 * 60 * 60 * 1000));
+
+    const stockMoved = await this.db
+      .select({ id: schema.cartOrders.id, customerName: schema.cartOrders.customerName, status: schema.cartOrders.status })
+      .from(schema.cartOrders)
+      .where(and(TEST_NAME_MATCH_CART, notInArray(schema.cartOrders.status, [...STOCK_NEUTRAL_STATUSES]), dateFilter))
+      .orderBy(schema.cartOrders.createdAt);
+
+    if (stockMoved.length > 0) {
+      const preview = stockMoved.slice(0, 30).map((o) => `${o.id} (${o.customerName} · ${o.status})`).join('; ');
+      this.logger.warn(`${stockMoved.length} test cart order(s) already moved stock — NOT auto-deleted: ${preview}`);
+    }
+
+    const targets = await this.db
+      .select({ id: schema.cartOrders.id, customerName: schema.cartOrders.customerName, status: schema.cartOrders.status, branchId: schema.cartOrders.branchId })
+      .from(schema.cartOrders)
+      .where(and(TEST_NAME_MATCH_CART, inArray(schema.cartOrders.status, [...PRE_DELETE_STATUSES]), isNull(schema.cartOrders.deletedAt), dateFilter))
+      .orderBy(schema.cartOrders.createdAt)
+      .limit(MAX_PER_RUN);
+
+    if (targets.length === 0) return { deleted: 0 };
+
+    const ids = targets.map((t) => t.id);
+    const now = new Date();
+
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      await tx
+        .update(schema.cartOrders)
+        .set({ status: 'DELETED', deletedAt: now, updatedAt: now })
+        .where(and(inArray(schema.cartOrders.id, ids), inArray(schema.cartOrders.status, [...PRE_DELETE_STATUSES])));
+      await tx.insert(schema.cartOrderTimelineEvents).values(
+        targets.map((t) => ({
+          cartOrderId: t.id,
+          eventType: 'ORDER_DELETED',
+          actorId: null,
+          actorName: 'System' as const,
+          description: 'Auto-deleted: test-order purge (customer name contains "test")',
+          branchId: t.branchId ?? null,
+        })),
+      );
+    });
+
+    await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
+
+    const preview = targets.slice(0, 30).map((t) => `${t.id} (${t.customerName})`).join('; ');
+    this.logger.log(`Deleted ${targets.length} test cart order(s). Targets: ${preview}`);
+    return { deleted: targets.length };
+  }
+
+  /**
+   * Purge test orders from the follow_up_orders table. Same logic as
+   * purgeTestOrders but targets follow_up_orders + follow_up_order_timeline_events.
+   */
+  async purgeTestFollowUpOrders(
+    allDates = false,
+  ): Promise<{ deleted: number }> {
+    const dateFilter = allDates
+      ? undefined
+      : gte(schema.followUpOrders.createdAt, new Date(Date.now() - 48 * 60 * 60 * 1000));
+
+    const stockMoved = await this.db
+      .select({ id: schema.followUpOrders.id, customerName: schema.followUpOrders.customerName, status: schema.followUpOrders.status })
+      .from(schema.followUpOrders)
+      .where(and(TEST_NAME_MATCH_FU, notInArray(schema.followUpOrders.status, [...STOCK_NEUTRAL_STATUSES]), dateFilter))
+      .orderBy(schema.followUpOrders.createdAt);
+
+    if (stockMoved.length > 0) {
+      const preview = stockMoved.slice(0, 30).map((o) => `${o.id} (${o.customerName} · ${o.status})`).join('; ');
+      this.logger.warn(`${stockMoved.length} test follow-up order(s) already moved stock — NOT auto-deleted: ${preview}`);
+    }
+
+    const targets = await this.db
+      .select({ id: schema.followUpOrders.id, customerName: schema.followUpOrders.customerName, status: schema.followUpOrders.status, branchId: schema.followUpOrders.branchId })
+      .from(schema.followUpOrders)
+      .where(and(TEST_NAME_MATCH_FU, inArray(schema.followUpOrders.status, [...PRE_DELETE_STATUSES]), isNull(schema.followUpOrders.deletedAt), dateFilter))
+      .orderBy(schema.followUpOrders.createdAt)
+      .limit(MAX_PER_RUN);
+
+    if (targets.length === 0) return { deleted: 0 };
+
+    const ids = targets.map((t) => t.id);
+    const now = new Date();
+
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      await tx
+        .update(schema.followUpOrders)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(and(inArray(schema.followUpOrders.id, ids), inArray(schema.followUpOrders.status, [...PRE_DELETE_STATUSES])));
+      await tx.insert(schema.followUpOrderTimelineEvents).values(
+        targets.map((t) => ({
+          followUpOrderId: t.id,
+          eventType: 'ORDER_DELETED',
+          actorId: null,
+          actorName: 'System' as const,
+          description: 'Auto-deleted: test-order purge (customer name contains "test")',
+          branchId: t.branchId ?? null,
+        })),
+      );
+    });
+
+    await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
+
+    const preview = targets.slice(0, 30).map((t) => `${t.id} (${t.customerName})`).join('; ');
+    this.logger.log(`Deleted ${targets.length} test follow-up order(s). Targets: ${preview}`);
+    return { deleted: targets.length };
   }
 
   /**
