@@ -480,6 +480,16 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         AND winner.status NOT IN ('CANCELLED', 'DELETED')
         AND winner.deleted_at IS NULL
         AND ABS(EXTRACT(EPOCH FROM (loser.created_at - winner.created_at))) <= 14 * 86400
+        -- A completed order is a finished transaction, not an open duplicate.
+        -- If the winner was already delivered before the loser was even created,
+        -- the loser is a legitimate repeat purchase (customer re-ordering the same
+        -- product weeks later) and must NOT be auto-deleted. Only collapse when the
+        -- winner was still open at the time the loser came in.
+        AND NOT (
+          winner.status IN ('DELIVERED', 'REMITTED')
+          AND winner.delivered_at IS NOT NULL
+          AND winner.delivered_at < loser.created_at
+        )
         AND (
           COALESCE(sr_winner.rank, 0) > COALESCE(sr_loser.rank, 0)
           OR (COALESCE(sr_winner.rank, 0) = COALESCE(sr_loser.rank, 0) AND winner.created_at < loser.created_at)
