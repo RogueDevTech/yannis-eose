@@ -6,7 +6,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { useCallback } from 'react';
 import { CashRemittanceCreatePage } from '~/features/finance/CashRemittanceCreatePage';
 import { removeOrderFromRemittanceBatch } from '~/hooks/usePersistedRemittanceSelection';
-import type { EligibleOrder } from '~/features/finance/CashRemittanceCreateModal';
+import type { EligibleOrder } from '~/features/finance/eligible-order';
 
 export const meta: MetaFunction = () => [
   { title: 'Create Cash Remittance — Yannis EOSE' },

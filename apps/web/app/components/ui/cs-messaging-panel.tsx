@@ -99,6 +99,9 @@ export function CSMessagingPanel({
   const [confirmWhatsappModalOpen, setConfirmWhatsappModalOpen] = useState(false);
   const [pendingWhatsappLogBody, setPendingWhatsappLogBody] = useState('');
   const [preparedWhatsappPhone, setPreparedWhatsappPhone] = useState<string | null>(null);
+  /** Template used for the in-flight send, captured before the composer clears
+   * so the logged outbound message keeps its template attribution. */
+  const [pendingTemplateId, setPendingTemplateId] = useState('');
 
   const closeTextPanel = () => {
     setTextPanelOpen(false);
@@ -310,6 +313,7 @@ export function CSMessagingPanel({
   const handleSend = () => {
     if (!textChannel) return;
     if (!messageBody.trim() && !selectedTemplateId) return;
+    setPendingTemplateId(selectedTemplateId);
 
     if (textChannel === 'sms') {
       const selected = channelTemplates.find((t) => t.id === selectedTemplateId);
@@ -711,11 +715,13 @@ export function CSMessagingPanel({
                 orderId,
                 channel: 'SMS',
                 body,
+                ...(pendingTemplateId ? { templateId: pendingTemplateId } : {}),
               },
               { method: 'post', action: '/admin/api/send-message' },
             );
             setConfirmSmsModalOpen(false);
             setPendingSmsLogBody('');
+            setPendingTemplateId('');
           }}
         >
           Yes, sent
@@ -763,11 +769,13 @@ export function CSMessagingPanel({
                 orderId,
                 channel: 'WHATSAPP',
                 body,
+                ...(pendingTemplateId ? { templateId: pendingTemplateId } : {}),
               },
               { method: 'post', action: '/admin/api/send-message' },
             );
             setConfirmWhatsappModalOpen(false);
             setPendingWhatsappLogBody('');
+            setPendingTemplateId('');
           }}
         >
           Yes, sent

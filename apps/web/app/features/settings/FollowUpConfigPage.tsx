@@ -980,6 +980,9 @@ function GroupsAndBranchesTab({
   const [peekGroup, setPeekGroup] = useState<FollowUpGroupItem | null>(null);
   const [editGroup, setEditGroup] = useState<FollowUpGroupItem | null>(null);
   const [deleteGroup, setDeleteGroup] = useState<FollowUpGroupItem | null>(null);
+  // Where the deleted group's unprocessed orders go: '' = auto-redistribute,
+  // 'group:<id>' = another follow-up group, 'branch:<id>' = a branch.
+  const [deleteTransferTarget, setDeleteTransferTarget] = useState('');
 
   const editFetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(editFetcher.data, { successMessage: 'Group updated' });
@@ -1199,22 +1202,46 @@ function GroupsAndBranchesTab({
 
       {/* Delete group confirm */}
       {deleteGroup && (
-        <Modal open onClose={() => setDeleteGroup(null)} maxWidth="max-w-sm" contentClassName="p-6 space-y-4">
+        <Modal
+          open
+          onClose={() => { setDeleteGroup(null); setDeleteTransferTarget(''); }}
+          maxWidth="max-w-sm"
+          contentClassName="p-6 space-y-4"
+        >
           <h3 className="text-lg font-semibold text-app-fg">Delete group</h3>
           <p className="text-sm text-app-fg-muted">
             Are you sure you want to delete <strong>{deleteGroup.name}</strong>? This cannot be undone.
           </p>
+          <FormSelect
+            id="fu-delete-transfer-target"
+            label="Move its orders to"
+            value={deleteTransferTarget}
+            onChange={(e) => setDeleteTransferTarget(e.target.value)}
+            options={[
+              { value: '', label: 'Redistribute automatically' },
+              ...followUpGroups
+                .filter((g) => g.id !== deleteGroup.id)
+                .map((g) => ({ value: `group:${g.id}`, label: `Group: ${g.name}` })),
+              ...branches.map((b) => ({ value: `branch:${b.id}`, label: `Branch: ${b.name}` })),
+            ]}
+          />
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setDeleteGroup(null)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => { setDeleteGroup(null); setDeleteTransferTarget(''); }}>Cancel</Button>
             <Button
               variant="danger"
               loading={deleteFetcher.state === 'submitting'}
               loadingText="Deleting…"
               onClick={() => {
-                deleteFetcher.submit(
-                  { intent: 'deleteFollowUpGroup', groupId: deleteGroup.id },
-                  { method: 'post' },
-                );
+                const payload: Record<string, string> = {
+                  intent: 'deleteFollowUpGroup',
+                  groupId: deleteGroup.id,
+                };
+                if (deleteTransferTarget.startsWith('group:')) {
+                  payload['transferToGroupId'] = deleteTransferTarget.slice('group:'.length);
+                } else if (deleteTransferTarget.startsWith('branch:')) {
+                  payload['transferToBranchId'] = deleteTransferTarget.slice('branch:'.length);
+                }
+                deleteFetcher.submit(payload, { method: 'post' });
               }}
             >
               Delete

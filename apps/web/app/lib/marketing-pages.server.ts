@@ -446,6 +446,9 @@ export function getMarketingRoleFlags(
 
 export async function runMarketingFundingAction(cookie: string, formData: FormData) {
   const intent = formData.get('intent')?.toString();
+  // Org-wide users pick a branch in the guard modal; forward it so the API
+  // doesn't fall back to a null ctx.currentBranchId.
+  const branchId = formData.get('branchId')?.toString() || undefined;
 
   if (intent === 'createFunding') {
     const receiptUrl = formData.get('receiptUrl')?.toString() || undefined;
@@ -456,6 +459,7 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
         receiverId: formData.get('receiverId')?.toString() ?? '',
         amount: formData.get('amount')?.toString() ?? '',
         ...(receiptUrl ? { receiptUrl } : {}),
+        ...(branchId ? { branchId } : {}),
       },
     });
     if (!res.ok) {
@@ -474,6 +478,7 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
         fundingId: formData.get('fundingId')?.toString() ?? '',
         action: verifyAction,
         disputeReason,
+        ...(branchId ? { branchId } : {}),
       },
     });
     if (!res.ok) {
@@ -517,7 +522,7 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
     const res = await apiRequest<unknown>('/trpc/marketing.approveFundingRequest', {
       method: 'POST',
       cookie,
-      body: { requestId, amount, ...(receiptUrl ? { receiptUrl } : {}) },
+      body: { requestId, amount, ...(receiptUrl ? { receiptUrl } : {}), ...(branchId ? { branchId } : {}) },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to approve funding request') }, { status: safeStatus(res.status) });
@@ -549,6 +554,9 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
 
 export async function runMarketingAdSpendAction(cookie: string, formData: FormData) {
   const intent = formData.get('intent')?.toString();
+  // Org-wide users pick a branch in the guard modal; forward it so the API
+  // doesn't fall back to a null ctx.currentBranchId.
+  const branchId = formData.get('branchId')?.toString() || undefined;
 
   // Simplified expense creation for non-AD_SPEND categories (amount + description only).
   if (intent === 'createSimpleExpense') {
@@ -569,6 +577,7 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
         description,
         platform: 'OTHER',
         platformCustomLabel: category,
+        ...(branchId ? { branchId } : {}),
       },
     });
     if (!res.ok) {
@@ -594,6 +603,7 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
         platform: formData.get('platform')?.toString() || undefined,
         platformCustomLabel: formData.get('platformCustomLabel')?.toString() || undefined,
         adUrl: formData.get('adUrl')?.toString() || undefined,
+        ...(branchId ? { branchId } : {}),
       },
     });
     if (!res.ok) {
@@ -630,7 +640,7 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
     const res = await apiRequest<unknown>('/trpc/marketing.createAdSpendBatch', {
       method: 'POST',
       cookie,
-      body: { spendDate, campaignId, lines },
+      body: { spendDate, campaignId, lines, ...(branchId ? { branchId } : {}) },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to submit ad spend batch') }, { status: safeStatus(res.status) });
@@ -724,6 +734,7 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
         productId: formData.get('productId')?.toString() || undefined,
         campaignId: formData.get('campaignId')?.toString() || undefined,
         category: formData.get('category')?.toString() || undefined,
+        ...(branchId ? { branchId } : {}),
       },
     });
     if (!res.ok) {

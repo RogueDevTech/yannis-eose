@@ -136,26 +136,31 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
    * isn't the order itself. Idempotent — skips rows that already have a value.
    */
   private async backfillDuplicateOfIdFromTimeline(): Promise<void> {
-    const result = await this.db.execute(sql`
-      UPDATE orders o
-      SET duplicate_of_id = w.winner_id,
-          updated_at = now()
-      FROM (
-        SELECT DISTINCT ON (te.order_id)
-          te.order_id,
-          (te.metadata->>'winnerId')::uuid AS winner_id
-        FROM order_timeline_events te
-        WHERE te.event_type = 'ORDER_DUPLICATE_FLAGGED'
-          AND te.metadata->>'winnerId' IS NOT NULL
-        ORDER BY te.order_id, te.created_at DESC
-      ) w
-      JOIN orders win ON win.id = w.winner_id
-      WHERE o.id = w.order_id
-        AND o.duplicate_of_id IS NULL
-        AND o.is_duplicate = 'FLAGGED'
-        AND w.winner_id <> o.id
-    `);
-    const rows = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    // withActor so the history trigger attributes these updates to the system
+    // actor. updated_at is left untouched: this is a metadata-only repair and
+    // bumping it would float old deleted orders to the top of recency sorts.
+    let rows = 0;
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      const result = await tx.execute(sql`
+        UPDATE orders o
+        SET duplicate_of_id = w.winner_id
+        FROM (
+          SELECT DISTINCT ON (te.order_id)
+            te.order_id,
+            (te.metadata->>'winnerId')::uuid AS winner_id
+          FROM order_timeline_events te
+          WHERE te.event_type = 'ORDER_DUPLICATE_FLAGGED'
+            AND te.metadata->>'winnerId' IS NOT NULL
+          ORDER BY te.order_id, te.created_at DESC
+        ) w
+        JOIN orders win ON win.id = w.winner_id
+        WHERE o.id = w.order_id
+          AND o.duplicate_of_id IS NULL
+          AND o.is_duplicate = 'FLAGGED'
+          AND w.winner_id <> o.id
+      `);
+      rows = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    });
     if (rows > 0) {
       this.logger.log(`Backfilled duplicate_of_id on ${rows} flagged duplicate orders`);
     }

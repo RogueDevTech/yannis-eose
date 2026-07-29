@@ -1068,26 +1068,45 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'setTeamSetting') {
     const teamId = form.get('teamId')?.toString() ?? '';
-    const key = form.get('key')?.toString() ?? '';
-    const valueJson = form.get('value')?.toString() ?? '';
-    if (!teamId || !key)
-      return Response.json({ error: 'Team and key are required' }, { status: 400 });
-    let value: Record<string, unknown>;
-    try {
-      value = JSON.parse(valueJson) as Record<string, unknown>;
-    } catch {
-      return Response.json({ error: 'Invalid value JSON' }, { status: 400 });
+    if (!teamId) return Response.json({ error: 'Team is required' }, { status: 400 });
+
+    // Multiple settings arrive as one submission ('settings' JSON array) so a
+    // single Save writes them all — two fetcher.submit calls on one fetcher
+    // abort the first request. Single key/value kept for compatibility.
+    let entries: Array<{ key: string; value: Record<string, unknown> }>;
+    const settingsJson = form.get('settings')?.toString();
+    if (settingsJson) {
+      try {
+        entries = JSON.parse(settingsJson) as Array<{ key: string; value: Record<string, unknown> }>;
+      } catch {
+        return Response.json({ error: 'Invalid settings JSON' }, { status: 400 });
+      }
+    } else {
+      const key = form.get('key')?.toString() ?? '';
+      const valueJson = form.get('value')?.toString() ?? '';
+      if (!key) return Response.json({ error: 'Team and key are required' }, { status: 400 });
+      try {
+        entries = [{ key, value: JSON.parse(valueJson) as Record<string, unknown> }];
+      } catch {
+        return Response.json({ error: 'Invalid value JSON' }, { status: 400 });
+      }
     }
-    const res = await apiRequest('/trpc/branches.setTeamSetting', {
-      method: 'POST',
-      cookie,
-      body: { teamId, key, value },
-    });
-    if (!res.ok) {
-      return Response.json(
-        { error: extractApiErrorMessage(res.data, 'Failed to update team setting') },
-        { status: safeStatus(res.status) },
-      );
+    if (!entries.length || entries.some((e) => !e.key || typeof e.value !== 'object' || e.value === null)) {
+      return Response.json({ error: 'Team and key are required' }, { status: 400 });
+    }
+
+    for (const entry of entries) {
+      const res = await apiRequest('/trpc/branches.setTeamSetting', {
+        method: 'POST',
+        cookie,
+        body: { teamId, key: entry.key, value: entry.value },
+      });
+      if (!res.ok) {
+        return Response.json(
+          { error: extractApiErrorMessage(res.data, 'Failed to update team setting') },
+          { status: safeStatus(res.status) },
+        );
+      }
     }
     return Response.json({ success: true });
   }
@@ -1756,33 +1775,27 @@ function TeamSettingsSection({
   useEffect(() => { setClaimCap(String(effectiveCap)); }, [effectiveCap]);
 
   const handleSave = () => {
-    // Save dispatch strategy if changed.
+    // Collect every changed setting into ONE submission — a second submit on
+    // the same fetcher would abort the first request mid-flight.
+    const entries: Array<{ key: string; value: Record<string, unknown> }> = [];
     if (strategyChanged && dispatchSetting) {
-      fetcher.submit(
-        {
-          intent: 'setTeamSetting',
-          teamId: team.id,
-          key: 'CS_DISPATCH_STRATEGY',
-          value: JSON.stringify({ strategy }),
-        },
-        { method: 'post' },
-      );
+      entries.push({ key: 'CS_DISPATCH_STRATEGY', value: { strategy } });
     }
-    // Save claim cap if changed.
     if (capChanged && claimCapSetting) {
       const n = Number(claimCap);
       if (Number.isFinite(n) && n >= 1 && n <= 50) {
-        fetcher.submit(
-          {
-            intent: 'setTeamSetting',
-            teamId: team.id,
-            key: 'CS_CLAIM_CAP',
-            value: JSON.stringify({ cap: Math.floor(n) }),
-          },
-          { method: 'post' },
-        );
+        entries.push({ key: 'CS_CLAIM_CAP', value: { cap: Math.floor(n) } });
       }
     }
+    if (entries.length === 0) return;
+    fetcher.submit(
+      {
+        intent: 'setTeamSetting',
+        teamId: team.id,
+        settings: JSON.stringify(entries),
+      },
+      { method: 'post' },
+    );
   };
 
   const systemStrategyLabel = describeSettingValue(
