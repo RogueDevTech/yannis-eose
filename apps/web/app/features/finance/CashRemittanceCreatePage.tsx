@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFetcher, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { AmountInput } from '~/components/ui/amount-input';
@@ -9,6 +9,11 @@ import { PageHeader } from '~/components/ui/page-header';
 import { useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import {
+  readRemittanceBatchDraft,
+  writeRemittanceBatchDraft,
+  clearRemittanceBatch,
+} from '~/hooks/usePersistedRemittanceSelection';
 import type { EligibleOrder } from './CashRemittanceCreateModal';
 
 type DuplicateWarning = {
@@ -27,11 +32,14 @@ function lineAmount(o: EligibleOrder): number {
 interface CashRemittanceCreatePageProps {
   selectedOrders: EligibleOrder[];
   onBack: () => void;
+  /** Drop one order from the batch (rewrites the ?orders= param + persisted batch). */
+  onRemoveOrder: (orderId: string) => void;
 }
 
 export function CashRemittanceCreatePage({
   selectedOrders,
   onBack,
+  onRemoveOrder,
 }: CashRemittanceCreatePageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string; duplicateWarnings?: DuplicateWarning[] }>();
   const fetcherSurface = useFetcherActionSurface(fetcher);
@@ -50,17 +58,82 @@ export function CashRemittanceCreatePage({
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [duplicateWarnings, setDuplicateWarnings] = useState<DuplicateWarning[]>([]);
 
+  // Skip persisting until after the mount hydration so an empty initial state
+  // doesn't clobber a saved draft.
+  const hydratedRef = useRef(false);
+
+  // Restore the saved batch draft (fees, extra costs, note, toggle) so a finance
+  // user who left mid-batch resumes exactly where they were. Runs once the
+  // orders have actually loaded (they arrive from the loader), and keys off the
+  // batch signature so the draft for THIS batch is restored.
   useEffect(() => {
-    const initial: Record<string, string> = {};
+    if (hydratedRef.current) return;
+    if (selectedOrders.length === 0) return; // wait for orders to load
+    const orderIds = selectedOrders.map((o) => o.id);
+    const draft = readRemittanceBatchDraft(orderIds);
+    // Seed delivery fees from the order defaults, then let any saved edits win.
+    const seeded: Record<string, string> = {};
     for (const o of selectedOrders) {
       if (o.deliveryFee != null && o.deliveryFee !== '' && parseFloat(o.deliveryFee) > 0) {
-        initial[o.id] = o.deliveryFee;
+        seeded[o.id] = o.deliveryFee;
       }
     }
-    setDeliveryFees(initial);
+    setDeliveryFees({ ...seeded, ...draft.deliveryFees });
+    setCommitmentFee(draft.commitmentFee);
+    setPosFee(draft.posFee);
+    setFailedDeliveryCost(draft.failedDeliveryCost);
+    setDiscount(draft.discount);
+    setWaybillCost(draft.waybillCost);
+    setBatchNote(draft.batchNote);
+    setMarkReceivedNow(draft.markReceivedNow);
+    hydratedRef.current = true;
   }, [selectedOrders]);
 
+  // When batch membership changes (order added/removed), fill defaults for any
+  // newly-added order without wiping fees already entered for existing ones.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    setDeliveryFees((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      const ids = new Set(selectedOrders.map((o) => o.id));
+      // Drop fees for orders no longer in the batch.
+      for (const id of Object.keys(next)) {
+        if (!ids.has(id)) { delete next[id]; changed = true; }
+      }
+      // Seed a default fee for a newly-added order that has one.
+      for (const o of selectedOrders) {
+        if (next[o.id] === undefined && o.deliveryFee != null && o.deliveryFee !== '' && parseFloat(o.deliveryFee) > 0) {
+          next[o.id] = o.deliveryFee;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [selectedOrders]);
+
+  // Persist the batch draft on every change so leaving and returning restores it.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    writeRemittanceBatchDraft(
+      {
+        deliveryFees,
+        commitmentFee,
+        posFee,
+        failedDeliveryCost,
+        discount,
+        waybillCost,
+        batchNote,
+        markReceivedNow,
+      },
+      selectedOrders.map((o) => o.id),
+    );
+  }, [deliveryFees, commitmentFee, posFee, failedDeliveryCost, discount, waybillCost, batchNote, markReceivedNow, selectedOrders]);
+
   const handleSuccess = useCallback(() => {
+    // Batch is now recorded — wipe the ongoing-batch selection + draft so the
+    // list page banner clears and nothing re-checks on return.
+    clearRemittanceBatch();
     toast.success(
       markReceivedNow
         ? `Remittance created and ${selectedOrders.length} order(s) marked Remitted`
@@ -223,9 +296,23 @@ export function CashRemittanceCreatePage({
                           </span>
                           <span className="text-xs text-app-fg-muted">{o.customerName}</span>
                         </div>
-                        <span className="shrink-0 tabular-nums text-sm font-medium text-app-fg">
-                          {orderAmt > 0 ? <NairaPrice amount={orderAmt} /> : '—'}
-                        </span>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="tabular-nums text-sm font-medium text-app-fg">
+                            {orderAmt > 0 ? <NairaPrice amount={orderAmt} /> : '—'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onRemoveOrder(o.id)}
+                            disabled={submitting}
+                            aria-label={`Remove ${o.invoice ? o.invoice.referenceFormatted : o.customerName} from batch`}
+                            title="Remove from batch"
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-app-fg-muted transition-colors hover:bg-danger-50 hover:text-danger-600 disabled:opacity-50 dark:hover:bg-danger-900/30 dark:hover:text-danger-400"
+                          >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
 
                       <div>

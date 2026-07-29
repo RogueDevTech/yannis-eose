@@ -1321,7 +1321,7 @@ export const marketingRouter = router({
 
       const hasDateFilter = !!(input.startDate || input.endDate);
       const balancesBaseOpts = { activeOnly: true, restrictToUserIds: restrictMbIds ?? undefined };
-      const [balancesAllTime, balancesFiltered, fundingSummary, leaderboard, profitabilityConfig, cartOrdersCounts] = await Promise.all([
+      const [balancesAllTime, balancesFiltered, fundingSummary, leaderboard, profitabilityConfig, cartOrdersCounts, teamsRaw] = await Promise.all([
         // All-time balances for the Balance column (always reflects actual running balance)
         getMarketingService().listFundingBalances(ctx.user, branchId, balancesBaseOpts, ctx.effectiveBranchIds),
         // Date-filtered balances for Received/Spent/Distributed columns
@@ -1341,6 +1341,18 @@ export const marketingRouter = router({
         // Cart order status counts — only DELIVERED/REMITTED count toward marketing total.
         // Marketing surface: scope by branchId (campaign attribution).
         getCartOrdersService().getStatusCounts(branchId, undefined, input.startDate, input.endDate, ctx.effectiveBranchIds, undefined, undefined, 'marketing', restrictMbIds),
+        // Marketing squads for Team view overview cards (HoM / admin-class).
+        (async () => {
+          const ids =
+            branchId
+              ? [branchId]
+              : (ctx.effectiveBranchIds ?? []).filter(Boolean);
+          if (ids.length === 0) return [];
+          const nested = await Promise.all(
+            ids.map((id) => getBranchTeamsService().listTeamsWithMembers(id).catch(() => [])),
+          );
+          return nested.flat();
+        })(),
       ]);
 
       // Merge: date-filtered received/spent/distributed with all-time balance
@@ -1416,6 +1428,19 @@ export const marketingRouter = router({
         usersFallback = picked.length > 0 ? picked : null;
       }
 
+      const marketingTeams = (teamsRaw ?? [])
+        .filter((t) => t.department === 'MARKETING')
+        .map((t) => {
+          const supervisors = t.members.filter((m) => m.isSupervisor);
+          return {
+            id: t.id,
+            name: t.name?.trim() || 'Unnamed team',
+            branchId: t.branchId,
+            supervisorNames: supervisors.map((s) => s.name).filter(Boolean),
+            memberIds: t.members.map((m) => m.userId),
+          };
+        });
+
       return {
         balances,
         fundingSummary,
@@ -1423,6 +1448,7 @@ export const marketingRouter = router({
         profitabilityConfig,
         usersFallback,
         cartOrdersCounts,
+        marketingTeams,
       };
     }),
 

@@ -3,7 +3,9 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData, useNavigate } from '@remix-run/react';
 import { getCurrentUser, apiRequest, getSessionCookie, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { useCallback } from 'react';
 import { CashRemittanceCreatePage } from '~/features/finance/CashRemittanceCreatePage';
+import { removeOrderFromRemittanceBatch } from '~/hooks/usePersistedRemittanceSelection';
 import type { EligibleOrder } from '~/features/finance/CashRemittanceCreateModal';
 
 export const meta: MetaFunction = () => [
@@ -106,10 +108,32 @@ export default function CreateCashRemittanceRoute() {
   const { selectedOrders } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
+  // Remove one order from the batch: rewrite the ?orders= param (source of
+  // truth for the loader) and keep the persisted batch in sync. If that empties
+  // the batch, go back to the list.
+  const handleRemoveOrder = useCallback(
+    (orderId: string) => {
+      const remaining = selectedOrders
+        .map((o) => o.id)
+        .filter((id) => id !== orderId);
+      removeOrderFromRemittanceBatch(orderId, remaining);
+      if (remaining.length === 0) {
+        navigate('/admin/finance/delivery-remittances');
+        return;
+      }
+      navigate(
+        `/admin/finance/delivery-remittances/create?orders=${remaining.join(',')}`,
+        { replace: true },
+      );
+    },
+    [selectedOrders, navigate],
+  );
+
   return (
     <CashRemittanceCreatePage
       selectedOrders={selectedOrders}
       onBack={() => navigate('/admin/finance/delivery-remittances')}
+      onRemoveOrder={handleRemoveOrder}
     />
   );
 }

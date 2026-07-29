@@ -515,9 +515,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   // ── Role-aware copy ─────────────────────────────────────
   const receivedTitle = isMediaBuyer ? 'Incoming Funding' : 'Funds Received';
 
-  // ── Disputed totals + search local state ────────────────
-  const totalDisputed = directionSummary.disputedAsReceiver + directionSummary.disputedAsSender;
-
+  // ── Search local state ────────────────
   const appliedSearch = searchParams.get('search') ?? '';
   const userNameById = (id: string) => users.find((u) => u.id === id)?.name ?? 'Unknown user';
   const applySearch = (query: string) => {
@@ -984,54 +982,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           setSearchParams(params, { preventScrollReset: true });
         }}
       />
-
-      {/* Disputed surfacing — visible whenever the user has anything in DISPUTED status. */}
-      {totalDisputed > 0 && (
-        <div className="rounded-lg border border-danger-300 dark:border-danger-700 bg-danger-50 dark:bg-danger-900/20 px-4 py-3 flex items-start gap-3">
-          <svg className="w-5 h-5 text-danger-600 dark:text-danger-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 17.25h.008v.008H12v-.008z" />
-          </svg>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-danger-700 dark:text-danger-300">
-              {totalDisputed} disputed {totalDisputed === 1 ? 'transfer' : 'transfers'} need{totalDisputed === 1 ? 's' : ''} review
-            </p>
-            <p className="text-xs text-danger-600 dark:text-danger-400 mt-0.5">
-              {directionSummary.disputedAsReceiver > 0 && (
-                <>
-                  {directionSummary.disputedAsReceiver} you flagged as Not Received
-                  {directionSummary.disputedAsSender > 0 ? ' · ' : ''}
-                </>
-              )}
-              {directionSummary.disputedAsSender > 0 && (
-                <>{directionSummary.disputedAsSender} flagged on funding you sent</>
-              )}
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="text-xs"
-            onClick={() => {
-              const params = new URLSearchParams(searchParams);
-              const targetSection: FundingSection =
-                directionSummary.disputedAsSender > directionSummary.disputedAsReceiver && canDistribute
-                  ? 'distributing'
-                  : 'received';
-              params.set('section', targetSection);
-              params.set('tab', 'transfers');
-              params.set('status', 'DISPUTED');
-              params.delete('page');
-              params.delete('requestStatus');
-              params.delete('search');
-              setSearchParams(params, { preventScrollReset: true });
-            }}
-          >
-            Review
-          </Button>
-        </div>
-      )}
 
       {/* ─── Ledger: primary tabs (received | distribute) ─ */}
       <div className="list-panel" id="funding-ledger">

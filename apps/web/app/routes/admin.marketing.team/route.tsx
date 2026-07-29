@@ -5,8 +5,9 @@ import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
 import { MarketingTeamPage } from '~/features/marketing/MarketingTeamPage';
 import { MarketingTeamLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
-import type { FundingBalanceRow, MarketingTeamOverviewStats } from '~/features/marketing/types';
+import type { FundingBalanceRow, MarketingTeamOverviewStats, MarketingSquadOverview } from '~/features/marketing/types';
 import { buildLeaderboardInput, resolveMarketingDateFilters } from '~/lib/marketing-pages.server';
+import { isAdminLevel } from '~/lib/rbac';
 
 export const meta: MetaFunction = () => [
   { title: 'Team Analysis — Yannis EOSE' },
@@ -22,6 +23,67 @@ function toBalanceRows(users: Array<{ id: string; name: string; role: string }>)
     totalSpend: '0',
     balance: '0',
   }));
+}
+
+function rollupSquadOverview(
+  team: {
+    id: string;
+    name: string;
+    branchId: string;
+    supervisorNames: string[];
+    memberIds: string[];
+  },
+  membersById: Map<string, FundingBalanceRow>,
+): MarketingSquadOverview {
+  const members = team.memberIds
+    .map((id) => membersById.get(id))
+    .filter((m): m is FundingBalanceRow => !!m);
+
+  let totalOrders = 0;
+  let confirmedOrders = 0;
+  let deliveredOrders = 0;
+  let totalAdSpend = 0;
+  let totalBalance = 0;
+  let totalReceived = 0;
+  let totalSpent = 0;
+  let totalDistributed = 0;
+  const profitScores: number[] = [];
+
+  for (const m of members) {
+    totalOrders += m.totalOrders ?? 0;
+    confirmedOrders += m.confirmedOrders ?? 0;
+    deliveredOrders += m.deliveredOrders ?? 0;
+    totalAdSpend += m.adSpend ?? 0;
+    totalBalance += Number(m.balance) || 0;
+    totalReceived += Number(m.totalReceived) || 0;
+    totalSpent += Number(m.totalSpend) || 0;
+    totalDistributed += Number(m.totalDistributed) || 0;
+    if (m.profitabilityScore != null) profitScores.push(m.profitabilityScore);
+  }
+
+  return {
+    id: team.id,
+    name: team.name,
+    branchId: team.branchId,
+    supervisorNames: team.supervisorNames,
+    memberIds: team.memberIds,
+    memberCount: team.memberIds.length,
+    totalOrders,
+    confirmedOrders,
+    deliveredOrders,
+    confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : null,
+    deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : null,
+    totalAdSpend,
+    avgCpa: totalOrders > 0 ? totalAdSpend / totalOrders : null,
+    totalBalance,
+    totalReceived,
+    totalSpent,
+    totalDistributed,
+    profitabilityScore:
+      profitScores.length > 0
+        ? profitScores.reduce((a, b) => a + b, 0) / profitScores.length
+        : null,
+  };
 }
 
 function computeMarketingTeamOverview(
@@ -111,6 +173,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     profitabilityConfig: { targetRoas: number; greenThreshold: number };
     usersFallback: Array<{ id: string; name: string; role: string }> | null;
     cartOrdersCounts?: Record<string, number>;
+    marketingTeams?: Array<{
+      id: string;
+      name: string;
+      branchId: string;
+      supervisorNames: string[];
+      memberIds: string[];
+    }>;
   };
   const bundle = bundleRes.ok
     ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
@@ -227,9 +296,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
         : 'desc';
 
   const unfilteredCount = teamMembersWithMetrics.length;
+  const teamIdParam = (url.searchParams.get('teamId') ?? '').trim();
+  const marketingTeamsRaw = bundle?.marketingTeams ?? [];
+  const selectedTeam = marketingTeamsRaw.find((t) => t.id === teamIdParam) ?? null;
+  const selectedTeamMemberIds = selectedTeam ? new Set(selectedTeam.memberIds) : null;
+
   let afterSearch = teamMembersWithMetrics;
+  if (selectedTeamMemberIds) {
+    afterSearch = afterSearch.filter((m) => selectedTeamMemberIds.has(m.userId));
+  }
   if (qLower.length > 0) {
-    afterSearch = teamMembersWithMetrics.filter((m) => {
+    afterSearch = afterSearch.filter((m) => {
       const name = m.name.toLowerCase();
       const role = m.role.toLowerCase().replaceAll('_', ' ');
       if (name.includes(qLower) || m.role.toLowerCase().includes(qLower) || role.includes(qLower)) {
@@ -310,6 +387,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     .map((m) => ({ id: m.userId, name: m.name }))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
+  // Team card view is for branch-wide managers only (HoM + admin-class).
+  // Marketing team supervisors stay on Listing.
+  const canUseTeamView =
+    user.role === 'HEAD_OF_MARKETING' || isAdminLevel(user);
+
+  const membersById = new Map(teamMembersWithMetrics.map((m) => [m.userId, m]));
+  const squadOverviews: MarketingSquadOverview[] = marketingTeamsRaw
+    .map((t) => rollupSquadOverview(t, membersById))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
   return {
     teamMembers: sorted,
     fundingSummary,
@@ -327,6 +414,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     overviewStats,
     allMembersForFilter,
     cartOrdersCounts,
+    canUseTeamView,
+    squadOverviews,
+    selectedTeamId: selectedTeam?.id ?? null,
+    selectedTeamName: selectedTeam?.name ?? null,
   };
   })();
 
@@ -361,6 +452,10 @@ export default function MarketingTeamRoute() {
             overviewStats={data.overviewStats}
             allMembersForFilter={data.allMembersForFilter}
             cartOrdersCounts={data.cartOrdersCounts}
+            canUseTeamView={data.canUseTeamView}
+            squadOverviews={data.squadOverviews}
+            selectedTeamId={data.selectedTeamId}
+            selectedTeamName={data.selectedTeamName}
           />
         )}
     </CachedAwait>

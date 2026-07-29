@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
@@ -15,6 +15,7 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SortMenu } from '~/components/ui/sort-menu';
+import { FormSelect } from '~/components/ui/form-select';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Pagination } from '~/components/ui/pagination';
@@ -23,11 +24,13 @@ import { Modal } from '~/components/ui/modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { formatNaira } from '~/lib/format-amount';
 import { SupervisorBadge } from '~/components/ui/supervisor-badge';
-import type { FundingBalanceRow, MarketingTeamOverviewStats } from './types';
+import type { FundingBalanceRow, MarketingTeamOverviewStats, MarketingSquadOverview } from './types';
 import {
   confirmationRateColorClass,
   deliveryRateColorClass,
 } from '~/lib/rate-color';
+
+export type MarketingTeamLayoutView = 'listing' | 'team';
 
 export interface MarketingTeamPageProps {
   teamMembers: FundingBalanceRow[];
@@ -54,6 +57,16 @@ export interface MarketingTeamPageProps {
   allMembersForFilter?: Array<{ id: string; name: string }>;
   /** Cart order per-status counts for the breakdown modal. */
   cartOrdersCounts?: Record<string, number>;
+  /**
+   * Team card layout is for HoM + admin-class (SUPER_ADMIN / ADMIN / SUPPORT).
+   * Branch marketing supervisors stay on Listing only.
+   */
+  canUseTeamView?: boolean;
+  /** Marketing squad overviews for Team view cards. */
+  squadOverviews?: MarketingSquadOverview[];
+  /** Active squad filter (`?teamId=`). */
+  selectedTeamId?: string | null;
+  selectedTeamName?: string | null;
 }
 
 /** Green if trueRoas ≥ green threshold, red below. Neutral when no spend/data. */
@@ -90,9 +103,110 @@ function MarketingTeamCompactStat({
 }
 
 /**
- * Media buyer peek card — visual mirror of `CSTeamMemberCard`.
- * Header + stacked stat-tile grids + actions row. Use `embedded` inside the
- * mobile peek modal (no outer card chrome); omit it for stand-alone use.
+ * Squad overview card for Team view — rolled-up metrics for one marketing team.
+ * Tap filters Listing to that team's members.
+ */
+function MarketingSquadOverviewCard({
+  squad,
+  onOpen,
+}: {
+  squad: MarketingSquadOverview;
+  onOpen: () => void;
+}) {
+  const balanceToneClass =
+    squad.totalBalance < 50000
+      ? 'text-danger-600 dark:text-danger-400'
+      : 'text-brand-600 dark:text-brand-400';
+  const profitClass =
+    squad.profitabilityScore == null
+      ? 'text-app-fg'
+      : squad.profitabilityScore >= 1
+        ? 'text-success-600 dark:text-success-400'
+        : 'text-danger-600 dark:text-danger-400';
+  const supervisorLabel =
+    squad.supervisorNames.length > 0 ? squad.supervisorNames.join(', ') : 'No supervisor';
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="card space-y-3 w-full text-left transition-colors hover:border-brand-500/40 hover:bg-app-hover/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+    >
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold text-app-fg">{squad.name}</p>
+        <p className="mt-0.5 truncate text-mini font-medium uppercase tracking-[0.14em] text-app-fg-muted">
+          {supervisorLabel} · {squad.memberCount} member{squad.memberCount === 1 ? '' : 's'}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <MarketingTeamCompactStat
+          label="Balance"
+          value={formatNaira(squad.totalBalance)}
+          valueClassName={balanceToneClass}
+        />
+        <MarketingTeamCompactStat label="Received" value={formatNaira(squad.totalReceived)} />
+        <MarketingTeamCompactStat label="Total Spent" value={formatNaira(squad.totalSpent)} />
+        <MarketingTeamCompactStat
+          label="Distributed"
+          value={squad.totalDistributed > 0 ? formatNaira(squad.totalDistributed) : '—'}
+        />
+        <MarketingTeamCompactStat label="Ad Spend" value={formatNaira(squad.totalAdSpend)} />
+        <MarketingTeamCompactStat
+          label="CPA"
+          value={squad.avgCpa != null ? <NairaPrice amount={squad.avgCpa} /> : '—'}
+        />
+        <MarketingTeamCompactStat
+          label="Orders"
+          value={squad.totalOrders.toLocaleString()}
+          valueClassName="text-brand-600 dark:text-brand-400"
+        />
+        <MarketingTeamCompactStat
+          label="Profit"
+          value={squad.profitabilityScore != null ? squad.profitabilityScore.toFixed(1) : '—'}
+          valueClassName={profitClass}
+        />
+        <MarketingTeamCompactStat
+          label="Confirmed"
+          value={
+            <span className="tabular-nums">
+              <span className="text-brand-600 dark:text-brand-400">{squad.confirmedOrders.toLocaleString()}</span>
+              {squad.confirmationRate != null && (
+                <>
+                  <span className="mx-0.5 text-app-fg-muted">·</span>
+                  <span className={confirmationRateColorClass(squad.confirmationRate)}>
+                    {Math.round(squad.confirmationRate)}%
+                  </span>
+                </>
+              )}
+            </span>
+          }
+        />
+        <MarketingTeamCompactStat
+          label="Delivered"
+          value={
+            <span className="tabular-nums">
+              <span className="text-success-600 dark:text-success-400">{squad.deliveredOrders.toLocaleString()}</span>
+              {squad.deliveryRate != null && (
+                <>
+                  <span className="mx-0.5 text-app-fg-muted">·</span>
+                  <span className={deliveryRateColorClass(squad.deliveryRate)}>
+                    {Math.round(squad.deliveryRate)}%
+                  </span>
+                </>
+              )}
+            </span>
+          }
+        />
+      </div>
+
+      <p className="text-xs font-medium text-brand-600 dark:text-brand-400">View members →</p>
+    </button>
+  );
+}
+
+/**
+ * Media buyer peek card — used by Listing mobile peek modal.
  */
 function MarketingTeamMemberCard({
   member,
@@ -107,26 +221,46 @@ function MarketingTeamMemberCard({
 }) {
   const balance = Number(member.balance);
   const balanceToneClass =
-    balance < 0
+    balance < 50000
       ? 'text-danger-600 dark:text-danger-400'
-      : balance < 50000
-        ? 'text-danger-600 dark:text-danger-400'
-        : 'text-success-600 dark:text-success-400';
+      : 'text-brand-600 dark:text-brand-400';
   const profitabilityToneClass =
     member.profitabilityScore != null && member.trueRoas != null
       ? member.trueRoas >= greenThreshold
         ? 'text-success-600 dark:text-success-400'
         : 'text-danger-600 dark:text-danger-400'
       : 'text-app-fg';
+  const inPipeline =
+    member.confirmedOrders != null
+      ? Math.max(0, member.confirmedOrders - (member.deliveredOrders ?? 0))
+      : null;
+  const roleLabel = member.role === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : 'Media Buyer';
+  const ledgerHref = `/admin/marketing/funding/ledger?userId=${member.userId}${dateFilters.periodAllTime ? '&period=all_time' : dateFilters.startDate && dateFilters.endDate ? `&startDate=${dateFilters.startDate}&endDate=${dateFilters.endDate}` : ''}`;
+  const expensesHref = `/admin/marketing/expenses?mediaBuyerId=${member.userId}${dateFilters.periodAllTime ? '&period=all_time' : dateFilters.startDate && dateFilters.endDate ? `&startDate=${dateFilters.startDate}&endDate=${dateFilters.endDate}` : ''}`;
 
   return (
     <div className={embedded ? 'space-y-3' : 'card space-y-3'}>
       <div className="flex items-start gap-3">
         <CompactUserAvatar name={member.name} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-app-fg">{member.name}</p>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <Link
+              to={`/hr/users/${member.userId}`}
+              prefetch="intent"
+              className="truncate text-sm font-medium text-app-fg hover:underline"
+            >
+              {member.name}
+            </Link>
+            {member.role === 'HEAD_OF_MARKETING' && (
+              <span className="shrink-0 rounded-full bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 text-micro font-semibold text-purple-700 dark:text-purple-300">HoM</span>
+            )}
+            {member.isTeamSupervisor && <SupervisorBadge size="sm" />}
+            {member.userStatus === 'INACTIVE' && (
+              <span className="shrink-0 rounded-full bg-danger-100 dark:bg-danger-900/30 px-2 py-0.5 text-micro font-semibold text-danger-700 dark:text-danger-300">Inactive</span>
+            )}
+          </div>
           <p className="truncate text-mini font-medium uppercase tracking-[0.14em] text-app-fg-muted">
-            Media Buyer
+            {roleLabel}
           </p>
         </div>
       </div>
@@ -152,35 +286,82 @@ function MarketingTeamMemberCard({
         />
         <MarketingTeamCompactStat
           label="CPA"
-          value={member.cpa != null ? formatNaira(member.cpa) : '—'}
+          value={member.cpa != null ? <NairaPrice amount={member.cpa} /> : '—'}
         />
         <MarketingTeamCompactStat
           label="Orders"
-          value={member.totalOrders != null ? member.totalOrders.toLocaleString() : '—'}
+          value={
+            member.totalOrders != null ? (
+              <Link
+                to={buildOrdersQuery(member.userId, dateFilters)}
+                className="underline-offset-2 hover:underline"
+              >
+                {member.totalOrders.toLocaleString()}
+              </Link>
+            ) : (
+              '—'
+            )
+          }
           valueClassName="text-brand-600 dark:text-brand-400"
         />
       </div>
 
       <div className="grid grid-cols-3 gap-2">
         <MarketingTeamCompactStat
-          label="Profitability"
+          label="Confirmed"
+          value={
+            member.confirmedOrders == null && member.confirmationRate == null ? (
+              '—'
+            ) : (
+              <span className="tabular-nums">
+                {inPipeline != null && (
+                  <span className="text-brand-600 dark:text-brand-400">{inPipeline.toLocaleString()}</span>
+                )}
+                {inPipeline != null && member.confirmationRate != null && (
+                  <span className="mx-0.5 text-app-fg-muted">·</span>
+                )}
+                {member.confirmationRate != null && (
+                  <span className={confirmationRateColorClass(member.confirmationRate)}>
+                    {Math.round(member.confirmationRate)}%
+                  </span>
+                )}
+              </span>
+            )
+          }
+        />
+        <MarketingTeamCompactStat
+          label="Delivered"
+          value={
+            member.deliveredOrders == null && member.deliveryRate == null ? (
+              '—'
+            ) : (
+              <span className="tabular-nums">
+                {member.deliveredOrders != null && (
+                  <span className="text-success-600 dark:text-success-400">
+                    {member.deliveredOrders.toLocaleString()}
+                  </span>
+                )}
+                {member.deliveredOrders != null && member.deliveryRate != null && (
+                  <span className="mx-0.5 text-app-fg-muted">·</span>
+                )}
+                {member.deliveryRate != null && (
+                  <span className={deliveryRateColorClass(member.deliveryRate)}>
+                    {Math.round(member.deliveryRate)}%
+                  </span>
+                )}
+              </span>
+            )
+          }
+        />
+        <MarketingTeamCompactStat
+          label="Profit"
           value={member.profitabilityScore != null ? member.profitabilityScore.toFixed(1) : '—'}
           valueClassName={profitabilityToneClass}
-        />
-        <MarketingTeamCompactStat
-          label="Conf. rate"
-          value={member.confirmationRate != null ? `${Math.round(member.confirmationRate)}%` : '—'}
-          valueClassName={confirmationRateColorClass(member.confirmationRate)}
-        />
-        <MarketingTeamCompactStat
-          label="Delivery rate"
-          value={member.deliveryRate != null ? `${Math.round(member.deliveryRate)}%` : '—'}
-          valueClassName={deliveryRateColorClass(member.deliveryRate)}
         />
       </div>
 
       <div className="border-t border-app-border pt-3">
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <CompactTableActionButton
             to={buildOrdersQuery(member.userId, dateFilters)}
             className="w-full justify-center"
@@ -188,11 +369,11 @@ function MarketingTeamMemberCard({
           >
             Orders
           </CompactTableActionButton>
-          <CompactTableActionButton
-            to={`/admin/marketing/funding/ledger?userId=${member.userId}${dateFilters.periodAllTime ? '&period=all_time' : dateFilters.startDate && dateFilters.endDate ? `&startDate=${dateFilters.startDate}&endDate=${dateFilters.endDate}` : ''}`}
-            className="w-full justify-center"
-          >
+          <CompactTableActionButton to={ledgerHref} className="w-full justify-center">
             Ledger
+          </CompactTableActionButton>
+          <CompactTableActionButton to={expensesHref} className="w-full justify-center">
+            Expenses
           </CompactTableActionButton>
           <CompactTableActionButton
             to={`/hr/users/${member.userId}`}
@@ -337,6 +518,10 @@ export function MarketingTeamPage({
   overviewStats,
   allMembersForFilter = [],
   cartOrdersCounts,
+  canUseTeamView = false,
+  squadOverviews = [],
+  selectedTeamId = null,
+  selectedTeamName = null,
 }: MarketingTeamPageProps) {
   const greenThreshold = profitabilityConfig.greenThreshold;
   const cartGraduatedDelivered = (cartOrdersCounts?.['DELIVERED'] ?? 0) + (cartOrdersCounts?.['REMITTED'] ?? 0);
@@ -347,11 +532,26 @@ export function MarketingTeamPage({
   const [previewMember, setPreviewMember] = useState<FundingBalanceRow | null>(null);
   const [breakdownModal, setBreakdownModal] = useState(false);
 
+  const rawView = searchParams.get('view');
+  const layoutView: MarketingTeamLayoutView =
+    canUseTeamView && rawView === 'team' ? 'team' : 'listing';
+
+  // Unauthorized `?view=team` (or stale links) → force Listing in the URL.
+  useEffect(() => {
+    if (!canUseTeamView && rawView === 'team') {
+      const params = new URLSearchParams(searchParams);
+      params.delete('view');
+      setSearchParams(params, { replace: true });
+    }
+  }, [canUseTeamView, rawView, searchParams, setSearchParams]);
+
   const mergeListParams = (overrides: {
     q?: string;
     sortBy?: string;
     sortDir?: 'asc' | 'desc';
     page?: number;
+    view?: MarketingTeamLayoutView;
+    teamId?: string | null;
   }) => {
     const params = new URLSearchParams(searchParams);
     if (overrides.q !== undefined) {
@@ -365,6 +565,14 @@ export function MarketingTeamPage({
       if (overrides.page <= 1) params.delete('page');
       else params.set('page', String(overrides.page));
     }
+    if (overrides.view !== undefined) {
+      if (overrides.view === 'listing') params.delete('view');
+      else params.set('view', overrides.view);
+    }
+    if (overrides.teamId !== undefined) {
+      if (overrides.teamId) params.set('teamId', overrides.teamId);
+      else params.delete('teamId');
+    }
     setSearchParams(params);
   };
 
@@ -374,8 +582,46 @@ export function MarketingTeamPage({
     let n = 0;
     if (sortByFromLoader !== 'name') n += 1;
     if (sortDirFromLoader !== 'asc') n += 1;
+    if (canUseTeamView && layoutView === 'team') n += 1;
+    if (selectedTeamId) n += 1;
     return n;
-  }, [sortByFromLoader, sortDirFromLoader]);
+  }, [sortByFromLoader, sortDirFromLoader, canUseTeamView, layoutView, selectedTeamId]);
+
+  const viewFilterSelect = canUseTeamView ? (
+    <FormSelect
+      id="marketing-team-view-filter"
+      aria-label="Team analysis layout"
+      value={layoutView}
+      onChange={(e) => {
+        const next = e.target.value === 'team' ? 'team' : 'listing';
+        mergeListParams({ view: next, page: 1, teamId: next === 'team' ? null : undefined });
+      }}
+      options={[
+        { value: 'listing', label: 'View by member' },
+        { value: 'team', label: 'View by Teams' },
+      ]}
+      wrapperClassName="w-auto min-w-[11.5rem] sm:w-48"
+    />
+  ) : null;
+
+  const viewFilterSelectSheet = canUseTeamView ? (
+    <FormSelect
+      id="marketing-team-view-filter-sheet"
+      aria-label="Team analysis layout"
+      value={layoutView}
+      onChange={(e) => {
+        const next = e.target.value === 'team' ? 'team' : 'listing';
+        mergeListParams({ view: next, page: 1, teamId: next === 'team' ? null : undefined });
+      }}
+      options={[
+        { value: 'listing', label: 'View by member' },
+        { value: 'team', label: 'View by Teams' },
+      ]}
+      controlSize="lg"
+      openAs="modal"
+      wrapperClassName="w-full"
+    />
+  ) : null;
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -580,15 +826,18 @@ export function MarketingTeamPage({
             saveFilterKey
             filtersBadgeCount={teamToolbarFilterBadge}
             filters={
-              <SortMenu
-                value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
-                onChange={(next) =>
-                  mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
-                }
-                defaultValue={{ sortBy: 'name', sortDir: 'asc' }}
-                options={TEAM_SORT_MENU_OPTIONS}
-                className="w-full justify-center"
-              />
+              <div className="flex w-full flex-col gap-3">
+                {viewFilterSelectSheet}
+                <SortMenu
+                  value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+                  onChange={(next) =>
+                    mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+                  }
+                  defaultValue={{ sortBy: 'name', sortDir: 'asc' }}
+                  options={TEAM_SORT_MENU_OPTIONS}
+                  className="w-full justify-center"
+                />
+              </div>
             }
             desktop={
               <>
@@ -738,6 +987,7 @@ export function MarketingTeamPage({
           }
           desktopInlineFilters={
             <>
+              {viewFilterSelect}
               {allMembersForFilter.length > 0 ? (
                 <div className="relative">
                   {!!q && (
@@ -778,6 +1028,7 @@ export function MarketingTeamPage({
           }
           sheetFilterBody={
             <div className="flex flex-col gap-3">
+              {viewFilterSelectSheet}
               {allMembersForFilter.length > 0 ? (
                 <div className="relative">
                   {!!q && (
@@ -840,8 +1091,48 @@ export function MarketingTeamPage({
               description="Try a different name, role, or clear the search field."
             />
           </div>
+        ) : layoutView === 'team' ? (
+          squadOverviews.length === 0 ? (
+            <div className="card">
+              <EmptyState
+                title="No marketing teams yet"
+                description="Create marketing squads on the branch page to see team performance cards here."
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {squadOverviews.map((squad) => (
+                <MarketingSquadOverviewCard
+                  key={squad.id}
+                  squad={squad}
+                  onOpen={() =>
+                    mergeListParams({
+                      view: 'listing',
+                      teamId: squad.id,
+                      page: 1,
+                    })
+                  }
+                />
+              ))}
+            </div>
+          )
         ) : (
           <>
+            {selectedTeamId && selectedTeamName ? (
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-app-border bg-app-hover/50 px-2.5 py-1 text-xs font-medium text-app-fg">
+                  Team: {selectedTeamName}
+                  <button
+                    type="button"
+                    className="text-app-fg-muted hover:text-app-fg"
+                    aria-label="Clear team filter"
+                    onClick={() => mergeListParams({ teamId: null, page: 1 })}
+                  >
+                    ×
+                  </button>
+                </span>
+              </div>
+            ) : null}
             <CompactTable
               columns={teamColumns}
               rows={teamMembers}
