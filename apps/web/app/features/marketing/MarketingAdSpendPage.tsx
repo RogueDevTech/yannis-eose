@@ -1178,6 +1178,7 @@ export function MarketingAdSpendPage({
         return (
           <OverviewStatStrip
             mobileGrid
+            matrixCols={3}
             items={[
               {
                 label: `Ad Spend (${selectedCategory === 'AD_SPEND' ? (statusCounts?.APPROVED ?? '—') : '—'})`,

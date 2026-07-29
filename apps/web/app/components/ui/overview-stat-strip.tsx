@@ -373,17 +373,17 @@ export function OverviewStatStrip({
                   .join(' ');
                 const inner = (
                   <>
-                    <span className="text-xs text-app-fg-muted shrink-0 pr-3">{item.label}</span>
+                    <span className="text-xs text-app-fg-muted min-w-0 pr-3">{item.label}</span>
                     {loading ? (
                       matrixValueSkeleton
                     ) : item.plainValue ? (
-                      <div className="min-w-0 text-right flex items-center justify-end gap-1">
+                      <div className="shrink-0 text-right flex items-center justify-end gap-1">
                         {item.value}
                         {stamp !== undefined && <LiveFlashArrow key={stamp} />}
                       </div>
                     ) : (
                       <span
-                        className={`min-w-0 text-right font-medium tabular-nums ${item.valueClassName ?? 'text-app-fg'}`}
+                        className={`shrink-0 text-right font-medium tabular-nums ${item.valueClassName ?? 'text-app-fg'}`}
                       >
                         {item.value}
                         {stamp !== undefined && <LiveFlashArrow key={stamp} />}

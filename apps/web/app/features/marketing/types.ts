@@ -62,6 +62,29 @@ export interface MarketingTeamOverviewStats {
   mbCount: number;
 }
 
+/** Rolled-up metrics for one marketing squad (`branch_teams` MARKETING). */
+export interface MarketingSquadOverview {
+  id: string;
+  name: string;
+  branchId: string;
+  supervisorNames: string[];
+  memberIds: string[];
+  memberCount: number;
+  totalOrders: number;
+  confirmedOrders: number;
+  deliveredOrders: number;
+  confirmationRate: number | null;
+  deliveryRate: number | null;
+  totalAdSpend: number;
+  avgCpa: number | null;
+  totalBalance: number;
+  totalReceived: number;
+  totalSpent: number;
+  totalDistributed: number;
+  /** Mean profitability among members who have a score; null when none. */
+  profitabilityScore: number | null;
+}
+
 export interface FundingRequestRecord {
   id: string;
   requesterId: string;

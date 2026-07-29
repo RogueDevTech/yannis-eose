@@ -11,6 +11,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { usePersistedRemittanceSelection } from '~/hooks/usePersistedRemittanceSelection';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
@@ -243,10 +244,14 @@ export function DeliveryRemittancesPage({
       window.location.reload();
     }
   }, [generateInvoiceFetcher.state, generateInvoiceFetcher.data, primeSamePathRefetch]);
-  const [eligibleSelectedIds, setEligibleSelectedIds] = useState<Set<string>>(() => new Set());
-  const [selectedEligibleById, setSelectedEligibleById] = useState<Map<string, EligibleOrder>>(
-    () => new Map(),
-  );
+  // Selection persists to localStorage so a finance user can check a batch of
+  // orders, navigate away to verify something, and return without re-checking.
+  const {
+    selectedIds: eligibleSelectedIds,
+    setSelectedIds: setEligibleSelectedIds,
+    selectedById: selectedEligibleById,
+    setSelectedById: setSelectedEligibleById,
+  } = usePersistedRemittanceSelection<EligibleOrder>();
   const [infoModal, setInfoModal] = useState<string | null>(null);
   const [dateScopeModalOpen, setDateScopeModalOpen] = useState(false);
 
@@ -1737,6 +1742,48 @@ export function DeliveryRemittancesPage({
               sheetFilterBody={null}
             />
           </div>
+
+          {eligibleSelectedIds.size > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-brand-300 bg-brand-50 px-2.5 py-2 dark:border-brand-800 dark:bg-brand-950/40 sm:px-3">
+              <p className="text-xs text-brand-800 dark:text-brand-200 sm:text-sm">
+                <span className="font-semibold">Batch creation ongoing</span>
+                {' · '}
+                {eligibleSelectedIds.size} order{eligibleSelectedIds.size === 1 ? '' : 's'} selected. Check more rows to add, or continue.
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onEligibleToggleAll(false)}
+                >
+                  Discard batch
+                </Button>
+                {canCreateRemittance && (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={openCreateFromEligibleTab}
+                    disabled={
+                      eligibleMultiLocation ||
+                      eligibleTotal === 0 ||
+                      !remittanceSelectionComplete
+                    }
+                    title={
+                      eligibleMultiLocation
+                        ? 'All selected orders must share the same logistics location'
+                        : !remittanceSelectionComplete
+                          ? 'Could not resolve every selected order — clear selection and select again'
+                          : undefined
+                    }
+                  >
+                    Continue
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-1.5 rounded-md bg-app-hover px-2.5 py-1.5 sm:px-3">
             <div className="text-xs text-app-fg-muted sm:text-sm">
