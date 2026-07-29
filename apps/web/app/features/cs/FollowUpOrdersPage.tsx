@@ -11,6 +11,7 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 
@@ -176,6 +177,8 @@ export function FollowUpOrdersPage({
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {/* ── Status pills ─────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-1.5">

@@ -6,6 +6,7 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageSearchControl } from '~/components/ui/page-search-control';
@@ -594,6 +595,8 @@ export function FollowUpPage({
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {/* ── Summary strip ────────────────────────────────── */}
       {(() => {

@@ -5,7 +5,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -37,10 +36,8 @@ function branchPillClassName(branch: UserBranchBadgeItem, compactSize: boolean):
 
 function CompactBranchBadgeRow({
   listForPills,
-  pills,
 }: {
   listForPills: UserBranchBadgeItem[];
-  pills: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -98,7 +95,9 @@ function CompactBranchBadgeRow({
     };
   }, [open]);
 
-  const showDetailsTrigger = listForPills.length > 1;
+  const first = listForPills[0];
+  const extraCount = Math.max(0, listForPills.length - 1);
+  const showDetailsTrigger = extraCount > 0;
 
   const portal =
     open && panelPos && showDetailsTrigger && typeof document !== 'undefined'
@@ -134,30 +133,32 @@ function CompactBranchBadgeRow({
         )
       : null;
 
+  if (!first) return null;
+
   return (
     <>
       <div ref={wrapRef} className="flex min-w-0 max-w-full items-center gap-1">
-        <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden">{pills}</div>
+        <span
+          className={`${branchPillClassName(first, true)} min-w-0 max-w-full`}
+          title={`${first.branchName} (${first.branchCode})`}
+        >
+          <span className="min-w-0 truncate">{first.branchName}</span>
+          <span className="font-mono opacity-80 shrink-0">{first.branchCode}</span>
+        </span>
         {showDetailsTrigger ? (
           <button
             ref={triggerRef}
             type="button"
-            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-app-fg-muted hover:bg-app-hover hover:text-app-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-app-canvas"
+            className="inline-flex h-6 shrink-0 items-center justify-center gap-0.5 rounded-md px-1.5 text-micro font-semibold tabular-nums text-app-fg-muted hover:bg-app-hover hover:text-app-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-app-canvas"
             aria-expanded={open}
             aria-controls={panelId}
             aria-haspopup="true"
-            aria-label="View all branches"
+            aria-label={`View ${extraCount} more branch${extraCount === 1 ? '' : 'es'}`}
             onClick={() => {
               setOpen((v) => !v);
             }}
           >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
+            +{extraCount}
           </button>
         ) : null}
       </div>
@@ -198,7 +199,7 @@ export function UserBranchBadges({
   ));
 
   if (compact) {
-    return <CompactBranchBadgeRow listForPills={listForPills} pills={pills} />;
+    return <CompactBranchBadgeRow listForPills={listForPills} />;
   }
 
   // Group by company when branches span multiple companies (SuperAdmin only)

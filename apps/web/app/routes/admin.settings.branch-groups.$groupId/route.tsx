@@ -7,6 +7,7 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { TextInput } from '~/components/ui/text-input';
@@ -360,6 +361,8 @@ function GroupDetailPage({ group }: { group: GroupDetail; allGroups: Array<{ id:
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <OverviewStatStrip items={stats} mobileGrid />
 

@@ -3,6 +3,7 @@ import { Link } from '@remix-run/react';
 import { useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
@@ -183,6 +184,8 @@ export function PayrollOnboardingPage({ queue, canWrite }: PayrollOnboardingPage
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <OverviewStatStrip items={statStrip} />
 

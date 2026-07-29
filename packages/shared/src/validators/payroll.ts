@@ -206,10 +206,18 @@ export const getContractorSchema = z.object({
   id: z.string().uuid(),
 });
 
+/** Omit or `active: true` = active only (default). `active: false` = inactive only. */
+export const listContractorsSchema = z.object({
+  active: z.boolean().optional(),
+});
+
 export const listContractorPayoutsSchema = z.object({
   contractorId: z.string().uuid(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
+  /** Inclusive payroll period bounds as `YYYY-MM-01`. */
+  fromMonth: z.string().regex(/^\d{4}-\d{2}-01$/).optional(),
+  toMonth: z.string().regex(/^\d{4}-\d{2}-01$/).optional(),
 });
 
 export const overridePayslipLineSchema = z.object({
@@ -288,6 +296,7 @@ export type SaveTaxBandConfigInput = z.infer<typeof saveTaxBandConfigSchema>;
 export type CreateContractorInput = z.infer<typeof createContractorSchema>;
 export type UpdateContractorInput = z.infer<typeof updateContractorSchema>;
 export type GetContractorInput = z.infer<typeof getContractorSchema>;
+export type ListContractorsInput = z.infer<typeof listContractorsSchema>;
 export type ListContractorPayoutsInput = z.infer<typeof listContractorPayoutsSchema>;
 
 export const payrollRegisterSchema = z.object({

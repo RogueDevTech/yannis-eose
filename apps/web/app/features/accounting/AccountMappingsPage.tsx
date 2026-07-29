@@ -3,6 +3,7 @@ import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { ActionDropdown } from '~/components/ui/action-dropdown';
 import { Button } from '~/components/ui/button';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -10,7 +11,111 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { useFetcherToast } from '~/components/ui/toast';
 import { Tabs } from '~/components/ui/tabs';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { Modal } from '~/components/ui/modal';
 import { ChartOfAccountsPage, type AccountRow } from './ChartOfAccountsPage';
+import {
+  ACCOUNT_TYPES_HELP,
+  MAPPING_HELP,
+  POSTING_RULES_INTRO_HELP,
+  RULE_HELP,
+  SIDE_HELP,
+  STAT_HELP,
+} from './account-config-help';
+
+type InfoContent = {
+  title: string;
+  body: string;
+  sections?: Array<{ heading: string; body: string }>;
+};
+
+function InfoIcon({
+  title,
+  body,
+  sections,
+  onOpen,
+  className = '',
+}: {
+  title: string;
+  body: string;
+  sections?: Array<{ heading: string; body: string }>;
+  onOpen: (info: InfoContent) => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpen({ title, body, sections });
+      }}
+      className={`inline-flex items-center justify-center rounded-full text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 transition-colors ${className}`}
+      aria-label={`Info: ${title}`}
+    >
+      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <circle cx="12" cy="12" r="10" />
+        <path strokeLinecap="round" d="M12 16v-4M12 8h.01" />
+      </svg>
+    </button>
+  );
+}
+
+function InfoModal({
+  info,
+  onClose,
+}: {
+  info: InfoContent | null;
+  onClose: () => void;
+}) {
+  const hasSections = (info?.sections?.length ?? 0) > 0;
+  return (
+    <Modal
+      open={info != null}
+      onClose={onClose}
+      maxWidth={hasSections ? 'max-w-lg' : 'max-w-md'}
+      backdropBlur
+      contentClassName="p-5 space-y-4 max-h-[85vh] overflow-y-auto"
+      aria-labelledby="account-config-info-title"
+    >
+      {info ? (
+        <>
+          <div className="flex items-start justify-between gap-3">
+            <h3 id="account-config-info-title" className="text-base font-semibold text-app-fg">
+              {info.title}
+            </h3>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-app-fg-muted hover:text-app-fg p-1 shrink-0"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {hasSections ? (
+            <div className="space-y-4">
+              <p className="text-sm text-app-fg-muted leading-relaxed whitespace-pre-line">{info.body}</p>
+              <div className="space-y-3 divide-y divide-app-border">
+                {info.sections!.map((section) => (
+                  <div key={section.heading} className="pt-3 first:pt-0">
+                    <h4 className="text-sm font-semibold text-app-fg mb-1">{section.heading}</h4>
+                    <p className="text-sm text-app-fg-muted leading-relaxed whitespace-pre-line">
+                      {section.body}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-app-fg-muted leading-relaxed whitespace-pre-line">{info.body}</p>
+          )}
+        </>
+      ) : null}
+    </Modal>
+  );
+}
 
 export interface AccountMappingRow {
   mappingKey: string;
@@ -120,6 +225,7 @@ export function AccountConfigPage({
     'accounts',
   );
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [info, setInfo] = useState<InfoContent | null>(null);
 
   // The Accounts tab (ChartOfAccountsPage) registers its create-modal opener
   // here so the page header's Add Account button can drive it.
@@ -223,6 +329,7 @@ export function AccountConfigPage({
 
   return (
     <div className="space-y-4">
+      <InfoModal info={info} onClose={() => setInfo(null)} />
       <PageHeader
         title="Account Config"
         mobileInlineActions
@@ -272,6 +379,8 @@ export function AccountConfigPage({
         }
       />
 
+      <MobileDateFilterRow hideDate />
+
       <Tabs
         value={activeTab}
         onChange={(v) => setActiveTab(v as typeof activeTab)}
@@ -301,10 +410,36 @@ export function AccountConfigPage({
             mobileGridCols={missingCount > 0 ? 2 : 3}
             items={[
               { label: 'Total', value: totalCount },
-              { label: 'Custom', value: customCount, valueClassName: customCount > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg' },
-              { label: 'Default', value: defaultCount },
+              {
+                label: (
+                  <span className="inline-flex items-center justify-center gap-1">
+                    Custom
+                    <InfoIcon title="Custom mappings" body={STAT_HELP.custom} onOpen={setInfo} />
+                  </span>
+                ),
+                value: customCount,
+                valueClassName: customCount > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+              },
+              {
+                label: (
+                  <span className="inline-flex items-center justify-center gap-1">
+                    Default
+                    <InfoIcon title="Default mappings" body={STAT_HELP.default} onOpen={setInfo} />
+                  </span>
+                ),
+                value: defaultCount,
+              },
               ...(missingCount > 0
-                ? [{ label: 'Unmapped', value: missingCount, valueClassName: 'text-danger-600 dark:text-danger-400' }]
+                ? [{
+                    label: (
+                      <span className="inline-flex items-center justify-center gap-1">
+                        Unmapped
+                        <InfoIcon title="Unmapped keys" body={STAT_HELP.unmapped} onOpen={setInfo} />
+                      </span>
+                    ),
+                    value: missingCount,
+                    valueClassName: 'text-danger-600 dark:text-danger-400',
+                  }]
                 : []),
             ]}
           />
@@ -363,6 +498,7 @@ export function AccountConfigPage({
                             accountOptions={accountOptions}
                             canWrite={canWrite}
                             onChange={handleMappingChange}
+                            onOpenInfo={setInfo}
                           />
                         ))}
                       </div>
@@ -397,8 +533,16 @@ export function AccountConfigPage({
 
       {activeTab === 'categories' && (
         <div className="space-y-3">
-          <p className="text-xs text-app-fg-muted px-0.5">
-            Account types tag leaf accounts for reports and Cash Flow (BANK / CASH). Add accounts on the Accounts tab to add more of a type.
+          <p className="text-xs text-app-fg-muted px-0.5 inline-flex items-start gap-1.5">
+            <span>
+              Account types tag leaf accounts for reports and Cash Flow (BANK / CASH). Add accounts on the Accounts tab to add more of a type.
+            </span>
+            <InfoIcon
+              title="Account types"
+              body={ACCOUNT_TYPES_HELP}
+              onOpen={setInfo}
+              className="mt-0.5 shrink-0"
+            />
           </p>
           <CompactTable
             columns={accountTypeColumns}
@@ -411,7 +555,7 @@ export function AccountConfigPage({
       )}
 
       {activeTab === 'rules' && (
-        <PostingRulesTab onJumpToMappings={() => setActiveTab('mappings')} />
+        <PostingRulesTab onJumpToMappings={() => setActiveTab('mappings')} onOpenInfo={setInfo} />
       )}
     </div>
   );
@@ -535,7 +679,13 @@ const POSTING_RULES = [
   },
 ] as const;
 
-function PostingRulesTab({ onJumpToMappings }: { onJumpToMappings: () => void }) {
+function PostingRulesTab({
+  onJumpToMappings,
+  onOpenInfo,
+}: {
+  onJumpToMappings: () => void;
+  onOpenInfo: (info: InfoContent) => void;
+}) {
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(POSTING_RULES.map((r) => r.trigger)),
   );
@@ -550,13 +700,40 @@ function PostingRulesTab({ onJumpToMappings }: { onJumpToMappings: () => void })
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-app-fg-muted px-0.5">
-        Read-only reference for how auto-posting journals are built. Remap any named account on the Mappings tab.
+      <p className="text-xs text-app-fg-muted px-0.5 inline-flex items-start gap-1.5">
+        <span>
+          Read-only reference for how auto-posting journals are built. Remap any named account on the Mappings tab.
+          {' '}
+          Tap{' '}
+          <button
+            type="button"
+            className="text-brand-600 dark:text-brand-400 hover:underline font-semibold"
+            onClick={() => onOpenInfo({ title: 'Debit (DR)', body: SIDE_HELP.DR })}
+          >
+            DR
+          </button>
+          {' or '}
+          <button
+            type="button"
+            className="text-brand-600 dark:text-brand-400 hover:underline font-semibold"
+            onClick={() => onOpenInfo({ title: 'Credit (CR)', body: SIDE_HELP.CR })}
+          >
+            CR
+          </button>
+          {' for what each side means.'}
+        </span>
+        <InfoIcon
+          title="Posting rules"
+          body={POSTING_RULES_INTRO_HELP}
+          onOpen={onOpenInfo}
+          className="mt-0.5 shrink-0"
+        />
       </p>
       <div className="card !p-0 overflow-hidden">
         <div className="divide-y divide-app-border">
           {POSTING_RULES.map((rule) => {
             const isExpanded = expanded.has(rule.trigger);
+            const ruleHelp = RULE_HELP[rule.trigger];
             return (
               <div key={rule.trigger}>
                 <button
@@ -571,7 +748,17 @@ function PostingRulesTab({ onJumpToMappings }: { onJumpToMappings: () => void })
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                   </svg>
                   <div className="flex-1 min-w-0 text-left">
-                    <span className="text-sm font-semibold text-app-fg">{rule.trigger}</span>
+                    <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-app-fg">
+                      {rule.trigger}
+                      {ruleHelp ? (
+                        <InfoIcon
+                          title={rule.trigger}
+                          body={ruleHelp.summary}
+                          sections={ruleHelp.sections}
+                          onOpen={onOpenInfo}
+                        />
+                      ) : null}
+                    </span>
                     <p className="text-xs text-app-fg-muted mt-0.5">{rule.description}</p>
                   </div>
                   <span className="text-xs text-app-fg-muted shrink-0">
@@ -581,36 +768,57 @@ function PostingRulesTab({ onJumpToMappings }: { onJumpToMappings: () => void })
 
                 {isExpanded && (
                   <div className="divide-y divide-app-border">
-                    {rule.entries.map((entry, idx) => (
-                      <div key={idx} className="flex items-center gap-3 px-4 py-2.5 pl-12">
+                    {rule.entries.map((entry, idx) => {
+                      const mappingKey = 'mappingKey' in entry ? entry.mappingKey : undefined;
+                      const entryHelp =
+                        (mappingKey && ruleHelp?.entries[mappingKey]) ||
+                        ruleHelp?.entries[entry.account] ||
+                        (mappingKey ? MAPPING_HELP[mappingKey] : undefined);
+                      return (
+                      <div key={idx} className="flex items-start gap-3 px-4 py-3 pl-12">
                         {entry.side === 'DR' ? (
-                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300 shrink-0 w-10 justify-center">
+                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300 shrink-0 w-10 justify-center mt-0.5">
                             DR
                           </span>
                         ) : entry.side === 'CR' ? (
-                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300 shrink-0 w-10 justify-center">
+                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300 shrink-0 w-10 justify-center mt-0.5">
                             CR
                           </span>
                         ) : (
-                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-app-hover text-app-fg-muted shrink-0 w-10 justify-center">
+                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-app-hover text-app-fg-muted shrink-0 w-10 justify-center mt-0.5">
                             {entry.side}
                           </span>
                         )}
-                        {'mappingKey' in entry && entry.mappingKey ? (
-                          <button
-                            type="button"
-                            onClick={onJumpToMappings}
-                            className="text-sm text-brand-600 dark:text-brand-400 hover:underline text-left"
-                            title={`Remap ${entry.mappingKey} on Mappings tab`}
-                          >
-                            {entry.account}
-                            <span className="ml-1.5 text-[10px] font-mono text-app-fg-muted">{entry.mappingKey}</span>
-                          </button>
-                        ) : (
-                          <span className="text-sm text-app-fg">{entry.account}</span>
-                        )}
+                        <div className="min-w-0 flex-1 space-y-0.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {mappingKey ? (
+                              <button
+                                type="button"
+                                onClick={onJumpToMappings}
+                                className="text-sm text-brand-600 dark:text-brand-400 hover:underline text-left min-w-0 truncate"
+                                title={`Remap ${mappingKey} on Mappings tab`}
+                              >
+                                {entry.account}
+                              </button>
+                            ) : (
+                              <span className="text-sm text-app-fg truncate">{entry.account}</span>
+                            )}
+                            {entryHelp ? (
+                              <InfoIcon
+                                title={`${entry.side} · ${entry.account}`}
+                                body={entryHelp}
+                                onOpen={onOpenInfo}
+                                className="shrink-0"
+                              />
+                            ) : null}
+                          </div>
+                          {mappingKey ? (
+                            <p className="text-[10px] font-mono text-app-fg-muted">{mappingKey}</p>
+                          ) : null}
+                        </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -628,16 +836,19 @@ function MappingRow({
   accountOptions,
   canWrite,
   onChange,
+  onOpenInfo,
 }: {
   mapping: AccountMappingRow;
   localValue?: string;
   accountOptions: Array<{ value: string; label: string; description?: string }>;
   canWrite: boolean;
   onChange: (mappingKey: string, accountId: string) => void;
+  onOpenInfo: (info: InfoContent) => void;
 }) {
   const currentValue = localValue ?? mapping.accountId;
   const isDirty = localValue !== undefined;
   const isMissing = !mapping.accountId && !localValue;
+  const help = MAPPING_HELP[mapping.mappingKey];
 
   return (
     <div
@@ -651,7 +862,12 @@ function MappingRow({
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm text-app-fg">{mapping.label}</span>
+          <span className="inline-flex items-center gap-1.5 text-sm text-app-fg">
+            {mapping.label}
+            {help ? (
+              <InfoIcon title={mapping.label} body={help} onOpen={onOpenInfo} />
+            ) : null}
+          </span>
           {isDirty ? (
             <span className="inline-flex items-center rounded-full bg-warning-100 dark:bg-warning-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-warning-700 dark:text-warning-300">
               Changed
@@ -671,6 +887,8 @@ function MappingRow({
           )}
         </div>
         <p className="text-xs text-app-fg-muted mt-0.5">
+          <span className="font-mono">{mapping.mappingKey}</span>
+          {' · '}
           Default: <span className="font-mono">{mapping.defaultCode}</span>
           {mapping.accountId ? (
             <>

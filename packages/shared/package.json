@@ -30,6 +30,7 @@
     "db:seed:expenses-today": "tsx src/db/seed-expenses-today.ts",
     "db:seed-permissions": "tsx scripts/seed-permissions.ts",
     "db:seed-payroll-config": "tsx scripts/seed-payroll-config.ts",
+    "db:seed-payroll-staff-assign": "tsx scripts/seed-payroll-staff-assign.ts",
     "db:seed-message-templates": "tsx scripts/seed-message-templates.ts",
     "db:audit-funding": "tsx src/db/audit-funding-balance.ts",
     "db:audit-permission-coverage": "tsx scripts/audit-permission-coverage.ts",

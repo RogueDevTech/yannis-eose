@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { useLoaderData, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
@@ -172,8 +172,18 @@ function PayrollConfigTabbedPage({
   products: Array<{ id: string; name: string }>;
   canWrite: boolean;
 }) {
-  const [tab, setTab] = useState('roles');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const tab =
+    tabParam === 'products' || tabParam === 'tax' || tabParam === 'roles' ? tabParam : 'roles';
   const [createTarget, setCreateTarget] = useState<'products' | 'tax' | null>(null);
+
+  const setTab = (next: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'roles') params.delete('tab');
+    else params.set('tab', next);
+    setSearchParams(params, { replace: true });
+  };
 
   const tabsBar = (
     <Tabs

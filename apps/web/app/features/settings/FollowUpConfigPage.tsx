@@ -3,6 +3,7 @@ import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { useSocketEvent } from '~/hooks/useSocket';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable } from '~/components/ui/compact-table';
 import { Tabs } from '~/components/ui/tabs';
 import { Modal } from '~/components/ui/modal';
@@ -324,6 +325,8 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
         }
         mobileInlineActions
       />
+
+      <MobileDateFilterRow hideDate />
 
       <Tabs
         value={tab}

@@ -170,6 +170,12 @@ export interface CompactTableProps<T> {
    * `hideable: false`. Desktop-only — mobile cards always show all columns.
    */
   columnVisibilityKey?: string;
+  /**
+   * Left side of the desktop Columns toolbar (and a compact strip above mobile
+   * cards). Use for filtered totals / record previews so they share the row
+   * with the Columns control instead of a separate bar above the table.
+   */
+  toolbarLeading?: ReactNode;
 }
 
 const ALIGN_CLASS: Record<CompactTableAlign, string> = {
@@ -450,6 +456,7 @@ export function CompactTable<T>({
   renderRowDetail,
   rowHref,
   columnVisibilityKey,
+  toolbarLeading,
 }: CompactTableProps<T>) {
   const navigate = useNavigate();
   const hasRows = rows.length > 0;
@@ -770,15 +777,20 @@ export function CompactTable<T>({
     </div>
   );
 
+  const showToolbar = Boolean(toolbarLeading) || hasColumnToggler;
+
   const desktopTable = (
     <div className="hidden md:block">
-      {hasColumnToggler && (
-        <div className="relative flex justify-end border-b border-app-border bg-app-elevated px-2 py-1">
-          <ColumnVisibilityPopover
-            columns={columns}
-            visibleKeys={visibleKeys}
-            onChange={handleColumnVisibilityChange}
-          />
+      {showToolbar && (
+        <div className="relative flex items-center justify-between gap-3 border-b border-app-border bg-app-elevated px-2 py-1">
+          <div className="min-w-0 flex-1">{toolbarLeading}</div>
+          {hasColumnToggler ? (
+            <ColumnVisibilityPopover
+              columns={columns}
+              visibleKeys={visibleKeys}
+              onChange={handleColumnVisibilityChange}
+            />
+          ) : null}
         </div>
       )}
       <div className="overflow-x-auto">
@@ -908,6 +920,11 @@ export function CompactTable<T>({
 
   const body = (
     <>
+      {toolbarLeading ? (
+        <div className="md:hidden border-b border-app-border bg-app-elevated px-3 py-2">
+          {toolbarLeading}
+        </div>
+      ) : null}
       {mobileCards}
       {desktopTable}
     </>

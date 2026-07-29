@@ -348,10 +348,16 @@ export function PayrollContractorDetailLoadingShell() {
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Contractor detail toolbar"
-            desktop={<PageRefreshButton />}
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                <DateFilterBar startDate="" endDate="" periodAllTime={false} chrome="pill" />
+              </div>
+            }
           />
         }
       />
+      <MobileDateFilterRow startDate="" endDate="" periodAllTime={false} />
       <OverviewStatStrip
         items={[
           { label: 'Job title', value: <StatValuePulse className="min-w-[4rem]" /> },

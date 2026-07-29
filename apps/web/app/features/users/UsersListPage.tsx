@@ -7,6 +7,7 @@ import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { PageSearchControl } from '~/components/ui/page-search-control';
@@ -27,6 +28,8 @@ import { ROLE_OPTIONS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { SupervisorBadge } from '~/components/ui/supervisor-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
+import { TruncatedTextWithPopup } from '~/components/ui/truncated-text-popup';
+import { CopyableEmail } from '~/components/ui/copyable-email';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TableActionButton } from '~/components/ui/table-action-button';
 // Legacy modal removed (CEO directive 2026-05-11) — Import now opens its own
@@ -432,14 +435,21 @@ export function UsersListPage({
         key: 'name',
         header: 'Name',
         hideable: false,
+        nowrap: true,
         render: (user) => (
-          <span className="font-medium text-app-fg">{user.name}</span>
+          <TruncatedTextWithPopup
+            value={user.name}
+            chars={20}
+            label="Name"
+            textClassName="font-medium text-app-fg"
+          />
         ),
       },
       {
         key: 'email',
         header: 'Email',
-        render: (user) => <span className="text-app-fg-muted">{user.email}</span>,
+        nowrap: true,
+        render: (user) => <CopyableEmail email={user.email} chars={20} />,
       },
       {
         key: 'role',
@@ -635,6 +645,8 @@ export function UsersListPage({
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {!staffAccounts && (
         rosterLoading ? (
@@ -1072,7 +1084,9 @@ export function UsersListPage({
                     <RoleBadge variant="text" role={user.role} label={formatRole(user.role)} />
                     {user.isTeamSupervisor && <SupervisorBadge size="sm" />}
                   </div>
-                  <div className="text-xs text-app-fg-muted truncate">{user.email}</div>
+                  <div className="text-xs min-w-0">
+                    <CopyableEmail email={user.email} chars={20} className="text-xs" />
+                  </div>
                 </button>
               )}
             />

@@ -6,6 +6,7 @@ import { requirePermission, apiRequest, getSessionCookie } from '~/lib/api.serve
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { TextInput } from '~/components/ui/text-input';
@@ -110,6 +111,8 @@ export default function CompanyGroupsPage() {
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {/* Groups grid — card design matching /admin/branches */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useFetcher } from '@remix-run/react';
+import { Link } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
@@ -8,11 +8,6 @@ import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
-import { Modal } from '~/components/ui/modal';
-import { Button } from '~/components/ui/button';
-import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
-import { useFetcherToast } from '~/components/ui/toast';
-import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -43,15 +38,9 @@ function formatCategory(category: string): string {
 }
 
 export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesContent, headerAction }: PayrollConfigRolesPageProps) {
-  const fetcher = useFetcher<{ success?: boolean; error?: string }>();
-  const [archiveRole, setArchiveRole] = useState<PayRole | null>(null);
-  const [peekRole, setPeekRole] = useState<PayRole | null>(null);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [formulaFilter, setFormulaFilter] = useState('');
-
-  useFetcherToast(fetcher.data, { successMessage: 'Pay role archived' });
-  useCloseOnFetcherSuccess(fetcher, () => setArchiveRole(null), { intent: 'archivePayRole' });
 
   const categoryOptions = [
     { value: '', label: 'All categories' },
@@ -133,25 +122,13 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
         tight: true,
         hideable: false,
         render: (row) => (
-          <div className="inline-flex items-center gap-1.5">
-            <CompactTableActionButton to={`/hr/payroll/config/rules/${row.id}`} tone="brand">
-              {canWrite ? 'Edit' : 'View'}
-            </CompactTableActionButton>
-            {canWrite && (
-              <CompactTableActionButton to={`/hr/payroll/config/roles/${row.id}/assign?assignStatus=assigned_this`}>
-                Assign
-              </CompactTableActionButton>
-            )}
-            {canWrite && (
-              <CompactTableActionButton onClick={() => setArchiveRole(row)} tone="danger">
-                Archive
-              </CompactTableActionButton>
-            )}
-          </div>
+          <CompactTableActionButton to={`/hr/payroll/config/rules/${row.id}`} tone="brand">
+            View
+          </CompactTableActionButton>
         ),
       },
     ],
-    [canWrite],
+    [],
   );
 
   return (
@@ -306,9 +283,9 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
           emptyTitle="No pay roles"
           emptyDescription=""
           renderMobileCard={(row) => (
-            <button
-              type="button"
-              onClick={() => setPeekRole(row)}
+            <Link
+              to={`/hr/payroll/config/rules/${row.id}`}
+              prefetch="intent"
               className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
             >
               <div className="flex items-center justify-between gap-2">
@@ -326,84 +303,8 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
                 </span>
                 {' staff'}
               </p>
-            </button>
+            </Link>
           )}
-        />
-      )}
-
-      {/* Peek modal — mobile detail + actions */}
-      <Modal open={!!peekRole} onClose={() => setPeekRole(null)} maxWidth="max-w-sm" contentClassName="p-5 space-y-4">
-        {peekRole && (
-          <>
-            <div>
-              <h3 className="text-base font-semibold text-app-fg">{peekRole.name}</h3>
-              <p className="text-sm text-app-fg-muted mt-1">{formatCategory(peekRole.category)}</p>
-            </div>
-            <dl className="text-sm space-y-2">
-              <div className="flex justify-between">
-                <dt className="text-app-fg-muted">Formula</dt>
-                <dd className="text-app-fg">{peekRole.commissionPlanId ? 'Linked' : 'None'}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-app-fg-muted">Per-product bonus</dt>
-                <dd className="text-app-fg">{peekRole.perProductBonus ? 'Yes' : 'No'}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-app-fg-muted">Staff assigned</dt>
-                <dd className="text-app-fg tabular-nums">{peekRole.staffCount ?? 0}</dd>
-              </div>
-            </dl>
-            <div className="flex flex-col gap-2 pt-2 border-t border-app-border">
-              <Link
-                to={`/hr/payroll/config/rules/${peekRole.id}`}
-                className="btn-primary h-10 flex items-center justify-center text-sm font-medium rounded-lg"
-                onClick={() => setPeekRole(null)}
-              >
-                {canWrite ? 'Edit formula' : 'View formula'}
-              </Link>
-              {canWrite && (
-                <Link
-                  to={`/hr/payroll/config/roles/${peekRole.id}/assign?assignStatus=assigned_this`}
-                  className="btn-secondary h-10 flex items-center justify-center text-sm font-medium rounded-lg"
-                  onClick={() => setPeekRole(null)}
-                >
-                  Assign staff
-                </Link>
-              )}
-              {canWrite && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="w-full text-danger-600 dark:text-danger-400"
-                  onClick={() => {
-                    setPeekRole(null);
-                    setArchiveRole(peekRole);
-                  }}
-                >
-                  Archive
-                </Button>
-              )}
-            </div>
-          </>
-        )}
-      </Modal>
-
-      {/* Archive confirmation */}
-      {archiveRole && (
-        <ConfirmActionModal
-          open
-          title="Archive pay role"
-          description={`Archive "${archiveRole.name}"? Staff currently assigned this role will keep their existing payouts, but no new batches will use it.`}
-          confirmLabel="Archive"
-          variant="danger"
-          loading={fetcher.state === 'submitting'}
-          onClose={() => setArchiveRole(null)}
-          onConfirm={() => {
-            fetcher.submit(
-              { intent: 'archivePayRole', payRoleId: archiveRole.id },
-              { method: 'post' },
-            );
-          }}
         />
       )}
       </>}

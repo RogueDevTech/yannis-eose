@@ -24,9 +24,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   if (!user) throw redirect('/auth');
   const cookie = getSessionCookie(request);
+  const url = new URL(request.url);
+  const statusParam = url.searchParams.get('status');
+  const statusFilter = statusParam === 'inactive' ? 'inactive' : 'active';
 
   const pageData = (async () => {
-    const contractorsRes = await apiRequest<unknown>('/trpc/hr.listContractors', { method: 'GET', cookie });
+    const listInput = encodeURIComponent(
+      JSON.stringify({ active: statusFilter === 'active' }),
+    );
+    const contractorsRes = await apiRequest<unknown>(
+      `/trpc/hr.listContractors?input=${listInput}`,
+      { method: 'GET', cookie },
+    );
 
     const contractors = contractorsRes.ok
       ? (((contractorsRes.data as { result?: { data?: PayrollContractor[] } })?.result?.data) ?? [])
@@ -39,7 +48,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       user.role === 'ADMIN' ||
       user.role === 'HR_MANAGER';
 
-    return { contractors, canWrite };
+    return { contractors, statusFilter, canWrite };
   })();
 
   return defer({ pageData });
@@ -86,37 +95,6 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
-  if (intent === 'updateContractor') {
-    const body: Record<string, unknown> = {
-      id: formData.get('contractorId')?.toString() ?? '',
-    };
-    const name = pickOptional('name');
-    if (name) body.name = name;
-    const jobTitle = pickOptional('jobTitle');
-    if (jobTitle !== undefined) body.jobTitle = jobTitle;
-    const monthlyFee = formData.get('monthlyFee')?.toString();
-    if (monthlyFee) body.monthlyFee = Number(monthlyFee);
-    const bankName = pickOptional('bankName');
-    if (bankName !== undefined) body.bankName = bankName;
-    const bankCode = pickOptional('bankCode');
-    if (bankCode !== undefined) body.bankCode = bankCode;
-    const accountNumber = pickOptional('accountNumber');
-    if (accountNumber !== undefined) body.accountNumber = accountNumber;
-    const accountName = pickOptional('accountName');
-    if (accountName !== undefined) body.accountName = accountName;
-    const notes = pickOptional('notes');
-    if (notes !== undefined) body.notes = notes;
-
-    const res = await apiRequest<unknown>('/trpc/hr.updateContractor', { method: 'POST', cookie, body });
-    if (!res.ok) {
-      return json(
-        { error: extractApiErrorMessage(res.data, 'Failed to update contractor') },
-        { status: safeStatus(res.status) },
-      );
-    }
-    return json({ success: true });
-  }
-
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
@@ -127,6 +105,7 @@ export default function PayrollContractorsRoute() {
       {(data) => (
         <PayrollContractorsPage
           contractors={data.contractors}
+          statusFilter={data.statusFilter}
           canWrite={data.canWrite}
         />
       )}

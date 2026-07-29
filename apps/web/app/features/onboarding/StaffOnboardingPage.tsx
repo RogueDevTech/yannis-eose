@@ -8,6 +8,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
@@ -584,6 +585,8 @@ export function StaffOnboardingPage({
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {isMirroring ? (
         <div className="rounded-lg border border-success-300 bg-success-50 p-3 text-sm text-success-900 dark:border-success-700 dark:bg-success-900/20 dark:text-success-100">

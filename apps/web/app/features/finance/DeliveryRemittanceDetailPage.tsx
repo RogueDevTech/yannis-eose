@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useFetcher, useLocation, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useLocation, useNavigate } from '@remix-run/react';
 import { generateInvoicePdf } from '~/lib/invoice-pdf';
 import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
 import { ReceiptPreviewModal } from '~/components/ui/receipt-preview-modal';
@@ -8,6 +8,7 @@ import { Button } from '~/components/ui/button';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
@@ -23,7 +24,6 @@ import {
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import type { DeliveryRemittanceDetail } from './DeliveryRemittancesPage';
-import { CashRemittanceEditModal } from './CashRemittanceEditModal';
 
 interface DeliveryRemittanceDetailPageProps {
   detail: DeliveryRemittanceDetail;
@@ -45,26 +45,14 @@ export function DeliveryRemittanceDetailPage({
   userMap,
 }: DeliveryRemittanceDetailPageProps) {
   const location = useLocation();
-  const [, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [disputeMode, setDisputeMode] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
   const [dismissedError, setDismissedError] = useState(false);
   const [invoicePreview, setInvoicePreview] = useState<OrderInvoice | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<{ url: string; label: string } | null>(null);
-  const [showEditModal, setShowEditModal] = useState(() => {
-    const params = new URLSearchParams(location.search);
-    return params.get('edit') === 'true';
-  });
-
-  const closeEditModal = () => {
-    setShowEditModal(false);
-    setSearchParams((p) => {
-      const next = new URLSearchParams(p);
-      next.delete('edit');
-      return next;
-    }, { replace: true });
-  };
+  const editPath = `/admin/finance/delivery-remittances/${detail.id}/edit`;
 
   const listBackHref =
     typeof location.state === 'object' &&
@@ -263,7 +251,7 @@ export function DeliveryRemittanceDetailPage({
               <>
                 <PageRefreshButton />
                 {hasApprovePermission && (
-                  <Button variant="secondary" size="sm" onClick={() => setShowEditModal(true)}>
+                  <Button variant="secondary" size="sm" onClick={() => navigate(editPath)}>
                     Edit
                   </Button>
                 )}
@@ -279,7 +267,7 @@ export function DeliveryRemittanceDetailPage({
                     className="h-12 w-full justify-center"
                     onClick={() => {
                       closeSheet();
-                      setShowEditModal(true);
+                      navigate(editPath);
                     }}
                   >
                     Edit batch
@@ -290,6 +278,8 @@ export function DeliveryRemittanceDetailPage({
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {actionError && !dismissedError && (
         <PageNotification
@@ -553,20 +543,6 @@ export function DeliveryRemittanceDetailPage({
         title={receiptPreview ? `Remittance ${receiptPreview.label.toLowerCase()}` : 'Receipt'}
         imageAlt={receiptPreview?.label ?? 'Receipt'}
       />
-
-      {hasApprovePermission && (
-        <CashRemittanceEditModal
-          open={showEditModal}
-          onClose={() => closeEditModal()}
-          detail={detail}
-          onSuccess={() => {
-            // Remove ?edit from URL and reload to pick up fresh data
-            const url = new URL(window.location.href);
-            url.searchParams.delete('edit');
-            window.location.replace(url.toString());
-          }}
-        />
-      )}
     </div>
   );
 }

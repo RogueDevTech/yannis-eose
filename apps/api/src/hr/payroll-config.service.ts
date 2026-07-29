@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, inArray, isNotNull, isNull, sql, type AnyColumn, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lte, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { uuidv7 } from 'uuidv7';
 import {
@@ -155,7 +155,27 @@ export class PayrollConfigService {
       plan = linked ?? null;
     }
 
-    return { payRole, plan };
+    const assignedStaff = await this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        role: schema.users.role,
+        email: schema.users.email,
+      })
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.payRoleId, payRoleId),
+          eq(schema.users.status, 'ACTIVE'),
+        ),
+      )
+      .orderBy(schema.users.name);
+
+    return {
+      payRole: { ...payRole, staffCount: assignedStaff.length },
+      plan,
+      assignedStaff,
+    };
   }
 
   async saveFormulaConfig(
@@ -324,13 +344,14 @@ export class PayrollConfigService {
     );
   }
 
-  async listContractors(groupId?: string | null) {
+  async listContractors(groupId?: string | null, opts?: { active?: boolean }) {
+    const active = opts?.active ?? true;
     return this.db
       .select()
       .from(schema.payrollContractors)
       .where(
         and(
-          eq(schema.payrollContractors.active, true),
+          eq(schema.payrollContractors.active, active),
           companyEq(schema.payrollContractors.groupId, groupId),
         ),
       )
@@ -357,7 +378,10 @@ export class PayrollConfigService {
     const page = input.page ?? 1;
     const limit = input.limit ?? 20;
     const offset = (page - 1) * limit;
-    const where = eq(schema.payoutRecords.contractorId, input.contractorId);
+    const conds = [eq(schema.payoutRecords.contractorId, input.contractorId)];
+    if (input.fromMonth) conds.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
+    if (input.toMonth) conds.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
+    const where = and(...conds);
 
     const [rows, countResult] = await Promise.all([
       this.db
@@ -376,6 +400,7 @@ export class PayrollConfigService {
       this.db
         .select({ count: count() })
         .from(schema.payoutRecords)
+        .innerJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
         .where(where),
     ]);
 

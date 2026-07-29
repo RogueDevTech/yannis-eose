@@ -7,6 +7,7 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { FileUpload } from '~/components/ui/file-upload';
 import { Tabs } from '~/components/ui/tabs';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
@@ -673,11 +674,12 @@ export function LogisticsOrderDetailPage({
                 </span>
               )}
               <OrderStatusBadge status={order.status} expanded />
-              <PageRefreshButton iconOnly />
             </div>
           </>
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {/* Status Pipeline */}
       <div className="card p-4">

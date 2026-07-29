@@ -13,6 +13,7 @@ import { InlineNotification } from '~/components/ui/inline-notification';
 import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -904,6 +905,9 @@ export function InventoryPage(props: InventoryStreamData) {
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
+
       {levelsLoadError && <RouteFetchErrorBanner messages={[levelsLoadError]} variant="danger" />}
       {movementsLoadError && (
         <RouteFetchErrorBanner messages={[movementsLoadError]} variant="warning" />

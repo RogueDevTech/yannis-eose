@@ -604,23 +604,100 @@ export function MarketingTeamPage({
     />
   ) : null;
 
+  const viewLabel = layoutView === 'team' ? 'View by Teams' : 'View by member';
+  const viewIsDefault = layoutView === 'listing';
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const [viewDraft, setViewDraft] = useState<MarketingTeamLayoutView>(layoutView);
+  useEffect(() => {
+    if (viewMenuOpen) setViewDraft(layoutView);
+  }, [viewMenuOpen, layoutView]);
+
+  // Mobile Actions sheet: match SortMenu trigger chrome (bordered pill), not FormSelect.
   const viewFilterSelectSheet = canUseTeamView ? (
-    <FormSelect
-      id="marketing-team-view-filter-sheet"
-      aria-label="Team analysis layout"
-      value={layoutView}
-      onChange={(e) => {
-        const next = e.target.value === 'team' ? 'team' : 'listing';
-        mergeListParams({ view: next, page: 1, teamId: next === 'team' ? null : undefined });
-      }}
-      options={[
-        { value: 'listing', label: 'View by member' },
-        { value: 'team', label: 'View by Teams' },
-      ]}
-      controlSize="lg"
-      openAs="modal"
-      wrapperClassName="w-full"
-    />
+    <>
+      <button
+        type="button"
+        onClick={() => setViewMenuOpen(true)}
+        className={[
+          'inline-flex items-center gap-1.5 rounded-md border bg-app-surface px-3 py-1.5 text-sm font-medium transition-colors',
+          viewIsDefault
+            ? 'border-app-border text-app-fg-muted hover:bg-app-hover'
+            : 'border-brand-300 dark:border-brand-700 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-200 hover:bg-brand-100 dark:hover:bg-brand-900/30',
+        ].join(' ')}
+        aria-label="Open view menu"
+      >
+        <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 018.25 20.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"
+          />
+        </svg>
+        <span className="text-app-fg-muted">View:</span>
+        <span className="text-app-fg">{viewLabel}</span>
+      </button>
+
+      <Modal open={viewMenuOpen} onClose={() => setViewMenuOpen(false)} contentClassName="p-0" maxWidth="max-w-md">
+        <div className="border-b border-app-border px-5 pb-3 pt-5">
+          <h2 className="text-base font-semibold text-app-fg">View</h2>
+          <p className="mt-1 text-xs text-app-fg-muted">Choose how to browse Team Analysis.</p>
+        </div>
+        <div className="space-y-1 px-5 py-4">
+          {(
+            [
+              { value: 'listing' as const, label: 'View by member', description: 'Table of individual media buyers' },
+              { value: 'team' as const, label: 'View by Teams', description: 'Cards with rolled-up squad performance' },
+            ] as const
+          ).map((opt) => {
+            const selected = viewDraft === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setViewDraft(opt.value)}
+                className={[
+                  'flex w-full flex-col items-start gap-0.5 rounded-md border px-3 py-2.5 text-left transition-colors',
+                  selected
+                    ? 'border-brand-400 bg-brand-50 dark:border-brand-600 dark:bg-brand-900/20'
+                    : 'border-app-border hover:bg-app-hover',
+                ].join(' ')}
+              >
+                <span className="text-sm font-medium text-app-fg">{opt.label}</span>
+                <span className="text-xs text-app-fg-muted">{opt.description}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex gap-2 border-t border-app-border p-3">
+          <Button
+            type="button"
+            variant="secondary"
+            className="flex-1"
+            onClick={() => {
+              mergeListParams({ view: 'listing', page: 1, teamId: null });
+              setViewMenuOpen(false);
+            }}
+          >
+            Reset
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            className="flex-1"
+            onClick={() => {
+              mergeListParams({
+                view: viewDraft,
+                page: 1,
+                teamId: viewDraft === 'team' ? null : undefined,
+              });
+              setViewMenuOpen(false);
+            }}
+          >
+            Apply
+          </Button>
+        </div>
+      </Modal>
+    </>
   ) : null;
 
   const activeFilterCount = useMemo(() => {

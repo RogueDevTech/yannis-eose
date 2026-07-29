@@ -7,6 +7,7 @@ import { Modal } from '~/components/ui/modal';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Tabs } from '~/components/ui/tabs';
@@ -346,6 +347,8 @@ export function FormsPage({
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <OverviewStatStrip
         mobileGrid

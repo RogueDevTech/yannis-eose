@@ -63,7 +63,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   const parsed = listStaffOnboardingDocumentsSchema.safeParse(rawInput);
-  const input = parsed.success ? parsed.data : listStaffOnboardingDocumentsSchema.parse({ page, limit });
+  // If URL params fail validation (historically: limit 10_000 vs Zod max 1000),
+  // fall back to safe defaults — never re-parse the same invalid payload (that 500s).
+  const input = parsed.success
+    ? parsed.data
+    : listStaffOnboardingDocumentsSchema.parse({
+        page,
+        limit: Math.min(limit, 10_000),
+        search: rawInput.search,
+        allBranches: rawInput.allBranches,
+      });
 
   const inputEnc = encodeURIComponent(JSON.stringify(input));
   const countsInput = encodeURIComponent(

@@ -23,8 +23,10 @@ export const REMITTANCE_BATCH_STORAGE_KEY = 'yannis:remittance-batch';
 /**
  * The create-page batch DRAFT (per-order delivery fees, extra costs, note,
  * toggle) lives under its own key so nothing on the list page can wipe it. It is
- * keyed by the exact set of order IDs in the batch, so returning to the same
- * batch restores its inputs and a different batch starts clean.
+ * tagged with the batch's order IDs: the draft is restored when the current
+ * batch is the same batch, a grown version of it (more orders checked on the
+ * list page), or a shrunk version (orders removed). An unrelated batch starts
+ * clean.
  */
 const REMITTANCE_DRAFT_STORAGE_KEY = 'yannis:remittance-draft';
 
@@ -54,7 +56,6 @@ export const EMPTY_BATCH_DRAFT: RemittanceBatchDraft = {
 type PersistedShape<T> = {
   ids: string[];
   rows: Array<[string, T]>;
-  draft?: RemittanceBatchDraft;
 };
 
 function readStore<T>(): PersistedShape<T> | null {
@@ -98,12 +99,9 @@ export function usePersistedRemittanceSelection<T>() {
         localStorage.removeItem(REMITTANCE_BATCH_STORAGE_KEY);
         return;
       }
-      // Preserve the create-page draft when rewriting membership.
-      const existing = readStore<T>();
       const payload: PersistedShape<T> = {
         ids: [...selectedIds],
         rows: [...selectedById.entries()],
-        draft: existing?.draft,
       };
       localStorage.setItem(REMITTANCE_BATCH_STORAGE_KEY, JSON.stringify(payload));
     } catch {
@@ -146,18 +144,29 @@ export function useRemittanceBatchDraftCount(): number {
   return count;
 }
 
-/** A stable signature for a batch: its order IDs, order-independent. */
-function batchSignature(orderIds: string[]): string {
-  return [...orderIds].sort().join(',');
-}
+type StoredDraft = {
+  ids?: string[];
+  /** Legacy tag from the first release: sorted order IDs joined by ','. */
+  sig?: string;
+  draft: RemittanceBatchDraft;
+};
 
-type StoredDraft = { sig: string; draft: RemittanceBatchDraft };
+/** True when one of the two ID sets contains the other (same batch, grown, or shrunk). */
+function isSameOngoingBatch(storedIds: string[], currentIds: string[]): boolean {
+  if (storedIds.length === 0 || currentIds.length === 0) return false;
+  const stored = new Set(storedIds);
+  const current = new Set(currentIds);
+  return (
+    [...stored].every((id) => current.has(id)) || [...current].every((id) => stored.has(id))
+  );
+}
 
 /**
  * Read the persisted batch-detail draft for the given batch. Returns an empty
- * draft when nothing is saved, or when the saved draft belongs to a DIFFERENT
- * batch (different set of order IDs) so an unrelated batch never inherits stale
- * fees.
+ * draft when nothing is saved, or when the saved draft belongs to an UNRELATED
+ * batch so it never inherits stale fees. A batch that merely grew (more orders
+ * checked on the list page) or shrank (orders removed) is still the same
+ * ongoing batch and keeps its draft.
  */
 export function readRemittanceBatchDraft(currentOrderIds: string[]): RemittanceBatchDraft {
   try {
@@ -165,9 +174,15 @@ export function readRemittanceBatchDraft(currentOrderIds: string[]): RemittanceB
     if (!raw) return { ...EMPTY_BATCH_DRAFT };
     const parsed = JSON.parse(raw) as StoredDraft;
     if (!parsed?.draft) return { ...EMPTY_BATCH_DRAFT };
-    // Only restore when the draft was saved for this exact batch.
-    if (parsed.sig !== batchSignature(currentOrderIds)) return { ...EMPTY_BATCH_DRAFT };
-    return { ...EMPTY_BATCH_DRAFT, ...parsed.draft };
+    const storedIds = parsed.ids ?? parsed.sig?.split(',').filter(Boolean) ?? [];
+    if (!isSameOngoingBatch(storedIds, currentOrderIds)) return { ...EMPTY_BATCH_DRAFT };
+    const draft = { ...EMPTY_BATCH_DRAFT, ...parsed.draft };
+    // Drop fees for orders no longer in the batch (shrunk elsewhere or ineligible).
+    const current = new Set(currentOrderIds);
+    draft.deliveryFees = Object.fromEntries(
+      Object.entries(draft.deliveryFees ?? {}).filter(([id]) => current.has(id)),
+    );
+    return draft;
   } catch {
     return { ...EMPTY_BATCH_DRAFT };
   }
@@ -175,8 +190,8 @@ export function readRemittanceBatchDraft(currentOrderIds: string[]): RemittanceB
 
 /**
  * Persist the create-page batch draft under its own key, tagged with the batch's
- * order-ID signature. Independent of the list-page selection store so navigating
- * back to the list can never wipe it.
+ * order IDs. Independent of the list-page selection store so navigating back to
+ * the list can never wipe it.
  */
 export function writeRemittanceBatchDraft(
   draft: RemittanceBatchDraft,
@@ -184,7 +199,7 @@ export function writeRemittanceBatchDraft(
 ): void {
   try {
     if (currentOrderIds.length === 0) return;
-    const payload: StoredDraft = { sig: batchSignature(currentOrderIds), draft };
+    const payload: StoredDraft = { ids: [...currentOrderIds], draft };
     localStorage.setItem(REMITTANCE_DRAFT_STORAGE_KEY, JSON.stringify(payload));
   } catch {
     /* ignore */
@@ -210,10 +225,7 @@ export function removeOrderFromRemittanceBatch(
         localStorage.removeItem(REMITTANCE_BATCH_STORAGE_KEY);
       } else {
         const rows = existing.rows.filter(([id]) => id !== orderId);
-        localStorage.setItem(
-          REMITTANCE_BATCH_STORAGE_KEY,
-          JSON.stringify({ ids, rows, draft: existing.draft }),
-        );
+        localStorage.setItem(REMITTANCE_BATCH_STORAGE_KEY, JSON.stringify({ ids, rows }));
       }
     }
   } catch {
@@ -236,7 +248,7 @@ export function removeOrderFromRemittanceBatch(
       delete restFees[orderId];
       draft.deliveryFees = restFees;
     }
-    const payload: StoredDraft = { sig: batchSignature(remainingOrderIds), draft };
+    const payload: StoredDraft = { ids: [...remainingOrderIds], draft };
     localStorage.setItem(REMITTANCE_DRAFT_STORAGE_KEY, JSON.stringify(payload));
   } catch {
     /* ignore */

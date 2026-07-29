@@ -18,6 +18,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { FormField } from '~/components/ui/form-field';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -71,6 +72,33 @@ export interface WarehousesPageProps {
     skuCount: number;
   };
 }
+
+const WAREHOUSE_SORT_OPTIONS = [
+  {
+    value: 'createdAt',
+    label: 'Recently added',
+    description: 'When the warehouse was created.',
+    ascLabel: 'Oldest first',
+    descLabel: 'Newest first',
+    defaultDir: 'desc' as const,
+  },
+  {
+    value: 'name',
+    label: 'Name',
+    description: 'Alphabetical.',
+    ascLabel: 'A → Z',
+    descLabel: 'Z → A',
+    defaultDir: 'asc' as const,
+  },
+  {
+    value: 'available',
+    label: 'Available units',
+    description: 'Stock count minus reserved units across the warehouse.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+];
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -300,8 +328,9 @@ export function WarehousesPage({
     }, { preventScrollReset: true });
   };
 
+  const sortIsDefault = sortBy === 'createdAt' && sortDir === 'desc';
+
   const toolbar = useMemo(() => {
-    const sortIsDefault = sortBy === 'createdAt' && sortDir === 'desc';
     return (
       <ToolbarFiltersCollapsible
         className="!border-0 !px-0 md:!px-4"
@@ -338,32 +367,7 @@ export function WarehousesPage({
                 )
               }
               defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
-              options={[
-                {
-                  value: 'createdAt',
-                  label: 'Recently added',
-                  description: 'When the warehouse was created.',
-                  ascLabel: 'Oldest first',
-                  descLabel: 'Newest first',
-                  defaultDir: 'desc',
-                },
-                {
-                  value: 'name',
-                  label: 'Name',
-                  description: 'Alphabetical.',
-                  ascLabel: 'A → Z',
-                  descLabel: 'Z → A',
-                  defaultDir: 'asc',
-                },
-                {
-                  value: 'available',
-                  label: 'Available units',
-                  description: 'Stock count minus reserved units across the warehouse.',
-                  ascLabel: 'Lowest first',
-                  descLabel: 'Highest first',
-                  defaultDir: 'desc',
-                },
-              ]}
+              options={WAREHOUSE_SORT_OPTIONS}
             />
           </div>
         }
@@ -373,7 +377,7 @@ export function WarehousesPage({
         sheetTitle="Actions"
       />
     );
-  }, [search, sortBy, sortDir, setSearchParams]);
+  }, [search, sortBy, sortDir, setSearchParams, sortIsDefault]);
 
   return (
     <div className="space-y-4">
@@ -386,6 +390,28 @@ export function WarehousesPage({
             sheetTitle="Actions"
             triggerAriaLabel="Warehouse toolbar"
             saveFilterKey
+            filtersBadgeCount={sortIsDefault ? 0 : 1}
+            onClearFilters={sortIsDefault ? undefined : () => updateWarehouseSort('createdAt', 'desc')}
+            filters={
+              <div className="relative">
+                {!sortIsDefault && (
+                  <FilterDismiss
+                    onClear={() => updateWarehouseSort('createdAt', 'desc')}
+                  />
+                )}
+                <SortMenu
+                  value={{ sortBy, sortDir }}
+                  onChange={(next) =>
+                    updateWarehouseSort(
+                      next.sortBy as 'createdAt' | 'name' | 'available',
+                      next.sortDir,
+                    )
+                  }
+                  defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
+                  options={WAREHOUSE_SORT_OPTIONS}
+                />
+              </div>
+            }
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />
@@ -398,29 +424,6 @@ export function WarehousesPage({
             }
             sheet={({ closeSheet }) => (
               <>
-                <div className="relative">
-                  {!(sortBy === 'createdAt' && sortDir === 'desc') && (
-                    <FilterDismiss
-                      onClear={() => updateWarehouseSort('createdAt', 'desc')}
-                    />
-                  )}
-                  <SortMenu
-                    value={{ sortBy, sortDir }}
-                    onChange={(next) => {
-                      updateWarehouseSort(
-                        next.sortBy as 'createdAt' | 'name' | 'available',
-                        next.sortDir,
-                      );
-                      closeSheet();
-                    }}
-                    defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
-                    options={[
-                      { value: 'createdAt', label: 'Recently added', ascLabel: 'Oldest first', descLabel: 'Newest first', defaultDir: 'desc' },
-                      { value: 'name', label: 'Name', ascLabel: 'A → Z', descLabel: 'Z → A', defaultDir: 'asc' },
-                      { value: 'available', label: 'Available units', ascLabel: 'Lowest first', descLabel: 'Highest first', defaultDir: 'desc' },
-                    ]}
-                  />
-                </div>
                 {canManage ? (
                   <Button variant="secondary" size="sm" className="h-12 w-full justify-center" onClick={() => { closeSheet(); setShowCreate(true); }}>
                     Add warehouse
@@ -431,6 +434,8 @@ export function WarehousesPage({
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <OverviewStatStrip
         mobileGrid

@@ -12,7 +12,9 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Breadcrumb } from '~/components/ui/breadcrumb';
 import {
@@ -222,6 +224,7 @@ export default function EditShipmentRoute() {
       <PageHeader
         title={`Edit ${data.referenceLabel}`}
         description="Correct shipment details and line items. Destination cannot be changed."
+        mobileInlineActions
         breadcrumb={
           <Breadcrumb
             items={[
@@ -232,14 +235,27 @@ export default function EditShipmentRoute() {
           />
         }
         actions={
-          <div className="flex items-center gap-2">
-            <PageRefreshButton />
-            <Link to={detailUrl} prefetch="intent" className="btn-secondary btn-sm">
-              Back to shipment
-            </Link>
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Edit shipment toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Link to={detailUrl} prefetch="intent" className="btn-secondary btn-sm">
+                  Back to shipment
+                </Link>
+              </>
+            }
+            sheet={
+              <Link to={detailUrl} prefetch="intent" className="btn-secondary btn-sm w-full justify-center">
+                Back to shipment
+              </Link>
+            }
+          />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {!data.canIntake ? (
         <div className="card p-4">

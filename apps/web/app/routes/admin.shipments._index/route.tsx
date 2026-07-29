@@ -17,6 +17,7 @@ import { isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -421,6 +422,8 @@ function ShipmentsIndexContent(data: {
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <OverviewStatStrip
         mobileGrid

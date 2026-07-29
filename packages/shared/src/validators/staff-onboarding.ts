@@ -134,7 +134,8 @@ export const listStaffOnboardingDocumentsSchema = z.object({
   userStatus: z.enum(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED']).optional(),
   branchId: z.string().uuid().optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(1000).default(20),
+  /** HR onboarding directory may load the full company roster in one page. */
+  limit: z.number().int().min(1).max(10_000).default(20),
   sortBy: z.enum(['name', 'onboardingUpdatedAt']).default('name'),
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
   /**

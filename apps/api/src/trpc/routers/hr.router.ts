@@ -24,6 +24,7 @@ import {
   createContractorSchema,
   updateContractorSchema,
   getContractorSchema,
+  listContractorsSchema,
   listContractorPayoutsSchema,
   overridePayslipLineSchema,
   previewPayeSchema,
@@ -523,8 +524,11 @@ export const hrRouter = router({
     }),
 
   listContractors: permissionProcedure('hr.read')
-    .query(async ({ ctx }) => {
-      return getPayrollConfigService().listContractors(ctx.activeGroupId);
+    .input(listContractorsSchema.optional())
+    .query(async ({ input, ctx }) => {
+      return getPayrollConfigService().listContractors(ctx.activeGroupId, {
+        active: input?.active ?? true,
+      });
     }),
 
   getContractor: permissionProcedure('hr.read')

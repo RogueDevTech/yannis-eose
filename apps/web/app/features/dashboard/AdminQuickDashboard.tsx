@@ -3,6 +3,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { confirmationRateColorClass, deliveryRateColorClass } from '~/lib/rate-color';
 import {
   STATUS_OPTIONS,
@@ -158,6 +159,12 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
             desktop={<PageRefreshButton />}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters?.startDate ?? ''}
+        endDate={filters?.endDate ?? ''}
+        periodAllTime={filters?.periodAllTime ?? false}
       />
 
       {/* Order Funnel */}

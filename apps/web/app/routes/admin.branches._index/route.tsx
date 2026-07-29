@@ -17,6 +17,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { TextInput } from '~/components/ui/text-input';
@@ -175,6 +176,8 @@ function BranchManagementContent({ branches, branchGroups }: { branches: Branch[
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {/* Branches grid — grouped by company when multiple groups exist.
           Same card shape as `/admin/marketing/forms`. The whole card is a

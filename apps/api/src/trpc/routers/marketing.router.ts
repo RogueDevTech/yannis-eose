@@ -1430,6 +1430,10 @@ export const marketingRouter = router({
 
       const marketingTeams = (teamsRaw ?? [])
         .filter((t) => t.department === 'MARKETING')
+        // Skip auto-seeded default teams that nobody has staffed yet: a team with
+        // no members AND no supervisor is just noise on the overview. Teams that
+        // have a supervisor (but no MBs yet) still show so the lead isn't hidden.
+        .filter((t) => t.members.length > 0)
         .map((t) => {
           const supervisors = t.members.filter((m) => m.isSupervisor);
           return {

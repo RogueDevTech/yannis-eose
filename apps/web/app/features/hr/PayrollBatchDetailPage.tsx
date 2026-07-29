@@ -5,6 +5,7 @@ import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fe
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { Button } from '~/components/ui/button';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { Modal } from '~/components/ui/modal';
@@ -728,6 +729,8 @@ export function PayrollBatchDetailPage({
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {/* Status timeline */}
       <div className="card !p-4">

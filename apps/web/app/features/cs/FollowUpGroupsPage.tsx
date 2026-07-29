@@ -3,6 +3,7 @@ import { Link, useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -71,6 +72,9 @@ export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }:
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
+
       <FollowUpGroupsBody groups={groups} closers={closers} deferredLoading={deferredLoading} />
     </div>
   );

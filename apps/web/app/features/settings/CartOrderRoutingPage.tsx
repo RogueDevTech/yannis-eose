@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable } from '~/components/ui/compact-table';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
@@ -75,6 +76,8 @@ export function CartOrderRoutingPage({ rules, branches, teams = [] }: Props) {
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <RulesTab
         rules={rules}
