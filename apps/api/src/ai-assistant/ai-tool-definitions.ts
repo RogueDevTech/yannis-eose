@@ -152,6 +152,30 @@ const queryProducts: ToolDef = {
   },
 };
 
+// ─── Category B: Diagnostics (admin / CS-lead only) ──────────────────
+
+const traceOrder: ToolDef = {
+  name: 'trace_order',
+  description:
+    'Investigate a specific order by its YNS number, INCLUDING deleted orders. ' +
+    'Use this when a user reports an order is "missing", "gone from my dashboard", ' +
+    'or asks what happened to an order. Unlike query_orders, this sees DELETED orders, ' +
+    'returns the full timeline (who/when/why), and — if the order was auto-deleted as a ' +
+    'duplicate — resolves the winning order and flags whether the deletion was a ' +
+    'false-positive on a legitimate repeat purchase. Always prefer this tool for ' +
+    '"where is order X" / "why is order X missing" questions.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      orderNumber: {
+        type: 'number',
+        description: 'The numeric YNS order number, e.g. 68366 for YNS-68366 (digits only).',
+      },
+    },
+    required: ['orderNumber'],
+  },
+};
+
 // ─── Tool Registry ───────────────────────────────────────────────────
 
 export const AI_TOOLS: ToolDef[] = [
@@ -165,6 +189,8 @@ export const AI_TOOLS: ToolDef[] = [
   // Category A
   queryOrders,
   queryProducts,
+  // Category B — diagnostics
+  traceOrder,
 ];
 
 /**
@@ -180,4 +206,7 @@ export const TOOL_PERMISSION_MAP: Record<string, string> = {
   get_logistics_health: 'logistics.read',
   query_orders: 'orders.read',
   query_products: 'products.read',
+  // Diagnostics: can see DELETED orders + audit timeline. Gated to CS leads and
+  // admins (SUPER_ADMIN / SUPPORT / ADMIN bypass all checks in the executor).
+  trace_order: 'cs.scope.global',
 };

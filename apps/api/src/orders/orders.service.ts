@@ -22,7 +22,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
@@ -1124,7 +1124,7 @@ export class OrdersService {
         actorId: actor.id,
         actorName: actor.name ?? null,
         description,
-        metadata: note ? { note } : null,
+        metadata: { reason: 'MANUAL', ...(note ? { note } : {}) },
         branchId: order.branchId ?? null,
       });
     });
@@ -1444,7 +1444,7 @@ export class OrdersService {
         actorId: actor.id,
         actorName: actor.name ?? null,
         description,
-        metadata: { dualApproval: true, ...(note ? { note } : {}) },
+        metadata: { reason: 'DUAL_APPROVAL', dualApproval: true, ...(note ? { note } : {}) },
         branchId: order.branchId ?? null,
       });
 
@@ -2033,8 +2033,8 @@ export class OrdersService {
 
     // Same-form rapid resubmit guard (double-tap / refresh within 2 minutes).
     // Same phone + same campaign + same products = idempotent return.
-    // This is distinct from the 7-day cross-funnel dedup below: that one records
-    // CFA rows but still creates the order. This one returns early.
+    // This is distinct from the 14-day universal dedup below: that one records
+    // CFA rows and blocks creating a second order. This one returns early.
     if (orderSource === 'edge-form' && orderInput.customerPhoneHash && orderInput.campaignId) {
       const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
       const productIds = orderInput.items.map((i) => i.productId);
@@ -2073,8 +2073,8 @@ export class OrdersService {
       }
     }
 
-    // Universal dedup (no time limit):
-    // Same phone + any overlapping product = duplicate, regardless of age.
+    // Universal 14-day dedup:
+    // Same phone + any overlapping product within 14 days = duplicate.
     // Duplicates are recorded in cross_funnel_attempts for MB visibility.
     // No order is created. Customer still sees success (pixel fires, redirect works).
     if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
@@ -2386,11 +2386,25 @@ export class OrdersService {
             .limit(5);
           if (matchingCartOrders.length > 0) {
             const cartOrderIds = matchingCartOrders.map((c) => c.id);
+            const supersededAt = new Date();
             await withActor(this.db, { id: actorId ?? EDGE_FORM_ACTOR_ID }, async (tx) => {
               await tx
                 .update(schema.cartOrders)
-                .set({ status: 'DELETED', deletedAt: new Date(), updatedAt: new Date() })
+                .set({ status: 'DELETED', deletedAt: supersededAt, updatedAt: supersededAt })
                 .where(inArray(schema.cartOrders.id, cartOrderIds));
+              // Detailed deletion comment on each superseded cart order so its
+              // activity log explains it was replaced by the real form order.
+              await tx.insert(schema.cartOrderTimelineEvents).values(
+                cartOrderIds.map((cid) => ({
+                  cartOrderId: cid,
+                  eventType: 'ORDER_DELETED',
+                  actorId: null,
+                  actorName: 'System',
+                  description: `Order deleted because it was superseded by a real order (YNS-${order.orderNumber}) submitted for the same customer and product.`,
+                  metadata: { reason: 'GRADUATION_SUPERSEDED', supersededByOrderId: order.id },
+                  branchId: order.branchId ?? null,
+                })),
+              );
             });
             this.logger.log(
               { orderId: order.id, supersededCartOrderIds: cartOrderIds },
@@ -2481,18 +2495,6 @@ export class OrdersService {
         code: 'BAD_REQUEST',
         message:
           `Duplicate: an order for this customer and product already exists (${existingWinner.id.slice(0, 8)}…, status: ${existingWinner.status}). Please check existing orders before creating a new one.`,
-      });
-    }
-
-    // 20-day duplicate guard — block creating offline orders for a phone+product
-    // that already has an active (not yet delivered) order. Catches closers who re-enter
-    // customers weeks after the original order (fraud report Jul 2026).
-    const deliveredDup = await this.findDeliveredDuplicateOrder(customerPhoneHash, productIds);
-    if (deliveredDup) {
-      const orderLabel = deliveredDup.orderNumber ? `YNS-${deliveredDup.orderNumber}` : deliveredDup.id.slice(0, 8);
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `This customer already has an order for ${deliveredDup.productName ?? 'this product'} (order ${orderLabel}, status: ${deliveredDup.status}). Cannot create a duplicate offline order for the same product while still active (not yet delivered).`,
       });
     }
 
@@ -2793,16 +2795,6 @@ export class OrdersService {
         code: 'BAD_REQUEST',
         message:
           `Duplicate: an order for this customer and product already exists (${existingWinner.id.slice(0, 8)}…, status: ${existingWinner.status}). Please check existing orders before creating a new one.`,
-      });
-    }
-
-    // 20-day active duplicate guard
-    const deliveredDup = await this.findDeliveredDuplicateOrder(customerPhoneHash, productIds);
-    if (deliveredDup) {
-      const orderLabel = deliveredDup.orderNumber ? `YNS-${deliveredDup.orderNumber}` : deliveredDup.id.slice(0, 8);
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `This customer already has an order for ${deliveredDup.productName ?? 'this product'} (order ${orderLabel}, status: ${deliveredDup.status}). Cannot create a duplicate order while still active (not yet delivered).`,
       });
     }
 
@@ -9822,9 +9814,10 @@ export class OrdersService {
    */
 
   /**
-   * Universal 7-day dedup: same phone + any overlapping product within 7 days.
+   * Universal 14-day dedup: same phone + any overlapping product within 14 days.
    * Ignores MB, campaign, offer label, quantity — pure phone×product match.
    * Winner: highest lifecycle status, ties → oldest createdAt.
+   * Beyond 14 days, treat as a legitimate repeat purchase.
    */
   private async findExistingOrderForDedup(
     phoneHash: string,
@@ -9834,7 +9827,6 @@ export class OrdersService {
     if (!phoneHash || productIds.length === 0) return null;
 
     // 14-day window: same phone + overlapping product within 14 days = duplicate.
-    // Beyond 14 days, treat as a legitimate repeat purchase.
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
     // Step 1: find candidates across orders, cart_orders, and follow_up_orders.
@@ -9858,7 +9850,7 @@ export class OrdersService {
           ),
         )
         .orderBy(desc(schema.orders.createdAt))
-        .limit(20),
+        .limit(50),
       opts?.skipCartOrders
         ? Promise.resolve([])
         : this.db
@@ -9878,7 +9870,7 @@ export class OrdersService {
               ),
             )
             .orderBy(desc(schema.cartOrders.createdAt))
-            .limit(20),
+            .limit(50),
       this.db
         .select({
           id: schema.followUpOrders.id,
@@ -9896,7 +9888,7 @@ export class OrdersService {
           ),
         )
         .orderBy(desc(schema.followUpOrders.createdAt))
-        .limit(20),
+        .limit(50),
     ]);
 
     const candidates: Candidate[] = [
@@ -9908,6 +9900,7 @@ export class OrdersService {
     if (candidates.length === 0) return null;
 
     // Step 2: check which candidates have overlapping products across all item tables.
+    // Collect ALL matching order IDs (no limit) so winner ranking sees every overlap.
     const orderIds = orderCandidates.map((c) => c.id);
     const cartIds = cartCandidates.map((c) => c.id);
     const fuIds = followUpCandidates.map((c) => c.id);
@@ -9915,25 +9908,22 @@ export class OrdersService {
     const itemQueries = await Promise.all([
       orderIds.length > 0
         ? this.db
-            .select({ orderId: schema.orderItems.orderId })
+            .selectDistinct({ orderId: schema.orderItems.orderId })
             .from(schema.orderItems)
             .where(and(inArray(schema.orderItems.orderId, orderIds), inArray(schema.orderItems.productId, productIds)))
-            .limit(1)
-        : Promise.resolve([]),
+        : Promise.resolve([] as { orderId: string }[]),
       cartIds.length > 0
         ? this.db
-            .select({ orderId: schema.cartOrderItems.cartOrderId })
+            .selectDistinct({ orderId: schema.cartOrderItems.cartOrderId })
             .from(schema.cartOrderItems)
             .where(and(inArray(schema.cartOrderItems.cartOrderId, cartIds), inArray(schema.cartOrderItems.productId, productIds)))
-            .limit(1)
-        : Promise.resolve([]),
+        : Promise.resolve([] as { orderId: string }[]),
       fuIds.length > 0
         ? this.db
-            .select({ orderId: schema.followUpOrderItems.followUpOrderId })
+            .selectDistinct({ orderId: schema.followUpOrderItems.followUpOrderId })
             .from(schema.followUpOrderItems)
             .where(and(inArray(schema.followUpOrderItems.followUpOrderId, fuIds), inArray(schema.followUpOrderItems.productId, productIds)))
-            .limit(1)
-        : Promise.resolve([]),
+        : Promise.resolve([] as { orderId: string }[]),
     ]);
 
     const matchingOrderIdSet = new Set([
@@ -9965,136 +9955,6 @@ export class OrdersService {
       mediaBuyerId: winner.mediaBuyerId,
       status: winner.status,
       createdAt: winner.createdAt,
-    };
-  }
-
-  /**
-   * Check if an order with the same phone + any overlapping product already
-   * exists within the last 20 days and is still active (not yet delivered or
-   * remitted). Returns the matching order if found, null otherwise. Used to
-   * block duplicate offline entries and duplicate cart graduations.
-   *
-   * Complements the 7-day `findExistingOrderForDedup` by extending coverage
-   * to 20 days, catching closers who re-enter customers weeks after the
-   * original order. Orders that have already reached DELIVERED or REMITTED
-   * are not blocked — repeat purchases after delivery are legitimate.
-   */
-  async findDeliveredDuplicateOrder(
-    phoneHash: string,
-    productIds: string[],
-    /** Exclude this order ID from the check (e.g. the graduating cart order itself). */
-    excludeOrderId?: string,
-  ): Promise<{ id: string; orderNumber: number | null; status: string; deliveredAt: Date | null; productName: string | null } | null> {
-    if (!phoneHash || productIds.length === 0) return null;
-
-    const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
-    const terminalFilter = sql`status NOT IN ('CANCELLED', 'DELETED', 'DELIVERED', 'REMITTED')`;
-
-    type Candidate = { id: string; orderNumber: number | null; status: string; deliveredAt: Date | null; source: string };
-
-    const orderConditions: SQL[] = [
-      eq(schema.orders.customerPhoneHash, phoneHash),
-      terminalFilter,
-      isNull(schema.orders.deletedAt),
-      gte(schema.orders.createdAt, twentyDaysAgo),
-    ];
-    if (excludeOrderId) {
-      orderConditions.push(sql`${schema.orders.id} != ${excludeOrderId}`);
-    }
-
-    const cartConditions: SQL[] = [
-      eq(schema.cartOrders.customerPhoneHash, phoneHash),
-      sql`${schema.cartOrders.status} NOT IN ('CANCELLED', 'DELETED', 'DELIVERED', 'REMITTED')`,
-      isNull(schema.cartOrders.deletedAt),
-      gte(schema.cartOrders.createdAt, twentyDaysAgo),
-    ];
-    if (excludeOrderId) {
-      cartConditions.push(sql`${schema.cartOrders.id} != ${excludeOrderId}`);
-    }
-
-    const fuConditions: SQL[] = [
-      eq(schema.followUpOrders.customerPhoneHash, phoneHash),
-      sql`${schema.followUpOrders.status} NOT IN ('CANCELLED', 'DELETED', 'DELIVERED', 'REMITTED')`,
-      isNull(schema.followUpOrders.deletedAt),
-      gte(schema.followUpOrders.createdAt, twentyDaysAgo),
-    ];
-    if (excludeOrderId) {
-      fuConditions.push(sql`${schema.followUpOrders.id} != ${excludeOrderId}`);
-    }
-
-    const [orderCandidates, cartCandidates, fuCandidates] = await Promise.all([
-      this.db
-        .select({ id: schema.orders.id, orderNumber: schema.orders.orderNumber, status: schema.orders.status, deliveredAt: schema.orders.deliveredAt })
-        .from(schema.orders)
-        .where(and(...orderConditions))
-        .orderBy(desc(schema.orders.createdAt))
-        .limit(20),
-      this.db
-        .select({ id: schema.cartOrders.id, orderNumber: schema.cartOrders.orderNumber, status: schema.cartOrders.status, deliveredAt: schema.cartOrders.deliveredAt })
-        .from(schema.cartOrders)
-        .where(and(...cartConditions))
-        .orderBy(desc(schema.cartOrders.createdAt))
-        .limit(20),
-      this.db
-        .select({ id: schema.followUpOrders.id, orderNumber: schema.followUpOrders.orderNumber, status: schema.followUpOrders.status, deliveredAt: schema.followUpOrders.deliveredAt })
-        .from(schema.followUpOrders)
-        .where(and(...fuConditions))
-        .orderBy(desc(schema.followUpOrders.createdAt))
-        .limit(20),
-    ]);
-
-    const candidates: Candidate[] = [
-      ...orderCandidates.map((c) => ({ ...c, source: 'orders' })),
-      ...cartCandidates.map((c) => ({ ...c, source: 'cart_orders' })),
-      ...fuCandidates.map((c) => ({ ...c, source: 'follow_up_orders' })),
-    ];
-
-    if (candidates.length === 0) return null;
-
-    const oIds = orderCandidates.map((c) => c.id);
-    const cIds = cartCandidates.map((c) => c.id);
-    const fIds = fuCandidates.map((c) => c.id);
-
-    const [orderMatches, cartMatches, fuMatches] = await Promise.all([
-      oIds.length > 0
-        ? this.db
-            .select({ orderId: schema.orderItems.orderId, productName: schema.products.name })
-            .from(schema.orderItems)
-            .leftJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
-            .where(and(inArray(schema.orderItems.orderId, oIds), inArray(schema.orderItems.productId, productIds)))
-            .limit(1)
-        : Promise.resolve([] as { orderId: string; productName: string | null }[]),
-      cIds.length > 0
-        ? this.db
-            .select({ orderId: schema.cartOrderItems.cartOrderId, productName: schema.products.name })
-            .from(schema.cartOrderItems)
-            .leftJoin(schema.products, eq(schema.products.id, schema.cartOrderItems.productId))
-            .where(and(inArray(schema.cartOrderItems.cartOrderId, cIds), inArray(schema.cartOrderItems.productId, productIds)))
-            .limit(1)
-        : Promise.resolve([] as { orderId: string; productName: string | null }[]),
-      fIds.length > 0
-        ? this.db
-            .select({ orderId: schema.followUpOrderItems.followUpOrderId, productName: schema.products.name })
-            .from(schema.followUpOrderItems)
-            .leftJoin(schema.products, eq(schema.products.id, schema.followUpOrderItems.productId))
-            .where(and(inArray(schema.followUpOrderItems.followUpOrderId, fIds), inArray(schema.followUpOrderItems.productId, productIds)))
-            .limit(1)
-        : Promise.resolve([] as { orderId: string; productName: string | null }[]),
-    ]);
-
-    const allMatches = [...orderMatches, ...cartMatches, ...fuMatches];
-    const firstMatch = allMatches[0];
-    if (!firstMatch) return null;
-
-    const winner = candidates.find((c) => c.id === firstMatch.orderId);
-    if (!winner) return null;
-
-    return {
-      id: winner.id,
-      orderNumber: winner.orderNumber,
-      status: winner.status,
-      deliveredAt: winner.deliveredAt,
-      productName: firstMatch.productName,
     };
   }
 
@@ -10425,6 +10285,156 @@ export class OrdersService {
   }
 
   /**
+   * DIAGNOSTIC: trace an order by its human YNS number, including DELETED rows.
+   *
+   * The normal order search/list tools apply `deleted_at IS NULL` + graduation
+   * exclusions, so a soft-deleted order is invisible to them — which is exactly
+   * why "my order is missing" reports can't be answered by the standard tools.
+   * This method deliberately ignores those filters so an authorized investigator
+   * (Admin / HoCS via the AI assistant) can see:
+   *   - the order row even when status = DELETED,
+   *   - its full timeline (why/when/who),
+   *   - if it was auto-deleted as a duplicate, the resolved "winner" order and
+   *     whether that winner was already delivered (i.e. a false-positive on a
+   *     legitimate repeat purchase).
+   *
+   * Phone numbers are NOT included here — the AI executor masks them anyway, and
+   * the caller must be admin/CS-lead gated at the tool layer.
+   */
+  async traceOrderByNumber(orderNumber: number): Promise<{
+    found: boolean;
+    order?: {
+      id: string;
+      orderNumber: number;
+      customerName: string | null;
+      status: string;
+      orderSource: string | null;
+      isFollowUp: boolean;
+      isDuplicate: string | null;
+      deletedAt: Date | null;
+      deliveredAt: Date | null;
+      createdAt: Date;
+      updatedAt: Date;
+      assignedCsName: string | null;
+      branchId: string | null;
+      servicingBranchId: string | null;
+    };
+    timeline?: Array<{
+      eventType: string;
+      actorName: string | null;
+      description: string;
+      metadata: unknown;
+      createdAt: Date;
+    }>;
+    deletion?: {
+      deletedAsDuplicate: boolean;
+      winnerOrderNumber: number | null;
+      winnerStatus: string | null;
+      winnerDeliveredAt: Date | null;
+      likelyFalsePositive: boolean;
+      explanation: string;
+    };
+  }> {
+    const [order] = await this.db
+      .select({
+        id: schema.orders.id,
+        orderNumber: schema.orders.orderNumber,
+        customerName: schema.orders.customerName,
+        status: schema.orders.status,
+        orderSource: schema.orders.orderSource,
+        isFollowUp: schema.orders.isFollowUp,
+        isDuplicate: schema.orders.isDuplicate,
+        deletedAt: schema.orders.deletedAt,
+        deliveredAt: schema.orders.deliveredAt,
+        createdAt: schema.orders.createdAt,
+        updatedAt: schema.orders.updatedAt,
+        assignedCsName: schema.users.name,
+        branchId: schema.orders.branchId,
+        servicingBranchId: schema.orders.servicingBranchId,
+      })
+      .from(schema.orders)
+      .leftJoin(schema.users, eq(schema.users.id, schema.orders.assignedCsId))
+      .where(eq(schema.orders.orderNumber, orderNumber))
+      .limit(1);
+
+    if (!order) {
+      return { found: false };
+    }
+
+    const timelineRows = await this.db
+      .select({
+        eventType: schema.orderTimelineEvents.eventType,
+        actorName: schema.orderTimelineEvents.actorName,
+        description: schema.orderTimelineEvents.description,
+        metadata: schema.orderTimelineEvents.metadata,
+        createdAt: schema.orderTimelineEvents.createdAt,
+      })
+      .from(schema.orderTimelineEvents)
+      .where(eq(schema.orderTimelineEvents.orderId, order.id))
+      .orderBy(asc(schema.orderTimelineEvents.createdAt));
+
+    // If this order was auto-deleted as a duplicate, resolve the winner and
+    // judge whether the deletion was a false positive (winner already delivered
+    // before this order was even created => legitimate repeat purchase).
+    let deletion: Awaited<ReturnType<OrdersService['traceOrderByNumber']>>['deletion'];
+    const dupEvent = [...timelineRows]
+      .reverse()
+      .find((e) => e.eventType === 'ORDER_DUPLICATE_FLAGGED');
+    const winnerId =
+      dupEvent && dupEvent.metadata && typeof dupEvent.metadata === 'object'
+        ? (dupEvent.metadata as Record<string, unknown>)['winnerId']
+        : undefined;
+
+    if (order.status === 'DELETED' && dupEvent) {
+      let winnerOrderNumber: number | null = null;
+      let winnerStatus: string | null = null;
+      let winnerDeliveredAt: Date | null = null;
+      if (typeof winnerId === 'string') {
+        const [winner] = await this.db
+          .select({
+            orderNumber: schema.orders.orderNumber,
+            status: schema.orders.status,
+            deliveredAt: schema.orders.deliveredAt,
+          })
+          .from(schema.orders)
+          .where(eq(schema.orders.id, winnerId))
+          .limit(1);
+        if (winner) {
+          winnerOrderNumber = winner.orderNumber;
+          winnerStatus = winner.status;
+          winnerDeliveredAt = winner.deliveredAt;
+        }
+      }
+      const likelyFalsePositive =
+        (winnerStatus === 'DELIVERED' || winnerStatus === 'REMITTED') &&
+        winnerDeliveredAt != null &&
+        winnerDeliveredAt < order.createdAt;
+      deletion = {
+        deletedAsDuplicate: true,
+        winnerOrderNumber,
+        winnerStatus,
+        winnerDeliveredAt,
+        likelyFalsePositive,
+        explanation: likelyFalsePositive
+          ? `Auto-deleted as a duplicate of YNS-${winnerOrderNumber}, but that order was already ${winnerStatus} before this one was created. This is a legitimate repeat purchase, not a duplicate — it should be restored.`
+          : `Auto-deleted as a duplicate of YNS-${winnerOrderNumber ?? '(unknown)'} by the duplicate-detection rules (same customer + product within the dedup window).`,
+      };
+    } else if (order.status === 'DELETED') {
+      deletion = {
+        deletedAsDuplicate: false,
+        winnerOrderNumber: null,
+        winnerStatus: null,
+        winnerDeliveredAt: null,
+        likelyFalsePositive: false,
+        explanation:
+          'Order was deleted, but not by the duplicate rules. See the timeline for the deleting event and actor.',
+      };
+    }
+
+    return { found: true, order, timeline: timelineRows, deletion };
+  }
+
+  /**
    * Append an event to the order_timeline_events table.
    * Best-effort — never throws so it does not interrupt the calling flow.
    *
@@ -10460,6 +10470,73 @@ export class OrdersService {
         });
       },
     ).catch(() => {});
+  }
+
+  /**
+   * Central deletion logger — every order soft-delete MUST call this so the
+   * activity log always answers "why was this order deleted, when, and by whom".
+   * (Pillar 4 — Absolute Accountability.)
+   *
+   * Writes a single, detailed ORDER_DELETED timeline event with a machine-readable
+   * `reason` in metadata plus a human sentence. Best-effort: never throws, so it
+   * cannot interrupt the delete flow. Call it inside/after the delete tx.
+   *
+   * Reasons:
+   *  - TEST_ORDER          test-order purge (name contains the word "test")
+   *  - DUPLICATE_RULE      duplicate-detection cron collapsed it into a winner
+   *  - MANUAL              a user deleted it directly
+   *  - DUAL_APPROVAL       Finance-requested delete, CS + Logistics approved
+   *  - BATCH_REVERT        follow-up batch reverted; untouched copy removed
+   *  - GRADUATION_SUPERSEDED  superseded by a graduated/real order
+   *  - OTHER               anything else (include a clear `detail`)
+   */
+  async logOrderDeletion(params: {
+    orderId: string;
+    reason:
+      | 'TEST_ORDER'
+      | 'DUPLICATE_RULE'
+      | 'MANUAL'
+      | 'DUAL_APPROVAL'
+      | 'BATCH_REVERT'
+      | 'GRADUATION_SUPERSEDED'
+      | 'OTHER';
+    actorId?: string | null;
+    actorName?: string | null;
+    branchId?: string | null;
+    /** Free-text specifics shown in the sentence, e.g. the winner order, note, batch name. */
+    detail?: string | null;
+    /** Extra structured context merged into metadata (winnerId, batchId, note, etc.). */
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    const who = params.actorName ?? (params.actorId ? 'a user' : 'the system');
+    const detail = params.detail?.trim();
+    const base: Record<typeof params.reason, string> = {
+      TEST_ORDER:
+        'Order deleted because it was detected as a test order (its name contains the word "test").',
+      DUPLICATE_RULE:
+        'Order deleted by the duplicate-detection rules (same customer and product as an existing order).',
+      MANUAL: `Order manually deleted by ${who}.`,
+      DUAL_APPROVAL:
+        'Order deleted via dual-approval (Finance requested; CS and Logistics approved).',
+      BATCH_REVERT:
+        'Order deleted because its follow-up batch was reverted and this copy had not been worked.',
+      GRADUATION_SUPERSEDED:
+        'Order deleted because it was superseded by a graduated/real order for the same customer.',
+      OTHER: `Order deleted by ${who}.`,
+    };
+    const description = detail
+      ? `${base[params.reason]} ${detail}`.slice(0, 900)
+      : base[params.reason];
+
+    await this.writeTimelineEvent({
+      orderId: params.orderId,
+      eventType: 'ORDER_DELETED',
+      actorId: params.actorId ?? null,
+      actorName: params.actorName ?? null,
+      description,
+      branchId: params.branchId ?? null,
+      metadata: { reason: params.reason, ...(detail ? { detail } : {}), ...(params.metadata ?? {}) },
+    });
   }
 
   private buildTransitionActivityDescription(
@@ -11182,13 +11259,24 @@ export class OrdersService {
     const untouched = items.filter((i) => UNTOUCHED.has(i.orderStatus));
     const worked = items.filter((i) => !UNTOUCHED.has(i.orderStatus));
 
-    // Soft-delete untouched copy orders
+    // Soft-delete untouched copy orders (through the audited actor so the
+    // history trigger captures who, and log a detailed deletion comment).
     const now = new Date();
     for (const item of untouched) {
-      await this.db
-        .update(schema.orders)
-        .set({ status: 'DELETED', deletedAt: now })
-        .where(eq(schema.orders.id, item.orderId));
+      await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+        await tx
+          .update(schema.orders)
+          .set({ status: 'DELETED', deletedAt: now, updatedAt: now })
+          .where(eq(schema.orders.id, item.orderId));
+      });
+      await this.logOrderDeletion({
+        orderId: item.orderId,
+        reason: 'BATCH_REVERT',
+        actorId: null,
+        actorName: 'System',
+        detail: `Batch: ${batch.name ?? batchId}.`,
+        metadata: { batchId, batchName: batch.name ?? null },
+      });
     }
 
     // Worked copies stay as-is — work remains with the closer
