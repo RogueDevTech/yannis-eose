@@ -16,6 +16,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TextInput } from '~/components/ui/text-input';
@@ -431,6 +432,8 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {/* Status timeline */}
       <div className="flex flex-wrap items-center gap-2 text-xs text-app-fg-muted">

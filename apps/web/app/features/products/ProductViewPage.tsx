@@ -3,6 +3,7 @@ import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PRODUCT_STATUS_COLORS } from './types';
 import type { Product } from './types';
 
@@ -66,6 +67,8 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {/* Product Details */}
       <div className="card space-y-4">

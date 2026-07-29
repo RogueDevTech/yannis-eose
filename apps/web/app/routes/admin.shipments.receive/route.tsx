@@ -12,7 +12,9 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageNotification } from '~/components/ui/page-notification';
 import { useRevalidateOnFocus } from '~/hooks/use-revalidate-on-focus';
 import type { LocationOption, ProductOption } from '~/features/inventory/types';
@@ -168,15 +170,29 @@ export default function ReceiveShipmentRoute() {
       <PageHeader
         title="Receive shipment"
         description="Record an incoming supplier shipment. Use this page for large multi-SKU receipts."
+        mobileInlineActions
         actions={
-          <div className="flex items-center gap-2">
-            <PageRefreshButton />
-            <Link to="/admin/shipments" prefetch="intent" className="btn-secondary btn-sm">
-              Back to shipments
-            </Link>
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Receive shipment toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Link to="/admin/shipments" prefetch="intent" className="btn-secondary btn-sm">
+                  Back to shipments
+                </Link>
+              </>
+            }
+            sheet={
+              <Link to="/admin/shipments" prefetch="intent" className="btn-secondary btn-sm w-full justify-center">
+                Back to shipments
+              </Link>
+            }
+          />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {!data.canIntake ? (
         <div className="card p-4">

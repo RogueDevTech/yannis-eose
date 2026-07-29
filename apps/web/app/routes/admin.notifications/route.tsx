@@ -15,6 +15,7 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { NotificationsPage } from '~/features/notifications/NotificationsPage';
 import type { Notification } from '~/features/notifications/types';
 import { NotificationsBroadcastPanel } from '~/features/notifications/panels/NotificationsBroadcastPanel';
@@ -437,6 +438,8 @@ export default function AdminNotificationsRoute() {
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <div className="sticky top-0 z-10 -mx-4 lg:-mx-6 border-b border-app-border bg-app-canvas/95 backdrop-blur supports-[backdrop-filter]:bg-app-canvas/80">
         <nav

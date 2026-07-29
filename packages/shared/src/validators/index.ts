@@ -561,6 +561,7 @@ export {
   createContractorSchema,
   updateContractorSchema,
   getContractorSchema,
+  listContractorsSchema,
   listContractorPayoutsSchema,
   overridePayslipLineSchema,
   previewPayeSchema,
@@ -619,6 +620,7 @@ export type {
   CreateContractorInput,
   UpdateContractorInput,
   GetContractorInput,
+  ListContractorsInput,
   ListContractorPayoutsInput,
 } from './payroll';
 

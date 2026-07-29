@@ -1450,43 +1450,15 @@ export class OrdersService {
 
       // 2. Reverse stock INSIDE the same transaction — if this fails, the
       //    entire deletion rolls back so we never have a deleted order with
-      //    un-reversed stock.
-      const deliveryMovements = await tx
-        .select()
-        .from(schema.stockMovements)
-        .where(
-          and(
-            eq(schema.stockMovements.referenceId, orderId),
-            eq(schema.stockMovements.movementType, 'DELIVERY'),
-          ),
-        );
-      for (const mov of deliveryMovements) {
-        const reverseQty = Math.abs(mov.quantity);
-        const locationId = mov.fromLocationId;
-        await tx.insert(schema.stockMovements).values({
-          productId: mov.productId,
-          movementType: 'ADJUSTMENT',
-          quantity: reverseQty,
-          toLocationId: locationId,
-          referenceId: orderId,
-          reason: `Stock reversal: delivered order deleted (dual-approval). Reversing ${reverseQty} units.`,
-          actorId: actor.id,
-        });
-        if (locationId) {
-          await tx
-            .update(schema.inventoryLevels)
-            .set({
-              stockCount: sql`${schema.inventoryLevels.stockCount} + ${reverseQty}`,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(schema.inventoryLevels.productId, mov.productId),
-                eq(schema.inventoryLevels.locationId, locationId),
-              ),
-            );
-        }
-      }
+      //    un-reversed stock. The shared implementation nets out reversals
+      //    already applied (e.g. a retrack) and restores FIFO batch remaining
+      //    alongside the shelf count.
+      await this.inventoryService.reverseDeliveryForOrderInTx(
+        tx,
+        orderId,
+        actor,
+        'delivered order deleted (dual-approval)',
+      );
     });
 
     // GL reversal runs outside the stock tx — non-fatal by design. A failed GL
@@ -6753,6 +6725,67 @@ export class OrdersService {
   }
 
   /**
+   * "Total Delivered This Month" — orders DELIVERED within the date window by
+   * `delivered_at`, REGARDLESS of when they were generated. This is the
+   * carry-over-inclusive count: an order created last month but delivered this
+   * month is counted here (unlike the cohort count in
+   * getStatusCountsByOrderSource, which filters by created_at).
+   *
+   * Additive/display-only: this MUST NOT be wired into any delivery-rate,
+   * conversion-rate, or CPA numerator/denominator. The reported DR keeps using
+   * the created-in-period cohort so it stays ≤ 100%.
+   *
+   * Uses the SAME scope/source condition builders as getStatusCountsByOrderSource
+   * so branch/media-buyer/team/supervisor/source scoping stays identical between
+   * the two tiles — only the date field (delivered_at) and the status filter
+   * (DELIVERED/REMITTED) differ.
+   */
+  async getDeliveredThisMonthCount(opts: {
+    mediaBuyerId?: string; startDate?: string; endDate?: string;
+    assignedCsId?: string; branchId?: string | null;
+    supervisorScope?: OrdersAggregateSupervisorScope;
+    branchScope?: 'servicing' | 'marketing';
+    effectiveBranchIds?: string[] | null;
+    orderSource?: string; teamMemberIds?: string[];
+    excludeFollowUps?: boolean;
+    excludeCartGraduated?: boolean;
+  }): Promise<number> {
+    const conditions: Parameters<typeof and>[0][] = [
+      sql`(${schema.orders.deletedAt} IS NULL OR ${schema.orders.status} IN ('DELETED', 'CANCELLED'))`,
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+    ];
+    if (opts.excludeFollowUps) {
+      conditions.push(eq(schema.orders.isFollowUp, false));
+      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up' AND ${schema.orders.orderSource} IS DISTINCT FROM 'graduated_follow_up')`);
+    }
+    if (opts.excludeCartGraduated) {
+      conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'online')`);
+    }
+    if (opts.orderSource === 'edge-form') {
+      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online')`);
+    } else if (opts.orderSource === 'edge-form-and-import') {
+      conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.orderSource} = 'import')`);
+    } else if (opts.orderSource === 'offline_and_import') {
+      conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
+    } else if (opts.orderSource) {
+      conditions.push(eq(schema.orders.orderSource, opts.orderSource));
+    }
+    appendOrdersAggregateScopeConditions(conditions, {
+      mediaBuyerId: opts.mediaBuyerId, assignedCsId: opts.assignedCsId,
+      supervisorScope: opts.supervisorScope, teamMemberIds: opts.teamMemberIds,
+    });
+    const bCond = this.orderBranchScopeCondition(opts.branchId, opts.branchScope ?? 'servicing', opts.effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+    // The one difference from the cohort query: filter on delivered_at, not created_at.
+    if (opts.startDate) conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(opts.startDate)));
+    if (opts.endDate) conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(opts.endDate)));
+    const [row] = await this.db
+      .select({ count: count() })
+      .from(schema.orders).where(and(...conditions));
+    return row?.count ?? 0;
+  }
+
+  /**
    * Optional mediaBuyerId filters to that buyer's orders (for Marketing Orders page).
    * Optional assignedCsId filters to that Sales closer's orders (for Sales Orders page).
    * Optional logisticsLocationId filters to that 3PL location (for Logistics Orders page / TPL_MANAGER scoping).
@@ -8841,9 +8874,15 @@ export class OrdersService {
     //      idempotent, non-fatal): leaving DELIVERED undoes the sale (AR + COGS);
     //      leaving REMITTED undoes the cash settlement. Order: undo payment
     //      before sale.
+    // PARTIALLY_DELIVERED sits at the DELIVERED position: IN_TRANSIT →
+    // PARTIALLY_DELIVERED is a forward move (its own case below handles stock),
+    // not a retrack. Statuses absent from this map (RETURNED, RESTOCKED,
+    // WRITTEN_OFF, DELETED, ...) resolve to -1, so entering them from a
+    // post-allocation status flows into the reserve-release branch below.
     const LIFECYCLE_POS: Record<string, number> = {
       UNPROCESSED: 0, CS_ASSIGNED: 1, CS_ENGAGED: 2, CONFIRMED: 3,
-      AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
+      AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6,
+      DELIVERED: 7, PARTIALLY_DELIVERED: 7, REMITTED: 8,
     };
     const prevPos = LIFECYCLE_POS[previousOrder.status] ?? -1;
     const nextPos = LIFECYCLE_POS[newStatus] ?? -1;
@@ -8852,7 +8891,11 @@ export class OrdersService {
     if (isRetrackSideEffect) {
       if (previousOrder.status === 'DELIVERED') {
         // Reverse the FIFO delivery deduction before the switch re-reserves stock.
-        await this.inventoryService.reverseDeliveryForOrder(updatedOrder.id, actor);
+        await this.inventoryService.reverseDeliveryForOrder(
+          updatedOrder.id,
+          actor,
+          'order retracked out of DELIVERED',
+        );
 
         // When retracking DELIVERED → DISPATCHED/IN_TRANSIT, the order is still in
         // the logistics pipeline so reservedCount must be re-applied. DELIVERED →
@@ -9148,92 +9191,73 @@ export class OrdersService {
         break;
       }
 
-      case 'RETURNED': {
-        await withActor(this.db, actor, async (tx) => {
-          for (const item of orderItems) {
-            await tx.insert(schema.stockMovements).values({
-              productId: item.productId,
-              movementType: 'RETURN',
-              quantity: item.quantity,
-              toLocationId: updatedOrder.logisticsLocationId ?? undefined,
-              referenceId: updatedOrder.id,
-              reason: `Returned: order ${updatedOrder.id}`,
-              actorId: actor.id,
-            });
+      case 'PARTIALLY_DELIVERED': {
+        // Guard against a hypothetical REMITTED → PARTIALLY_DELIVERED retrack:
+        // stock for the delivered units was already deducted the first time.
+        if (isRetrackSideEffect && previousOrder.status === 'REMITTED') {
+          break;
+        }
+        const partialLocationId = updatedOrder.logisticsLocationId;
+        if (!partialLocationId) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Cannot record partial delivery: order has no fulfillment location.',
+          });
+        }
+        const deliveredUnits = Number(metadata?.deliveredQuantity);
+        await this.inventoryService.completePartialDeliveryInventory(
+          updatedOrder.id,
+          partialLocationId,
+          deliveredUnits,
+          actor,
+        );
+        // No automatic GL sales posting: the order's invoice total does not
+        // match the delivered value, so finance records this sale manually.
+        this.logger.warn(
+          `Order ${updatedOrder.id} partially delivered (${deliveredUnits} units): no automatic GL sales posting, finance must record the sale manually.`,
+        );
+        break;
+      }
 
-            // Restore stock at the logistics location
-            if (updatedOrder.logisticsLocationId) {
-              await tx
-                .update(schema.inventoryLevels)
-                .set({
-                  stockCount: sql`${schema.inventoryLevels.stockCount} + ${item.quantity}`,
-                  updatedAt: new Date(),
-                })
-                .where(
-                  and(
-                    eq(schema.inventoryLevels.productId, item.productId),
-                    eq(schema.inventoryLevels.locationId, updatedOrder.logisticsLocationId),
-                  ),
-                );
-            }
-          }
-        });
+      case 'RETURNED': {
+        // No stock mutation. Deduction only ever happens at DELIVERED, and
+        // RETURNED is reachable only from AGENT_ASSIGNED / IN_TRANSIT, so the
+        // units never left the shelf: the goods coming back to the 3PL are
+        // already counted. The allocation reserve was released by the
+        // reserve-release branch above (RETURNED resolves to lifecycle -1).
+        // Writing RETURN movements here would double-count: pre-2026-07 this
+        // case also bumped stock_count, inflating shelf stock on every failed
+        // delivery.
         break;
       }
 
       case 'RESTOCKED': {
-        await withActor(this.db, actor, async (tx) => {
-          for (const item of orderItems) {
-            await tx.insert(schema.stockMovements).values({
-              productId: item.productId,
-              movementType: 'RESTOCK',
-              quantity: item.quantity,
-              toLocationId: updatedOrder.logisticsLocationId ?? undefined,
-              referenceId: updatedOrder.id,
-              reason: `Restocked at logistics company: order ${updatedOrder.id}`,
-              actorId: actor.id,
-            });
-
-            // Restore stock at the logistics location
-            if (updatedOrder.logisticsLocationId) {
-              await tx
-                .update(schema.inventoryLevels)
-                .set({
-                  stockCount: sql`${schema.inventoryLevels.stockCount} + ${item.quantity}`,
-                  updatedAt: new Date(),
-                })
-                .where(
-                  and(
-                    eq(schema.inventoryLevels.productId, item.productId),
-                    eq(schema.inventoryLevels.locationId, updatedOrder.logisticsLocationId),
-                  ),
-                );
-            }
-          }
-        });
+        // No stock mutation, same reasoning as RETURNED: the units were never
+        // deducted, so passing the 3PL quality check changes nothing in the
+        // counts. RETURNED → RESTOCKED is a pure status/QC transition.
         break;
       }
 
       case 'WRITTEN_OFF': {
-        await withActor(this.db, actor, async (tx) => {
-          for (const item of orderItems) {
-            await tx.insert(schema.stockMovements).values({
-              productId: item.productId,
-              movementType: 'WRITE_OFF',
-              quantity: -item.quantity,
-              fromLocationId: updatedOrder.logisticsLocationId ?? undefined,
-              referenceId: updatedOrder.id,
-              reason: `Written off: order ${updatedOrder.id}`,
-              actorId: actor.id,
-            });
-          }
-        });
-
-        for (const item of orderItems) {
-          if (updatedOrder.logisticsLocationId) {
-            this.inventoryService.scheduleLowStockCheck(item.productId, updatedOrder.logisticsLocationId);
-          }
+        // The damaged goods are physically gone but were never deducted (the
+        // order never reached DELIVERED), so the write-off is where the units
+        // leave the books: FIFO batches + shelf stock in one transaction.
+        if (!updatedOrder.logisticsLocationId) {
+          this.logger.warn(
+            `Order ${updatedOrder.id} written off without a logistics location: no stock deduction recorded.`,
+          );
+          break;
         }
+        await this.inventoryService.writeOffOrderStock(
+          updatedOrder.id,
+          updatedOrder.logisticsLocationId,
+          actor,
+        );
+        // No automatic GL posting for the write-off expense yet (no recipe in
+        // GeneralLedgerService): finance records the stock write-off manually.
+        this.logger.warn(
+          `Order ${updatedOrder.id} written off: stock deducted, finance must record the write-off expense manually.`,
+        );
         break;
       }
     }

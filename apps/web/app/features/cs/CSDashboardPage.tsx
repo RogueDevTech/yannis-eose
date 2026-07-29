@@ -12,6 +12,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
 import { Spinner } from '~/components/ui/spinner';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -594,56 +595,59 @@ function CSQueueStaticHeader({
 }) {
   const liveState = useLiveIndicator(liveEvents ?? []);
   return (
-    <PageHeader
-      title="Live Activities"
-      mobileInlineActions
-      description="Queue and closer activity."
-      actions={
-        <PageHeaderMobileTools
-          sheetTitle="Actions"
-          triggerAriaLabel="Sales queue tools"
-          saveFilterKey
-          mobileLeading={
-            liveEvents != null && liveEvents.length > 0 ? (
-              <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
-            ) : null
-          }
-          desktop={
-            <>
-              {liveEvents != null && liveEvents.length > 0 && (
+    <>
+      <PageHeader
+        title="Live Activities"
+        mobileInlineActions
+        description="Queue and closer activity."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Actions"
+            triggerAriaLabel="Sales queue tools"
+            saveFilterKey
+            mobileLeading={
+              liveEvents != null && liveEvents.length > 0 ? (
                 <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
-              )}
-              <PageRefreshButton />
-              {canCreateOffline && (
-                <Button variant="primary" size="sm" onClick={onCreateOffline}>
-                  Create offline order
-                </Button>
-              )}
-            </>
-          }
-          sheet={({ closeSheet }) => (
-            <>
-              {canCreateOffline ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="h-12 w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    onCreateOffline();
-                  }}
-                >
-                  Create offline order
-                </Button>
-              ) : (
-                <p className="text-sm text-app-fg-muted">Use the refresh icon to reload the queue.</p>
-              )}
-            </>
-          )}
-        />
-      }
-    />
+              ) : null
+            }
+            desktop={
+              <>
+                {liveEvents != null && liveEvents.length > 0 && (
+                  <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+                )}
+                <PageRefreshButton />
+                {canCreateOffline && (
+                  <Button variant="primary" size="sm" onClick={onCreateOffline}>
+                    Create offline order
+                  </Button>
+                )}
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                {canCreateOffline ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      onCreateOffline();
+                    }}
+                  >
+                    Create offline order
+                  </Button>
+                ) : (
+                  <p className="text-sm text-app-fg-muted">Use the refresh icon to reload the queue.</p>
+                )}
+              </>
+            )}
+          />
+        }
+      />
+      <MobileDateFilterRow hideDate />
+    </>
   );
 }
 

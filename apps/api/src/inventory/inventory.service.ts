@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, asc, desc, count, sql, inArray, gt, isNull, type SQL } from 'drizzle-orm';
+import { eq, and, or, asc, desc, count, sql, inArray, gt, lt, like, isNull, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -228,8 +228,28 @@ export class InventoryService {
     let costTotal = 0;
     let costRemaining = quantityNeeded;
 
+    // Keyset pagination: this simulation never decrements `remaining_quantity`,
+    // so head-reads (as in the consuming path) would return the SAME page every
+    // iteration and double-count the oldest batches whenever `quantityNeeded`
+    // exceeds one page's remaining. Advance an explicit (received_at, id) cursor
+    // instead — safe here because nothing mutates inside the tx.
+    let cursor: { receivedAt: Date; id: string } | null = null;
     while (costRemaining > 0) {
-      const page = await this.fifoActiveBatchPage(tx, productId);
+      const page: Array<typeof schema.stockBatches.$inferSelect> = await tx
+        .select()
+        .from(schema.stockBatches)
+        .where(
+          and(
+            eq(schema.stockBatches.productId, productId),
+            gt(schema.stockBatches.remainingQuantity, 0),
+            cursor
+              ? sql`(${schema.stockBatches.receivedAt}, ${schema.stockBatches.id}) > (${cursor.receivedAt}, ${cursor.id})`
+              : undefined,
+          ),
+        )
+        .orderBy(asc(schema.stockBatches.receivedAt), asc(schema.stockBatches.id))
+        .limit(InventoryService.FIFO_BATCH_PAGE_SIZE)
+        .for('update');
       if (page.length === 0) break;
 
       for (const batch of page) {
@@ -240,6 +260,18 @@ export class InventoryService {
         costTotal += units * costPerUnit;
         costRemaining -= units;
       }
+      const last = page[page.length - 1];
+      if (!last) break;
+      cursor = { receivedAt: last.receivedAt, id: last.id };
+    }
+
+    if (costRemaining > 0) {
+      // Batches can't cover the quantity: cost what exists rather than
+      // fabricating layers. Callers gate availability separately (CONFIRM
+      // asserts FIFO remaining first), so this is a data-drift signal.
+      this.logger.warn(
+        `FIFO cost simulation for product ${productId}: batches cover only ${quantityNeeded - costRemaining}/${quantityNeeded} units; costing the covered units.`,
+      );
     }
 
     return costTotal;
@@ -3518,6 +3550,17 @@ export class InventoryService {
       .from(schema.orderItems)
       .where(eq(schema.orderItems.orderId, orderId));
 
+    return this.expandLineQuantities(rows);
+  }
+
+  /**
+   * Bundle-expand an arbitrary set of (productId, quantity) lines. Partial
+   * delivery attributes a delivered subset of an order's lines, so expansion
+   * must work on any line set, not just a whole order.
+   */
+  private async expandLineQuantities(
+    rows: Array<{ productId: string; quantity: number }>,
+  ): Promise<Map<string, number>> {
     if (rows.length === 0) return new Map();
 
     // Check which of these products are bundles (have components)
@@ -3840,76 +3883,13 @@ export class InventoryService {
           actorId: actor.id,
         });
 
-        const levelRows = await tx
-          .select()
-          .from(schema.inventoryLevels)
-          .where(
-            and(
-              eq(schema.inventoryLevels.productId, productId),
-              eq(schema.inventoryLevels.locationId, logisticsLocationId),
-            ),
-          )
-          .orderBy(desc(schema.inventoryLevels.stockCount))
-          .for('update');
+        await this.deductShelfStockInTx(tx, productId, logisticsLocationId, lineQty, {
+          missingLevel:
+            'Cannot record delivery: no inventory level at the fulfillment location for a product on this order.',
+          insufficient: 'Cannot record delivery: shelf count at location is below shipped quantity.',
+        });
 
-        if (levelRows.length === 0) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message:
-              'Cannot record delivery: no inventory level at the fulfillment location for a product on this order.',
-          });
-        }
-
-        const totalStock = levelRows.reduce((sum, r) => sum + r.stockCount, 0);
-        const totalReserved = levelRows.reduce((sum, r) => sum + r.reservedCount, 0);
-        if (totalStock < lineQty) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Cannot record delivery: shelf count at location is below shipped quantity.',
-          });
-        }
-
-        let stockRemaining = lineQty;
-        for (const level of levelRows) {
-          if (stockRemaining <= 0) break;
-          const take = Math.min(stockRemaining, level.stockCount);
-          if (take <= 0) continue;
-          await tx
-            .update(schema.inventoryLevels)
-            .set({
-              stockCount: sql`${schema.inventoryLevels.stockCount} - ${take}`,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.inventoryLevels.id, level.id));
-          stockRemaining -= take;
-        }
-
-        const reservedToRelease = Math.min(lineQty, totalReserved);
-        let resRemaining = reservedToRelease;
-        const rowsAfter = await tx
-          .select()
-          .from(schema.inventoryLevels)
-          .where(
-            and(
-              eq(schema.inventoryLevels.productId, productId),
-              eq(schema.inventoryLevels.locationId, logisticsLocationId),
-            ),
-          )
-          .orderBy(desc(schema.inventoryLevels.reservedCount));
-
-        for (const level of rowsAfter) {
-          if (resRemaining <= 0) break;
-          const take = Math.min(resRemaining, level.reservedCount);
-          if (take <= 0) continue;
-          await tx
-            .update(schema.inventoryLevels)
-            .set({
-              reservedCount: sql`${schema.inventoryLevels.reservedCount} - ${take}`,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.inventoryLevels.id, level.id));
-          resRemaining -= take;
-        }
+        await this.releaseReservedAtLocationInTx(tx, productId, logisticsLocationId, lineQty);
       }
     });
 
@@ -3919,62 +3899,383 @@ export class InventoryService {
   }
 
   /**
-   * Reverse DELIVERY stock deductions for a delivered order that is being deleted
-   * (Finance dual-approval flow). Creates offsetting ADJUSTMENT movements and
-   * restores inventory levels at the original fulfillment locations.
+   * Decrement shelf stock_count for a product at a location across its level
+   * rows (largest first), under FOR UPDATE. Throws when no level row exists or
+   * the combined count is below `qty`.
    */
-  async reverseDeliveryForOrder(orderId: string, actor: SessionUser): Promise<void> {
-    // Find all DELIVERY movements for this order
-    const deliveryMovements = await this.db
+  private async deductShelfStockInTx(
+    tx: InventoryDbTx,
+    productId: string,
+    locationId: string,
+    qty: number,
+    messages: { missingLevel: string; insufficient: string },
+  ): Promise<void> {
+    const levelRows = await tx
       .select()
-      .from(schema.stockMovements)
+      .from(schema.inventoryLevels)
       .where(
         and(
-          eq(schema.stockMovements.referenceId, orderId),
-          eq(schema.stockMovements.movementType, 'DELIVERY'),
+          eq(schema.inventoryLevels.productId, productId),
+          eq(schema.inventoryLevels.locationId, locationId),
         ),
-      );
+      )
+      .orderBy(desc(schema.inventoryLevels.stockCount))
+      .for('update');
+
+    if (levelRows.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: messages.missingLevel });
+    }
+
+    const totalStock = levelRows.reduce((sum, r) => sum + r.stockCount, 0);
+    if (totalStock < qty) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: messages.insufficient });
+    }
+
+    let stockRemaining = qty;
+    for (const level of levelRows) {
+      if (stockRemaining <= 0) break;
+      const take = Math.min(stockRemaining, level.stockCount);
+      if (take <= 0) continue;
+      await tx
+        .update(schema.inventoryLevels)
+        .set({
+          stockCount: sql`${schema.inventoryLevels.stockCount} - ${take}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.inventoryLevels.id, level.id));
+      stockRemaining -= take;
+    }
+  }
+
+  /**
+   * Release up to `qty` reserved units for a product at a location, clamped to
+   * what is actually reserved (never drives reserved_count negative).
+   */
+  private async releaseReservedAtLocationInTx(
+    tx: InventoryDbTx,
+    productId: string,
+    locationId: string,
+    qty: number,
+  ): Promise<void> {
+    const rows = await tx
+      .select()
+      .from(schema.inventoryLevels)
+      .where(
+        and(
+          eq(schema.inventoryLevels.productId, productId),
+          eq(schema.inventoryLevels.locationId, locationId),
+        ),
+      )
+      .orderBy(desc(schema.inventoryLevels.reservedCount))
+      .for('update');
+
+    const totalReserved = rows.reduce((sum, r) => sum + r.reservedCount, 0);
+    let resRemaining = Math.min(qty, totalReserved);
+    for (const level of rows) {
+      if (resRemaining <= 0) break;
+      const take = Math.min(resRemaining, level.reservedCount);
+      if (take <= 0) continue;
+      await tx
+        .update(schema.inventoryLevels)
+        .set({
+          reservedCount: sql`${schema.inventoryLevels.reservedCount} - ${take}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.inventoryLevels.id, level.id));
+      resRemaining -= take;
+    }
+  }
+
+  /**
+   * PARTIALLY_DELIVERED: some units reached the customer, the rest came back
+   * to the 3PL with the rider. `deliveredUnits` is the operator-entered total
+   * across the order's lines, so units are attributed to lines in listed order
+   * (earlier lines deliver first) and bundle-expanded per line. Delivered
+   * units consume FIFO batches and shelf stock exactly like a full delivery;
+   * undelivered units stay on the shelf. The order leaves the logistics
+   * pipeline here, so the FULL reservation is released.
+   */
+  async completePartialDeliveryInventory(
+    orderId: string,
+    logisticsLocationId: string,
+    deliveredUnits: number,
+    actor: SessionUser,
+  ): Promise<void> {
+    const lines = await this.db
+      .select({
+        productId: schema.orderItems.productId,
+        quantity: schema.orderItems.quantity,
+      })
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, orderId));
+
+    if (lines.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items for delivery.' });
+    }
+    if (!Number.isInteger(deliveredUnits) || deliveredUnits <= 0) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Partial delivery requires a positive whole number of delivered units.',
+      });
+    }
+
+    // Attribute delivered units to lines in listed order, clamped to the order total.
+    let unitsLeft = deliveredUnits;
+    const deliveredLines: Array<{ productId: string; quantity: number }> = [];
+    for (const line of lines) {
+      if (unitsLeft <= 0) break;
+      const take = Math.min(unitsLeft, line.quantity);
+      deliveredLines.push({ productId: line.productId, quantity: take });
+      unitsLeft -= take;
+    }
+
+    const deliveredByProduct = await this.expandLineQuantities(deliveredLines);
+    const fullByProduct = await this.expandLineQuantities(lines);
+
+    await withActor(this.db, actor, async (tx) => {
+      for (const [productId, qty] of deliveredByProduct) {
+        await this.consumeFifoRemainingInTx(
+          tx,
+          productId,
+          qty,
+          'Cannot record partial delivery: insufficient FIFO batch remaining for a product on this order.',
+        );
+
+        await tx.insert(schema.stockMovements).values({
+          productId,
+          movementType: 'DELIVERY',
+          quantity: -qty,
+          fromLocationId: logisticsLocationId,
+          referenceId: orderId,
+          reason: `Partially delivered: ${qty} of order ${orderId}`,
+          actorId: actor.id,
+        });
+
+        await this.deductShelfStockInTx(tx, productId, logisticsLocationId, qty, {
+          missingLevel:
+            'Cannot record partial delivery: no inventory level at the fulfillment location for a product on this order.',
+          insufficient:
+            'Cannot record partial delivery: shelf count at location is below the delivered quantity.',
+        });
+      }
+
+      // The whole reservation goes: delivered units left the shelf above, and
+      // the returned units are back on the shelf as free (unreserved) stock.
+      for (const [productId, qty] of fullByProduct) {
+        await this.releaseReservedAtLocationInTx(tx, productId, logisticsLocationId, qty);
+      }
+    });
+
+    for (const productId of deliveredByProduct.keys()) {
+      this.scheduleLowStockCheck(productId, logisticsLocationId);
+    }
+  }
+
+  /**
+   * WRITTEN_OFF: goods physically lost or damaged after a failed delivery.
+   * Stock is only ever deducted at DELIVERED, and a written-off order never
+   * got there, so this is the point where the units actually leave the books:
+   * consume FIFO batches and decrement shelf stock at the logistics location.
+   * The order's reservation was already released when it entered RETURNED.
+   */
+  async writeOffOrderStock(
+    orderId: string,
+    logisticsLocationId: string,
+    actor: SessionUser,
+  ): Promise<void> {
+    const byProduct = await this.loadAggregatedOrderLineQuantities(orderId);
+    if (byProduct.size === 0) return;
+
+    await withActor(this.db, actor, async (tx) => {
+      for (const [productId, lineQty] of byProduct) {
+        await this.consumeFifoRemainingInTx(
+          tx,
+          productId,
+          lineQty,
+          'Cannot write off: insufficient FIFO batch remaining for a product on this order.',
+        );
+
+        await tx.insert(schema.stockMovements).values({
+          productId,
+          movementType: 'WRITE_OFF',
+          quantity: -lineQty,
+          fromLocationId: logisticsLocationId,
+          referenceId: orderId,
+          reason: `Written off: order ${orderId}`,
+          actorId: actor.id,
+        });
+
+        await this.deductShelfStockInTx(tx, productId, logisticsLocationId, lineQty, {
+          missingLevel:
+            'Cannot write off: no inventory level at the logistics location for a product on this order.',
+          insufficient: 'Cannot write off: shelf count at location is below the order quantity.',
+        });
+      }
+    });
+
+    for (const productId of byProduct.keys()) {
+      this.scheduleLowStockCheck(productId, logisticsLocationId);
+    }
+  }
+
+  /**
+   * Reason prefix stamped on every delivery-reversal ADJUSTMENT. Doubles as the
+   * idempotency marker: {@link reverseDeliveryForOrderInTx} nets prior rows with
+   * this prefix against the order's DELIVERY movements, so re-running a reversal
+   * (retrack then delete, double-fired side effect) restores nothing twice.
+   */
+  private static readonly DELIVERY_REVERSAL_REASON_PREFIX = 'Stock reversal:';
+
+  /**
+   * Reverse DELIVERY stock deductions for a delivered order that is being
+   * retracked or deleted. Restores shelf stock AND FIFO batch remaining (the
+   * delivery consumed both; restoring only the shelf permanently splits the
+   * shelf-vs-FIFO invariant and blocks future confirms).
+   *
+   * Only reserved is left alone: it was released on delivery and the retrack
+   * flow re-reserves when needed (e.g. DELIVERED → CONFIRMED re-allocation).
+   */
+  async reverseDeliveryForOrder(orderId: string, actor: SessionUser, reasonLabel?: string): Promise<void> {
+    await withActor(this.db, actor, async (tx) => {
+      await this.reverseDeliveryForOrderInTx(tx, orderId, actor, reasonLabel);
+    });
+  }
+
+  /**
+   * Transaction-scoped implementation, shared with the dual-approval delete so
+   * the reversal commits atomically with the order's DELETED flip.
+   */
+  async reverseDeliveryForOrderInTx(
+    tx: InventoryDbTx,
+    orderId: string,
+    actor: SessionUser,
+    reasonLabel = 'delivered order retracked or deleted',
+  ): Promise<void> {
+    const [deliveryMovements, priorReversals] = await Promise.all([
+      tx
+        .select()
+        .from(schema.stockMovements)
+        .where(
+          and(
+            eq(schema.stockMovements.referenceId, orderId),
+            eq(schema.stockMovements.movementType, 'DELIVERY'),
+          ),
+        ),
+      tx
+        .select()
+        .from(schema.stockMovements)
+        .where(
+          and(
+            eq(schema.stockMovements.referenceId, orderId),
+            eq(schema.stockMovements.movementType, 'ADJUSTMENT'),
+            like(schema.stockMovements.reason, `${InventoryService.DELIVERY_REVERSAL_REASON_PREFIX}%`),
+          ),
+        ),
+    ]);
 
     if (deliveryMovements.length === 0) {
       // No stock was moved — nothing to reverse (e.g. order was pre-shipment)
       return;
     }
 
-    await withActor(this.db, actor, async (tx) => {
-      for (const mov of deliveryMovements) {
-        const reverseQty = Math.abs(mov.quantity); // DELIVERY has negative qty
-        const locationId = mov.fromLocationId;
+    // Net delivered minus already-reversed per (product, location). An order
+    // that was delivered, retracked (reversed), and re-delivered has two
+    // DELIVERY rows but only one un-reversed deduction outstanding.
+    const key = (productId: string, locationId: string | null) => `${productId}|${locationId ?? ''}`;
+    const outstanding = new Map<string, { productId: string; locationId: string | null; qty: number }>();
+    for (const mov of deliveryMovements) {
+      const k = key(mov.productId, mov.fromLocationId);
+      const entry = outstanding.get(k) ?? { productId: mov.productId, locationId: mov.fromLocationId, qty: 0 };
+      entry.qty += Math.abs(mov.quantity); // DELIVERY has negative qty
+      outstanding.set(k, entry);
+    }
+    for (const rev of priorReversals) {
+      const k = key(rev.productId, rev.toLocationId);
+      const entry = outstanding.get(k);
+      if (entry) entry.qty -= Math.abs(rev.quantity);
+    }
 
-        // Create offsetting ADJUSTMENT movement
-        await tx.insert(schema.stockMovements).values({
-          productId: mov.productId,
-          movementType: 'ADJUSTMENT',
-          quantity: reverseQty,
-          toLocationId: locationId,
-          referenceId: orderId,
-          reason: `Stock reversal: delivered order deleted (dual-approval). Reversing ${reverseQty} units.`,
-          actorId: actor.id,
-        });
+    for (const { productId, locationId, qty } of outstanding.values()) {
+      if (qty <= 0) continue;
 
-        // Restore inventory level at the original location.
-        // Only restore stockCount — reservedCount was released on delivery
-        // and will be re-reserved by the retrack flow if needed (e.g. when
-        // reverting DELIVERED → CONFIRMED triggers reserveForAllocateWithMovements).
-        if (locationId) {
-          await tx
-            .update(schema.inventoryLevels)
-            .set({
-              stockCount: sql`${schema.inventoryLevels.stockCount} + ${reverseQty}`,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(schema.inventoryLevels.productId, mov.productId),
-                eq(schema.inventoryLevels.locationId, locationId),
-              ),
-            );
-        }
+      await tx.insert(schema.stockMovements).values({
+        productId,
+        movementType: 'ADJUSTMENT',
+        quantity: qty,
+        toLocationId: locationId,
+        referenceId: orderId,
+        reason: `${InventoryService.DELIVERY_REVERSAL_REASON_PREFIX} ${reasonLabel}. Reversing ${qty} units.`,
+        actorId: actor.id,
+      });
+
+      // Un-consume FIFO batches so shelf and batch remaining move together.
+      const restored = await this.restoreFifoRemainingInTx(tx, productId, qty);
+      if (restored < qty) {
+        this.logger.warn(
+          `Delivery reversal for order ${orderId}: FIFO batches could only absorb ${restored}/${qty} units of product ${productId} (batch headroom exhausted).`,
+        );
       }
-    });
+
+      if (locationId) {
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`${schema.inventoryLevels.stockCount} + ${qty}`,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(schema.inventoryLevels.productId, productId),
+              eq(schema.inventoryLevels.locationId, locationId),
+            ),
+          );
+      }
+    }
+  }
+
+  /**
+   * Mirror of {@link consumeFifoRemainingInTx}: re-add `qty` units to the most
+   * recently consumed batches first (newest received_at), capped per batch at
+   * its original quantity. Returns how many units the batches absorbed.
+   */
+  private async restoreFifoRemainingInTx(
+    tx: InventoryDbTx,
+    productId: string,
+    qty: number,
+  ): Promise<number> {
+    let remaining = qty;
+
+    while (remaining > 0) {
+      const page = await tx
+        .select()
+        .from(schema.stockBatches)
+        .where(
+          and(
+            eq(schema.stockBatches.productId, productId),
+            lt(schema.stockBatches.remainingQuantity, schema.stockBatches.quantity),
+          ),
+        )
+        .orderBy(desc(schema.stockBatches.receivedAt), desc(schema.stockBatches.id))
+        .limit(InventoryService.FIFO_BATCH_PAGE_SIZE)
+        .for('update');
+      if (page.length === 0) break;
+
+      let progressed = false;
+      for (const batch of page) {
+        if (remaining <= 0) break;
+        const headroom = batch.quantity - batch.remainingQuantity;
+        if (headroom <= 0) continue;
+        const add = Math.min(remaining, headroom);
+        await tx
+          .update(schema.stockBatches)
+          .set({ remainingQuantity: batch.remainingQuantity + add })
+          .where(eq(schema.stockBatches.id, batch.id));
+        remaining -= add;
+        progressed = true;
+      }
+      if (!progressed) break;
+    }
+
+    return qty - remaining;
   }
 }

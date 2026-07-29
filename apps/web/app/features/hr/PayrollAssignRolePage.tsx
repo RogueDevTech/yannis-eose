@@ -4,6 +4,7 @@ import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -273,6 +274,8 @@ export function PayrollAssignRolePage({
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <OverviewStatStrip
         mobileGrid

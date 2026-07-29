@@ -117,7 +117,48 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     // ongoing slips. The full-table self-join is too heavy to run on every
     // API restart without blocking the connection pool.
 
+    try {
+      await this.backfillDuplicateOfIdFromTimeline();
+    } catch (err) {
+      this.logger.error(`duplicate_of_id backfill failed: ${(err as Error)?.message ?? err}`);
+    }
+
     this.logger.log('Boot sweep complete');
+  }
+
+  /**
+   * One-time backfill: older auto-flagged duplicates were marked
+   * `is_duplicate='FLAGGED'` but never had `duplicate_of_id` populated, so the
+   * "Compare with original" button on the order detail page had no target and
+   * stayed hidden. The winner id was always recorded in the
+   * `ORDER_DUPLICATE_FLAGGED` timeline event metadata (`{ winnerId }`), so we
+   * recover it from there. Guarded to only set a winner that still exists and
+   * isn't the order itself. Idempotent — skips rows that already have a value.
+   */
+  private async backfillDuplicateOfIdFromTimeline(): Promise<void> {
+    const result = await this.db.execute(sql`
+      UPDATE orders o
+      SET duplicate_of_id = w.winner_id,
+          updated_at = now()
+      FROM (
+        SELECT DISTINCT ON (te.order_id)
+          te.order_id,
+          (te.metadata->>'winnerId')::uuid AS winner_id
+        FROM order_timeline_events te
+        WHERE te.event_type = 'ORDER_DUPLICATE_FLAGGED'
+          AND te.metadata->>'winnerId' IS NOT NULL
+        ORDER BY te.order_id, te.created_at DESC
+      ) w
+      JOIN orders win ON win.id = w.winner_id
+      WHERE o.id = w.order_id
+        AND o.duplicate_of_id IS NULL
+        AND o.is_duplicate = 'FLAGGED'
+        AND w.winner_id <> o.id
+    `);
+    const rows = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    if (rows > 0) {
+      this.logger.log(`Backfilled duplicate_of_id on ${rows} flagged duplicate orders`);
+    }
   }
 
   /** Every 2 hours, on the hour (00:00, 02:00, 04:00 … server time). */
@@ -585,37 +626,60 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       // 1a. Soft-delete early-stage duplicates — removes them from CS queues
       //     and counts so they don't drag down confirmation rates.
       if (softDeleteIds.length > 0) {
-        await tx
-          .update(schema.orders)
-          .set({
-            isDuplicate: 'FLAGGED',
-            status: 'DELETED',
-            deletedAt: now,
-            updatedAt: now,
-          })
-          .where(
-            and(
-              inArray(schema.orders.id, softDeleteIds),
-              isNull(schema.orders.deletedAt),
-            ),
-          );
+        // Set duplicateOfId per-row so the Compare button on the order detail
+        // page can diff the deleted duplicate against its winner. Winner varies
+        // per loser, so update each group of losers sharing a winner separately.
+        const byWinner = new Map<string, string[]>();
+        for (const e of loserEntries) {
+          if (!SAFE_TO_DELETE_STATUSES.includes(e.status)) continue;
+          const ids = byWinner.get(e.winnerId) ?? [];
+          ids.push(e.loserId);
+          byWinner.set(e.winnerId, ids);
+        }
+        for (const [winnerId, ids] of byWinner) {
+          await tx
+            .update(schema.orders)
+            .set({
+              isDuplicate: 'FLAGGED',
+              duplicateOfId: winnerId,
+              status: 'DELETED',
+              deletedAt: now,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                inArray(schema.orders.id, ids),
+                isNull(schema.orders.deletedAt),
+              ),
+            );
+        }
       }
 
       // 1b. Flag-only for CONFIRMED+ orders — stock may be allocated, can't
       //     safely delete without inventory reversal. CS/HoCS handles manually.
       if (flagOnlyIds.length > 0) {
-        await tx
-          .update(schema.orders)
-          .set({
-            isDuplicate: 'FLAGGED',
-            updatedAt: now,
-          })
-          .where(
-            and(
-              inArray(schema.orders.id, flagOnlyIds),
-              isNull(schema.orders.deletedAt),
-            ),
-          );
+        const byWinner = new Map<string, string[]>();
+        for (const e of loserEntries) {
+          if (SAFE_TO_DELETE_STATUSES.includes(e.status)) continue;
+          const ids = byWinner.get(e.winnerId) ?? [];
+          ids.push(e.loserId);
+          byWinner.set(e.winnerId, ids);
+        }
+        for (const [winnerId, ids] of byWinner) {
+          await tx
+            .update(schema.orders)
+            .set({
+              isDuplicate: 'FLAGGED',
+              duplicateOfId: winnerId,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                inArray(schema.orders.id, ids),
+                isNull(schema.orders.deletedAt),
+              ),
+            );
+        }
       }
 
       // 2. Timeline events for audit trail

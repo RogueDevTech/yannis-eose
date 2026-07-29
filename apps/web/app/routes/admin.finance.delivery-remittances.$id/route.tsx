@@ -1,5 +1,5 @@
 
-import { json, defer } from '@remix-run/node';
+import { json, defer, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Await, useLoaderData } from '@remix-run/react';
 import {
@@ -29,6 +29,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   if (!remittanceId) {
     throw new Response('Remittance ID required', { status: 400 });
+  }
+
+  // Legacy links opened the edit modal via ?edit=true; edit is a full page now.
+  if (new URL(request.url).searchParams.get('edit') === 'true') {
+    throw redirect(`/admin/finance/delivery-remittances/${remittanceId}/edit`);
   }
 
   const detailShell = { remittanceId };

@@ -3,10 +3,10 @@ import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
-import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { useFetcherToast } from '~/components/ui/toast';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import type { CommissionPlan } from './types';
@@ -54,11 +54,9 @@ const CATEGORY_OPTIONS = [
 export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleBuilderPageProps) {
   const isCreate = !payRole;
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
-  const archiveFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const previewFetcher = useFetcher<{ preview?: FormulaPreviewResult; error?: string }>();
   const surface = useFetcherActionSurface(fetcher);
   const initialRules = (plan?.rules ?? {}) as PayrollFormula;
-  const [showArchive, setShowArchive] = useState(false);
 
   // Role metadata state
   const [reportsToRequired, setReportsToRequired] = useState(payRole?.reportsToRequired ?? false);
@@ -106,12 +104,13 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
     previewFetcher.data && 'preview' in previewFetcher.data ? previewFetcher.data.preview ?? null : null;
 
   const intent = isCreate ? 'createPayRoleWithFormula' : 'saveFormulaConfig';
+  const backTo = isCreate ? '/hr/payroll/config/roles' : `/hr/payroll/config/rules/${payRole.id}`;
 
   return (
     <div className="space-y-3">
       <PageHeader
-        title={isCreate ? 'Create pay role' : payRole.name}
-        backTo="/hr/payroll/config/roles"
+        title={isCreate ? 'Create pay role' : `Edit · ${payRole.name}`}
+        backTo={backTo}
         mobileInlineActions
         description={
           isCreate
@@ -126,6 +125,8 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <ModalFetcherInlineError message={surface.errorMatchingIntent(intent)} />
 
@@ -213,35 +214,9 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
             <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving…">
               {isCreate ? 'Create pay role' : 'Save formula (new version)'}
             </Button>
-            {!isCreate && (
-              <>
-                <div className="flex-1" />
-                <Button variant="danger" size="sm" onClick={() => setShowArchive(true)}>
-                  Archive pay role
-                </Button>
-              </>
-            )}
           </div>
         ) : null}
       </fetcher.Form>
-
-      {showArchive && payRole && (
-        <ConfirmActionModal
-          open
-          title="Archive pay role"
-          description={`Archive "${payRole.name}"? Staff currently assigned this role will keep their existing payouts, but no new batches will use it.`}
-          confirmLabel="Archive"
-          variant="danger"
-          loading={archiveFetcher.state === 'submitting'}
-          onClose={() => setShowArchive(false)}
-          onConfirm={() => {
-            archiveFetcher.submit(
-              { intent: 'archivePayRole', payRoleId: payRole.id },
-              { method: 'post' },
-            );
-          }}
-        />
-      )}
     </div>
   );
 }

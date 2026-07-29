@@ -11,6 +11,7 @@ import {
 } from '~/lib/api.server';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { PageSearchControl } from '~/components/ui/page-search-control';
@@ -246,6 +247,8 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <Card variant="default" padding="md">
         <ToolbarFiltersCollapsible

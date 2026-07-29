@@ -3,6 +3,7 @@ import { useFetcher, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -382,6 +383,8 @@ export function AssetRegisterPage({
       >
         <Tabs value={activeTab} onChange={handleTabChange} tabs={STATUS_TABS} variant="pill" />
       </PageHeader>
+
+      <MobileDateFilterRow hideDate />
 
       <OverviewStatStrip
         items={[

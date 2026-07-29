@@ -14,6 +14,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { Pagination } from '~/components/ui/pagination';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -312,13 +313,10 @@ export function PermissionRequestsPage({
         title="Permission Requests"
         description="Review sensitive approval requests."
         mobileInlineActions
-        actions={
-          <>
-            <PageRefreshButton className="hidden md:inline-flex" />
-            <PageRefreshButton iconOnly className="md:hidden" />
-          </>
-        }
+        actions={<PageRefreshButton className="hidden md:inline-flex" />}
       />
+
+      <MobileDateFilterRow hideDate />
 
       {fetcherError && !dismissedError && modal == null && (
         <PageNotification

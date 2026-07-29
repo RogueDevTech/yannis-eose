@@ -293,7 +293,7 @@ async function backfillUserPayRoles(sql: Sql) {
        AND pr.name = ${payRoleName}
        AND pr.valid_to IS NULL
        AND pr.active = true
-      WHERE u.branch_id = b.id
+      WHERE u.primary_branch_id = b.id
         AND u.role = ${systemRole}::user_role
         AND u.pay_role_id IS NULL
         AND u.status = 'ACTIVE'

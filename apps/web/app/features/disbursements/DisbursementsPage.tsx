@@ -1148,11 +1148,6 @@ export function DisbursementsPage({
               }
             />
 
-            <FilteredTotalsRow
-              totalAmount={Number(filteredTotalAmount)}
-              recordCount={totalFunding}
-            />
-
             <TableLoadingOverlay show={isFilterLoading}>
               <CompactTable<DisbursementRecord>
                 columnVisibilityKey="admin.finance.disbursements"
@@ -1160,6 +1155,13 @@ export function DisbursementsPage({
                 columns={fundingLedgerColumns}
                 rows={funding}
                 rowKey={(f) => f.id}
+                toolbarLeading={
+                  <FilteredTotalsRow
+                    variant="inline"
+                    totalAmount={Number(filteredTotalAmount)}
+                    recordCount={totalFunding}
+                  />
+                }
                 emptyTitle="No disbursements found"
                 emptyDescription={
                   selectedStatus !== 'ALL' || selectedReceiver !== 'ALL'

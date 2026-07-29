@@ -90,7 +90,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       'delivered',
       'unitsDelivered',
       'deliveryRate',
-      'delinquencyRate',
       'returned',
       'locations',
     ]);
@@ -129,8 +128,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
             return p.unitsDelivered;
           case 'deliveryRate':
             return p.deliveryRate;
-          case 'delinquencyRate':
-            return p.delinquencyRate;
           case 'returned':
             return p.returned;
           case 'locations':

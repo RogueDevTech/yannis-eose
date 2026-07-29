@@ -11,6 +11,7 @@ import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -641,6 +642,8 @@ function ProductsRouteInner(
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
 <OverviewStatStrip
         mobileGrid

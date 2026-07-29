@@ -9,6 +9,11 @@ interface FilteredTotalsRowProps {
   recordLabel?: string;
   /** Extra items to display after the amount and count. */
   extra?: React.ReactNode;
+  /**
+   * `bar` — full-width strip (legacy standalone placement).
+   * `inline` — compact preview for CompactTable `toolbarLeading` (left of Columns).
+   */
+  variant?: 'bar' | 'inline';
 }
 
 export function FilteredTotalsRow({
@@ -16,11 +21,26 @@ export function FilteredTotalsRow({
   recordCount,
   recordLabel,
   extra,
+  variant = 'bar',
 }: FilteredTotalsRowProps) {
   if (recordCount <= 0) return null;
 
   const label = recordLabel
     ?? (recordCount === 1 ? 'record' : 'records');
+
+  if (variant === 'inline') {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+        <span className="text-sm font-semibold text-brand-700 dark:text-brand-300 tabular-nums">
+          {formatNaira(totalAmount)}
+        </span>
+        <span className="text-xs text-app-fg-muted">
+          {recordCount} {label}
+        </span>
+        {extra}
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-4 px-4 py-2.5 bg-brand-50 dark:bg-brand-950/40 border-b-2 border-brand-200 dark:border-brand-800">

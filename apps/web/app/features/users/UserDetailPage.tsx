@@ -23,6 +23,7 @@ import { Modal } from '~/components/ui/modal';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -881,19 +882,6 @@ export function UserDetailPage({
                 </h1>
                 <p className="text-sm text-white/85 break-all">{user.email}</p>
               </div>
-              <div className="md:hidden flex items-center gap-2 shrink-0">
-                <PageRefreshButton iconOnly />
-                <button
-                  type="button"
-                  onClick={() => setMobileProfileSheetOpen(true)}
-                  className="h-9 w-9 shrink-0 rounded-lg bg-white/15 hover:bg-white/25 border border-white/20 flex items-center justify-center text-white"
-                  aria-label="Profile actions"
-                >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-                  </svg>
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -1094,6 +1082,8 @@ export function UserDetailPage({
           />
         </div>
       </div>
+
+      <MobileDateFilterRow hideDate />
 
       {/* Overview metrics */}
       <div className="card !p-0 overflow-hidden">

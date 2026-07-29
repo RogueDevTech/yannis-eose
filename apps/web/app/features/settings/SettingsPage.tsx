@@ -19,6 +19,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { humanizeZodIssuesString } from '~/lib/api-error';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { TextInput } from '~/components/ui/text-input';
 import { NumberInput } from '~/components/ui/number-input';
 import { Collapsible } from '~/components/ui/collapsible';
@@ -502,13 +503,10 @@ export function SettingsPage({
         title="Settings"
         description="Manage account and system settings."
         mobileInlineActions
-        actions={
-          <>
-            <PageRefreshButton className="hidden md:inline-flex" />
-            <PageRefreshButton iconOnly className="md:hidden" />
-          </>
-        }
+        actions={<PageRefreshButton className="hidden md:inline-flex" />}
       />
+
+      <MobileDateFilterRow hideDate />
 
       <Tabs
         value={activeTab}

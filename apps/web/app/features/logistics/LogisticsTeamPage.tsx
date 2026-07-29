@@ -15,10 +15,7 @@ import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SortMenu } from '~/components/ui/sort-menu';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { Pagination } from '~/components/ui/pagination';
-import {
-  deliveryRateColorClass,
-  delinquencyRateColorClass,
-} from '~/lib/rate-color';
+import { deliveryRateColorClass } from '~/lib/rate-color';
 import type { LogisticsProviderRow, LogisticsLocationRow } from './team-types';
 import { FormSelect } from '~/components/ui/form-select';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
@@ -96,7 +93,6 @@ function generateProviderReport(p: LogisticsProviderRow, filters?: { productName
   lines.push(`Returned:            ${p.returned.toLocaleString()} orders`);
   lines.push(`Units Delivered:     ${p.unitsDelivered.toLocaleString()} units`);
   lines.push(`Delivery Rate:       ${p.totalAssigned > 0 ? `${Math.round(p.deliveryRate)}%` : '0%'}`);
-  lines.push(`Delinquency Rate:    ${p.totalAssigned > 0 ? `${Math.round(p.delinquencyRate)}%` : '0%'}`);
   lines.push('');
   lines.push(`REMITTANCE`);
   lines.push(`----------`);
@@ -163,14 +159,6 @@ const SORT_MENU_OPTIONS = [
     ascLabel: 'Lowest first',
     descLabel: 'Highest first',
     defaultDir: 'desc' as const,
-  },
-  {
-    value: 'delinquencyRate',
-    label: 'Delinquency rate',
-    description: 'Returned + partial + write-off ÷ assigned.',
-    ascLabel: 'Lowest first',
-    descLabel: 'Highest first',
-    defaultDir: 'asc' as const,
   },
   {
     value: 'returned',
@@ -320,18 +308,10 @@ function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: 
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 text-xs mb-3">
-        <div>
-          <div className="text-app-fg-muted">Delivery rate</div>
-          <div className={`font-semibold tabular-nums ${deliveryRateColorClass(row.deliveryRate)}`}>
-            {row.totalAssigned > 0 ? `${Math.round(row.deliveryRate)}%` : '0%'}
-          </div>
-        </div>
-        <div>
-          <div className="text-app-fg-muted">Delinquency</div>
-          <div className={`font-semibold tabular-nums ${delinquencyRateColorClass(row.delinquencyRate)}`}>
-            {row.totalAssigned > 0 ? `${Math.round(row.delinquencyRate)}%` : '0%'}
-          </div>
+      <div className="text-xs mb-3">
+        <div className="text-app-fg-muted">Delivery rate</div>
+        <div className={`font-semibold tabular-nums ${deliveryRateColorClass(row.deliveryRate)}`}>
+          {row.totalAssigned > 0 ? `${Math.round(row.deliveryRate)}%` : '0%'}
         </div>
       </div>
 
@@ -436,10 +416,6 @@ export function LogisticsTeamPage({
   const totalAssigned = providers.reduce((acc, p) => acc + p.totalAssigned, 0);
   const totalDelivered = providers.reduce((acc, p) => acc + p.delivered, 0);
   const totalUnitsDelivered = providers.reduce((acc, p) => acc + p.unitsDelivered, 0);
-  const totalDelinquent = providers.reduce(
-    (acc, p) => acc + p.returned + p.partiallyDelivered + p.writtenOff,
-    0,
-  );
   const totalRemitted = providers.reduce((acc, p) => acc + (Number(p.remittedAmount) || 0), 0);
   const totalRemittedOrders = providers.reduce((acc, p) => acc + (Number((p as unknown as Record<string, unknown>).remittedOrderCount) || 0), 0);
   const totalPending = providers.reduce((acc, p) => acc + (Number(p.pendingRemittanceAmount) || 0), 0);
@@ -457,8 +433,6 @@ export function LogisticsTeamPage({
   const stockBalanced = stockDiff === 0;
   const inconsistentProviders = providers.filter((p) => { const e = p.stockReceived - p.stockSold - p.stockTransferredOut + p.stockAdjusted - p.stockWrittenOff - (p.reservedStock ?? 0); return p.availableStock !== e; }).length;
   const overallDeliveryRate = totalAssigned > 0 ? (totalDelivered / totalAssigned) * 100 : 0;
-  const overallDelinquencyRate =
-    totalAssigned > 0 ? (totalDelinquent / totalAssigned) * 100 : 0;
 
   const providerColumns = useMemo((): CompactTableColumn<LogisticsProviderRow>[] => {
     return [
@@ -557,21 +531,6 @@ export function LogisticsTeamPage({
             <DualValue
               left={<span className="text-danger-600 dark:text-danger-400 font-medium"><NairaPrice amount={amount} /></span>}
               right={<span className="text-app-fg-muted">{cnt} order{cnt !== 1 ? 's' : ''}</span>}
-            />
-          );
-        },
-      },
-      {
-        key: 'delinquencyRate',
-        header: 'Delinquency',
-        align: 'right',
-        nowrap: true,
-        render: (p) => {
-          const count = p.returned + p.partiallyDelivered + p.writtenOff;
-          return (
-            <DualValue
-              left={<span className="text-app-fg">{count.toLocaleString()}</span>}
-              right={<span className={delinquencyRateColorClass(p.delinquencyRate)}>{p.totalAssigned > 0 ? `${Math.round(p.delinquencyRate)}%` : '0%'}</span>}
             />
           );
         },
@@ -683,22 +642,6 @@ export function LogisticsTeamPage({
                 <span className="text-warning-600 dark:text-warning-400 font-medium"><NairaPrice amount={l.pendingRemittanceAmount} /></span>
               </>
             )}
-          </span>
-        );
-      },
-    },
-    {
-      key: 'delinquencyRate',
-      header: 'Delinquency',
-      align: 'right',
-      nowrap: true,
-      render: (l) => {
-        const count = l.returned + l.partiallyDelivered + l.writtenOff;
-        return (
-          <span className="tabular-nums">
-            <span className="text-app-fg">{count.toLocaleString()}</span>
-            <span className="text-app-fg-muted mx-1">·</span>
-            <span className={delinquencyRateColorClass(l.delinquencyRate)}>{l.totalAssigned > 0 ? `${Math.round(l.delinquencyRate)}%` : '—'}</span>
           </span>
         );
       },
@@ -1062,14 +1005,6 @@ export function LogisticsTeamPage({
                 <div className="flex justify-between">
                   <span className="text-app-fg-muted">Units delivered</span>
                   <span className="font-medium tabular-nums">{p.unitsDelivered.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-app-fg-muted">Delinquency</span>
-                  <DualValue
-                    className="font-medium"
-                    left={<span>{(p.returned + p.partiallyDelivered + p.writtenOff).toLocaleString()}</span>}
-                    right={<span className={delinquencyRateColorClass(p.delinquencyRate)}>{p.totalAssigned > 0 ? `${Math.round(p.delinquencyRate)}%` : '0%'}</span>}
-                  />
                 </div>
                 <div className="flex justify-between">
                   <span className="text-app-fg-muted">Remitted</span>

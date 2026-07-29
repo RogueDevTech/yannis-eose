@@ -13,6 +13,7 @@ import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { Tabs } from '~/components/ui/tabs';
 import { useFetcherToast } from '~/components/ui/toast';
 import { FormSelect } from '~/components/ui/form-select';
@@ -515,6 +516,8 @@ function MessageTemplatesPage({
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {/* Channel tabs */}
       <Tabs

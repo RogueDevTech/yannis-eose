@@ -11,6 +11,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -418,6 +419,8 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       {actionData?.error && !dismissedError && (
         <PageNotification

@@ -7,6 +7,7 @@ import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { getNotificationAction, formatNotificationTime, formatNotificationDate } from '~/lib/notification-links';
@@ -205,6 +206,8 @@ export function NotificationsPage({
           }
         />
       )}
+
+      <MobileDateFilterRow hideDate />
 
       <TableLoadingOverlay show={isFilterLoading}>
       <div className="card p-0">

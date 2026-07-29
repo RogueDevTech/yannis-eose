@@ -5,6 +5,7 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { useToast } from '~/components/ui/toast';
@@ -384,6 +385,7 @@ export function TransfersImportPage({ locations, products }: TransfersImportPage
           />
         }
       />
+      <MobileDateFilterRow hideDate />
       <input
         ref={fileRef}
         type="file"

@@ -12,12 +12,13 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { PayrollRuleBuilderPage } from '~/features/hr/PayrollRuleBuilderPage';
+import { PayrollPayRoleViewPage, type AssignedStaffRow } from '~/features/hr/PayrollPayRoleViewPage';
 import { PayrollConfigLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type { CommissionPlan } from '~/features/hr/types';
 import type { PayRole } from '~/features/hr/payroll-prd-types';
 
 export const meta: MetaFunction = ({ params }) => [
-  { title: `${params.roleId === 'new' ? 'Create pay role' : 'Payroll formula'} — Yannis EOSE` },
+  { title: `${params.roleId === 'new' ? 'Create pay role' : 'Pay role rules'} — Yannis EOSE` },
 ];
 
 const VIEWER_ROLES = ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER', 'FINANCE_OFFICER', 'HEAD_OF_CS'];
@@ -39,7 +40,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Create mode — no existing role to fetch
   if (roleId === 'new') {
     if (!canWrite) throw redirect('/hr/payroll/config/roles');
-    return defer({ pageData: { payRole: null, plan: null, canWrite } });
+    return defer({ pageData: { mode: 'create' as const, payRole: null, plan: null, assignedStaff: [], canWrite } });
   }
 
   const cookie = getSessionCookie(request);
@@ -50,15 +51,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     );
     if (!detailRes.ok) {
-      // Role missing / wrong company — send back to the list.
       throw redirect('/hr/payroll/config/roles');
     }
     const detail = (detailRes.data as {
-      result?: { data?: { payRole: PayRole; plan: CommissionPlan | null } };
+      result?: {
+        data?: {
+          payRole: PayRole;
+          plan: CommissionPlan | null;
+          assignedStaff?: AssignedStaffRow[];
+        };
+      };
     })?.result?.data;
     if (!detail?.payRole) throw redirect('/hr/payroll/config/roles');
 
-    return { payRole: detail.payRole, plan: detail.plan ?? null, canWrite };
+    return {
+      mode: 'view' as const,
+      payRole: detail.payRole,
+      plan: detail.plan ?? null,
+      assignedStaff: detail.assignedStaff ?? [],
+      canWrite,
+    };
   })();
 
   return defer({ pageData });
@@ -114,7 +126,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: 'Pay role created but ID not returned' }, { status: 500 });
     }
 
-    // Save formula if tiers were configured
     const rulesSource = formData.get('rulesJsonOverride')?.toString()?.trim() || rulesJson;
     if (rulesSource) {
       let formula: Record<string, unknown> = {};
@@ -135,65 +146,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
         },
       });
       if (!formulaRes.ok) {
-        // Role was created but formula save failed — redirect to edit so user can retry
-        return redirect(`/hr/payroll/config/rules/${createdId}`);
+        return redirect(`/hr/payroll/config/rules/${createdId}/edit`);
       }
     }
 
-    return redirect('/hr/payroll/config/roles');
-  }
-
-  if (intent === 'saveFormulaConfig') {
-    // Also update role metadata if fields are present
-    const name = formData.get('name')?.toString()?.trim();
-    const category = formData.get('category')?.toString();
-    if (name && category && payRoleId && payRoleId !== 'new') {
-      const updateBody = {
-        id: payRoleId,
-        name,
-        category,
-        reportsToRequired: formData.get('reportsToRequired') === 'true',
-        perProductBonus: formData.get('perProductBonus') === 'true',
-      };
-      const updateRes = await apiRequest<unknown>('/trpc/hr.updatePayRole', {
-        method: 'POST',
-        cookie,
-        body: updateBody,
-      });
-      if (!updateRes.ok) {
-        return json(
-          { error: extractApiErrorMessage(updateRes.data, 'Failed to update pay role') },
-          { status: safeStatus(updateRes.status) },
-        );
-      }
-    }
-
-    const rulesSource = formData.get('rulesJsonOverride')?.toString()?.trim() || rulesJson;
-    let formula: Record<string, unknown> = rules;
-    if (rulesSource) {
-      try {
-        formula = JSON.parse(rulesSource) as Record<string, unknown>;
-      } catch {
-        return json({ error: 'Invalid formula JSON' }, { status: 400 });
-      }
-    }
-    const res = await apiRequest<unknown>('/trpc/hr.saveFormulaConfig', {
-      method: 'POST',
-      cookie,
-      body: {
-        payRoleId,
-        planName: formData.get('planName')?.toString(),
-        effectiveFrom: formData.get('effectiveFrom')?.toString() ?? new Date().toISOString().slice(0, 10),
-        formula,
-      },
-    });
-    if (!res.ok) {
-      return json(
-        { error: extractApiErrorMessage(res.data, 'Failed to save formula') },
-        { status: safeStatus(res.status) },
-      );
-    }
-    return redirect('/hr/payroll/config/roles');
+    return redirect(`/hr/payroll/config/rules/${createdId}`);
   }
 
   if (intent === 'previewFormula') {
@@ -240,53 +197,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ preview });
   }
 
-  if (intent === 'createPlan') {
-    const res = await apiRequest<unknown>('/trpc/hr.createPlan', {
-      method: 'POST',
-      cookie,
-      body: {
-        role: '',
-        planName: formData.get('planName')?.toString() ?? 'Payroll formula',
-        rules,
-        effectiveFrom: formData.get('effectiveFrom')?.toString() ?? new Date().toISOString().slice(0, 10),
-      },
-    });
-    if (!res.ok) {
-      return json(
-        { error: extractApiErrorMessage(res.data, 'Failed to create plan') },
-        { status: safeStatus(res.status) },
-      );
-    }
-    const created = (res.data as { result?: { data?: { id: string } } })?.result?.data;
-    const planId = created?.id;
-    if (planId && payRoleId) {
-      await apiRequest<unknown>('/trpc/hr.updatePayRole', {
-        method: 'POST',
-        cookie,
-        body: { id: payRoleId, commissionPlanId: planId },
-      });
-    }
-    return redirect('/hr/payroll/config/roles');
-  }
-
-  if (intent === 'updatePlan') {
-    const body: Record<string, unknown> = {
-      planId: formData.get('planId')?.toString() ?? '',
-      rules,
-    };
-    const planName = formData.get('planName')?.toString();
-    if (planName) body.planName = planName;
-
-    const res = await apiRequest<unknown>('/trpc/hr.updatePlan', { method: 'POST', cookie, body });
-    if (!res.ok) {
-      return json(
-        { error: extractApiErrorMessage(res.data, 'Failed to update plan') },
-        { status: safeStatus(res.status) },
-      );
-    }
-    return redirect('/hr/payroll/config/roles');
-  }
-
   if (intent === 'archivePayRole') {
     const body = { id: formData.get('payRoleId')?.toString() ?? payRoleId };
     const res = await apiRequest<unknown>('/trpc/hr.archivePayRole', { method: 'POST', cookie, body });
@@ -302,13 +212,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
-export default function PayrollRuleBuilderRoute() {
+export default function PayrollPayRoleRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
     <CachedAwait resolve={pageData} fallback={<PayrollConfigLoadingShell />} loaderShell={{}} deferredKey="pageData">
-      {(data) => (
-        <PayrollRuleBuilderPage payRole={data.payRole} plan={data.plan} canWrite={data.canWrite} />
-      )}
+      {(data) =>
+        data.mode === 'create' || !data.payRole ? (
+          <PayrollRuleBuilderPage payRole={null} plan={null} canWrite={data.canWrite} />
+        ) : (
+          <PayrollPayRoleViewPage
+            payRole={data.payRole}
+            plan={data.plan}
+            assignedStaff={data.assignedStaff ?? []}
+            canWrite={data.canWrite}
+          />
+        )
+      }
     </CachedAwait>
   );
 }

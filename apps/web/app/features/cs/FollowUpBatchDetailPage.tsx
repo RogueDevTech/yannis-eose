@@ -2,6 +2,7 @@ import { Link, useFetcher, useNavigate } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -379,6 +380,8 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
           />
         }
       />
+
+      <MobileDateFilterRow hideDate />
 
       <OverviewStatStrip
         mobileGrid

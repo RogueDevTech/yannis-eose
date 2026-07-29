@@ -1,17 +1,20 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Link, useFetcher } from '@remix-run/react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
 import { BankSelect } from '~/components/ui/bank-select';
 import { EmptyState } from '~/components/ui/empty-state';
+import { FormSelect } from '~/components/ui/form-select';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { useFetcherToast } from '~/components/ui/toast';
 import {
   CompactTable,
@@ -24,26 +27,71 @@ import type { PayrollContractor } from './payroll-prd-types';
 
 interface PayrollContractorsPageProps {
   contractors: PayrollContractor[];
+  statusFilter: 'active' | 'inactive';
   canWrite: boolean;
 }
 
-export function PayrollContractorsPage({ contractors, canWrite }: PayrollContractorsPageProps) {
+const STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'inactive', label: 'Inactive' },
+];
+
+export function PayrollContractorsPage({
+  contractors,
+  statusFilter,
+  canWrite,
+}: PayrollContractorsPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const surface = useFetcherActionSurface(fetcher);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showCreate, setShowCreate] = useState(false);
-  const [editRow, setEditRow] = useState<PayrollContractor | null>(null);
+  const [search, setSearch] = useState('');
 
   useFetcherToast(fetcher.data, {
     successMessage: 'Contractor saved',
-    skipErrorToast: showCreate || !!editRow,
+    skipErrorToast: showCreate,
   });
 
   const handleSuccess = useCallback(() => {
     setShowCreate(false);
-    setEditRow(null);
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleSuccess, { intent: 'createContractor' });
-  useCloseOnFetcherSuccess(fetcher, handleSuccess, { intent: 'updateContractor' });
+
+  const setStatusFilter = useCallback(
+    (value: string) => {
+      const next = new URLSearchParams(searchParams);
+      if (value === 'inactive') next.set('status', 'inactive');
+      else next.delete('status');
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const clearFilters = useCallback(() => {
+    setSearch('');
+    setStatusFilter('active');
+  }, [setStatusFilter]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    if (!q) return contractors;
+    return contractors.filter((c) => {
+      const haystack = [
+        c.name,
+        c.jobTitle,
+        c.bankName,
+        c.accountName,
+        c.accountNumber,
+        c.notes,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [contractors, search]);
+
+  const activeFilterCount = [search, statusFilter === 'inactive' ? 'inactive' : ''].filter(Boolean).length;
 
   const columns: CompactTableColumn<PayrollContractor>[] = useMemo(
     () => [
@@ -77,7 +125,7 @@ export function PayrollContractorsPage({ contractors, canWrite }: PayrollContrac
         render: (row) => (
           <span className="text-xs text-app-fg-muted">
             {row.bankName ?? 'Not set'}
-            {row.accountNumber ? ` · ****${row.accountNumber.slice(-4)}` : ''}
+            {row.accountNumber ? ` · ${row.accountNumber}` : ''}
           </span>
         ),
       },
@@ -92,16 +140,28 @@ export function PayrollContractorsPage({ contractors, canWrite }: PayrollContrac
             <CompactTableActionButton to={`/hr/payroll/contractors/${row.id}`} tone="brand">
               View
             </CompactTableActionButton>
-            {canWrite ? (
-              <CompactTableActionButton tone="brand" onClick={() => setEditRow(row)}>
-                Edit
-              </CompactTableActionButton>
-            ) : null}
           </div>
         ),
       },
     ],
-    [canWrite],
+    [],
+  );
+
+  const monthlyCost = useMemo(
+    () => contractors.reduce((sum, c) => sum + Number(c.monthlyFee), 0),
+    [contractors],
+  );
+
+  const renderStatusSelect = (opts?: { className?: string; wrapperClassName?: string }) => (
+    <FormSelect
+      label=""
+      name="status"
+      options={STATUS_OPTIONS}
+      value={statusFilter}
+      onChange={(e) => setStatusFilter(e.target.value)}
+      className={opts?.className ?? 'w-36'}
+      wrapperClassName={opts?.wrapperClassName ?? 'w-full min-w-0 sm:w-36'}
+    />
   );
 
   return (
@@ -112,8 +172,9 @@ export function PayrollContractorsPage({ contractors, canWrite }: PayrollContrac
         description="External agency contractors on fixed monthly fees (no PAYE)."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Actions"
+            sheetTitle="Filters"
             triggerAriaLabel="Contractors toolbar"
+            filtersBadgeCount={activeFilterCount}
             desktop={
               <>
                 <PageRefreshButton />
@@ -124,6 +185,17 @@ export function PayrollContractorsPage({ contractors, canWrite }: PayrollContrac
                 ) : null}
               </>
             }
+            filters={() => (
+              <div className="space-y-3">
+                <PageSearchControl
+                  value={search}
+                  onApply={setSearch}
+                  placeholder="Search contractors"
+                  title="Search contractors"
+                />
+                {renderStatusSelect({ wrapperClassName: 'w-full' })}
+              </div>
+            )}
             sheet={({ closeSheet }) =>
               canWrite ? (
                 <Button
@@ -160,40 +232,62 @@ export function PayrollContractorsPage({ contractors, canWrite }: PayrollContrac
         actionsSheetTitle="Actions"
       />
 
-      {contractors.length > 0 && (
-        <OverviewStatStrip
-          mobileGrid
-          items={[
-            { label: 'Contractors', value: contractors.length },
-            { label: 'Active', value: contractors.filter((c) => c.active).length },
-            {
-              label: 'Monthly cost',
-              value: (
-                <NairaPrice
-                  amount={contractors
-                    .filter((c) => c.active)
-                    .reduce((sum, c) => sum + Number(c.monthlyFee), 0)}
-                />
-              ),
-            },
-          ]}
-        />
-      )}
+      <OverviewStatStrip
+        mobileGrid
+        items={[
+          {
+            label: statusFilter === 'inactive' ? 'Inactive' : 'Active',
+            value: contractors.length,
+          },
+          {
+            label: 'Monthly cost',
+            value: <NairaPrice amount={monthlyCost} />,
+          },
+        ]}
+      />
 
-      {contractors.length === 0 ? (
+      <div className="list-panel">
+        <ToolbarFiltersCollapsible
+          className="!border-0"
+          hideMobileSheet
+          badgeCount={activeFilterCount}
+          onClearAll={activeFilterCount > 0 ? clearFilters : undefined}
+          searchRow={
+            <PageSearchControl
+              value={search}
+              onApply={setSearch}
+              placeholder="Search by name, job title, or bank"
+              title="Search contractors"
+            />
+          }
+          desktopInlineFilters={renderStatusSelect()}
+        />
+      </div>
+
+      {filtered.length === 0 ? (
         <EmptyState
-          title="No contractors"
+          title={
+            search
+              ? 'No matching contractors'
+              : statusFilter === 'inactive'
+                ? 'No inactive contractors'
+                : 'No contractors'
+          }
           description={
-            canWrite
-              ? 'Add agency contractors to include them in payroll batch generation.'
-              : 'Contractors configured by HR will appear here.'
+            search
+              ? 'Try adjusting your search or status filter.'
+              : statusFilter === 'inactive'
+                ? 'Deactivated contractors will appear here.'
+                : canWrite
+                  ? 'Add agency contractors to include them in payroll batch generation.'
+                  : 'Contractors configured by HR will appear here.'
           }
         />
       ) : (
         <CompactTable<PayrollContractor>
           columnVisibilityKey="hr.payroll.contractors"
           columns={columns}
-          rows={contractors}
+          rows={filtered}
           rowKey={(r) => r.id}
           emptyTitle="No contractors"
           emptyDescription=""
@@ -215,24 +309,22 @@ export function PayrollContractorsPage({ contractors, canWrite }: PayrollContrac
               </div>
               <p className="text-xs text-app-fg-muted">
                 {row.bankName ?? 'Bank not set'}
-                {row.accountNumber ? ` · ****${row.accountNumber.slice(-4)}` : ''}
+                {row.accountNumber ? ` · ${row.accountNumber}` : ''}
               </p>
             </Link>
           )}
         />
       )}
 
-      {(showCreate || editRow) && (
+      {showCreate && (
         <ContractorModal
-          contractor={editRow}
-          readOnly={false}
+          contractor={null}
           submitting={fetcher.state === 'submitting'}
-          error={surface.errorMatchingIntent(editRow ? 'updateContractor' : 'createContractor') ?? undefined}
+          error={surface.errorMatchingIntent('createContractor') ?? undefined}
           fetcher={fetcher}
           onClose={() => {
             if (fetcher.state !== 'idle') return;
             setShowCreate(false);
-            setEditRow(null);
           }}
         />
       )}
@@ -242,14 +334,12 @@ export function PayrollContractorsPage({ contractors, canWrite }: PayrollContrac
 
 function ContractorModal({
   contractor,
-  readOnly,
   submitting,
   error,
   fetcher,
   onClose,
 }: {
   contractor: PayrollContractor | null;
-  readOnly: boolean;
   submitting: boolean;
   error?: string;
   fetcher: ReturnType<typeof useFetcher>;
@@ -260,7 +350,7 @@ function ContractorModal({
     <Modal open onClose={onClose} maxWidth="max-w-lg" backdropBlur contentClassName="p-6 sm:p-8 space-y-5">
       <div className="flex items-start justify-between gap-3">
         <h3 className="text-base font-semibold text-app-fg">
-          {readOnly ? 'View contractor' : isEdit ? 'Edit contractor' : 'New contractor'}
+          {isEdit ? 'Edit contractor' : 'New contractor'}
         </h3>
         <button type="button" onClick={onClose} className="text-app-fg-muted hover:text-app-fg p-1 -m-1" aria-label="Close">
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -279,22 +369,19 @@ function ContractorModal({
           label="Name"
           name="name"
           required
-          readOnly={readOnly}
           defaultValue={contractor?.name ?? ''}
         />
         <TextInput
           label="Job title"
           name="jobTitle"
-          readOnly={readOnly}
           placeholder="e.g. IT Support, Cleaning Services"
           defaultValue={contractor?.jobTitle ?? ''}
         />
         <div>
-          <label className="block text-sm font-medium text-app-fg-muted mb-1">Monthly fee (₦)</label>
+          <label className="block text-sm font-medium text-app-fg mb-1">Monthly fee</label>
           <AmountInput
             name="monthlyFee"
             className="input"
-            disabled={readOnly}
             defaultValue={contractor ? String(Number(contractor.monthlyFee)) : ''}
           />
         </div>
@@ -302,30 +389,23 @@ function ContractorModal({
           id={isEdit ? `contractor-bank-${contractor.id}` : 'contractor-bank-new'}
           defaultBankName={contractor?.bankName}
           defaultBankCode={contractor?.bankCode}
-          nameBankName="bankName"
-          nameBankCode="bankCode"
-          disabled={readOnly}
-          label="Bank"
-          hint="Search and pick a bank. Bank code fills in automatically."
         />
         <TextInput
           label="Account number"
           name="accountNumber"
-          readOnly={readOnly}
+          inputMode="numeric"
           maxLength={10}
           defaultValue={contractor?.accountNumber ?? ''}
         />
-        <TextInput label="Account name" name="accountName" readOnly={readOnly} defaultValue={contractor?.accountName ?? ''} />
-        <TextInput label="Notes" name="notes" readOnly={readOnly} defaultValue={contractor?.notes ?? ''} />
+        <TextInput label="Account name" name="accountName" defaultValue={contractor?.accountName ?? ''} />
+        <TextInput label="Notes" name="notes" defaultValue={contractor?.notes ?? ''} />
 
-        <div className="flex gap-2 pt-1">
-          {!readOnly ? (
-            <Button type="submit" variant="primary" size="sm" loading={submitting} loadingText="Saving…">
-              Save contractor
-            </Button>
-          ) : null}
-          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
-            Close
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" size="sm" disabled={submitting}>
+            Save contractor
           </Button>
         </div>
       </fetcher.Form>

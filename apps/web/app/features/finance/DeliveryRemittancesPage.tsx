@@ -67,6 +67,8 @@ export interface DeliveryRemittanceDetail extends DeliveryRemittanceListItem {
   commitmentFee?: string | null;
   posFee?: string | null;
   failedDeliveryCost?: string | null;
+  discount?: string | null;
+  waybillCost?: string | null;
   orders: Array<{
     id: string;
     orderNumber: number | null;
@@ -498,7 +500,7 @@ export function DeliveryRemittancesPage({
         render: (r) => (
           <div className="flex items-center gap-1">
             <CompactTableActionButton
-              to={`/admin/finance/delivery-remittances/${r.id}?edit=true`}
+              to={`/admin/finance/delivery-remittances/${r.id}/edit`}
               state={remittanceDetailLinkState}
             >
               Edit
@@ -1547,7 +1549,7 @@ export function DeliveryRemittancesPage({
                       <CompactTableActionButton to={`/admin/orders/${r.id}`}>
                         Order
                       </CompactTableActionButton>
-                      <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.remittanceId}?edit=true`}>
+                      <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.remittanceId}/edit`}>
                         Edit
                       </CompactTableActionButton>
                       <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.remittanceId}`}>
