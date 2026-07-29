@@ -249,7 +249,8 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           // edge-form events in the timeline.
           actorId: null,
           actorName: 'System' as const,
-          description: 'Auto-deleted: test-order purge (customer name contains "test")',
+          description: 'Order deleted because it was detected as a test order (its name contains the word "test").',
+          metadata: { reason: 'TEST_ORDER' },
           branchId: t.branchId ?? null,
         })),
       );
@@ -258,7 +259,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     // Also soft-delete follow-up copies of these test orders so they don't
     // linger in the follow-up pipeline after the source is purged.
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
-      await tx
+      const bySource = await tx
         .update(schema.followUpOrders)
         .set({ deletedAt: now, updatedAt: now })
         .where(
@@ -266,11 +267,12 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
             inArray(schema.followUpOrders.sourceOrderId, ids),
             isNull(schema.followUpOrders.deletedAt),
           ),
-        );
+        )
+        .returning({ id: schema.followUpOrders.id });
 
       // Also catch follow-up orders where the customer name itself is a test name
       // (cart-origin follow-ups have no sourceOrderId but may have test customer names)
-      await tx
+      const byName = await tx
         .update(schema.followUpOrders)
         .set({ deletedAt: now, updatedAt: now })
         .where(
@@ -278,7 +280,24 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
             sql`${schema.followUpOrders.customerName} ~* '\\mtest\\M'`,
             isNull(schema.followUpOrders.deletedAt),
           ),
+        )
+        .returning({ id: schema.followUpOrders.id });
+
+      // Detailed deletion comment on each removed follow-up copy.
+      const fuIds = [...bySource, ...byName].map((r) => r.id);
+      if (fuIds.length > 0) {
+        await tx.insert(schema.followUpOrderTimelineEvents).values(
+          fuIds.map((fid) => ({
+            followUpOrderId: fid,
+            eventType: 'ORDER_DELETED',
+            actorId: null,
+            actorName: 'System' as const,
+            description: 'Order deleted because it was detected as a test order (its name contains the word "test").',
+            metadata: { reason: 'TEST_ORDER' },
+            branchId: null,
+          })),
         );
+      }
     }).catch(() => {}); // Non-critical — best-effort cleanup
 
     // The deletion happened outside the tRPC mutation path, so the
@@ -342,7 +361,8 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           eventType: 'ORDER_DELETED',
           actorId: null,
           actorName: 'System' as const,
-          description: 'Auto-deleted: test-order purge (customer name contains "test")',
+          description: 'Order deleted because it was detected as a test order (its name contains the word "test").',
+          metadata: { reason: 'TEST_ORDER' },
           branchId: t.branchId ?? null,
         })),
       );
@@ -400,7 +420,8 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           eventType: 'ORDER_DELETED',
           actorId: null,
           actorName: 'System' as const,
-          description: 'Auto-deleted: test-order purge (customer name contains "test")',
+          description: 'Order deleted because it was detected as a test order (its name contains the word "test").',
+          metadata: { reason: 'TEST_ORDER' },
           branchId: t.branchId ?? null,
         })),
       );
@@ -414,13 +435,13 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
   }
 
   /**
-   * Universal 7-day dedup flagging (CEO directive 2026-05-26):
+   * Universal 14-day dedup flagging (CEO directive 2026-05-26):
    * Same phone + any overlapping product within 14 days = duplicate.
    * Winner: highest lifecycle status, ties → oldest created_at.
-   * Loser: flagged as duplicate (isDuplicate='FLAGGED') but NEVER deleted —
-   * orders must never disappear from the system. CFA row recorded for MB
-   * visibility. The flag lets CS and reporting surfaces highlight duplicates
-   * without destroying audit trails or orphaning stock reservations.
+   * Early-stage losers (UNPROCESSED / CS_ASSIGNED / CS_ENGAGED): soft-deleted + FLAGGED.
+   * Late-stage losers (CONFIRMED+): FLAGGED only — stock may be allocated.
+   * CFA row recorded for MB visibility. Completed (already-delivered) winners
+   * that pre-date the loser are excluded so legitimate repeat purchases survive.
    */
   async purgeUniversalDuplicates(
     allDates = false,
@@ -612,7 +633,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
             description: wasSoftDeleted
               ? `Auto-deleted duplicate: same phone + product within 14 days (winner: ${winnerLabel})`
               : `Flagged as duplicate: same phone + product within 14 days (winner: ${winnerLabel})`,
-            metadata: { winnerId: e.winnerId },
+            metadata: { reason: 'DUPLICATE_RULE', winnerId: e.winnerId },
             branchId: e.branchId ?? null,
           };
         }),

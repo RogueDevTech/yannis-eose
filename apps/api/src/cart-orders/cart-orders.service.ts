@@ -12,8 +12,8 @@ import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
-// uuidv7() is now called as a PostgreSQL 18 built-in function in raw SQL
-// instead of JS-side generation. The import was removed to avoid TS6133.
+// Raw SQL pull/backfill calls PostgreSQL uuidv7().
+// PG 18 has it natively; older DBs get a polyfill via migration 0275.
 
 /** Valid values for the order_timeline_events.event_type enum.
  *  Cart order timeline uses plain text — filter before copying to orders. */
@@ -52,7 +52,9 @@ export class CartOrdersService {
     this.seedDefaultRoutingRule().catch((err) =>
       this.logger.warn(`Cart routing rule seed failed: ${err.message}`),
     );
-    // Backfill cart_order_items for any cart orders missing line items
+    // Backfill cart_order_items for any cart orders missing line items.
+    // Also re-run on the abandon cron — pull Step A+B are not transactional, so a
+    // failed Step B leaves orphan cart_orders with no products until repair.
     this.backfillMissingCartOrderItems().catch((err) =>
       this.logger.warn(`Cart order items backfill failed: ${err.message}`),
     );
@@ -124,8 +126,13 @@ export class CartOrdersService {
     }
   }
 
-  /** Backfill cart_order_items for cart orders that were pulled without line items. */
-  private async backfillMissingCartOrderItems() {
+  /**
+   * Backfill cart_order_items for cart orders that were pulled without line items.
+   * Safe to call repeatedly (idempotent). Used on boot and every abandon cron tick
+   * because pull Step A commits before Step B — a failed/partial Step B otherwise
+   * leaves Product/Amount blank on Cart Orders until the next API restart.
+   */
+  async backfillMissingCartOrderItems(): Promise<number> {
     // Use pg.unsafe() to bypass Drizzle — simple protocol avoids trigger conflict.
     const result = await this.pg.unsafe(`
       INSERT INTO cart_order_items (id, cart_order_id, product_id, quantity, unit_price, offer_label)
@@ -133,7 +140,7 @@ export class CartOrdersService {
         uuidv7(), co.id, ca.product_id, COALESCE(ca.quantity, 1),
         COALESCE(
           (SELECT (o->>'price')::numeric
-           FROM jsonb_array_elements(p.offers) AS o
+           FROM jsonb_array_elements(COALESCE(p.offers, '[]'::jsonb)) AS o
            WHERE o->>'label' = ca.offer_label
            LIMIT 1),
           COALESCE(p.base_sale_price, 0)
@@ -141,19 +148,20 @@ export class CartOrdersService {
         ca.offer_label
       FROM cart_orders co
       JOIN cart_abandonments ca ON ca.id = co.source_cart_id
-      LEFT JOIN products p ON p.id = ca.product_id
+      JOIN products p ON p.id = ca.product_id
       WHERE NOT EXISTS (
         SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
       )
         AND ca.product_id IS NOT NULL
     `);
-    if (result.count > 0) {
-      this.logger.log(`Backfilled ${result.count} missing cart_order_items from source carts`);
+    const inserted = result.count ?? 0;
+    if (inserted > 0) {
+      this.logger.log(`Backfilled ${inserted} missing cart_order_items from source carts`);
       await this.pg.unsafe(`
         UPDATE cart_orders co
         SET total_amount = sub.line_total, updated_at = now()
         FROM (
-          SELECT coi.cart_order_id, SUM(coi.unit_price) AS line_total
+          SELECT coi.cart_order_id, SUM(coi.unit_price * coi.quantity) AS line_total
           FROM cart_order_items coi
           GROUP BY coi.cart_order_id
         ) sub
@@ -161,6 +169,7 @@ export class CartOrdersService {
           AND (co.total_amount IS NULL OR co.total_amount = 0)
       `);
     }
+    return inserted;
   }
 
   // ── List Cart Orders ─────────────────────────────────────────────────
@@ -603,7 +612,10 @@ export class CartOrdersService {
 
       // Build a descriptive timeline message instead of the generic "Status changed to X."
       let description: string | undefined;
-      if (isRetrack) {
+      if (newStatus === 'DELETED') {
+        // Always make deletions self-explanatory in the activity log (who + why).
+        description = `Order manually deleted by ${actor.name ?? 'a user'}.${note ? ` ${note}` : ''}`;
+      } else if (isRetrack) {
         description = `Order retracked from ${statusLabel(order.status)} to ${statusLabel(newStatus)}${note ? `. ${note}` : ''}`;
       } else if (note) {
         description = note;
@@ -633,7 +645,7 @@ export class CartOrdersService {
           case 'DISPATCHED': description = 'Order dispatched to rider.'; break;
           case 'IN_TRANSIT': description = 'Order in transit.'; break;
           case 'DELIVERED': description = 'Order marked delivered.'; break;
-          case 'DELETED': description = 'Order deleted.'; break;
+          case 'DELETED': description = 'Order deleted.'; break; // handled earlier; kept for exhaustiveness
           default: description = `Status changed to ${newStatus.replace(/_/g, ' ').toLowerCase()}.`;
         }
       }
@@ -675,15 +687,30 @@ export class CartOrdersService {
     // not all online orders from the same phone.
     if (newStatus === 'DELETED' && order.sourceCartId) {
       try {
-        await this.db
+        const cascaded = await this.db
           .update(schema.orders)
-          .set({ status: 'DELETED', deletedAt: new Date() })
+          .set({ status: 'DELETED', deletedAt: new Date(), updatedAt: new Date() })
           .where(
             and(
               eq(schema.orders.cartId, order.sourceCartId),
               isNull(schema.orders.deletedAt),
             ),
-          );
+          )
+          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+        // Log a detailed deletion comment on each cascaded graduated order so its
+        // activity log explains why it disappeared (the cart order it came from
+        // was deleted), rather than silently vanishing.
+        for (const row of cascaded) {
+          await this.db.insert(schema.orderTimelineEvents).values({
+            orderId: row.id,
+            eventType: 'ORDER_DELETED',
+            actorId: actor.id,
+            actorName: actor.name ?? null,
+            description: `Order deleted because its originating cart order was deleted by ${actor.name ?? 'a user'}.`,
+            metadata: { reason: 'GRADUATION_SUPERSEDED', cartOrderId: orderId },
+            branchId: row.branchId ?? null,
+          }).catch(() => {});
+        }
       } catch (err) {
         this.logger.warn(`Cascade delete to graduated order failed for cart order ${orderId}: ${err instanceof Error ? err.message : err}`);
       }
@@ -1596,74 +1623,103 @@ export class CartOrdersService {
     // INNER JOIN products to skip carts whose product was deleted — a dangling
     // product_id FK would cause the entire batch INSERT to fail, leaving all
     // cart orders in the batch without items.
-    const items = await this.pg.unsafe<Array<{ id: string }>>(`
-      ${actorSetSql}
-      INSERT INTO cart_order_items (
-        id, cart_order_id, product_id, quantity, unit_price, offer_label
-      )
-      SELECT
-        uuidv7(),
-        co.id,
-        ca.product_id,
-        COALESCE(ca.quantity, 1),
-        COALESCE(
-          (SELECT (o->>'price')::numeric
-           FROM jsonb_array_elements(p.offers) AS o
-           WHERE o->>'label' = ca.offer_label
-           LIMIT 1),
-          COALESCE(p.base_sale_price, 0)
-        ),
-        ca.offer_label
-      FROM cart_orders co
-      JOIN cart_abandonments ca ON ca.id = co.source_cart_id
-      JOIN products p ON p.id = ca.product_id
-      WHERE co.source_cart_id IN (${sourceIdList})
-        AND NOT EXISTS (
-          SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
+    let items: Array<{ id: string }> = [];
+    try {
+      items = await this.pg.unsafe<Array<{ id: string }>>(`
+        ${actorSetSql}
+        INSERT INTO cart_order_items (
+          id, cart_order_id, product_id, quantity, unit_price, offer_label
         )
-      RETURNING id
-    `);
-    this.logger.log(`[pull] Step B: created ${items.length} line items`);
+        SELECT
+          uuidv7(),
+          co.id,
+          ca.product_id,
+          COALESCE(ca.quantity, 1),
+          COALESCE(
+            (SELECT (o->>'price')::numeric
+             FROM jsonb_array_elements(COALESCE(p.offers, '[]'::jsonb)) AS o
+             WHERE o->>'label' = ca.offer_label
+             LIMIT 1),
+            COALESCE(p.base_sale_price, 0)
+          ),
+          ca.offer_label
+        FROM cart_orders co
+        JOIN cart_abandonments ca ON ca.id = co.source_cart_id
+        JOIN products p ON p.id = ca.product_id
+        WHERE co.source_cart_id IN (${sourceIdList})
+          AND NOT EXISTS (
+            SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
+          )
+        RETURNING id
+      `);
+      this.logger.log(`[pull] Step B: created ${items.length} line items`);
+    } catch (err) {
+      this.logger.error(
+        `[pull] Step B failed after inserting ${inserted.length} cart order(s) — will repair via backfill: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+    }
+
+    // If Step B under-delivered (failure or INNER JOIN skips), repair immediately
+    // so Cart Orders never sits with Product/Amount blank until the next API restart.
+    if (items.length < inserted.length) {
+      const repaired = await this.backfillMissingCartOrderItems().catch((err) => {
+        this.logger.error(`[pull] Immediate item repair failed: ${err instanceof Error ? err.message : err}`);
+        return 0;
+      });
+      this.logger.warn(
+        `[pull] Step B created ${items.length}/${inserted.length} items; backfill repaired ${repaired}`,
+      );
+    }
 
     // Step C: Update total_amount from line items
-    await this.pg.unsafe(`
-      ${actorSetSql}
-      UPDATE cart_orders co
-      SET total_amount = sub.line_total, updated_at = now()
-      FROM (
-        SELECT coi.cart_order_id, SUM(coi.unit_price * coi.quantity) AS line_total
-        FROM cart_order_items coi
-        WHERE coi.cart_order_id IN (
-          SELECT id FROM cart_orders WHERE source_cart_id IN (${sourceIdList})
-        )
-        GROUP BY coi.cart_order_id
-      ) sub
-      WHERE co.id = sub.cart_order_id
-        AND (co.total_amount IS NULL OR co.total_amount = 0)
-    `);
-    this.logger.log(`[pull] Step C: updated totals`);
+    try {
+      await this.pg.unsafe(`
+        ${actorSetSql}
+        UPDATE cart_orders co
+        SET total_amount = sub.line_total, updated_at = now()
+        FROM (
+          SELECT coi.cart_order_id, SUM(coi.unit_price * coi.quantity) AS line_total
+          FROM cart_order_items coi
+          WHERE coi.cart_order_id IN (
+            SELECT id FROM cart_orders WHERE source_cart_id IN (${sourceIdList})
+          )
+          GROUP BY coi.cart_order_id
+        ) sub
+        WHERE co.id = sub.cart_order_id
+          AND (co.total_amount IS NULL OR co.total_amount = 0)
+      `);
+      this.logger.log(`[pull] Step C: updated totals`);
+    } catch (err) {
+      this.logger.error(`[pull] Step C failed: ${err instanceof Error ? err.message : err}`);
+    }
 
     // Step D: Create timeline events
-    await this.pg.unsafe(`
-      ${actorSetSql}
-      INSERT INTO cart_order_timeline_events (
-        id, cart_order_id, event_type, actor_name, description, metadata, branch_id
-      )
-      SELECT
-        uuidv7(),
-        co.id,
-        'ORDER_RECEIVED',
-        'System',
-        'Cart order created from abandoned cart.',
-        jsonb_build_object('sourceCartId', co.source_cart_id),
-        co.servicing_branch_id
-      FROM cart_orders co
-      WHERE co.source_cart_id IN (${sourceIdList})
-        AND NOT EXISTS (
-          SELECT 1 FROM cart_order_timeline_events cte WHERE cte.cart_order_id = co.id
+    try {
+      await this.pg.unsafe(`
+        ${actorSetSql}
+        INSERT INTO cart_order_timeline_events (
+          id, cart_order_id, event_type, actor_name, description, metadata, branch_id
         )
-    `);
-    this.logger.log(`[pull] Step D: created timeline events`);
+        SELECT
+          uuidv7(),
+          co.id,
+          'ORDER_RECEIVED',
+          'System',
+          'Cart order created from abandoned cart.',
+          jsonb_build_object('sourceCartId', co.source_cart_id),
+          co.servicing_branch_id
+        FROM cart_orders co
+        WHERE co.source_cart_id IN (${sourceIdList})
+          AND NOT EXISTS (
+            SELECT 1 FROM cart_order_timeline_events cte WHERE cte.cart_order_id = co.id
+          )
+      `);
+      this.logger.log(`[pull] Step D: created timeline events`);
+    } catch (err) {
+      this.logger.error(`[pull] Step D failed: ${err instanceof Error ? err.message : err}`);
+    }
 
     this.logger.log(`pullFromAbandonedCarts: pulled ${inserted.length} of ${cartIds.length} requested`);
     return { pulled: inserted.length };

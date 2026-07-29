@@ -310,8 +310,9 @@ export class OnboardingService {
   /**
    * Move the record to SUBMITTED — locks it for the staff member. Only self-submit.
    *
-   * Required fields at submission: gender, DOB, residential address, proof of
-   * address, both guarantors with at least name + phone + letter URL.
+   * Required at submission: payout bank details (bank name, bank code, account
+   * name, account number). Personal details and file uploads are optional;
+   * HR can request missing items later via request-changes.
    */
   async submit(targetUserId: string, actor: SessionUser) {
     if (targetUserId !== actor.id) {
@@ -357,24 +358,10 @@ export class OnboardingService {
         .where(eq(schema.users.id, targetUserId))
         .limit(1);
 
-      // Submission checklist — kept in sync with the StaffOnboardingPage UI
-      // sections. HR feedback 2026-05 moved guarantors to file-only (form + ID)
-      // and added state, contract, government ID as required.
+      // Submission checklist — only payout bank details are required so Finance
+      // can pay. Personal details and document uploads are optional at submit;
+      // HR can request them later if needed.
       const missing: string[] = [];
-      if (!existing.gender) missing.push('gender');
-      if (!existing.dateOfBirth) missing.push('date of birth');
-      if (!existing.residentialAddress) missing.push('residential address');
-      if (!existing.currentStateOfResidence) missing.push('current state of residence');
-      // File uploads are optional until image upload is fully implemented.
-      // if (!existing.proofOfAddressUrl) missing.push('proof of address');
-      // if (!existing.signedContractUrl) missing.push('signed contract');
-      // if (!existing.governmentIdUrl) missing.push('government ID (NIN slip or passport)');
-      // if (!existing.guarantor1FormUrl || !existing.guarantor1IdUrl) {
-      //   missing.push('guarantor 1 (signed form + means of ID)');
-      // }
-      // if (!existing.guarantor2FormUrl || !existing.guarantor2IdUrl) {
-      //   missing.push('guarantor 2 (signed form + means of ID)');
-      // }
       if (
         !bankRow?.payoutBankName?.trim() ||
         !bankRow?.payoutAccountName?.trim() ||

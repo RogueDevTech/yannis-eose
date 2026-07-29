@@ -218,7 +218,7 @@ function OnboardingReadOnlyView({ record }: { record: OnboardingRecord }) {
       <Card>
         <CardHeader
           title="Identification & contracts"
-          description="Signed contract and government-issued ID. Required at submission."
+          description="Signed contract and government-issued ID. Optional at submit; HR may request them later."
         />
         <CardBody>
           <DescriptionList
@@ -724,7 +724,7 @@ export function StaffOnboardingPage({
           <Card>
             <CardHeader
               title="Identification & contracts"
-              description="Signed contract and a government-issued ID. Both required at submission."
+              description="Signed contract and a government-issued ID. Optional for now; HR may ask for them later."
             />
             <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField label="Signed contract" hint="PDF or image, ≤10MB" className="sm:col-span-2">
@@ -1113,7 +1113,7 @@ function GuarantorCard({
     <Card>
       <CardHeader
         title={`Guarantor ${index}`}
-        description="Upload the signed guarantor form and a means of ID. Both files required at submission."
+        description="Upload the signed guarantor form and a means of ID. Optional for now; HR may ask for them later."
       />
       <CardBody className="grid grid-cols-1 gap-4">
         <FormField label="Signed guarantor form" hint="PDF or image, ≤10MB">
