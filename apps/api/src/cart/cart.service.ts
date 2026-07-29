@@ -336,6 +336,18 @@ export class CartService {
     } catch (err) {
       console.error(`[Cart] Auto-pull to Cart Orders failed:`, err instanceof Error ? err.stack : err);
     }
+
+    // Repair cart_orders that were inserted without line items (Step A committed
+    // before a failed Step B). Without this, Product/Amount stay blank until
+    // the next API restart boot backfill — often ~24h later.
+    try {
+      const repaired = await this.cartOrdersService.backfillMissingCartOrderItems();
+      if (repaired > 0) {
+        console.log(`[Cart] Repaired ${repaired} cart order(s) missing line items`);
+      }
+    } catch (err) {
+      console.error(`[Cart] Missing line-item repair failed:`, err instanceof Error ? err.stack : err);
+    }
   }
 
   /**

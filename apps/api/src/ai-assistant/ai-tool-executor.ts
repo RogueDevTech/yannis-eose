@@ -263,6 +263,20 @@ export async function executeTool(
         break;
       }
 
+      // ─── Category B: Diagnostics ───────────────────────
+      case 'trace_order': {
+        const raw = params.orderNumber;
+        const orderNumber =
+          typeof raw === 'number'
+            ? raw
+            : parseInt(String(raw ?? '').replace(/[^0-9]/g, ''), 10);
+        if (!Number.isFinite(orderNumber) || orderNumber <= 0) {
+          return JSON.stringify({ error: 'Provide a valid numeric order number, e.g. 68366.' });
+        }
+        result = await services.ordersService.traceOrderByNumber(orderNumber);
+        break;
+      }
+
       default:
         return JSON.stringify({ error: `Unknown tool: ${toolName}` });
     }
