@@ -27,7 +27,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     'HEAD_OF_MARKETING',
     'HEAD_OF_CS',
     'CS_CLOSER',
-    'TPL_RIDER',
     'HR_MANAGER',
   ].includes(profileUser.role);
 

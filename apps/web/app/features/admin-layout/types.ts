@@ -7,7 +7,7 @@ export interface AdminErrorBoundaryProps {
    * Home path to send users to from the 403 / 404 / generic-server error screens
    * and the modal "Go back" fallback when there's no browser history. Default
    * `/admin` (back-compat for admin + HR). Pass `/tpl` for the TPL portal,
-   * `/rider` for the rider PWA, etc.
+   * `/tpl` for 3PL managers, etc.
    */
   homePath?: string;
   /**

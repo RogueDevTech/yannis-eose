@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -37,6 +38,71 @@ import {
 function resolvedSessionCookieDomain(): string | undefined {
   if (process.env['NODE_ENV'] !== 'production') return undefined;
   return process.env['SESSION_COOKIE_DOMAIN']?.trim() || undefined;
+}
+
+/**
+ * Only allow password-reset links that target our own app origin(s).
+ * Rejects phishing injection via a crafted `resetBaseUrl` on the public endpoint.
+ */
+function assertAllowedResetBaseUrl(raw: string | undefined): string {
+  const value = raw?.trim();
+  if (!value) {
+    throw new BadRequestException('resetBaseUrl is required');
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new BadRequestException('Invalid resetBaseUrl');
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new BadRequestException('Invalid resetBaseUrl');
+  }
+
+  // Must end at the reset-password path (no open redirect via query/hash tricks in the base).
+  if (!parsed.pathname.replace(/\/$/, '').endsWith('/auth/reset-password')) {
+    throw new BadRequestException('Invalid resetBaseUrl');
+  }
+  if (parsed.search || parsed.hash) {
+    throw new BadRequestException('Invalid resetBaseUrl');
+  }
+
+  const allowedOrigins = new Set<string>();
+  for (const source of [
+    process.env['APP_URL'],
+    process.env['CORS_ORIGIN'],
+  ]) {
+    if (!source) continue;
+    for (const part of source.split(',')) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      try {
+        allowedOrigins.add(new URL(trimmed).origin);
+      } catch {
+        // ignore malformed env entries
+      }
+    }
+  }
+
+  // Local defaults when env is unset, or always in non-production so local
+  // Remix (often :4003 / :5173) works even if APP_URL points at a deploy host.
+  if (allowedOrigins.size === 0 || process.env['NODE_ENV'] !== 'production') {
+    allowedOrigins.add('http://localhost:4001');
+    allowedOrigins.add('http://localhost:4003');
+    allowedOrigins.add('http://localhost:5173');
+    allowedOrigins.add('http://127.0.0.1:4001');
+    allowedOrigins.add('http://127.0.0.1:4003');
+    allowedOrigins.add('http://127.0.0.1:5173');
+  }
+
+  if (!allowedOrigins.has(parsed.origin)) {
+    throw new BadRequestException('Invalid resetBaseUrl');
+  }
+
+  // Normalize: strip trailing slash on path for consistent email links.
+  return `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}`;
 }
 
 /** When web (e.g. yannis.*) and API (e.g. api-yannis.*) differ, set e.g. `.roguedevtech.com` so Socket.io receives `Cookie`. */
@@ -230,7 +296,8 @@ export class AuthController {
       return { message: 'If an account with that email exists, a reset link has been sent.' };
     }
 
-    await this.authService.forgotPassword(email, body.resetBaseUrl);
+    const resetBaseUrl = assertAllowedResetBaseUrl(body.resetBaseUrl);
+    await this.authService.forgotPassword(email, resetBaseUrl);
 
     return { message: 'If an account with that email exists, a reset link has been sent.' };
   }
@@ -245,11 +312,11 @@ export class AuthController {
     @Body() body: { token: string; newPassword: string },
   ) {
     if (!body.token || !body.newPassword) {
-      return { error: 'Token and new password are required' };
+      throw new BadRequestException('Token and new password are required');
     }
 
     if (body.newPassword.length < 8) {
-      return { error: 'Password must be at least 8 characters' };
+      throw new BadRequestException('Password must be at least 8 characters');
     }
 
     await this.authService.resetPasswordWithToken(body.token, body.newPassword);

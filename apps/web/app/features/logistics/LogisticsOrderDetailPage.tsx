@@ -563,7 +563,6 @@ export function LogisticsOrderDetailPage({
 
   const [activeTab, setActiveTab] = useState('overview');
   const [allocateLocationId, setAllocateLocationId] = useState('');
-  const [dispatchRiderId, setDispatchRiderId] = useState('');
   const [deliveryProofUrl, setDeliveryProofUrl] = useState('');
   const [deliveryCost, setDeliveryCost] = useState('');
   const [deliveryDiscount, setDeliveryDiscount] = useState('');
@@ -573,7 +572,6 @@ export function LogisticsOrderDetailPage({
 
   useEffect(() => {
     setAllocateLocationId('');
-    setDispatchRiderId('');
     setDeliveryProofUrl('');
     setDeliveryCost('');
     setDeliveryDiscount('');
@@ -585,7 +583,6 @@ export function LogisticsOrderDetailPage({
   useEffect(() => {
     if (fetcher.data && (fetcher.data as { success?: boolean }).success) {
       setAllocateLocationId('');
-      setDispatchRiderId('');
       setDeliveryProofUrl('');
       setDeliveryCost('');
       setDeliveryDiscount('');
@@ -596,10 +593,6 @@ export function LogisticsOrderDetailPage({
   }, [fetcher.data]);
 
   const allowed = order.allowedTransitions ?? [];
-  const ridersForOrder =
-    order.logisticsLocationId && order.status === 'AGENT_ASSIGNED'
-      ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
-      : riders;
   const allocatableLocations = allocatableLocationsProp ?? locations.filter((l) => l.status === 'ACTIVE');
   const isSubmitting = fetcher.state === 'submitting';
   const logisticsLocationWithGroupLink =
@@ -1103,27 +1096,13 @@ export function LogisticsOrderDetailPage({
                   <TruckIcon />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-app-fg">Dispatch to Rider</h3>
-                  <p className="text-mini text-app-fg-muted">Assign a rider for pickup and delivery</p>
+                  <h3 className="text-sm font-semibold text-app-fg">Dispatch</h3>
+                  <p className="text-mini text-app-fg-muted">Mark order as dispatched for pickup and delivery</p>
                 </div>
               </div>
-              <fetcher.Form method="post" className="flex flex-wrap items-end gap-3">
+              <fetcher.Form method="post">
                 <input type="hidden" name="intent" value="dispatch" />
-                <input type="hidden" name="riderId" value={dispatchRiderId} />
-                <div className="flex-1 min-w-[200px]">
-                  <SearchableSelect
-                    id="logistics-dispatch-rider"
-                    label="Rider"
-                    required
-                    value={dispatchRiderId}
-                    onChange={setDispatchRiderId}
-                    disabled={isSubmitting}
-                    placeholder={ridersForOrder.length === 0 ? 'No riders at this location' : 'Select rider...'}
-                    searchPlaceholder="Search riders..."
-                    options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
-                  />
-                </div>
-                <Button type="submit" variant="primary" size="sm" loading={isSubmitting} disabled={isSubmitting || ridersForOrder.length === 0}>
+                <Button type="submit" variant="primary" size="sm" loading={isSubmitting} disabled={isSubmitting}>
                   Dispatch
                 </Button>
               </fetcher.Form>

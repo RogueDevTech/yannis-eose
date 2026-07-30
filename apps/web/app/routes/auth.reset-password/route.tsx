@@ -10,14 +10,19 @@ import { apiRequest, getCurrentUser, safeStatus } from '~/lib/api.server';
 
 export const meta: MetaFunction = () => {
   return [
-    { title: 'Yannis EOSE — Reset Password' },
+    { title: 'Yannis EOSE: Reset Password' },
     { name: 'description', content: 'Set a new password for your Yannis EOSE account' },
   ];
 };
 
+function homeForRole(role: string | undefined): string {
+  if (role === 'TPL_MANAGER') return '/tpl';
+  return '/admin';
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request, { softNetwork: true });
-  if (user) return redirect('/admin');
+  if (user) return redirect(homeForRole(user.role));
 
   const url = new URL(request.url);
   const token = url.searchParams.get('token') ?? '';
@@ -52,9 +57,15 @@ export async function action({ request }: ActionFunctionArgs) {
     body: { token, newPassword },
   });
 
-  if (!res.ok) {
-    const msg = (res.data as { message?: string }).message ?? 'Failed to reset password. The link may have expired.';
-    return json({ error: msg }, { status: safeStatus(res.status) });
+  // API historically returned HTTP 200 + `{ error }` for validation failures —
+  // treat that as failure even when `res.ok` is true.
+  const bodyError = typeof res.data?.error === 'string' ? res.data.error : null;
+  if (!res.ok || bodyError) {
+    const msg =
+      bodyError ??
+      (res.data as { message?: string }).message ??
+      'Failed to reset password. The link may have expired.';
+    return json({ error: msg }, { status: !res.ok ? safeStatus(res.status) : 400 });
   }
 
   return json({ success: res.data.message ?? 'Password has been reset successfully.' });
@@ -82,8 +93,6 @@ export default function ResetPasswordRoute() {
   useEffect(() => {
     if (actionData?.error) setDismissedError(false);
   }, [actionData?.error]);
-
-  const onInputChange = () => {};
 
   const hasToken = Boolean(token);
 
@@ -196,7 +205,6 @@ export default function ResetPasswordRoute() {
                   minLength={8}
                   placeholder="Minimum 8 characters"
                   autoFocus
-                  onChange={onInputChange}
                   className={mobileInput}
                   rightAction={<EyeToggle shown={showPassword} onToggle={() => setShowPassword(!showPassword)} />}
                 />
@@ -210,7 +218,6 @@ export default function ResetPasswordRoute() {
                   required
                   minLength={8}
                   placeholder="Re-enter your password"
-                  onChange={onInputChange}
                   className={mobileInput}
                 />
 

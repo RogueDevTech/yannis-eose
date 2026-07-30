@@ -43,7 +43,6 @@ const KNOWN_ROLES = [
   'HEAD_OF_LOGISTICS',
   'LOGISTICS_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
   'STOCK_MANAGER',
   'HR_MANAGER',
 ] as const;
@@ -173,7 +172,7 @@ export function DashboardPage({
         />
       )}
       {hasFinanceAccess({ role: role ?? '' }) && !isAdminLevel({ role: role ?? '' }) && <FinanceDashboard data={data} naira={naira} />}
-      {(role === 'HEAD_OF_LOGISTICS' || role === 'LOGISTICS_MANAGER' || role === 'TPL_MANAGER' || role === 'TPL_RIDER') && <LogisticsDashboard data={data} role={role} />}
+      {(role === 'HEAD_OF_LOGISTICS' || role === 'LOGISTICS_MANAGER' || role === 'TPL_MANAGER') && <LogisticsDashboard data={data} role={role} />}
       {(role === 'STOCK_MANAGER') && <WarehouseDashboard data={data} />}
       {(role === 'HR_MANAGER') && <HRDashboard naira={naira} />}
 
@@ -215,7 +214,6 @@ function getRoleDescription(role: string | null) {
     HEAD_OF_LOGISTICS: 'Logistics operations and delivery metrics.',
     LOGISTICS_MANAGER: 'Your location operations overview.',
     TPL_MANAGER: 'Your 3PL location stock and deliveries.',
-    TPL_RIDER: 'Your assigned deliveries for today.',
     STOCK_MANAGER: 'Stock levels and inventory movements.',
     HR_MANAGER: 'Payroll overview and pending actions.',
   };

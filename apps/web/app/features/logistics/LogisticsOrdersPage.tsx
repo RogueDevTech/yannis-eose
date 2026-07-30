@@ -67,7 +67,7 @@ export interface RiderOption {
 export type LogisticsOrdersDeferredSecondary = {
   statusCounts: Record<string, number>;
   locations: Location[];
-  /** TPL orders route — riders for dispatch picklists and row labels. */
+  /** Legacy rider list for historical name lookup; dispatch no longer uses riders. */
   riders?: RiderOption[];
   /** TPL — scope-filtered allocate targets; omitted on admin (derived from `locations`). */
   allocatableLocations?: Location[];
@@ -223,7 +223,7 @@ function LogisticsOrdersPageImpl({
       ...o,
       locationName: o.logisticsLocationId ? locationNameById.get(o.logisticsLocationId) ?? '—' : '—',
       locationProviderName: o.logisticsLocationId ? locationProviderById.get(o.logisticsLocationId) ?? null : null,
-      riderName: o.riderId ? riderById.get(o.riderId)?.name ?? '—' : '—',
+      riderName: o.riderName ?? (o.riderId ? riderById.get(o.riderId)?.name : null) ?? 'Not set',
     }));
   }, [orders, locations, riders]);
 
@@ -269,9 +269,7 @@ function LogisticsOrdersPageImpl({
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [allocateLocationId, setAllocateLocationId] = useState('');
-  const [dispatchRiderId, setDispatchRiderId] = useState('');
   const [rowAllocateLocationByOrder, setRowAllocateLocationByOrder] = useState<Record<string, string>>({});
-  const [rowDispatchRiderByOrder, setRowDispatchRiderByOrder] = useState<Record<string, string>>({});
   const [bulkResult, setBulkResult] = useState<{ succeeded: number; failed: number; errors: string[] } | null>(null);
 
   const [peekOrder, setPeekOrder] = useState<LogisticsOrderRow | null>(null);
@@ -409,14 +407,10 @@ function LogisticsOrdersPageImpl({
     selectedAllocated.length === selectedIds.size &&
     new Set(selectedAllocated.map((o) => o.logisticsLocationId)).size === 1;
   const canBulkMarkDelivered = selectedInTransit.length > 0 && selectedInTransit.length === selectedIds.size;
-  const bulkDispatchLocationId = canBulkDispatch ? selectedAllocated[0]?.logisticsLocationId ?? null : null;
-  const ridersForBulkDispatch = bulkDispatchLocationId
-    ? riders.filter((r) => r.logisticsLocationId === bulkDispatchLocationId)
-    : [];
 
   const hasVisibleBulkActions =
     (canBulkAllocate && !allocationOnDetailOnly) ||
-    (canBulkDispatch && !allocationOnDetailOnly && ridersForBulkDispatch.length > 0) ||
+    (canBulkDispatch && !allocationOnDetailOnly) ||
     (canBulkMarkDelivered && !allocationOnDetailOnly);
 
   /** Locations available for allocation; TPL passes only their location */
@@ -426,7 +420,6 @@ function LogisticsOrdersPageImpl({
     setSelectedIds(new Set());
     setBulkResult(null);
     setAllocateLocationId('');
-    setDispatchRiderId('');
   };
 
   const isSubmitting = fetcher.state !== 'idle';
@@ -553,44 +546,14 @@ function LogisticsOrdersPageImpl({
                 </fetcher.Form>
               )}
               {order.status === 'AGENT_ASSIGNED' && !allocationOnDetailOnly && (
-                <fetcher.Form method="post" className="inline-flex items-center gap-1">
+                <fetcher.Form method="post" className="inline">
                   <input type="hidden" name="intent" value="dispatch" />
                   <input type="hidden" name="orderId" value={order.id} />
-                  <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[order.id] ?? ''} />
-                  <SearchableSelect
-                    id={`logistics-row-dispatch-${order.id}`}
-                    value={rowDispatchRiderByOrder[order.id] ?? ''}
-                    onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [order.id]: value }))}
-                    disabled={
-                      !order.logisticsLocationId ||
-                      riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId).length === 0
-                    }
-                    placeholder={
-                      !order.logisticsLocationId ||
-                      riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId).length === 0
-                        ? 'No riders'
-                        : 'Rider'
-                    }
-                    searchPlaceholder="Search riders..."
-                    options={
-                      order.logisticsLocationId
-                        ? riders
-                            .filter((r) => r.logisticsLocationId === order.logisticsLocationId)
-                            .map((r) => ({ value: r.id, label: r.name }))
-                        : []
-                    }
-                    wrapperClassName="w-36"
-                    controlSize="sm"
-                  />
                   <Button
                     type="submit"
                     variant="primary"
                     size="sm"
-                    disabled={
-                      isSubmitting ||
-                      !order.logisticsLocationId ||
-                      riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId).length === 0
-                    }
+                    disabled={isSubmitting}
                     loading={isSubmitting}
                   >
                     Dispatch
@@ -620,9 +583,7 @@ function LogisticsOrdersPageImpl({
     canEditDeliveryDate,
     allocationOnDetailOnly,
     rowAllocateLocationByOrder,
-    rowDispatchRiderByOrder,
     allocatableLocations,
-    riders,
     markInTransitLabel,
   ]);
 
@@ -874,39 +835,26 @@ function LogisticsOrdersPageImpl({
                   </Button>
                 </>
               )}
-              {canBulkDispatch && !allocationOnDetailOnly && ridersForBulkDispatch.length > 0 && (
-                <>
-                  <SearchableSelect
-                    id="logistics-bulk-dispatch-rider"
-                    value={dispatchRiderId}
-                    onChange={setDispatchRiderId}
-                    wrapperClassName="w-48"
-                    placeholder="Select rider"
-                    searchPlaceholder="Search riders..."
-                    options={ridersForBulkDispatch.map((r) => ({ value: r.id, label: r.name }))}
-                  />
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    disabled={!dispatchRiderId || isSubmitting}
-                    loading={isSubmitting}
-                    loadingText="Dispatching..."
-                    onClick={() => {
-                      if (!dispatchRiderId) return;
-                      fetcher.submit(
-                        {
-                          intent: 'bulkDispatch',
-                          orderIds: JSON.stringify([...selectedIds]),
-                          riderId: dispatchRiderId,
-                        },
-                        { method: 'post' },
-                      );
-                      setBulkResult(null);
-                    }}
-                  >
-                    Dispatch selected
-                  </Button>
-                </>
+              {canBulkDispatch && !allocationOnDetailOnly && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={isSubmitting}
+                  loading={isSubmitting}
+                  loadingText="Dispatching..."
+                  onClick={() => {
+                    fetcher.submit(
+                      {
+                        intent: 'bulkDispatch',
+                        orderIds: JSON.stringify([...selectedIds]),
+                      },
+                      { method: 'post' },
+                    );
+                    setBulkResult(null);
+                  }}
+                >
+                  Dispatch selected
+                </Button>
               )}
               {canBulkMarkDelivered && !allocationOnDetailOnly && (
                 <Button
@@ -1208,10 +1156,6 @@ function LogisticsOrdersPageImpl({
           const companyLine = o.locationProviderName
             ? `${o.locationProviderName} · ${o.locationName}`
             : o.locationName;
-          const ridersForOrder =
-            o.logisticsLocationId && o.status === 'AGENT_ASSIGNED'
-              ? riders.filter((r) => r.logisticsLocationId === o.logisticsLocationId)
-              : [];
           return (
             <div className="space-y-4">
               {/* Header */}
@@ -1242,7 +1186,7 @@ function LogisticsOrdersPageImpl({
                   <span className="text-app-fg-muted">Created</span>
                   <span className="text-app-fg">{formatOrderTimestamp(o.createdAt)}</span>
                 </div>
-                {o.riderName && o.riderName !== '—' && (
+                {o.riderName && o.riderName !== 'Not set' && (
                   <div className="flex justify-between">
                     <span className="text-app-fg-muted">Rider</span>
                     <span className="text-app-fg">{o.riderName}</span>
@@ -1275,21 +1219,11 @@ function LogisticsOrdersPageImpl({
                       </Button>
                     </fetcher.Form>
                   )}
-                  {o.status === 'AGENT_ASSIGNED' && ridersForOrder.length > 0 && (
-                    <fetcher.Form method="post" className="flex gap-1.5">
+                  {o.status === 'AGENT_ASSIGNED' && (
+                    <fetcher.Form method="post">
                       <input type="hidden" name="intent" value="dispatch" />
                       <input type="hidden" name="orderId" value={o.id} />
-                      <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[o.id] ?? ''} />
-                      <SearchableSelect
-                        value={rowDispatchRiderByOrder[o.id] ?? ''}
-                        onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [o.id]: value }))}
-                        placeholder="Select rider"
-                        searchPlaceholder="Search riders..."
-                        options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
-                        controlSize="sm"
-                        wrapperClassName="min-w-0 flex-1"
-                      />
-                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowDispatchRiderByOrder[o.id] ?? '')}>
+                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting} className="w-full">
                         Dispatch
                       </Button>
                     </fetcher.Form>

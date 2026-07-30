@@ -69,7 +69,6 @@ export const ROLE_OPTIONS = [
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
   'HR_MANAGER',
   'SUPPORT',
   'AUDITOR',

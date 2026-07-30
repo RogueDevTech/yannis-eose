@@ -41,11 +41,6 @@ export async function loginAsHR(page: Page): Promise<void> {
   await login(page, 'hr@yannis.test', 'Test@12345');
 }
 
-/** Login as 3PL Rider. */
-export async function loginAsRider(page: Page): Promise<void> {
-  await login(page, 'rider@yannis.test', 'Test@12345');
-}
-
 /** Login as Head of Marketing. */
 export async function loginAsHoM(page: Page): Promise<void> {
   await login(page, 'hom@yannis.test', 'Test@12345');

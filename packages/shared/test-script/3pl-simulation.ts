@@ -1,7 +1,7 @@
 /**
  * 3pl-simulation — Moves ALLOCATED orders through the full delivery cycle.
  *
- * Login as HOL → fetch ALLOCATED orders + riders → per order:
+ * Login as HOL → fetch ALLOCATED orders → per order:
  *   DISPATCHED → IN_TRANSIT → DELIVERED → COMPLETED
  * Each transition separated by INTERVAL_MS.
  *
@@ -34,12 +34,6 @@ interface Order {
   id: string;
   status: string;
   logisticsLocationId?: string | null;
-}
-
-interface Rider {
-  id: string;
-  name: string;
-  logisticsLocationId: string | null;
 }
 
 async function main() {
@@ -79,33 +73,6 @@ async function main() {
   const allOrders = ordersRes.data?.orders ?? [];
   console.log(`  Found ${allOrders.length} ALLOCATED orders.\n`);
 
-  // ── Fetch riders ───────────────────────────────────────
-  console.log('Fetching riders...');
-  const ridersRes = await trpcGet<Rider[]>(API_URL, 'logistics.listRiders', undefined, cookie);
-
-  if (!ridersRes.ok) {
-    console.error(`Failed to list riders: ${ridersRes.error}`);
-    process.exit(1);
-  }
-
-  const riders = ridersRes.data ?? [];
-  console.log(`  Found ${riders.length} riders.\n`);
-
-  if (riders.length === 0) {
-    console.error('No riders found. Seed riders first.');
-    process.exit(1);
-  }
-
-  // Build rider lookup by locationId
-  const ridersByLocation = new Map<string, Rider[]>();
-  for (const rider of riders) {
-    if (rider.logisticsLocationId) {
-      const existing = ridersByLocation.get(rider.logisticsLocationId) ?? [];
-      existing.push(rider);
-      ridersByLocation.set(rider.logisticsLocationId, existing);
-    }
-  }
-
   const toProcess = allOrders.slice(0, TPL_COUNT);
 
   if (toProcess.length === 0) {
@@ -127,14 +94,6 @@ async function main() {
 
     logStep('3PL', idx, total, `Order ${order.id.slice(0, 8)} — starting cycle`);
 
-    // Pick a rider for this order's location
-    const locationRiders = order.logisticsLocationId
-      ? ridersByLocation.get(order.logisticsLocationId)
-      : undefined;
-    const rider = locationRiders && locationRiders.length > 0
-      ? locationRiders[Math.floor(Math.random() * locationRiders.length)]!
-      : riders[Math.floor(Math.random() * riders.length)]!;
-
     // Step 1: ALLOCATED → DISPATCHED
     const dispatchRes = await trpcPost(
       API_URL,
@@ -142,7 +101,6 @@ async function main() {
       {
         orderId: order.id,
         newStatus: 'DISPATCHED',
-        metadata: { riderId: rider.id },
       },
       cookie,
     );
@@ -153,7 +111,7 @@ async function main() {
       if (i < toProcess.length - 1) await sleep(INTERVAL_MS);
       continue;
     }
-    logStep('3PL', idx, total, `→ DISPATCHED (rider: ${rider.name})`);
+    logStep('3PL', idx, total, `→ DISPATCHED`);
 
     await sleep(INTERVAL_MS);
 

@@ -24,7 +24,7 @@ export default defineConfig({
     {
       name: 'mobile-chrome',
       use: { ...devices['Pixel 5'] },
-      testMatch: ['**/rider/**', '**/07-state-machine-validation.spec.ts'],
+      testMatch: ['**/07-state-machine-validation.spec.ts'],
     },
   ],
   webServer: process.env.CI

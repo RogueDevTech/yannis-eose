@@ -167,8 +167,7 @@ export default function App() {
   const isLoggedInArea =
     location.pathname.startsWith('/admin') ||
     location.pathname.startsWith('/hr') ||
-    location.pathname.startsWith('/tpl') ||
-    location.pathname.startsWith('/rider');
+    location.pathname.startsWith('/tpl');
 
   useServerAppThemeSync(isLoggedInArea);
   useServerFontScaleSync(isLoggedInArea);

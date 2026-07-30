@@ -61,7 +61,6 @@ export const LEGACY_PERMISSION_CODE_MAP: Record<string, string> = {
   'users.deactivate': 'users.staff.deactivate',
   'audit.read': 'audit.logs.view',
   'settings.write': 'settings.system.manage',
-  'rider.dashboard': 'rider.dashboard.view',
   'cart.read': 'cart.abandoned.view',
   'branches.manage': 'branches.admin.manage',
   'branches.view_all': 'branches.scope.global',

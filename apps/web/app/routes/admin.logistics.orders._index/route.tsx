@@ -326,9 +326,8 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'dispatch') {
     await requirePermission(request, 'logistics.read');
     const orderId = formData.get('orderId')?.toString();
-    const riderId = formData.get('riderId')?.toString();
-    if (!orderId || !riderId) {
-      return json({ success: false, error: 'Order and rider are required' }, { status: 400 });
+    if (!orderId) {
+      return json({ success: false, error: 'Order is required' }, { status: 400 });
     }
     const res = await apiRequest<unknown>('/trpc/orders.transition', {
       method: 'POST',
@@ -336,7 +335,6 @@ export async function action({ request }: ActionFunctionArgs) {
       body: {
         orderId,
         newStatus: 'DISPATCHED',
-        metadata: { riderId },
       },
     });
     if (!res.ok) {
@@ -348,9 +346,8 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'bulkDispatch') {
     await requirePermission(request, 'orders.bulkTransition');
     const orderIds = JSON.parse((formData.get('orderIds') as string) ?? '[]') as string[];
-    const riderId = formData.get('riderId')?.toString();
-    if (!orderIds.length || !riderId) {
-      return json({ success: false, error: 'Select at least one order and a rider' }, { status: 400 });
+    if (!orderIds.length) {
+      return json({ success: false, error: 'Select at least one order' }, { status: 400 });
     }
     const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number; results: Array<{ orderId: string; success: boolean; error?: string }> } } }>(
       '/trpc/orders.bulkTransition',
@@ -360,7 +357,6 @@ export async function action({ request }: ActionFunctionArgs) {
         body: {
           orderIds,
           newStatus: 'DISPATCHED',
-          metadata: { riderId },
         },
         timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
       },

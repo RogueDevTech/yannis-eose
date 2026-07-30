@@ -184,7 +184,7 @@ function NetworkErrorModalLayout({
   const goBack = () => {
     setBackLoading(true);
     // -1 returns to whichever entry the user was on before this failed navigation.
-    // Falls back to the surface's home (/admin, /tpl, /rider, ...) when the user
+    // Falls back to the surface's home (/admin, /tpl, ...) when the user
     // landed here directly via a deep link with no history to step back through.
     if (typeof window !== 'undefined' && window.history.length > 1) {
       navigate(-1);

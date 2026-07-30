@@ -290,7 +290,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
     const allowedTargets: Record<string, string[]> = {
       HEAD_OF_CS: ['CS_CLOSER'],
       HEAD_OF_MARKETING: ['MEDIA_BUYER'],
-      HEAD_OF_LOGISTICS: ['TPL_RIDER', 'LOGISTICS_MANAGER'],
+      HEAD_OF_LOGISTICS: ['LOGISTICS_MANAGER', 'TPL_MANAGER', 'STOCK_MANAGER'],
       SUPER_ADMIN: ['CS_CLOSER', 'MEDIA_BUYER', 'SUPER_ADMIN', 'FINANCE_OFFICER', 'HR_MANAGER'],
     };
 

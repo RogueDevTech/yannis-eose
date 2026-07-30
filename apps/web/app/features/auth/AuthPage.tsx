@@ -249,8 +249,6 @@ function SetupForm({
     if (actionData?.error) setDismissedError(false);
   }, [actionData?.error]);
 
-  const onInputChange = () => {};
-
   return (
     <>
       <div>
@@ -286,7 +284,6 @@ function SetupForm({
           required
           minLength={2}
           placeholder="Your full name"
-          onChange={onInputChange}
           className={mobileInput}
         />
 
@@ -298,7 +295,6 @@ function SetupForm({
           autoComplete="email"
           required
           placeholder="admin@company.com"
-          onChange={onInputChange}
           className={mobileInput}
         />
 
@@ -310,7 +306,6 @@ function SetupForm({
           required
           minLength={8}
           placeholder="Minimum 8 characters"
-          onChange={onInputChange}
           className={mobileInput}
           rightAction={<EyeToggle shown={showPassword} onToggle={() => setShowPassword(!showPassword)} />}
         />
@@ -323,7 +318,6 @@ function SetupForm({
           required
           minLength={8}
           placeholder="Re-enter your password"
-          onChange={onInputChange}
           className={mobileInput}
         />
 

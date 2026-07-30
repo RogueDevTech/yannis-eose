@@ -184,7 +184,7 @@ function describeAllocatableLocation(loc: AllocatableLocationDescriptor): string
 
 /**
  * "Order Progress" stepper visible to logistics-side viewers (HEAD_OF_LOGISTICS,
- * LOGISTICS_MANAGER, STOCK_MANAGER, TPL_MANAGER, TPL_RIDER). They need the
+ * LOGISTICS_MANAGER, STOCK_MANAGER, TPL_MANAGER). They need the
  * `AGENT_ASSIGNED` step because that's their actionable handoff. `DISPATCHED`
  * / `IN_TRANSIT` collapse into it (sub-stages happen offline).
  */
@@ -216,7 +216,6 @@ const LOGISTICS_VIEWER_ROLES = new Set([
   'LOGISTICS_MANAGER',
   'STOCK_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
 ]);
 
 /** CS / HoCS assign to external 3PL; internal warehouse hubs stay on logistics surfaces. */
@@ -1011,7 +1010,6 @@ export function OrderDetailPage({
       userRole === 'HEAD_OF_LOGISTICS' ||
       userRole === 'LOGISTICS_MANAGER' ||
       userRole === 'TPL_MANAGER' ||
-      userRole === 'TPL_RIDER' ||
       userRole === 'STOCK_MANAGER'
     ) {
       return '/admin/logistics/orders';

@@ -8677,12 +8677,7 @@ export class OrdersService {
       }
 
       case 'DISPATCHED': {
-        if (!metadata?.riderId && !order.riderId) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'A rider must be assigned before dispatch',
-          });
-        }
+        // Rider assignment removed (flow ends at Agent). Dispatch no longer requires riderId.
         break;
       }
 
@@ -10711,7 +10706,7 @@ export class OrdersService {
         return 'Agent assigned for delivery (logistics)';
       }
       case 'DISPATCHED':
-        return 'Order dispatched to rider';
+        return 'Order dispatched';
       case 'IN_TRANSIT':
         return 'Order marked in transit';
       case 'DELIVERED':

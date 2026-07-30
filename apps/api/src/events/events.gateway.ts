@@ -186,12 +186,6 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
           void client.join(`3pl-${user.logisticsLocationId}`);
         }
         break;
-      case 'TPL_RIDER':
-        void client.join(`rider-${user.id}`);
-        if (user.logisticsLocationId) {
-          void client.join(`3pl-${user.logisticsLocationId}`);
-        }
-        break;
       case 'HR_MANAGER':
         void client.join('hr');
         break;

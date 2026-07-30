@@ -262,14 +262,12 @@ export function UserDetailPage({
     'CS_CLOSER',
     'HEAD_OF_LOGISTICS',
     'TPL_MANAGER',
-    'TPL_RIDER',
   ].includes(user.role);
   const showPayrollTab = [
     'MEDIA_BUYER',
     'HEAD_OF_MARKETING',
     'HEAD_OF_CS',
     'CS_CLOSER',
-    'TPL_RIDER',
     'HR_MANAGER',
   ].includes(user.role);
   // Finance activity tab is visible to Finance Officer and other finance-access roles.
@@ -607,7 +605,6 @@ export function UserDetailPage({
   const showCapacityReadonly = ['CS_CLOSER', 'MEDIA_BUYER'].includes(user.role);
   const isLogisticsRole = [
     'TPL_MANAGER',
-    'TPL_RIDER',
     'HEAD_OF_LOGISTICS',
     'STOCK_MANAGER',
   ].includes(user.role);

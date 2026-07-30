@@ -31,7 +31,7 @@ export const users = pgTable('users', {
   scopeTeamSupervisor: boolean('scope_team_supervisor').default(false).notNull(),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
   capacity: integer('capacity').default(10).notNull(),
-  // Links TPL_MANAGER and TPL_RIDER to their logistics location.
+  // Links TPL_MANAGER to their logistics location.
   // NULL for non-logistics roles.
   logisticsLocationId: uuid('logistics_location_id'),
   // Staff WhatsApp/phone number. ALWAYS masked in API responses (Lead Fortress).

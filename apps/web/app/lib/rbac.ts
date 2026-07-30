@@ -46,7 +46,6 @@ const NON_BRANCH_ASSIGNED_ROLES = new Set<string>([
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
   'LOGISTICS_MANAGER',
   'HR_MANAGER',
   'AUDITOR',
@@ -186,7 +185,6 @@ export function canEditUser(
 const HEAD_OF_LOGISTICS_MIRRORABLE = new Set<string>([
   'LOGISTICS_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
   'STOCK_MANAGER',
 ]);
 

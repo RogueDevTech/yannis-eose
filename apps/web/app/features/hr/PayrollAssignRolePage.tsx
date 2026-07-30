@@ -60,7 +60,6 @@ const ROLE_FILTER_OPTIONS = [
   { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics' },
   { value: 'STOCK_MANAGER', label: 'Stock Manager' },
   { value: 'TPL_MANAGER', label: 'TPL Manager' },
-  { value: 'TPL_RIDER', label: 'TPL Rider' },
   { value: 'HR_MANAGER', label: 'HR Manager' },
   { value: 'SUPPORT', label: 'Support' },
   { value: 'AUDITOR', label: 'Auditor' },

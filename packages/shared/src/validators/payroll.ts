@@ -170,7 +170,6 @@ export const payrollPayRoleCategorySchema = z.enum([
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
   'HR_MANAGER',
   'AUDITOR',
 ]);

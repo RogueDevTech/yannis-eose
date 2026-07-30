@@ -40,6 +40,7 @@ export const USER_ROLE = {
   HEAD_OF_LOGISTICS: 'HEAD_OF_LOGISTICS',
   STOCK_MANAGER: 'STOCK_MANAGER',
   TPL_MANAGER: 'TPL_MANAGER',
+  /** @deprecated Legacy Postgres enum value — not assignable; existing rows only. */
   TPL_RIDER: 'TPL_RIDER',
   HR_MANAGER: 'HR_MANAGER',
   SUPPORT: 'SUPPORT',

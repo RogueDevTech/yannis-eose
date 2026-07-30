@@ -59,7 +59,7 @@ export class PayrollComputeService {
     const subordinateRoles: Record<string, string[]> = {
       HEAD_OF_CS: ['CS_CLOSER'],
       HEAD_OF_MARKETING: ['MEDIA_BUYER'],
-      HEAD_OF_LOGISTICS: ['TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER'],
+      HEAD_OF_LOGISTICS: ['TPL_MANAGER', 'STOCK_MANAGER'],
     };
     const subRoles = subordinateRoles[member.role];
     let reporteeIds: string[] = [];

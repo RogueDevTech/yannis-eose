@@ -32,7 +32,6 @@ const CATEGORY_OPTIONS = [
   { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics' },
   { value: 'STOCK_MANAGER', label: 'Stock Manager' },
   { value: 'TPL_MANAGER', label: 'TPL Manager' },
-  { value: 'TPL_RIDER', label: 'TPL Rider' },
   { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
   { value: 'HR_MANAGER', label: 'HR Manager' },
   { value: 'SUPER_ADMIN', label: 'Super Admin' },

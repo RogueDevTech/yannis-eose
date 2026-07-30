@@ -1912,9 +1912,9 @@ export const ordersRouter = router({
   /**
    * Single-request bundle for `/tpl/orders` (the 3PL Orders page).
    *
-   * Replaces 4 parallel loader calls — `orders.list`, `orders.statusCounts`,
-   * `logistics.listLocations`, `logistics.listRiders` — with one HTTP
-   * round-trip. Same fan-out runs server-side. Permission gate matches
+   * Replaces 3 parallel loader calls — `orders.list`, `orders.statusCounts`,
+   * `logistics.listLocations` — with one HTTP round-trip. Same fan-out runs
+   * server-side. Permission gate matches
    * the page (caller must hold `logistics.read` OR be a TPL_MANAGER).
    */
   tplOrdersPageBundle: authedProcedure
@@ -1994,7 +1994,7 @@ export const ordersRouter = router({
         ...(input.logisticsLocationId && { logisticsLocationId: input.logisticsLocationId }),
       };
 
-      const [ordersResult, statusCounts, locationsResult, ridersResult] =
+      const [ordersResult, statusCounts, locationsResult] =
         await Promise.all([
           getOrdersService().list(listInput, branchId, { ...buildOrdersListOpts(ctx.user, listInput), effectiveBranchIds: ctx.effectiveBranchIds }),
           getOrdersService().getStatusCounts(
@@ -2010,7 +2010,6 @@ export const ordersRouter = router({
             ctx.effectiveBranchIds,
           ),
           getLogisticsService().listLocations({ page: 1, limit: 20, status: 'ACTIVE' }),
-          getLogisticsService().listRiders(),
         ]);
 
       return {
@@ -2018,13 +2017,7 @@ export const ordersRouter = router({
         pagination: ordersResult.pagination,
         statusCounts,
         locations: (locationsResult as { locations?: unknown[] }).locations ?? [],
-        riders: (ridersResult as Array<{ id: string; name: string; logisticsLocationId: string | null }>).map(
-          (r) => ({
-            id: r.id,
-            name: r.name,
-            logisticsLocationId: r.logisticsLocationId ?? null,
-          }),
-        ),
+        riders: [],
       };
     }),
 

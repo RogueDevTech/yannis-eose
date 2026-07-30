@@ -349,7 +349,7 @@ export class UsersService {
     if (perms.includes('marketing.teamOverview') && target.role === 'MEDIA_BUYER') return true;
     if (
       perms.includes('team.supervise_logistics') &&
-      ['LOGISTICS_MANAGER', 'TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER'].includes(target.role)
+      ['LOGISTICS_MANAGER', 'TPL_MANAGER', 'STOCK_MANAGER'].includes(target.role)
     ) {
       return true;
     }
@@ -3258,18 +3258,23 @@ export class UsersService {
         message: 'Name must be at least 2 characters',
       });
     }
-    return withActor(this.db, actor, async (tx) => {
-      const [row] = await tx
+    const row = await withActor(this.db, actor, async (tx) => {
+      const [updated] = await tx
         .update(schema.users)
         .set({ name: trimmed, updatedAt: new Date() })
         .where(eq(schema.users.id, actor.id))
         .returning({ id: schema.users.id, name: schema.users.name });
 
-      if (!row) {
+      if (!updated) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
       }
-      return row;
+      return updated;
     });
+
+    // Name is part of the cached /auth/me bundle — drop it so the header refreshes promptly.
+    void this.userBundleCache.invalidate(actor.id);
+
+    return row;
   }
 
   /**
