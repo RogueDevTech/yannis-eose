@@ -700,7 +700,18 @@ export class HrService {
     const performanceBonus = computed?.performanceBonus ?? 0;
     const allowancesTotal = computed?.allowancesTotal ?? 0;
     const penalties = computed?.deductionsTotal ?? 0;
-    const planName = computed?.payRoleName ?? 'No plan assigned';
+
+    let planName = computed?.payRoleName ?? 'No plan assigned';
+    if (!computed && user.payRoleId) {
+      const [roleRow] = await this.db
+        .select({ name: schema.payrollPayRoles.name })
+        .from(schema.payrollPayRoles)
+        .where(eq(schema.payrollPayRoles.id, user.payRoleId))
+        .limit(1);
+      planName = roleRow
+        ? `${roleRow.name} (formula not linked yet)`
+        : 'Pay role assigned (formula not linked yet)';
+    }
 
     const [pendingClawbacks, bonusRows, otherAddOnRows] = await Promise.all([
       this.db

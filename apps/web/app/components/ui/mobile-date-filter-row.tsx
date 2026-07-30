@@ -8,6 +8,11 @@ import {
   MOBILE_ACTIONS_CHANGED_EVENT,
   openMobileActionsSheet,
 } from '~/lib/mobile-actions-bridge';
+import {
+  hasMobileSearchOpener,
+  MOBILE_SEARCH_CHANGED_EVENT,
+  openMobileSearchSheet,
+} from '~/lib/mobile-search-bridge';
 
 function KebabVerticalIcon({ className = 'w-4 h-4' }: { className?: string }) {
   return (
@@ -37,7 +42,11 @@ export interface MobileDateFilterRowProps {
   actionsSheet?: ReactNode;
   /** Title for the Actions sheet. */
   actionsSheetTitle?: string;
-  /** Show the Search button (opens PageSearchControl modal via window function). */
+  /**
+   * Show the Search button (opens PageSearchControl modal via window function).
+   * When omitted, the button auto-appears if a `PageSearchControl` is present on
+   * the page. Pass `false` to force-hide, or `true` to force-show.
+   */
   showSearch?: boolean;
   /** Extra controls to render in the toolbar row. */
   extra?: ReactNode;
@@ -61,10 +70,23 @@ export function MobileDateFilterRow({
   hideRefresh = false,
   actionsSheet,
   actionsSheetTitle = 'Actions',
-  showSearch = false,
+  showSearch,
   extra,
 }: MobileDateFilterRowProps) {
   const [actionsOpen, setActionsOpen] = useState(false);
+  // Auto-detect a page-level PageSearchControl when `showSearch` is not set
+  // explicitly, so the mobile Search button appears without per-page wiring.
+  const [detectedSearch, setDetectedSearch] = useState(() =>
+    typeof window !== 'undefined' ? hasMobileSearchOpener() : false,
+  );
+  useEffect(() => {
+    if (showSearch !== undefined) return;
+    const sync = () => setDetectedSearch(hasMobileSearchOpener());
+    sync();
+    window.addEventListener(MOBILE_SEARCH_CHANGED_EVENT, sync);
+    return () => window.removeEventListener(MOBILE_SEARCH_CHANGED_EVENT, sync);
+  }, [showSearch]);
+  const searchVisible = showSearch ?? detectedSearch;
   const [hasHeaderToolsActions, setHasHeaderToolsActions] = useState(() =>
     typeof window !== 'undefined' ? hasMobileActionsOpener() : false,
   );
@@ -104,10 +126,10 @@ export function MobileDateFilterRow({
       )}
       {!hideRefresh && <PageRefreshButton />}
       {extra}
-      {showSearch && (
+      {searchVisible && (
         <button
           type="button"
-          onClick={() => (window as any).__openMobileSearchSheet?.()}
+          onClick={() => openMobileSearchSheet()}
           className="btn-secondary btn-sm inline-flex items-center gap-1.5"
         >
           <SearchIcon />

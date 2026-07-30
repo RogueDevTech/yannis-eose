@@ -25,7 +25,7 @@ import {
 import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
-import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
+import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import { isAdminLevel } from '../common/authz';
 import { hasFinanceAccess, hasFinanceWriteAccess } from '../common/utils/strip-finance-fields';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
@@ -6818,14 +6818,17 @@ export class OrdersService {
     });
     const bCond = this.orderBranchScopeCondition(opts.branchId, opts.branchScope ?? 'servicing', opts.effectiveBranchIds);
     if (bCond) conditions.push(bCond);
-    // Carry-over = delivered within the period (by delivered_at) AND generated
-    // before the period started (created_at < periodStart). The created_at bound
-    // is what excludes this period's own cohort, leaving only prior-month orders.
-    if (opts.startDate) {
-      conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(opts.startDate)));
-      conditions.push(lt(schema.orders.createdAt, nigeriaDayStart(opts.startDate)));
+    // Carry-over is anchored to the LAST month of the filter range: delivered
+    // within that final month (by delivered_at) AND generated before that month
+    // began (created_at < carryOverStart). The created_at bound excludes the
+    // final month's own cohort, leaving only orders carried over into it. For a
+    // single whole-month filter, carryOverStart === the range start (unchanged).
+    if (opts.endDate) {
+      const carryOverStart = nigeriaCarryOverMonthStart(nigeriaDayEnd(opts.endDate));
+      conditions.push(gte(schema.orders.deliveredAt, carryOverStart));
+      conditions.push(lt(schema.orders.createdAt, carryOverStart));
+      conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(opts.endDate)));
     }
-    if (opts.endDate) conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(opts.endDate)));
     const [row] = await this.db
       .select({ count: count() })
       .from(schema.orders).where(and(...conditions));

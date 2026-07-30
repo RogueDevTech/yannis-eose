@@ -79,7 +79,8 @@ function resolveBaseSalary(formula: PayrollFormula, metrics: PayrollMetrics): nu
         return tier.amount;
       }
     }
-    return 0;
+    // No tier matched: use configured flat base (same rule as the formula builder UI).
+    return formula.flatBaseSalary ?? 0;
   }
   return formula.flatBaseSalary ?? 0;
 }

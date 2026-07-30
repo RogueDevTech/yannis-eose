@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lte, sql, type AnyColumn, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { uuidv7 } from 'uuidv7';
 import {
@@ -426,8 +426,11 @@ export class PayrollConfigService {
     });
   }
 
-  previewPaye(input: { monthlyGross: number; taxStatus: string; employerSubsidyPercent?: number }) {
-    const config = defaultPayeBandConfig();
+  async previewPaye(
+    input: { monthlyGross: number; taxStatus: string; employerSubsidyPercent?: number },
+    groupId?: string | null,
+  ) {
+    const config = await this.loadActiveTaxBandConfig(groupId);
     return computePaye(
       {
         monthlyGross: input.monthlyGross,
@@ -436,6 +439,28 @@ export class PayrollConfigService {
       },
       config,
     );
+  }
+
+  private async loadActiveTaxBandConfig(groupId?: string | null): Promise<ReturnType<typeof defaultPayeBandConfig>> {
+    if (!groupId) return defaultPayeBandConfig();
+    const rows = await this.db
+      .select()
+      .from(schema.payrollTaxBandConfigs)
+      .where(
+        and(
+          eq(schema.payrollTaxBandConfigs.groupId, groupId),
+          or(isNull(schema.payrollTaxBandConfigs.effectiveTo), gte(schema.payrollTaxBandConfigs.effectiveTo, new Date())),
+        ),
+      )
+      .orderBy(desc(schema.payrollTaxBandConfigs.effectiveFrom))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return defaultPayeBandConfig();
+    return {
+      taxFreeThreshold: Number(row.taxFreeThreshold),
+      bands: row.bands as ReturnType<typeof defaultPayeBandConfig>['bands'],
+      reliefs: row.reliefs as ReturnType<typeof defaultPayeBandConfig>['reliefs'],
+    };
   }
 
   async listContractors(groupId?: string | null, opts?: { active?: boolean }) {

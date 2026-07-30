@@ -8,7 +8,7 @@ import { DRIZZLE, PG_CLIENT_RAW } from '../database/database.module';
 import type postgres from 'postgres';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
-import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
+import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
@@ -396,7 +396,9 @@ export class CartOrdersService {
   async getDeliveredCarryOverCount(
     branchId?: string | null,
     assignedCsId?: string | null,
-    startDate?: string,
+    // Carry-over is anchored to the range's LAST month (derived from endDate),
+    // so the range start is unused here; kept for positional-arg compatibility.
+    _startDate?: string,
     endDate?: string,
     effectiveBranchIds?: string[] | null,
     mediaBuyerId?: string | null,
@@ -424,14 +426,17 @@ export class CartOrdersService {
         conditions.push(bCond);
       }
     }
-    // Carry-over = delivered within the period (by delivered_at) AND generated
-    // before the period started (created_at < periodStart), which excludes this
-    // period's own cohort and leaves only prior-month cart orders.
-    if (startDate) {
-      conditions.push(gte(schema.cartOrders.deliveredAt, nigeriaDayStart(startDate)));
-      conditions.push(lt(schema.cartOrders.createdAt, nigeriaDayStart(startDate)));
+    // Carry-over is anchored to the LAST month of the filter range: delivered
+    // within that final month (by delivered_at) AND generated before that month
+    // began (created_at < carryOverStart), which excludes the final month's own
+    // cohort and leaves only cart orders carried over into it. For a single
+    // whole-month filter, carryOverStart === the range start (unchanged).
+    if (endDate) {
+      const carryOverStart = nigeriaCarryOverMonthStart(nigeriaDayEnd(endDate));
+      conditions.push(gte(schema.cartOrders.deliveredAt, carryOverStart));
+      conditions.push(lt(schema.cartOrders.createdAt, carryOverStart));
+      conditions.push(lte(schema.cartOrders.deliveredAt, nigeriaDayEnd(endDate)));
     }
-    if (endDate) conditions.push(lte(schema.cartOrders.deliveredAt, nigeriaDayEnd(endDate)));
 
     const [row] = await this.db
       .select({ count: sql<number>`COUNT(*)::int` })

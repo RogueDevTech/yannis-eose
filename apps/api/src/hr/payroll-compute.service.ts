@@ -89,7 +89,14 @@ export class PayrollComputeService {
       tx,
     );
 
-    if (member.salaryBasis === 'FLAT_RATE' && member.flatMonthlyAmount != null) {
+    // Pay-role formula is authoritative when assigned. Leftover FLAT_RATE +
+    // flat_monthly_amount from old test data must not shadow Payroll Config.
+    const useFlatRate =
+      !member.payRoleId &&
+      member.salaryBasis === 'FLAT_RATE' &&
+      member.flatMonthlyAmount != null;
+
+    if (useFlatRate) {
       return this.buildFlatLine(Number(member.flatMonthlyAmount), metrics, member.taxStatus ?? 'STANDARD_PAYE', tx, groupId);
     }
 
@@ -183,17 +190,40 @@ export class PayrollComputeService {
           .where(eq(schema.payrollPayRoles.id, member.payRoleId))
           .limit(1)
       )[0];
+
+      // 1) Plan currently linked on the pay role (Payroll Config → formula).
       if (payRole?.commissionPlanId) {
-        const plan = (
+        const linked = (
           await tx
             .select()
             .from(schema.commissionPlans)
             .where(eq(schema.commissionPlans.id, payRole.commissionPlanId))
             .limit(1)
         )[0];
-        if (plan) return plan;
+        if (linked) return linked;
       }
+
+      // 2) Latest open plan written for this pay role (covers link drift after formula saves).
+      const byPayRole = (
+        await tx
+          .select()
+          .from(schema.commissionPlans)
+          .where(
+            and(
+              eq(schema.commissionPlans.payRoleId, member.payRoleId),
+              isNull(schema.commissionPlans.effectiveTo),
+            ),
+          )
+          .orderBy(desc(schema.commissionPlans.effectiveFrom))
+          .limit(1)
+      )[0];
+      if (byPayRole) return byPayRole;
+
+      // Assigned pay role but no formula yet — do NOT fall back to a personal /
+      // legacy role-default commission plan (that showed the wrong earnings outlook).
+      return null;
     }
+
     return resolveApplicableCommissionPlan(tx, {
       commissionPlanId: member.commissionPlanId ?? null,
       staffRole: member.role,

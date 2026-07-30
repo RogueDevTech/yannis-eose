@@ -489,16 +489,24 @@ export const dashboardRouter = router({
    *   - `cs.{unassigned,engaged,confirmed,delivered}` — today's Sales activity snapshot
    * Plus `pendingApprovals` for finance.
    */
-  quickOverview: permissionProcedure('ceo.overview').query(async ({ ctx }) => {
+  quickOverview: permissionProcedure('ceo.overview')
+    .input(z.object({
+      startDate: z.string().date().optional(),
+      endDate: z.string().date().optional(),
+    }).optional())
+    .query(async ({ ctx, input }) => {
     if (!ordersService || !financeService) {
       throw new Error('Dashboard services not initialized');
     }
-    // "Today" must mean the Nigeria calendar day — the server runs in UTC, so
-    // `setHours(0, 0, 0, 0)` would give a UTC day boundary off by an hour from
-    // the business day. nigeriaDayStart/End pin the bounds to Africa/Lagos.
+    // Date bounds pin to the Nigeria calendar day — the server runs in UTC, so
+    // a UTC day boundary would be off by an hour from the business day.
+    // nigeriaDayStart/End pin the bounds to Africa/Lagos. When the caller sends
+    // no dates, default to today so the plain snapshot still works.
     const todayWat = nigeriaToday();
-    const startIso = nigeriaDayStart(todayWat).toISOString();
-    const endIso = nigeriaDayEnd(todayWat).toISOString();
+    const rangeStart = input?.startDate ?? todayWat;
+    const rangeEnd = input?.endDate ?? todayWat;
+    const startIso = nigeriaDayStart(rangeStart).toISOString();
+    const endIso = nigeriaDayEnd(rangeEnd).toISOString();
 
     const fetchQuickOverview = async () => {
     const [todayCounts, supplementary, pendingApprovals, followUpCounts, cartOrdersCounts] = await Promise.all([
@@ -543,7 +551,7 @@ export const dashboardRouter = router({
     };
 
     if (cacheService) {
-      const cacheKey = `cache:dashboard:quick:${ctx.currentBranchId ?? 'global'}:${CacheService.hashInput({ eIds: ctx.effectiveBranchIds, gId: ctx.activeGroupId })}`;
+      const cacheKey = `cache:dashboard:quick:${ctx.currentBranchId ?? 'global'}:${CacheService.hashInput({ eIds: ctx.effectiveBranchIds, gId: ctx.activeGroupId, s: rangeStart, e: rangeEnd })}`;
       return cacheService.getOrSet(cacheKey, 120, fetchQuickOverview);
     }
     return fetchQuickOverview();

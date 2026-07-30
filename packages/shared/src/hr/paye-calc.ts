@@ -119,7 +119,7 @@ export function computePaye(
   };
 }
 
-/** Default Nigeria Tax Act 2025 placeholder bands — Finance must confirm before live use. */
+/** Default PAYE bands — HR rule: 15% minimum first band; only Annual Rent Relief (20%). */
 export function defaultPayeBandConfig(): PayeBandConfig {
   return {
     taxFreeThreshold: 800_000,
@@ -131,8 +131,7 @@ export function defaultPayeBandConfig(): PayeBandConfig {
       { fromAmount: 49_200_000, toAmount: null, rate: 25 },
     ],
     reliefs: [
-      { name: 'Pension (8%)', basis: 'PERCENT_OF_GROSS', rate: 8 },
-      { name: 'NHF (2.5%)', basis: 'PERCENT_OF_GROSS', rate: 2.5 },
+      { name: 'Annual Rent Relief (20%)', basis: 'PERCENT_OF_GROSS', rate: 20 },
     ],
   };
 }

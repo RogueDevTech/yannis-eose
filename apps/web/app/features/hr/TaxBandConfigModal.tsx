@@ -24,10 +24,24 @@ export function TaxBandConfigModal({
   onClose: () => void;
 }) {
   const [bandRows, setBandRows] = useState<BandDraft[]>(() =>
-    (config?.bands ?? [{ fromAmount: 0, toAmount: null, rate: 7 }]).map((b) => ({
+    (config?.bands ?? [{ fromAmount: 0, toAmount: null, rate: 15 }]).map((b) => ({
       fromAmount: String(b.fromAmount),
       toAmount: b.toAmount != null ? String(b.toAmount) : '',
       rate: String(b.rate),
+    })),
+  );
+
+  const [reliefRows, setReliefRows] = useState<
+    Array<{ name: string; basis: string; rate: string; amount: string }>
+  >(() =>
+    (config?.reliefs?.length
+      ? config.reliefs
+      : [{ name: 'Annual Rent Relief (20%)', basis: 'PERCENT_OF_GROSS', rate: 20 }]
+    ).map((r) => ({
+      name: r.name,
+      basis: r.basis,
+      rate: String(r.rate ?? 0),
+      amount: r.amount != null ? String(r.amount) : '',
     })),
   );
 
@@ -37,8 +51,19 @@ export function TaxBandConfigModal({
       toAmount: row.toAmount.trim() === '' ? null : Math.max(0, Number(row.toAmount) || 0),
       rate: Math.max(0, Math.min(100, Number(row.rate) || 0)),
     }));
-    return JSON.stringify(normalized.length ? normalized : [{ fromAmount: 0, toAmount: null, rate: 7 }]);
+    return JSON.stringify(normalized.length ? normalized : [{ fromAmount: 0, toAmount: null, rate: 15 }]);
   }, [bandRows]);
+
+  const reliefsJson = useMemo(() => {
+    return JSON.stringify(
+      reliefRows.map((row) => ({
+        name: row.name.trim() || 'Relief',
+        basis: row.basis,
+        rate: Math.max(0, Math.min(100, Number(row.rate) || 0)),
+        ...(row.amount.trim() !== '' ? { amount: Math.max(0, Number(row.amount) || 0) } : {}),
+      })),
+    );
+  }, [reliefRows]);
 
   return (
     <Modal open onClose={onClose} maxWidth="max-w-2xl" backdropBlur contentClassName="p-6 sm:p-8 space-y-5">
@@ -60,7 +85,7 @@ export function TaxBandConfigModal({
       <fetcher.Form method="post" className="space-y-4">
         <input type="hidden" name="intent" value="saveTaxBandConfig" />
         <input type="hidden" name="bandsJson" value={bandsJson} />
-        <input type="hidden" name="reliefsJson" value={JSON.stringify(config?.reliefs ?? [])} />
+        <input type="hidden" name="reliefsJson" value={reliefsJson} />
         {config ? <input type="hidden" name="configId" value={config.id} /> : null}
 
         <TextInput label="Label" name="label" required readOnly={readOnly} defaultValue={config?.label ?? 'Default PAYE'} />
@@ -137,9 +162,80 @@ export function TaxBandConfigModal({
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => setBandRows((rows) => [...rows, { fromAmount: '0', toAmount: '', rate: '7' }])}
+              onClick={() => setBandRows((rows) => [...rows, { fromAmount: '0', toAmount: '', rate: '15' }])}
             >
               + Add band
+            </Button>
+          ) : null}
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-app-fg">Reliefs</p>
+          <p className="text-xs text-app-fg-muted">
+            HR rule: only Annual Rent Relief (20%). Do not include NHF or Pension.
+          </p>
+          {reliefRows.map((row, idx) => (
+            <div key={`relief-${idx}`} className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:items-end">
+              <div className="sm:col-span-5">
+                <TextInput
+                  label="Name"
+                  readOnly={readOnly}
+                  value={row.name}
+                  onChange={(e) =>
+                    setReliefRows((rows) => rows.map((r, i) => (i === idx ? { ...r, name: e.target.value } : r)))
+                  }
+                />
+              </div>
+              <div className="sm:col-span-4">
+                <TextInput
+                  label="Basis"
+                  readOnly={readOnly}
+                  value={row.basis}
+                  onChange={(e) =>
+                    setReliefRows((rows) => rows.map((r, i) => (i === idx ? { ...r, basis: e.target.value } : r)))
+                  }
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <TextInput
+                  label="Rate %"
+                  type="number"
+                  min={0}
+                  max={100}
+                  readOnly={readOnly}
+                  value={row.rate}
+                  onChange={(e) =>
+                    setReliefRows((rows) => rows.map((r, i) => (i === idx ? { ...r, rate: e.target.value } : r)))
+                  }
+                />
+              </div>
+              {!readOnly ? (
+                <div className="sm:col-span-1">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setReliefRows((rows) => rows.filter((_, i) => i !== idx))}
+                  >
+                    ×
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ))}
+          {!readOnly ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                setReliefRows((rows) => [
+                  ...rows,
+                  { name: 'Annual Rent Relief (20%)', basis: 'PERCENT_OF_GROSS', rate: '20', amount: '' },
+                ])
+              }
+            >
+              + Add relief
             </Button>
           ) : null}
         </div>

@@ -1,15 +1,18 @@
 /**
  * Label for the "Carry-over Delivered" stat tile — orders delivered in the
- * selected period but generated in a prior month ("last month's orders that
- * delivered this month").
+ * LAST month of the selected range but generated before that month began
+ * ("orders carried over into the range's final month").
  *
- * When the active date filter is exactly one whole calendar month (e.g.
- * 2026-07-01 → 2026-07-31), the label names the month BEFORE it — the source
- * month the carry-over came from: "Carry-over → June". (The count itself
- * includes any prior month, not just the immediately-preceding one; June is
- * simply the representative/dominant source month.) For any other range (custom
- * span, partial month, all-time), it falls back to the period-agnostic
- * "Carry-over Delivered" — the active date filter already shows the exact range.
+ * The count is anchored server-side to the range's last calendar month, so the
+ * label names the month BEFORE that final month — the source month the
+ * carry-over came from. For a July filter that is "Carry-over → June"; for a
+ * May–July range it is still "Carry-over → June" (June-and-earlier orders that
+ * delivered in July). The month comes from `endDate`, matching the query.
+ *
+ * When the range's final month is only partially covered (endDate is not the
+ * last day of its month) the "last month" framing is fuzzy, so it falls back to
+ * the period-agnostic "Carry-over Delivered" — the active date filter already
+ * shows the exact range.
  *
  * Dates are the raw YYYY-MM-DD strings the marketing filters use. Parsing is
  * done on the numeric parts (no Date timezone games) so the boundary check is
@@ -41,29 +44,28 @@ export const CARRY_OVER_FALLBACK_LABEL = 'Carry-over Delivered';
 /** The calendar month immediately before 1-indexed month `m1` of year `y`. */
 function priorMonthName(y: number, m1: number): string {
   // m1 is 1-12; the prior month wraps December → previous year.
-  const priorIndex0 = (m1 - 2 + 12) % 12; // 0-indexed month before m1
-  return MONTH_NAMES[priorIndex0];
+  const priorIndex0 = (m1 - 2 + 12) % 12; // 0-indexed month before m1 (always 0-11)
+  return MONTH_NAMES[priorIndex0]!;
 }
 
 /**
- * Returns "Carry-over → <PriorMonth>" when [startDate, endDate] is exactly one
- * whole calendar month (naming the month BEFORE the selected one — the source
- * month the carry-over came from), otherwise "Carry-over Delivered".
+ * Returns "Carry-over → <PriorMonth>" naming the month BEFORE the range's LAST
+ * month (the source month the carry-over came from), as long as that final
+ * month is fully covered (endDate lands on its last calendar day). Otherwise
+ * returns "Carry-over Delivered". Keys off `endDate` to match the server query,
+ * which anchors carry-over to the range's last month.
  */
 export function carryOverTileLabel(
   startDate: string | undefined | null,
   endDate: string | undefined | null,
 ): string {
-  const start = parseYmd(startDate);
   const end = parseYmd(endDate);
-  if (!start || !end) return CARRY_OVER_FALLBACK_LABEL;
+  if (!end) return CARRY_OVER_FALLBACK_LABEL;
 
-  const isWholeMonth =
-    start.y === end.y &&
-    start.m === end.m &&
-    start.d === 1 &&
-    end.d === lastDayOfMonth(end.y, end.m);
+  // Only name the source month when the range's final month is whole — a
+  // partial final month makes the "last month" framing ambiguous.
+  const endsOnMonthBoundary = end.d === lastDayOfMonth(end.y, end.m);
+  if (!endsOnMonthBoundary) return CARRY_OVER_FALLBACK_LABEL;
 
-  if (!isWholeMonth) return CARRY_OVER_FALLBACK_LABEL;
-  return `Carry-over → ${priorMonthName(start.y, start.m)}`;
+  return `Carry-over → ${priorMonthName(end.y, end.m)}`;
 }
