@@ -26,7 +26,7 @@ import { PermissionsService } from '../permissions/permissions.service';
 import { EventsService } from '../events/events.service';
 import { resolveRoleTemplateBaselineCodes } from '../permissions/role-template-baseline';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { ADMIN_LEVEL_ROLES, isAdminLevelRole, isOrgWideDepartmentHead } from '../common/authz';
+import { ADMIN_LEVEL_ROLES, canAccessStaffHrUserDetail, canEditUser, isAdminLevelRole, isOrgWideDepartmentHead } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { CacheService } from '../common/cache/cache.service';
@@ -349,7 +349,7 @@ export class UsersService {
     if (perms.includes('marketing.teamOverview') && target.role === 'MEDIA_BUYER') return true;
     if (
       perms.includes('team.supervise_logistics') &&
-      ['LOGISTICS_MANAGER', 'TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER'].includes(target.role)
+      ['LOGISTICS_MANAGER', 'TPL_MANAGER', 'STOCK_MANAGER'].includes(target.role)
     ) {
       return true;
     }
@@ -1080,6 +1080,27 @@ export class UsersService {
     const membershipsByUser = await this.getUserBranchMemberships([user.id]);
     const allMemberships = membershipsByUser.get(user.id) ?? [];
 
+    // Authorize before returning staff PII (email, role, branches). Self always allowed.
+    if (actor && actor.id !== user.id) {
+      const allowed = canAccessStaffHrUserDetail(
+        {
+          id: actor.id,
+          role: actor.role,
+          permissions: actor.permissions,
+          branchIds: (actor as { branchIds?: string[] }).branchIds,
+          currentBranchId: (actor as { currentBranchId?: string | null }).currentBranchId ?? null,
+        },
+        {
+          id: user.id,
+          role: user.role,
+          branchIds: allMemberships.map((m) => m.branchId),
+        },
+      );
+      if (!allowed) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot view this user.' });
+      }
+    }
+
     // Company boundary: when `effectiveBranchIds` is set (active company in session),
     // only return memberships in that company — including for SuperAdmin/Admin.
     // When null (cross-company / org-wide view), return every membership.
@@ -1115,11 +1136,12 @@ export class UsersService {
    */
   private actorMayListCompanyWideUserRoster(
     actor: { id: string; role: string; permissions?: string[] } | null,
-    _currentBranchId: string | null = null,
+    currentBranchId: string | null = null,
   ): boolean {
     if (!actor) return false;
     if (actor.role === 'SUPER_ADMIN' || isAdminLevelRole(actor.role)) return true;
-    if (actor.role === 'HR_MANAGER') return true;
+    // HR_MANAGER is org-wide only when no branch is selected (CEO 2026-05-19).
+    if (actor.role === 'HR_MANAGER') return !currentBranchId;
     if (actor.role === 'FINANCE_OFFICER') return true;
     const perms = new Set((actor.permissions ?? []).map((p) => canonicalPermissionCode(p)));
     return (
@@ -1738,6 +1760,28 @@ export class UsersService {
     }
 
     const beforeRow = existingRows[0];
+
+    const editAccess = canEditUser(
+      {
+        id: actor.id,
+        role: actor.role,
+        permissions: actor.permissions,
+        currentBranchId: actor.currentBranchId ?? null,
+        scopeTeamSupervisor: actor.scopeTeamSupervisor,
+      },
+      {
+        id: beforeRow.id,
+        role: beforeRow.role,
+        primaryBranchId: beforeRow.primaryBranchId,
+      },
+    );
+    if (editAccess === 'none') {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You cannot edit this user.',
+      });
+    }
+
     const existingMembershipRows = await this.db
       .select({ branchId: schema.userBranches.branchId })
       .from(schema.userBranches)
@@ -1877,13 +1921,17 @@ export class UsersService {
 
     // Admin-class viewers already get full edit via `canEditUser`; their permission snapshots
     // may still include supervise/update_supervised codes — do not treat them as branch team leads.
-    if (actorIsTeamLead && !isAdminLevelRole(actor.role)) {
+    const enforceLimitedEdit =
+      editAccess === 'limited' || (actorIsTeamLead && !isAdminLevelRole(actor.role));
+    if (enforceLimitedEdit) {
       if (!targetFitsTeamLeadScope) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: actorIsCsLead
             ? 'You can only edit Sales Closers on your team. Contact an administrator for anything else.'
-            : 'You can only edit Media Buyers on your team. Contact an administrator for anything else.',
+            : actorIsMarketingLead
+              ? 'You can only edit Media Buyers on your team. Contact an administrator for anything else.'
+              : 'You can only edit direct reports on your team.',
         });
       }
       if (!sameBranch) {
@@ -3258,18 +3306,23 @@ export class UsersService {
         message: 'Name must be at least 2 characters',
       });
     }
-    return withActor(this.db, actor, async (tx) => {
-      const [row] = await tx
+    const row = await withActor(this.db, actor, async (tx) => {
+      const [updated] = await tx
         .update(schema.users)
         .set({ name: trimmed, updatedAt: new Date() })
         .where(eq(schema.users.id, actor.id))
         .returning({ id: schema.users.id, name: schema.users.name });
 
-      if (!row) {
+      if (!updated) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
       }
-      return row;
+      return updated;
     });
+
+    // Name is part of the cached /auth/me bundle — drop it so the header refreshes promptly.
+    void this.userBundleCache.invalidate(actor.id);
+
+    return row;
   }
 
   /**

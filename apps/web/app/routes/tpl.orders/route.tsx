@@ -72,8 +72,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   const pageData = (async () => {
-    // Single bundled call — replaces 4 parallel tRPC HTTP round-trips
-    // (orders.list + orders.statusCounts + logistics.listLocations + logistics.listRiders).
+    // Single bundled call — replaces 3 parallel tRPC HTTP round-trips
+    // (orders.list + orders.statusCounts + logistics.listLocations).
     const bundleInput = encodeURIComponent(
       JSON.stringify({
         page,
@@ -197,9 +197,8 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'dispatch') {
     await requirePermission(request, 'logistics.read');
     const orderId = formData.get('orderId')?.toString();
-    const riderId = formData.get('riderId')?.toString();
-    if (!orderId || !riderId) {
-      return json({ success: false, error: 'Order and rider are required' }, { status: 400 });
+    if (!orderId) {
+      return json({ success: false, error: 'Order is required' }, { status: 400 });
     }
     const res = await apiRequest<unknown>('/trpc/orders.transition', {
       method: 'POST',
@@ -207,7 +206,6 @@ export async function action({ request }: ActionFunctionArgs) {
       body: {
         orderId,
         newStatus: 'DISPATCHED',
-        metadata: { riderId },
       },
     });
     if (!res.ok) {
@@ -225,9 +223,8 @@ export async function action({ request }: ActionFunctionArgs) {
     } catch {
       return json({ success: false, error: 'Invalid order IDs', succeeded: 0, failed: 0, results: [] }, { status: 400 });
     }
-    const riderId = formData.get('riderId')?.toString();
-    if (!orderIds.length || !riderId) {
-      return json({ success: false, error: 'Select at least one order and a rider', succeeded: 0, failed: orderIds.length, results: [] }, { status: 400 });
+    if (!orderIds.length) {
+      return json({ success: false, error: 'Select at least one order', succeeded: 0, failed: orderIds.length, results: [] }, { status: 400 });
     }
     const results: Array<{ orderId: string; success: boolean; error?: string }> = [];
     let succeeded = 0;
@@ -236,7 +233,7 @@ export async function action({ request }: ActionFunctionArgs) {
       const res = await apiRequest<unknown>('/trpc/orders.transition', {
         method: 'POST',
         cookie,
-        body: { orderId, newStatus: 'DISPATCHED', metadata: { riderId } },
+        body: { orderId, newStatus: 'DISPATCHED' },
       });
       if (res.ok) {
         succeeded++;
@@ -436,27 +433,10 @@ export async function action({ request }: ActionFunctionArgs) {
         continue;
       }
       if (status === 'AGENT_ASSIGNED') {
-        let riderId = current?.riderId;
-        if (!riderId) {
-          const ridersRes = await apiRequest<{ result?: { data?: Array<{ id: string; logisticsLocationId: string | null }> } }>(
-            '/trpc/logistics.listRiders?input=%7B%7D',
-            { method: 'GET', cookie },
-          );
-          if (!ridersRes.ok) {
-            return json({ success: false, error: 'Could not load riders', intent: 'updateDeliveryDate' }, { status: 502 });
-          }
-          const riders = (ridersRes.data as { result?: { data?: Array<{ id: string; logisticsLocationId: string | null }> } })?.result?.data ?? [];
-          const locationId = current?.logisticsLocationId;
-          const rider = locationId ? riders.find((r) => r.logisticsLocationId === locationId) : riders[0];
-          if (!rider) {
-            return json({ success: false, error: 'No riders at this location. Add a rider before resolving.', intent: 'updateDeliveryDate' }, { status: 400 });
-          }
-          riderId = rider.id;
-        }
         const tr = await apiRequest<{ result?: { data?: OrderSnapshot } }>('/trpc/orders.transition', {
           method: 'POST',
           cookie,
-          body: { orderId, newStatus: 'DISPATCHED', metadata: { riderId } },
+          body: { orderId, newStatus: 'DISPATCHED' },
         });
         if (!tr.ok) {
           return json({ success: false, error: transitionError(tr, 'Dispatch failed'), intent: 'updateDeliveryDate' }, { status: safeStatus(tr.status) });

@@ -38,7 +38,6 @@ export const SPREADSHEET_IMPORT_ROLE_REFERENCE = [
   { enum: 'HEAD_OF_LOGISTICS', acceptedLabels: 'Head of Logistics' },
   { enum: 'STOCK_MANAGER', acceptedLabels: 'Stock Manager' },
   { enum: 'TPL_MANAGER', acceptedLabels: '3PL Manager, TPL Manager' },
-  { enum: 'TPL_RIDER', acceptedLabels: '3PL Rider, TPL Rider' },
   { enum: 'HR_MANAGER', acceptedLabels: 'HR Manager' },
 ] as const;
 
@@ -60,8 +59,6 @@ const ROLE_LABEL_LOOKUP: Record<string, string> = {
   'stock manager': 'STOCK_MANAGER',
   '3pl manager': 'TPL_MANAGER',
   'tpl manager': 'TPL_MANAGER',
-  '3pl rider': 'TPL_RIDER',
-  'tpl rider': 'TPL_RIDER',
   'hr manager': 'HR_MANAGER',
 };
 

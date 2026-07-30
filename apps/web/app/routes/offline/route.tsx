@@ -18,18 +18,26 @@ export default function OfflinePage() {
           Your internet connection is currently unavailable. Any pending actions will be synced automatically when you reconnect.
         </p>
         <div className="space-y-3">
-          <a
-            href="javascript:window.location.reload()"
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
             className="block w-full px-4 py-2.5 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition-colors text-center"
           >
             Try again
-          </a>
-          <a
-            href="javascript:void(window.history.length>1?window.history.back():window.location.assign('/admin'))"
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (window.history.length > 1) {
+                window.history.back();
+              } else {
+                window.location.assign('/admin');
+              }
+            }}
             className="block w-full px-4 py-2.5 bg-app-hover text-app-fg-muted rounded-lg font-medium border border-app-border hover:bg-app-elevated transition-colors text-center"
           >
             Go back
-          </a>
+          </button>
         </div>
         <p className="mt-6 text-xs text-app-fg-muted">
           Delivery confirmations and order updates saved offline will sync within 30 seconds of reconnection.

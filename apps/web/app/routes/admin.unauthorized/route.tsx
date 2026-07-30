@@ -4,7 +4,7 @@ import type { MetaFunction } from '@remix-run/node';
 import { PermissionRequiredModal } from '~/components/ui/permission-required-modal';
 
 export const meta: MetaFunction = () => {
-  return [{ title: 'Yannis EOSE — Access Denied' }];
+  return [{ title: 'Yannis EOSE: Access Denied' }];
 };
 
 /**

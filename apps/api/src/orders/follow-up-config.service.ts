@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
+import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared';
 import type {
   CreateFollowUpRuleInput,
   UpdateFollowUpRuleInput,
@@ -1248,8 +1248,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       : [];
     const userMap = new Map(userRows.map((u) => [u.id, u.name]));
 
+    const { customerPhone, customerPhoneHash, ...orderRest } = order;
     return {
-      ...order,
+      ...orderRest,
+      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, customerPhoneHash),
       assignedCsName: order.assignedCsId ? (userMap.get(order.assignedCsId) ?? null) : null,
       mediaBuyerName: order.mediaBuyerId ? (userMap.get(order.mediaBuyerId) ?? null) : null,
       pendingOrderLinePriceRequestId: prReq?.id ?? null,
@@ -1791,7 +1793,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
               ? `Reassigned to logistics${locationLabel ? ` at ${locationLabel}` : ''}.`
               : `Order assigned to logistics${locationLabel ? ` at ${locationLabel}` : ''}.`;
             break;
-          case 'DISPATCHED': description = 'Order dispatched to rider.'; break;
+          case 'DISPATCHED': description = 'Order dispatched.'; break;
           case 'IN_TRANSIT': description = 'Order in transit.'; break;
           case 'DELIVERED': description = 'Order marked delivered.'; break;
           case 'DELETED': description = 'Order deleted.'; break;

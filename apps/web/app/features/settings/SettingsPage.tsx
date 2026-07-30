@@ -573,11 +573,11 @@ export function SettingsPage({
                   </div>
                   <div>
                     <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Email</label>
-                    <p className="text-sm text-app-fg mt-1">{user?.email ?? '—'}</p>
+                    <p className="text-sm text-app-fg mt-1">{user?.email ?? 'Not set'}</p>
                   </div>
                   <div>
                     <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Role</label>
-                    <p className="text-sm text-app-fg mt-1">{ROLE_LABELS[user?.role ?? ''] ?? user?.role ?? '—'}</p>
+                    <p className="text-sm text-app-fg mt-1">{ROLE_LABELS[user?.role ?? ''] ?? user?.role ?? 'Not set'}</p>
                   </div>
                 </div>
 
@@ -854,7 +854,7 @@ export function SettingsPage({
                   <h3 className="text-lg font-semibold text-app-fg">My notifications</h3>
                   <p className="mt-0.5 text-sm text-app-fg-muted">
                     Choose which notifications you receive. Turning a type off stops all delivery
-                    for that type — in-app, push, and email. You can turn it back on any time.
+                    for that type: in-app, push, and email. You can turn it back on any time.
                   </p>
                 </div>
                 {myNotificationPrefs && myNotificationPrefs.items.length > 0 && (
@@ -1232,7 +1232,7 @@ export function SettingsPage({
                             ? 'Load balanced'
                             : 'Manual assignment'
                     }</strong>
-                    {hasSystemChanges && ' — you have unsaved changes'}
+                    {hasSystemChanges && ': you have unsaved changes'}
                   </p>
                 </div>
                 </Collapsible>
@@ -1345,7 +1345,7 @@ export function SettingsPage({
                   <p className="sm:col-span-2 text-xs text-app-fg-muted">
                     Saved: <strong>target {profitabilityTargetSaved}x · green ≥ {profitabilityThresholdSaved}x</strong>
                     {(localProfitabilityTarget !== profitabilityTargetSaved ||
-                      localProfitabilityThreshold !== profitabilityThresholdSaved) && ' — you have unsaved changes'}
+                      localProfitabilityThreshold !== profitabilityThresholdSaved) && ': you have unsaved changes'}
                   </p>
                 </div>
                 </Collapsible>
@@ -1660,7 +1660,7 @@ export function SettingsPage({
         >
           <h3 className="text-lg font-semibold text-app-fg mb-2">Apply system settings?</h3>
           <p className="text-sm text-app-fg-muted mb-4">
-            These changes affect everyone in the org — VOIP availability, the Sales dispatch strategy,
+            These changes affect everyone in the org: VOIP availability, the Sales dispatch strategy,
             and the default app theme. Are you sure you want to apply them now?
           </p>
           <ModalFetcherInlineError

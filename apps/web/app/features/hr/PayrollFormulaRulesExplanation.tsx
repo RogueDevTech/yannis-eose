@@ -34,6 +34,21 @@ function conditionPhrase(metric: string, operator: string, threshold: number): s
   return `when ${metricLabel} is ${opLabel} ${formatThreshold(metric, threshold)}`;
 }
 
+/** Full condition phrase for a tier, including any ANDed extra conditions. */
+function tierPhrase(tier: {
+  metric: string;
+  operator: string;
+  threshold: number;
+  extraConditions?: Array<{ metric: string; operator: string; threshold: number }>;
+}): string {
+  let phrase = conditionPhrase(tier.metric, tier.operator, tier.threshold);
+  for (const c of tier.extraConditions ?? []) {
+    // Strip the leading "when " on extra conditions so they read as "... and X is ...".
+    phrase += ` and ${conditionPhrase(c.metric, c.operator, c.threshold).replace(/^when /, '')}`;
+  }
+  return phrase;
+}
+
 export function PayrollFormulaRulesExplanation({
   formula,
   perProductBonus,
@@ -80,7 +95,7 @@ export function PayrollFormulaRulesExplanation({
               >
                 <span className="text-xs font-semibold text-app-fg-muted mr-2">#{idx + 1}</span>
                 Pay <span className="font-medium tabular-nums">{formatNaira(tier.amount)}</span>{' '}
-                {conditionPhrase(tier.metric, tier.operator, tier.threshold)}.
+                {tierPhrase(tier)}.
               </li>
             ))}
           </ul>
@@ -113,7 +128,7 @@ export function PayrollFormulaRulesExplanation({
                 >
                   <span className="text-xs font-semibold text-app-fg-muted mr-2">#{idx + 1}</span>
                   Add <span className="font-medium tabular-nums">{amountLabel}</span>{' '}
-                  {conditionPhrase(tier.metric, tier.operator, tier.threshold)}.
+                  {tierPhrase(tier)}.
                 </li>
               );
             })}

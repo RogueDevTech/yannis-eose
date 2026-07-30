@@ -243,14 +243,6 @@ export const logisticsRouter = router({
       return getLogisticsService().getLogisticsHealthDashboard(ctx.effectiveBranchIds);
     }),
 
-  /**
-   * List riders (TPL_RIDER, ACTIVE) for dispatch assignment dropdowns.
-   * Returns id, name, logisticsLocationId. Gated by logistics.read.
-   */
-  listRiders: permissionProcedure('logistics.read').query(async ({ ctx }) => {
-    return getLogisticsService().listRiders(ctx.effectiveBranchIds);
-  }),
-
   // Transfer remittances (3PL → warehouse)
   createRemittance: permissionProcedure('logistics.remit')
     .input(createRemittanceSchema)

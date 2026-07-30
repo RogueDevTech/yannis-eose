@@ -126,7 +126,6 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'users.deactivate', resource: 'users', action: 'deactivate', description: 'Legacy alias for users.staff.deactivate' },
   { code: 'audit.read', resource: 'audit', action: 'read', description: 'View audit trail' },
   { code: 'settings.write', resource: 'settings', action: 'write', description: 'Update system settings' },
-  { code: 'rider.dashboard', resource: 'rider', action: 'dashboard', description: 'Rider dashboard' },
   { code: 'cart.read', resource: 'cart', action: 'read', description: 'View cart abandonment data (Sales dashboard)' },
   { code: 'branches.manage', resource: 'branches', action: 'manage', description: 'Create, update, and assign users to branches (SuperAdmin / Admin / HR Manager)' },
   { code: 'branches.view_all', resource: 'branches', action: 'view_all', description: 'View data across all branches (global visibility bypass) — grant sparingly' },
@@ -545,10 +544,6 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     // visibility after the 2026-05 split into per-page codes.
     'logistics.providers.view',
     'logistics.partner_transfers.view',
-  ],
-  TPL_RIDER: [
-    'rider.dashboard',
-    'logistics.deliveryConfirmation.submit',
   ],
   // AUDITOR = read-only finance-scoped role for external/internal auditors.
   // Sees GL, journal entries, trial balance, financial reports, audit trail,

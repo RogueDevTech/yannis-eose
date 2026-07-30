@@ -8,12 +8,18 @@ import { getCurrentUser } from '~/lib/api.server';
  * The route exists so the user dropdown's "My Profile" link can be a stable, role-agnostic
  * URL. The HR loader already has self-view access (any authenticated user may open their own
  * profile) and the page hides destructive admin actions when `isSelfView` is set.
+ *
+ * TPL managers never reach this route via the admin layout (parent redirects to /tpl), but
+ * if they land here somehow, send them to TPL settings profile tab.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   if (!user) {
     const url = new URL(request.url);
-    throw redirect(`/auth?redirectTo=${url.pathname}`);
+    throw redirect(`/auth?redirectTo=${encodeURIComponent(url.pathname)}`);
+  }
+  if (user.role === 'TPL_MANAGER') {
+    throw redirect('/tpl/settings?tab=profile');
   }
   throw redirect(`/hr/users/${user.id}`);
 }

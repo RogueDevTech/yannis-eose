@@ -15,6 +15,8 @@ const ROLES_NEED_METRICS = ['HEAD_OF_CS', 'CS_CLOSER', 'HEAD_OF_MARKETING', 'MED
 
 const defaultMetrics: DashboardData['metrics'] = {
   totalSpend: 0,
+  approvedSpend: 0,
+  pendingSpend: 0,
   totalOrders: 0,
   deliveredOrders: 0,
   deliveredRevenue: 0,

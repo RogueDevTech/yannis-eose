@@ -7,8 +7,9 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { SettingsPage } from '~/features/settings/SettingsPage';
 import { TplSettingsLoadingShell } from '~/features/tpl/TplDeferredLoadingShells';
+
 export const meta: MetaFunction = () => [
-  { title: 'Settings — Yannis EOSE' },
+  { title: 'Settings: Yannis EOSE' },
 ];
 
 interface SystemSetting {
@@ -18,22 +19,44 @@ interface SystemSetting {
   updatedAt: string;
 }
 
+interface MyNotificationPrefItem {
+  type: string;
+  label: string;
+  description: string;
+  category: string;
+  enabled: boolean;
+}
+
+interface MyNotificationPrefs {
+  items: MyNotificationPrefItem[];
+  preferences: Record<string, boolean>;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const pageData = (async () => {
     const user = await getCurrentUser(request);
     const cookie = getSessionCookie(request);
 
+    const [settingsRes, prefsRes] = await Promise.all([
+      apiRequest<unknown>('/trpc/settings.getSystemSettings', { method: 'GET', cookie }),
+      user
+        ? apiRequest<unknown>('/trpc/users.getMyNotificationPreferences', { method: 'GET', cookie })
+        : Promise.resolve({ ok: false as const, data: null }),
+    ]);
+
     let systemSettings: SystemSetting[] = [];
-    const settingsRes = await apiRequest<unknown>(
-      '/trpc/settings.getSystemSettings',
-      { method: 'GET', cookie },
-    );
     if (settingsRes.ok) {
       const data = settingsRes.data as { result?: { data?: SystemSetting[] } };
       systemSettings = data?.result?.data ?? [];
     }
 
-    return { user, systemSettings, notificationEmailConfig: null };
+    let myNotificationPrefs: MyNotificationPrefs | null = null;
+    if (prefsRes.ok) {
+      const data = prefsRes.data as { result?: { data?: MyNotificationPrefs } };
+      myNotificationPrefs = data?.result?.data ?? null;
+    }
+
+    return { user, systemSettings, notificationEmailConfig: null, myNotificationPrefs };
   })();
 
   return defer({ pageData });
@@ -48,7 +71,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'updateProfile') {
-    const res = await apiRequest<unknown>('/trpc/users.updateProfile', {
+    const res = await apiRequest<unknown>('/trpc/users.updateMyProfile', {
       method: 'POST',
       cookie,
       body: {
@@ -73,7 +96,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Password must be at least 8 characters' }, { status: 400 });
     }
 
-    const res = await apiRequest<unknown>('/trpc/users.changePassword', {
+    const res = await apiRequest<unknown>('/trpc/users.changeMyPassword', {
       method: 'POST',
       cookie,
       body: { currentPassword, newPassword },
@@ -84,6 +107,33 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true, message: 'Password changed' });
   }
 
+  if (intent === 'updateMyNotificationPreferences') {
+    const rawPrefs = formData.get('preferences')?.toString() ?? '{}';
+    let preferences: Record<string, boolean>;
+    try {
+      const parsed = JSON.parse(rawPrefs) as Record<string, unknown>;
+      preferences = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'boolean') preferences[k] = v;
+      }
+    } catch {
+      return json({ error: 'Invalid notification preferences' }, { status: 400 });
+    }
+
+    const res = await apiRequest<unknown>('/trpc/users.updateMyNotificationPreferences', {
+      method: 'POST',
+      cookie,
+      body: { preferences },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to save notification preferences') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true, message: 'Notification preferences saved' });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
@@ -92,11 +142,12 @@ export default function TplSettingsRoute() {
   return (
     <Suspense fallback={<TplSettingsLoadingShell />}>
       <Await resolve={pageData}>
-        {({ user, systemSettings, notificationEmailConfig }) => (
+        {({ user, systemSettings, notificationEmailConfig, myNotificationPrefs }) => (
           <SettingsPage
             user={user}
             systemSettings={systemSettings}
             notificationEmailConfig={notificationEmailConfig}
+            myNotificationPrefs={myNotificationPrefs}
           />
         )}
       </Await>

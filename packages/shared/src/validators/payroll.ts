@@ -17,11 +17,24 @@ export const payrollOperatorSchema = z.enum(['GTE', 'GT', 'LTE', 'LT', 'EQ']);
 
 export const payrollTierKindSchema = z.enum(['PER_ORDER', 'FLAT']);
 
+/**
+ * A single metric condition. A tier's primary condition lives on the tier itself
+ * (metric/operator/threshold); `extraConditions` holds additional conditions that
+ * are ANDed with the primary one — e.g. `DR% >= 85 AND CPA < 1000`. A tier only
+ * awards its amount when the primary condition AND every extra condition pass.
+ */
+export const payrollTierConditionSchema = z.object({
+  metric: payrollMetricTypeSchema,
+  operator: payrollOperatorSchema,
+  threshold: z.number().min(0),
+});
+
 export const payrollBaseSalaryTierSchema = z.object({
   metric: payrollMetricTypeSchema,
   operator: payrollOperatorSchema,
   threshold: z.number().min(0),
   amount: z.number().min(0),
+  extraConditions: z.array(payrollTierConditionSchema).max(4).optional(),
 });
 
 export const payrollBonusTierSchema = z.object({
@@ -30,6 +43,7 @@ export const payrollBonusTierSchema = z.object({
   threshold: z.number().min(0),
   kind: payrollTierKindSchema,
   amount: z.number().min(0),
+  extraConditions: z.array(payrollTierConditionSchema).max(4).optional(),
 });
 
 export const payrollMinimumFloorSchema = z.object({
@@ -170,7 +184,6 @@ export const payrollPayRoleCategorySchema = z.enum([
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
   'HR_MANAGER',
   'AUDITOR',
 ]);

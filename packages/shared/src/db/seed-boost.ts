@@ -63,7 +63,7 @@ async function boostSeed() {
   const headOfLogistics = users.find((u: Record<string, unknown>) => u.role === 'HEAD_OF_LOGISTICS');
   const hrManager = users.find((u: Record<string, unknown>) => u.role === 'HR_MANAGER');
 
-  if (!superAdmin || csClosers.length === 0 || mediaBuyers.length === 0 || riders.length === 0) {
+  if (!superAdmin || csClosers.length === 0 || mediaBuyers.length === 0) {
     console.error('Required base data not found (users/roles). Prepare your base data, then run db:seed:boost.');
     await sql.end();
     process.exit(1);
@@ -129,6 +129,15 @@ async function boostSeed() {
     if (loc) tplManagerByLocation[loc] = t.id as string;
   }
 
+  const pickRiderIdForLocation = (locationId: string): string | null => {
+    const locationRiders = ridersByLocation[locationId];
+    if (!locationRiders?.length) return null;
+    return faker.helpers.arrayElement(locationRiders);
+  };
+
+  const confirmationRequesterForLocation = (locationId: string, riderId: string | null): string =>
+    riderId ?? tplManagerByLocation[locationId] ?? (tplManagers[0]?.id as string);
+
   // Non-main locations (3PL hubs)
   const mainWarehouse = locations.find((l: Record<string, unknown>) => (l.name as string).includes('Main Warehouse'));
   const tplLocations = locations.filter((l: Record<string, unknown>) => l.id !== mainWarehouse?.id);
@@ -164,8 +173,8 @@ async function boostSeed() {
   // ── Create profitable orders ────────────────────────────────────
   console.log(`  Creating ${BOOST_COUNT} profitable delivered orders...`);
 
-  const deliveredOrderInfos: Array<{ orderId: string; riderId: string; locationId: string; totalAmount: number }> = [];
-  const pendingConfirmationInfos: Array<{ orderId: string; riderId: string }> = [];
+  const deliveredOrderInfos: Array<{ orderId: string; locationId: string; requestedBy: string; totalAmount: number }> = [];
+  const pendingConfirmationInfos: Array<{ orderId: string; requestedBy: string }> = [];
   let totalRevenue = 0;
   let totalLandedCostSum = 0;
   let totalDeliveryFees = 0;
@@ -202,12 +211,12 @@ async function boostSeed() {
     const csCloser = faker.helpers.arrayElement(csClosers);
     const csCloserId = csCloser.id as string;
 
-    // Pick 3PL location and rider
+    // Pick 3PL location (rider optional — legacy field)
     const tplLocation = faker.helpers.arrayElement(tplLocations);
     const locationId = tplLocation.id as string;
     const providerId = tplLocation.provider_id as string;
-    const locationRiders = ridersByLocation[locationId] ?? riders.map((r: Record<string, unknown>) => r.id as string);
-    const riderId = faker.helpers.arrayElement(locationRiders);
+    const riderId = pickRiderIdForLocation(locationId);
+    const requestedBy = confirmationRequesterForLocation(locationId, riderId);
 
     // Status — heavily skewed towards DELIVERED (finance counts DELIVERED only)
     const status = faker.helpers.weightedArrayElement([
@@ -276,12 +285,12 @@ async function boostSeed() {
     `;
 
     if (status !== 'IN_TRANSIT') {
-      deliveredOrderInfos.push({ orderId, riderId, locationId, totalAmount });
+      deliveredOrderInfos.push({ orderId, locationId, requestedBy, totalAmount });
       totalRevenue += totalAmount;
       totalLandedCostSum += totalLandedCost;
       totalDeliveryFees += deliveryFee;
     } else {
-      pendingConfirmationInfos.push({ orderId, riderId });
+      pendingConfirmationInfos.push({ orderId, requestedBy });
     }
 
     if ((i + 1) % 50 === 0) process.stdout.write(`  Progress: ${i + 1}/${BOOST_COUNT} orders...\r`);
@@ -311,8 +320,8 @@ async function boostSeed() {
     const tplLocation = faker.helpers.arrayElement(tplLocations);
     const locationId = tplLocation.id as string;
     const providerId = tplLocation.provider_id as string;
-    const locationRiders = ridersByLocation[locationId] ?? riders.map((r: Record<string, unknown>) => r.id as string);
-    const riderId = faker.helpers.arrayElement(locationRiders);
+    const riderId = pickRiderIdForLocation(locationId);
+    const requestedBy = confirmationRequesterForLocation(locationId, riderId);
 
     const daysAgo = faker.number.int({ min: 1, max: 14 });
     const createdAt = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
@@ -352,7 +361,7 @@ async function boostSeed() {
       VALUES (gen_random_uuid(), ${orderId}, ${csCloserId}, ${randomUUID()}, 'COMPLETED', ${faker.number.int({ min: 20, max: 180 })})
     `;
 
-    pendingConfirmationInfos.push({ orderId, riderId });
+    pendingConfirmationInfos.push({ orderId, requestedBy });
   }
   console.log(`  Added ${PENDING_CONFIRMATION_DEMO_COUNT} in-transit demo orders.`);
 
@@ -368,7 +377,7 @@ async function boostSeed() {
     });
     await sql`
       INSERT INTO delivery_confirmation_requests (id, order_id, requested_by, status, approved_by, approved_at, payload)
-      VALUES (gen_random_uuid(), ${info.orderId}, ${info.riderId}, 'APPROVED', ${headOfLogistics?.id ?? superAdmin.id}, NOW() - INTERVAL '1 day', ${payload}::jsonb)
+      VALUES (gen_random_uuid(), ${info.orderId}, ${info.requestedBy}, 'APPROVED', ${headOfLogistics?.id ?? superAdmin.id}, NOW() - INTERVAL '1 day', ${payload}::jsonb)
     `;
   }
   for (const info of pendingConfirmationInfos) {
@@ -380,7 +389,7 @@ async function boostSeed() {
     });
     await sql`
       INSERT INTO delivery_confirmation_requests (id, order_id, requested_by, status, payload)
-      VALUES (gen_random_uuid(), ${info.orderId}, ${info.riderId}, 'PENDING', ${payload}::jsonb)
+      VALUES (gen_random_uuid(), ${info.orderId}, ${info.requestedBy}, 'PENDING', ${payload}::jsonb)
     `;
   }
 
@@ -458,8 +467,7 @@ async function boostSeed() {
     const tplLocation = faker.helpers.arrayElement(tplLocations);
     const locationId = tplLocation.id as string;
     const providerId = tplLocation.provider_id as string;
-    const locationRiders = ridersByLocation[locationId] ?? riders.map((r: Record<string, unknown>) => r.id as string);
-    const riderId = faker.helpers.arrayElement(locationRiders);
+    const riderId = pickRiderIdForLocation(locationId);
     const tplManagerId = tplManagerByLocation[locationId] ?? tplManagers[0]?.id as string;
 
     const createdAt = new Date(Date.now() - faker.number.int({ min: 2, max: 20 }) * 24 * 60 * 60 * 1000);

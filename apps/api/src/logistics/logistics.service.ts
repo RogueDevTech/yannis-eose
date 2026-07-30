@@ -1202,48 +1202,6 @@ export class LogisticsService {
     };
   }
 
-  /**
-   * List riders (TPL_RIDER users) for dispatch dropdowns.
-   * Returns id, name, logisticsLocationId. Gated by logistics.read.
-   */
-  async listRiders(
-    effectiveBranchIds?: string[] | null,
-  ): Promise<Array<{ id: string; name: string; logisticsLocationId: string | null }>> {
-    const conditions: SQL[] = [
-      eq(schema.users.role, 'TPL_RIDER'),
-      eq(schema.users.status, 'ACTIVE'),
-    ];
-
-    // Scope riders to branches the caller can see
-    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
-      conditions.push(
-        inArray(
-          schema.users.id,
-          this.db
-            .select({ userId: schema.userBranches.userId })
-            .from(schema.userBranches)
-            .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
-        ),
-      );
-    }
-
-    const rows = await this.db
-      .select({
-        id: schema.users.id,
-        name: schema.users.name,
-        logisticsLocationId: schema.users.logisticsLocationId,
-      })
-      .from(schema.users)
-      .where(and(...conditions))
-      .orderBy(schema.users.name);
-
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      logisticsLocationId: r.logisticsLocationId,
-    }));
-  }
-
   // ============================================
   // Unified Logistics Orders (orders + cart_orders + follow_up_orders)
   // ============================================
@@ -1734,7 +1692,7 @@ export class LogisticsService {
     // Phase 20: also accept the explicit `finance.cashRemittance.create` permission
     // so a custom role template can grant just this capability.
     const isTplCaller =
-      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER');
     const isFinanceCaller =
       isAdminLevel(actor) ||
       hasFinanceWriteAccess(actor) ||
@@ -2056,7 +2014,7 @@ export class LogisticsService {
    */
   async updateDeliveryRemittance(input: UpdateDeliveryRemittanceInput, actor: SessionUser) {
     const isTplCaller =
-      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER');
     const isFinanceCaller =
       isAdminLevel(actor) ||
       hasFinanceWriteAccess(actor) ||
@@ -2159,7 +2117,7 @@ export class LogisticsService {
    */
   async listDeliveryRemittances(input: Omit<ListDeliveryRemittancesInput, 'summaryOnly'> & { summaryOnly?: boolean }, actor: SessionUser, groupId?: string | null, effectiveBranchIds?: string[] | null) {
     const isTplCaller =
-      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER');
     const canListGlobal =
       isAdminLevel(actor) ||
       hasFinanceAccess(actor) ||
@@ -2725,7 +2683,7 @@ export class LogisticsService {
     effectiveBranchIds?: string[] | null,
   ) {
     const isTplCaller =
-      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER');
     const canListGlobal =
       isAdminLevel(actor) ||
       hasFinanceAccess(actor) ||
@@ -3444,7 +3402,7 @@ export class LogisticsService {
     // Phase 20: also accept `finance.cashRemittance.create` so any custom role
     // that can create remittances can preview the eligible orders.
     const isTplCaller =
-      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER');
     const canListGlobal =
       isAdminLevel(actor) ||
       hasFinanceAccess(actor) ||
@@ -3649,7 +3607,7 @@ export class LogisticsService {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') &&
       !!actor.logisticsLocationId &&
-      (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
+      (actor.role === 'TPL_MANAGER');
     const canListGlobal =
       isAdminLevel(actor) ||
       hasFinanceAccess(actor) ||
@@ -4084,7 +4042,7 @@ export class LogisticsService {
    */
   async getDeliveryRemittance(deliveryRemittanceId: string, actor: SessionUser) {
     const isTplCaller =
-      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER' || actor.role === 'TPL_RIDER');
+      this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER');
     const canViewGlobal =
       isAdminLevel(actor) ||
       hasFinanceAccess(actor) ||

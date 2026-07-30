@@ -95,6 +95,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
   const marketingSafe = {
     totalSpend: data?.marketing?.totalSpend ?? 0,
     approvedSpend: (data?.marketing as Record<string, number> | undefined)?.approvedSpend ?? data?.marketing?.totalSpend ?? 0,
+    pendingSpend: (data?.marketing as Record<string, number> | undefined)?.pendingSpend ?? 0,
     deliveredRevenue: (data?.marketing as Record<string, number> | undefined)?.deliveredRevenue ?? 0,
     totalOrders: data?.marketing?.totalOrders ?? 0,
     confirmedOrders: data?.marketing?.confirmedOrders ?? 0,
@@ -173,8 +174,12 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           },
           {
             label: 'Ad spend',
-            value: fmt(marketingSafe.totalSpend),
+            value: fmt(marketingSafe.approvedSpend),
             valueClassName: 'text-danger-600 dark:text-danger-400',
+            title:
+              marketingSafe.pendingSpend > 0
+                ? `Approved ad spend (basis for ROAS). Pending unapproved: ${fmt(marketingSafe.pendingSpend)}`
+                : 'Approved ad spend (basis for ROAS)',
           },
           {
             label: 'Deep analysis',
@@ -700,12 +705,24 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           tileClassName="!py-2.5"
           items={[
             {
-              label: 'Total Ad Spend',
-              value: fmt(marketingSafe.totalSpend),
+              label: 'Ad Spend',
+              value: fmt(marketingSafe.approvedSpend),
               valueClassName: 'text-danger-600 dark:text-danger-400',
-              title: 'Total approved ad spend in the selected period',
+              title:
+                marketingSafe.pendingSpend > 0
+                  ? `Approved ad spend (basis for CPA/ROAS). Pending unapproved: ${fmt(marketingSafe.pendingSpend)}`
+                  : 'Approved ad spend (basis for CPA/ROAS)',
               to: '/admin/marketing/expenses',
             },
+            ...(marketingSafe.pendingSpend > 0
+              ? [{
+                  label: 'Pending Spend',
+                  value: fmt(marketingSafe.pendingSpend),
+                  valueClassName: 'text-warning-600 dark:text-warning-400' as const,
+                  title: 'Unapproved ad spend: excluded from CPA and ROAS',
+                  to: '/admin/marketing/expenses',
+                }]
+              : []),
             {
               label: 'Marketing Orders',
               value: marketingSafe.totalOrders.toLocaleString(),

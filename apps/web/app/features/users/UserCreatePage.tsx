@@ -37,7 +37,6 @@ const COMPANY_WIDE_OPTIONAL_SQUAD_ROLES = new Set([
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
   'LOGISTICS_MANAGER',
 ]);
 
@@ -124,7 +123,6 @@ const ROLES = [
     label: '3PL Manager',
     description: 'Manages a third-party logistics location',
   },
-  { value: 'TPL_RIDER', label: '3PL Rider', description: 'Handles deliveries for a 3PL location' },
   {
     value: 'HR_MANAGER',
     label: 'HR Manager',
@@ -637,8 +635,8 @@ export function UserCreatePage({
   // (max concurrent orders they can handle) and Media Buyers (max concurrent campaigns).
   // Managers / heads don't carry a personal load, so hiding it removes noise from their forms.
   const showCapacity = ['CS_CLOSER', 'MEDIA_BUYER'].includes(selectedRole);
-  const showLogisticsLocation = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
-  const is3PLRole = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
+  const showLogisticsLocation = selectedRole === 'TPL_MANAGER';
+  const is3PLRole = selectedRole === 'TPL_MANAGER';
   const showProductAssignment = selectedRole === 'MEDIA_BUYER';
   // Compensation is edited in HR's commission plans page, not on the user form. Hide it in edit mode.
   const showCompensation = !!selectedRole && !isEditMode;

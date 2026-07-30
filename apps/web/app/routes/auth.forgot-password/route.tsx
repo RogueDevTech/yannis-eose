@@ -5,18 +5,23 @@ import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { TextInput } from '~/components/ui/text-input';
 import { PageNotification } from '~/components/ui/page-notification';
-import { apiRequest, getCurrentUser } from '~/lib/api.server';
+import { apiRequest, getCurrentUser, safeStatus } from '~/lib/api.server';
 
 export const meta: MetaFunction = () => {
   return [
-    { title: 'Yannis EOSE — Forgot Password' },
+    { title: 'Yannis EOSE: Forgot Password' },
     { name: 'description', content: 'Reset your Yannis EOSE password' },
   ];
 };
 
+function homeForRole(role: string | undefined): string {
+  if (role === 'TPL_MANAGER') return '/tpl';
+  return '/admin';
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request, { softNetwork: true });
-  if (user) return redirect('/admin');
+  if (user) return redirect(homeForRole(user.role));
   return {};
 }
 
@@ -31,16 +36,30 @@ export async function action({ request }: ActionFunctionArgs) {
   const url = new URL(request.url);
   const resetBaseUrl = `${url.protocol}//${url.host}/auth/reset-password`;
 
-  const res = await apiRequest<{ message: string }>('/auth/forgot-password', {
+  const res = await apiRequest<{ message: string; error?: string }>('/auth/forgot-password', {
     method: 'POST',
     body: { email, resetBaseUrl },
   });
 
-  if (res.ok) {
-    return json({ success: res.data.message });
+  // Anti-enumeration: API returns 200 with a generic message whether or not the
+  // email exists. Non-OK means a real failure (validation, SMTP, network) — do not
+  // pretend the reset email was queued.
+  if (!res.ok) {
+    const looksLikeNetwork =
+      res.status === 503 || res.status === 504;
+    return json(
+      {
+        error: looksLikeNetwork
+          ? 'We could not reach the server. Please try again in a moment.'
+          : 'Unable to send a reset link right now. Please try again shortly.',
+      },
+      { status: safeStatus(res.status) },
+    );
   }
 
-  return json({ success: 'If an account with that email exists, a reset link has been sent.' });
+  return json({
+    success: res.data.message ?? 'If an account with that email exists, a reset link has been sent.',
+  });
 }
 
 const mobileInput =

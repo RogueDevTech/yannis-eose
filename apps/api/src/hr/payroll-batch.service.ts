@@ -43,7 +43,7 @@ import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 export const DEPARTMENT_ROLES: Record<PayrollDepartment, readonly string[]> = {
   CS: ['CS_CLOSER', 'HEAD_OF_CS'],
   MARKETING: ['MEDIA_BUYER', 'HEAD_OF_MARKETING'],
-  LOGISTICS: ['HEAD_OF_LOGISTICS', 'TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER'],
+  LOGISTICS: ['HEAD_OF_LOGISTICS', 'TPL_MANAGER', 'STOCK_MANAGER'],
   HR: ['HR_MANAGER', 'BRANCH_ADMIN'],
   OPERATIONS: ['SUPER_ADMIN', 'ADMIN'],
   FINANCE: ['FINANCE_OFFICER', 'AUDITOR'],
@@ -66,7 +66,7 @@ export const DEPARTMENT_OWNER_ROLE: Record<PayrollDepartment, string> = {
  *   - HR Manager: every role (the catch-all owner)
  *   - HEAD_OF_CS: CS_CLOSER
  *   - HEAD_OF_MARKETING: MEDIA_BUYER
- *   - HEAD_OF_LOGISTICS: LOGISTICS_MANAGER + TPL_MANAGER + TPL_RIDER + STOCK_MANAGER
+ *   - HEAD_OF_LOGISTICS: LOGISTICS_MANAGER + TPL_MANAGER + STOCK_MANAGER
  *   - everyone else: empty
  *
  * `null` return means "no plan management at all" — the caller should reject without checking

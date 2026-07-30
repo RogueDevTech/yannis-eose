@@ -4,7 +4,8 @@ import { z } from 'zod';
 // User Role Enum (matches DB enum)
 // ============================================
 
-export const userRoleSchema = z.enum([
+/** Roles that may be assigned on staff create/update. TPL_RIDER is excluded (deprecated). */
+export const assignableUserRoleSchema = z.enum([
   'SUPER_ADMIN',
   'ADMIN',
   'BRANCH_ADMIN',
@@ -17,10 +18,15 @@ export const userRoleSchema = z.enum([
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
   'HR_MANAGER',
   'SUPPORT',
   'AUDITOR',
+]);
+
+/** Includes legacy TPL_RIDER for list/filter reads of existing accounts. */
+export const userRoleSchema = z.enum([
+  ...assignableUserRoleSchema.options,
+  'TPL_RIDER',
 ]);
 
 /**
@@ -103,7 +109,7 @@ export const createStaffSchema = z.object({
   // Account details
   name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Invalid email address'),
-  role: userRoleSchema,
+  role: assignableUserRoleSchema,
   status: z.enum(['PENDING', 'ACTIVE']).default('PENDING'),
 
   /**
@@ -191,7 +197,7 @@ export const updateStaffSchema = z.object({
   userId: z.string().uuid(),
   name: z.string().min(2).optional(),
   email: z.string().email().optional(),
-  role: userRoleSchema.optional(),
+  role: assignableUserRoleSchema.optional(),
   roleTemplateId: z.string().uuid().nullable().optional(),
   permissionOverrides: z.record(z.boolean()).optional(),
   scopeGlobal: z.boolean().optional(),

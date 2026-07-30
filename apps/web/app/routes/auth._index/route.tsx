@@ -4,7 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { AuthPage } from '~/features/auth/AuthPage';
 
-const ALLOWED_REDIRECT_PREFIXES = ['/admin', '/tpl', '/rider'] as const;
+const ALLOWED_REDIRECT_PREFIXES = ['/admin', '/tpl'] as const;
 
 /** Shown when Nest returns 200 from /auth/login but Remix cannot forward any Set-Cookie (split web/API deploys need SESSION_COOKIE_DOMAIN on the API). */
 const SESSION_COOKIE_FORWARD_FAILED =
@@ -49,7 +49,7 @@ function allowedRedirectFromUrl(request: Request): string | null {
 
 export const meta: MetaFunction = () => {
   return [
-    { title: 'Yannis EOSE — Login' },
+    { title: 'Yannis EOSE: Login' },
     { name: 'description', content: 'Sign in to Yannis EOSE' },
   ];
 };
@@ -67,7 +67,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         return redirect(redirectTo);
       }
       if (user.role === 'TPL_MANAGER') return redirect('/tpl');
-      if (user.role === 'TPL_RIDER') return redirect('/rider');
       return redirect('/admin');
     }
   } catch {
@@ -102,7 +101,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
 async function handleLogin(request: Request, formData: FormData) {
   const postRedirect = resolveRedirectTo(request, formData);
-  const email = formData.get('email')?.toString() ?? '';
+  const email = formData.get('email')?.toString()?.trim().toLowerCase() ?? '';
   const password = formData.get('password')?.toString() ?? '';
   const rememberMe = formData.get('rememberMe')?.toString() === 'on';
 
@@ -200,14 +199,14 @@ async function handleLogin(request: Request, formData: FormData) {
     target = postRedirect;
   } else {
     const role = res.data?.user?.role;
-    target = role === 'TPL_MANAGER' ? '/tpl' : role === 'TPL_RIDER' ? '/rider' : '/admin';
+    target = role === 'TPL_MANAGER' ? '/tpl' : '/admin';
   }
   return redirect(target, { headers });
 }
 
 async function handleSetup(request: Request, formData: FormData) {
   const name = formData.get('name')?.toString() ?? '';
-  const email = formData.get('email')?.toString() ?? '';
+  const email = formData.get('email')?.toString()?.trim().toLowerCase() ?? '';
   const password = formData.get('password')?.toString() ?? '';
   const confirmPassword = formData.get('confirmPassword')?.toString() ?? '';
 
@@ -233,7 +232,7 @@ async function handleSetup(request: Request, formData: FormData) {
     return json({ error: errorData.message ?? 'Setup failed' }, { status: safeStatus(res.status) });
   }
 
-  // Auto-login after setup
+  // Auto-login after setup (same normalized email as setup body)
   const loginRes = await apiRequest<{ message: string }>('/auth/login', {
     method: 'POST',
     body: { email, password },

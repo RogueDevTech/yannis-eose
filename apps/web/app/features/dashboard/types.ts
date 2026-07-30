@@ -13,6 +13,10 @@ export interface DashboardData {
   }>;
   metrics: {
     totalSpend: number;
+    /** Approved AD_SPEND only — the basis for CPA/ROAS. */
+    approvedSpend?: number;
+    /** Pending (unapproved) AD_SPEND — shown separately, excluded from CPA/ROAS. */
+    pendingSpend?: number;
     totalOrders: number;
     deliveredOrders: number;
     /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */

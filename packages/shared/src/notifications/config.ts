@@ -507,15 +507,6 @@ export const RELEVANT_NOTIFICATION_TYPES_BY_ROLE: Record<string, NotificationTyp
     'hr:deduction_applied',
     ...COMMON_ACCOUNT_TYPES,
   ],
-  TPL_RIDER: [
-    'delivery:assigned',
-    'hr:payout_approved',
-    'hr:deduction_created',
-    'hr:addon_approved',
-    'hr:deduction_applied',
-    ...COMMON_ACCOUNT_TYPES,
-  ],
-
   // Finance / HR
   FINANCE_OFFICER: [
     'finance:approval_processed',

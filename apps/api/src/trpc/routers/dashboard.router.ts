@@ -247,6 +247,7 @@ async function _ceoOverviewFetch(params: {
     marketing: {
       totalSpend: safeMarketingMetrics.totalSpend ?? 0,
       approvedSpend: safeMarketingMetrics.approvedSpend ?? 0,
+      pendingSpend: safeMarketingMetrics.pendingSpend ?? 0,
       deliveredRevenue: safeMarketingMetrics.deliveredRevenue ?? 0,
       totalOrders: safeMarketingMetrics.totalOrders ?? 0,
       confirmedOrders: safeMarketingMetrics.confirmedOrders ?? 0,

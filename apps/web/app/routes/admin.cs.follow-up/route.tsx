@@ -113,6 +113,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         apiRequest<unknown>(`/trpc/orders.followUpOrdersList?input=${listInputStr}`, deferredOpt),
         apiRequest<unknown>(`/trpc/orders.followUpOrdersStatusCounts?input=${encodeURIComponent(JSON.stringify({
           ...(branchId ? { branchId } : {}),
+          ...(assignedCsId ? { assignedCsId } : {}),
           ...(startDate ? { startDate } : {}),
           ...(endDate ? { endDate } : {}),
         }))}`, deferredOpt).catch(() => ({ ok: false as const, status: 500, data: null })),
@@ -187,6 +188,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         branchId: branchId ?? '',
         startDate: startDate ?? '',
         endDate: endDate ?? '',
+        periodAllTime,
         backTo: backToParam ?? '',
         bulkSelectAllMatchingInput: JSON.stringify(listInput),
       },
@@ -808,7 +810,7 @@ export default function FollowUpRoute() {
       filters: {
         startDate: shell?.startDate ?? '',
         endDate: shell?.endDate ?? '',
-        periodAllTime: false,
+        periodAllTime: shell?.periodAllTime ?? false,
       },
     };
     return (

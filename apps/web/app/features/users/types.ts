@@ -69,7 +69,6 @@ export const ROLE_OPTIONS = [
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
   'HR_MANAGER',
   'SUPPORT',
   'AUDITOR',
@@ -362,8 +361,10 @@ export interface UserDetailLoaderData {
   /** When set, Overview permissions card hydrates from SSR; client resource route is skipped. */
   overviewPermissionsSlice?: UserDetailPermissionsOverviewSlice | null;
   isSuperAdmin?: boolean;
-  /** SuperAdmin/Admin or `users.deactivate` / `users.staff.deactivate` — can restore DEACTIVATED staff to ACTIVE. */
+  /** SuperAdmin/Admin/HR or `users.deactivate` / `users.staff.deactivate` — can restore DEACTIVATED staff to ACTIVE. */
   canReactivateDeactivatedStaff?: boolean;
+  /** Same authority as API `users.deactivate` — show Deactivate on profile. */
+  canDeactivateStaff?: boolean;
   isViewerHeadOfMarketing?: boolean;
   isViewerHeadOfCS?: boolean;
   /**

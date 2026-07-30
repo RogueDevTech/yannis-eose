@@ -68,7 +68,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   if (!viewerCanSeePermissionRequests(user)) {
-    throw redirect('/admin/unauthorized?missing=permission-requests.view');
+    throw redirect('/admin/unauthorized?required=permission-requests.view');
   }
   const cookie = getSessionCookie(request);
 

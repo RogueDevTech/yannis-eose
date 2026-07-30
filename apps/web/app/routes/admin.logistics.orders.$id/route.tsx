@@ -67,17 +67,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'dispatch') {
     await requirePermission(request, 'logistics.read');
-    const riderId = formData.get('riderId')?.toString();
-    if (!riderId) {
-      return json({ error: 'Rider is required' }, { status: 400 });
-    }
     const res = await apiRequest<unknown>('/trpc/orders.transition', {
       method: 'POST',
       cookie,
       body: {
         orderId,
         newStatus: 'DISPATCHED',
-        metadata: { riderId },
       },
     });
     if (!res.ok) {

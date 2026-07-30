@@ -1804,9 +1804,10 @@ export class MarketingService {
       return [];
     }
 
-    // Match the enforcement logic in computeMarketingDisbursableInTx:
+    // Match the enforcement logic in computeMarketingDisbursableInTx / getFundingBalance:
     // - Received: COMPLETED only (receiver must mark-received first)
     // - Distributed: SENT + COMPLETED + DISPUTED (all non-cancelled outflows)
+    // - Spend: PENDING + APPROVED (pending deducts immediately; REJECTED excluded)
     // Date conditions: funding filtered by sentAt, spend filtered by spendDate.
     const fundingDateConds: SQL[] = [];
     const spendDateConds: SQL[] = [];
@@ -1853,6 +1854,8 @@ export class MarketingService {
       // under their own branch context). Applying the CALLER's branch would
       // exclude spend logged under a different branch's campaigns and inflate
       // the balance compared to the recipient's own view.
+      // Spend: PENDING + APPROVED (same as getFundingBalance / computeMarketingDisbursableInTx).
+      // Pending expenses deduct immediately; only REJECTED is excluded.
       this.db
         .select({
           mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
@@ -1862,7 +1865,7 @@ export class MarketingService {
         .where(
           and(
             inArray(schema.adSpendLogs.mediaBuyerId, recipientUserIds),
-            eq(schema.adSpendLogs.status, 'APPROVED'),
+            inArray(schema.adSpendLogs.status, ['PENDING', 'APPROVED']),
             ...spendDateConds,
           ),
         )

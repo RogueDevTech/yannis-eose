@@ -49,7 +49,6 @@ const NON_BRANCH_ASSIGNED_ROLES = new Set<string>([
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
   'LOGISTICS_MANAGER',
   'HR_MANAGER',
   'AUDITOR',
@@ -230,12 +229,11 @@ export function canEditUser(
 
 /**
  * Roles a Head of Logistics may mirror — anyone in the logistics chain on
- * their branch (3PL managers, riders, stock managers, branch logistics manager).
+ * their branch (3PL managers, stock managers, branch logistics manager).
  */
 const HEAD_OF_LOGISTICS_MIRRORABLE = new Set<string>([
   'LOGISTICS_MANAGER',
   'TPL_MANAGER',
-  'TPL_RIDER',
   'STOCK_MANAGER',
 ]);
 
@@ -246,7 +244,7 @@ const HEAD_OF_LOGISTICS_MIRRORABLE = new Set<string>([
  * - SuperAdmin / Admin can mirror anyone EXCEPT another admin-level user.
  * - HEAD_OF_CS can mirror any CS_CLOSER.
  * - HEAD_OF_MARKETING can mirror any MEDIA_BUYER.
- * - HEAD_OF_LOGISTICS can mirror LOGISTICS_MANAGER / TPL_MANAGER / TPL_RIDER / STOCK_MANAGER.
+ * - HEAD_OF_LOGISTICS can mirror LOGISTICS_MANAGER / TPL_MANAGER / STOCK_MANAGER.
  * - Branch team supervisors mirror via `BranchTeamsService.actorCanMirrorViaSupervision`.
  * - Department-head mirror powers are tied to the direct-report role matrix above,
  *   not to `scopeOrgWideHead`. Head of Marketing no longer keeps org-wide branch
@@ -321,6 +319,9 @@ export function canAccessStaffHrUserDetail(
 
   /** Same branch as `requireStaffAccountsAccess` — primary Finance Officer only (not hat-only). */
   if (hasFinanceAccess(viewer)) return true;
+
+  // HR Manager is staff-directory org role (same as roster / deactivate authority).
+  if (viewer.role === 'HR_MANAGER') return true;
 
   const perms = viewer.permissions ?? [];
   for (const p of perms) {

@@ -30,7 +30,6 @@ const ALL_ROLES: RoleOption[] = [
   { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics' },
   { value: 'LOGISTICS_MANAGER', label: 'Logistics Manager' },
   { value: 'TPL_MANAGER', label: '3PL Manager' },
-  { value: 'TPL_RIDER', label: '3PL Rider' },
   { value: 'STOCK_MANAGER', label: 'Stock Manager' },
   { value: 'HR_MANAGER', label: 'HR Manager' },
   { value: 'SUPPORT', label: 'Support' },
@@ -47,7 +46,7 @@ function getRolesForActor(actorRole: string): RoleOption[] {
       return ALL_ROLES.filter((r) => r.value === 'MEDIA_BUYER');
     case 'HEAD_OF_LOGISTICS':
       return ALL_ROLES.filter((r) =>
-        ['TPL_RIDER', 'HEAD_OF_LOGISTICS', 'LOGISTICS_MANAGER', 'TPL_MANAGER'].includes(r.value),
+        ['HEAD_OF_LOGISTICS', 'LOGISTICS_MANAGER', 'TPL_MANAGER', 'STOCK_MANAGER'].includes(r.value),
       );
     default:
       return ALL_ROLES;

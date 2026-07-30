@@ -51,7 +51,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   };
 
   const pageData = (async () => {
-    const [orderRes, locationsRes, ridersRes, allocatableRes] = await Promise.all([
+    const [orderRes, locationsRes, allocatableRes] = await Promise.all([
       apiRequest<unknown>(
         `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
         { method: 'GET', cookie },
@@ -60,7 +60,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
         { method: 'GET', cookie },
       ),
-      apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
       apiRequest<unknown>(
         `/trpc/orders.listAllocatableLocations?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
         { method: 'GET', cookie },
@@ -88,9 +87,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const locationsData = locationsRes.ok
       ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
       : null;
-    const ridersData = ridersRes.ok
-      ? (ridersRes.data as { result?: { data?: Array<{ id: string; name: string; logisticsLocationId: string | null }> } })?.result?.data ?? []
-      : [];
 
     const historyRows: HistoryEntry[] = await apiRequest<unknown>(
       `/trpc/audit.recordHistory?input=${encodeURIComponent(JSON.stringify({ tableName: 'orders', recordId: orderId, page: 1, limit: 20 }))}`,
@@ -123,7 +119,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       order,
       history: Promise.resolve(historyRows) as Promise<HistoryEntry[]>,
       locations,
-      riders: ridersData,
+      riders: [],
       allocatableLocations,
       richAllocatableLocations,
     };
@@ -173,17 +169,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'dispatch') {
     await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.read' });
-    const riderId = formData.get('riderId')?.toString();
-    if (!riderId) {
-      return json({ error: 'Rider is required' }, { status: 400 });
-    }
     const res = await apiRequest<unknown>('/trpc/orders.transition', {
       method: 'POST',
       cookie,
       body: {
         orderId,
         newStatus: 'DISPATCHED',
-        metadata: { riderId },
       },
     });
     if (!res.ok) {

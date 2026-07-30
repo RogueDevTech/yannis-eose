@@ -114,6 +114,9 @@ export class AuthService {
     // Rate limit check
     await this.checkRateLimit(clientIp);
 
+    // Emails are stored lowercase — normalize so `User@Company.com` still matches.
+    const normalizedEmail = email.trim().toLowerCase();
+
     // Find user by email
     const [user] = await this.db
       .select({
@@ -133,7 +136,7 @@ export class AuthService {
         primaryBranchId: schema.users.primaryBranchId,
       })
       .from(schema.users)
-      .where(eq(schema.users.email, email))
+      .where(eq(schema.users.email, normalizedEmail))
       .limit(1);
 
     if (!user) {
@@ -147,6 +150,12 @@ export class AuthService {
     }
     if (user.status !== 'ACTIVE' && user.status !== 'PENDING') {
       throw new ForbiddenException('Account is deactivated');
+    }
+
+    if (user.role === 'TPL_RIDER') {
+      throw new ForbiddenException(
+        'Rider accounts are no longer supported. Contact an administrator.',
+      );
     }
 
     // Verify password

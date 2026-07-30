@@ -47,7 +47,7 @@ When explaining a metric, always:
 - SUPPORT: Read-only admin access
 - HEAD_OF_MARKETING / MEDIA_BUYER: Marketing funnel
 - HEAD_OF_CS / CS_CLOSER: Sales/confirmation funnel
-- HEAD_OF_LOGISTICS / STOCK_MANAGER / TPL_MANAGER / TPL_RIDER: Logistics chain
+- HEAD_OF_LOGISTICS / STOCK_MANAGER / TPL_MANAGER: Logistics chain
 - FINANCE_OFFICER: Financial operations
 - HR_MANAGER: Staff management
 - BRANCH_ADMIN: Branch-level administration

@@ -5,7 +5,6 @@ import {
   loginAsMediaBuyer,
   loginAsFinance,
   loginAsHR,
-  loginAsRider,
   loginAsHoM,
   assertNoExposedPhoneNumbers,
 } from './helpers';

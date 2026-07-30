@@ -3,7 +3,7 @@ import type { ActionFunctionArgs } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 
-const ALLOWED_NEXT_PREFIXES = ['/admin', '/hr', '/tpl', '/rider', '/auth'] as const;
+const ALLOWED_NEXT_PREFIXES = ['/admin', '/hr', '/tpl', '/auth'] as const;
 
 /**
  * Same-origin path guard for the optional `next` field. Accepts only relative

@@ -92,14 +92,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       currentUser?.role === 'SUPER_ADMIN' ||
       currentUser?.role === 'ADMIN' ||
       currentUser?.role === 'SUPPORT';
-    const permsSetForReactivate = new Set(
+    const permsSetForDeactivate = new Set(
       (currentUser?.permissions ?? []).map((c) => canonicalPermissionCode(c)),
     );
+    const canDeactivateStaff =
+      currentUser?.role === 'SUPER_ADMIN' ||
+      currentUser?.role === 'HR_MANAGER' ||
+      permsSetForDeactivate.has(canonicalPermissionCode('users.deactivate')) ||
+      permsSetForDeactivate.has(canonicalPermissionCode('users.staff.deactivate'));
     const canReactivateDeactivatedStaff =
       isSuperAdmin ||
       currentUser?.role === 'HR_MANAGER' ||
-      permsSetForReactivate.has(canonicalPermissionCode('users.deactivate')) ||
-      permsSetForReactivate.has(canonicalPermissionCode('users.staff.deactivate'));
+      permsSetForDeactivate.has(canonicalPermissionCode('users.deactivate')) ||
+      permsSetForDeactivate.has(canonicalPermissionCode('users.staff.deactivate'));
     const isViewerHeadOfMarketing = currentUser?.role === 'HEAD_OF_MARKETING';
     const isViewerHeadOfCS = currentUser?.role === 'HEAD_OF_CS';
     const editAccessLevel = canEditUser(currentUser, {
@@ -163,6 +168,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return {
       user,
       isSuperAdmin,
+      canDeactivateStaff,
       canReactivateDeactivatedStaff,
       isViewerHeadOfMarketing,
       isViewerHeadOfCS,
@@ -409,12 +415,19 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'deactivate') {
     const currentUser = await getCurrentUser(request);
-    if (
-      currentUser?.role !== 'SUPER_ADMIN' &&
-      currentUser?.role !== 'ADMIN' &&
-      currentUser?.role !== 'HR_MANAGER'
-    ) {
-      return json({ error: 'Only Super Admins, Admins, and HR Managers can deactivate users.' }, { status: 403 });
+    const permSet = new Set(
+      (currentUser?.permissions ?? []).map((c) => canonicalPermissionCode(c)),
+    );
+    const canDeactivate =
+      currentUser?.role === 'SUPER_ADMIN' ||
+      currentUser?.role === 'HR_MANAGER' ||
+      permSet.has(canonicalPermissionCode('users.deactivate')) ||
+      permSet.has(canonicalPermissionCode('users.staff.deactivate'));
+    if (!canDeactivate) {
+      return json(
+        { error: 'You do not have permission to deactivate users.' },
+        { status: 403 },
+      );
     }
 
     const targetRes = await apiRequest<unknown>(
