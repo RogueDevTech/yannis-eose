@@ -3,6 +3,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { confirmationRateColorClass, deliveryRateColorClass } from '~/lib/rate-color';
 import {
@@ -151,12 +152,22 @@ export function AdminQuickDashboard({ data, userName, role, filters }: AdminQuic
       <PageHeader
         title={`${getGreeting()}, ${firstName}`}
         mobileInlineActions
-        description="Quick snapshot of today's performance."
+        description="Quick snapshot of performance for the selected date range."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
-            triggerAriaLabel="Dashboard toolbar"
-            desktop={<PageRefreshButton />}
+            triggerAriaLabel="Dashboard date range"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <DateFilterBar
+                  startDate={filters?.startDate ?? ''}
+                  endDate={filters?.endDate ?? ''}
+                  periodAllTime={filters?.periodAllTime ?? false}
+                  chrome="pill"
+                />
+              </>
+            }
           />
         }
       />

@@ -519,8 +519,8 @@ export const hrRouter = router({
 
   previewPaye: permissionProcedure('payroll.config.read')
     .input(previewPayeSchema)
-    .query(async ({ input }) => {
-      return getPayrollConfigService().previewPaye(input);
+    .query(async ({ input, ctx }) => {
+      return getPayrollConfigService().previewPaye(input, ctx.activeGroupId);
     }),
 
   listContractors: permissionProcedure('hr.read')

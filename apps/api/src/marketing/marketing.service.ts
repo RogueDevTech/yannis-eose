@@ -57,7 +57,7 @@ import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
-import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
+import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { SettingsService } from '../settings/settings.service';
@@ -5163,10 +5163,17 @@ export class MarketingService {
     const deliveredWhere = and(...deliveredConditions);
 
     // "Carry-over Delivered": same status/scope as the cohort delivered count
-    // above, but counts orders DELIVERED within the period (by delivered_at)
-    // that were GENERATED before the period started (created_at < periodStart).
-    // The created_at bound excludes this period's own cohort, leaving only the
-    // prior-month carry-over. Display-only — NEVER used in deliveryRate/cpa/roas.
+    // above, but counts orders DELIVERED within the LAST month of the range (by
+    // delivered_at) that were GENERATED before that month began (created_at <
+    // carryOverStart). Anchoring to the range's final month — not its first day —
+    // is what "delivered this period from a prior month" means when the range
+    // spans more than one month. The created_at bound excludes the final month's
+    // own cohort. Display-only — NEVER used in deliveryRate/cpa/roas.
+    // carryOverStart = first day of the range's last month. periodEnd anchors it;
+    // for `this_month` (periodEnd null) periodStart already IS that month's 1st.
+    const carryOverStart = periodEnd
+      ? nigeriaCarryOverMonthStart(periodEnd)
+      : periodStart;
     const deliveredThisMonthConditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       ...(isServicingScope ? [] : [
@@ -5179,9 +5186,9 @@ export class MarketingService {
       ] : []),
     ];
     appendMetricsOrderScope(deliveredThisMonthConditions);
-    if (periodStart) {
-      deliveredThisMonthConditions.push(gte(schema.orders.deliveredAt, periodStart));
-      deliveredThisMonthConditions.push(lt(schema.orders.createdAt, periodStart));
+    if (carryOverStart) {
+      deliveredThisMonthConditions.push(gte(schema.orders.deliveredAt, carryOverStart));
+      deliveredThisMonthConditions.push(lt(schema.orders.createdAt, carryOverStart));
     }
     if (periodEnd) deliveredThisMonthConditions.push(lte(schema.orders.deliveredAt, periodEnd));
     const deliveredThisMonthWhere = and(...deliveredThisMonthConditions);
@@ -5255,10 +5262,11 @@ export class MarketingService {
           if (supervisorScope?.mediaBuyerIds && supervisorScope.mediaBuyerIds.length > 0) {
             cartConds.push(inArray(schema.cartOrders.mediaBuyerId, supervisorScope.mediaBuyerIds));
           }
-          // Carry-over: delivered in-period, generated before the period started.
-          if (periodStart) {
-            cartConds.push(gte(schema.cartOrders.deliveredAt, periodStart));
-            cartConds.push(lt(schema.cartOrders.createdAt, periodStart));
+          // Carry-over: delivered in the range's last month, generated before
+          // that month began (carryOverStart, computed above from periodEnd).
+          if (carryOverStart) {
+            cartConds.push(gte(schema.cartOrders.deliveredAt, carryOverStart));
+            cartConds.push(lt(schema.cartOrders.createdAt, carryOverStart));
           }
           if (periodEnd) cartConds.push(lte(schema.cartOrders.deliveredAt, periodEnd));
           return this.db.select({ deliveredCount: count() }).from(schema.cartOrders).where(and(...cartConds));
@@ -5490,13 +5498,19 @@ export class MarketingService {
         ? (and(isDelivered, ...inCreatedPeriod) ?? isDelivered)
         : isDelivered;
 
-    // Carry-over Delivered: delivered within the period (by delivered_at) but
-    // generated before the period started (created_at < periodStart), so it
-    // excludes this period's cohort. Display-only — NOT used in DR.
+    // Carry-over Delivered: delivered within the range's LAST month (by
+    // delivered_at) but generated before that month began (created_at <
+    // carryOverStart), so it excludes the final month's cohort. Anchored to the
+    // range's last month, not its first day. Display-only — NOT used in DR.
+    // periodEnd anchors carryOverStart; for `this_month` (periodEnd null)
+    // periodStart already IS the current month's 1st.
+    const carryOverStart = periodEnd
+      ? nigeriaCarryOverMonthStart(periodEnd)
+      : periodStart;
     const inDeliveredPeriod: SQL[] = [];
-    if (periodStart) {
-      inDeliveredPeriod.push(gte(schema.orders.deliveredAt, periodStart));
-      inDeliveredPeriod.push(lt(schema.orders.createdAt, periodStart));
+    if (carryOverStart) {
+      inDeliveredPeriod.push(gte(schema.orders.deliveredAt, carryOverStart));
+      inDeliveredPeriod.push(lt(schema.orders.createdAt, carryOverStart));
     }
     if (periodEnd) inDeliveredPeriod.push(lte(schema.orders.deliveredAt, periodEnd));
     const deliveredThisMonthFilter =
@@ -5522,11 +5536,12 @@ export class MarketingService {
     if (periodStart) cartInCreated.push(gte(schema.cartOrders.createdAt, periodStart));
     if (periodEnd) cartInCreated.push(lte(schema.cartOrders.createdAt, periodEnd));
     const cartCreatedFilter = cartInCreated.length > 0 ? (and(...cartInCreated) ?? sql`true`) : sql`true`;
-    // Carry-over: cart orders delivered in-period but generated before it started.
+    // Carry-over: cart orders delivered in the range's last month but generated
+    // before that month began (carryOverStart, computed above from periodEnd).
     const cartInDelivered: SQL[] = [];
-    if (periodStart) {
-      cartInDelivered.push(gte(schema.cartOrders.deliveredAt, periodStart));
-      cartInDelivered.push(lt(schema.cartOrders.createdAt, periodStart));
+    if (carryOverStart) {
+      cartInDelivered.push(gte(schema.cartOrders.deliveredAt, carryOverStart));
+      cartInDelivered.push(lt(schema.cartOrders.createdAt, carryOverStart));
     }
     if (periodEnd) cartInDelivered.push(lte(schema.cartOrders.deliveredAt, periodEnd));
     const cartDeliveredFilter = cartInDelivered.length > 0 ? (and(...cartInDelivered) ?? sql`true`) : sql`true`;

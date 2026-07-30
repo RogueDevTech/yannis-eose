@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { SearchInput } from '~/components/ui/search-input';
+import { registerMobileSearchOpener } from '~/lib/mobile-search-bridge';
 
 export type PageSearchControlProps = {
   /** Currently applied search string (drives the active chip). */
@@ -42,11 +43,9 @@ export function PageSearchControl({
   const titleId = useId();
   const applied = value.trim();
 
-  // Expose opener on window so MobileDateFilterRow can trigger it
-  useEffect(() => {
-    (window as any).__openMobileSearchSheet = () => setOpen(true);
-    return () => { delete (window as any).__openMobileSearchSheet; };
-  }, []);
+  // Register opener so MobileDateFilterRow can surface a Search button on mobile
+  // (this control's own button is hidden inside the `md:block` toolbar).
+  useEffect(() => registerMobileSearchOpener(() => setOpen(true)), []);
 
   useEffect(() => {
     if (open) {

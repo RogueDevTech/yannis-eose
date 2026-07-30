@@ -27,6 +27,30 @@ export function nigeriaDayEnd(input: string): Date {
   return new Date(`${input}T23:59:59.999${NIGERIA_OFFSET}`);
 }
 
+const NIGERIA_MONTH_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Africa/Lagos',
+  year: 'numeric',
+  month: '2-digit',
+});
+
+/**
+ * Start (`gte` lower bound) of the LAST Nigeria calendar month covered by a
+ * filter range, derived from the range's `periodEnd` instant.
+ *
+ * "Carry-over Delivered" is anchored to the last month of the selected range:
+ * orders delivered in that final month but generated before it began. Given
+ * the range's end instant, this returns 00:00 WAT on the 1st of that month.
+ * For a single whole-month filter (July 1 → July 31) it returns July 1, so
+ * that common case is unchanged; only multi-month / partial / all-time ranges
+ * shift from "before the range" to "before the range's last month".
+ */
+export function nigeriaCarryOverMonthStart(periodEnd: Date): Date {
+  // Format the end instant in Nigeria time to get its YYYY-MM, then take the
+  // 1st of that month at Nigeria midnight. Avoids server-TZ month arithmetic.
+  const ym = NIGERIA_MONTH_FORMATTER.format(periodEnd); // e.g. "2026-07"
+  return new Date(`${ym}-01T00:00:00${NIGERIA_OFFSET}`);
+}
+
 const NIGERIA_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Africa/Lagos',
   year: 'numeric',
