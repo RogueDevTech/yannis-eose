@@ -121,6 +121,7 @@ export function UserDetailPage({
   userStampPreview,
   isSuperAdmin = false,
   canReactivateDeactivatedStaff = false,
+  canDeactivateStaff = false,
   isViewerHeadOfMarketing = false,
   isViewerHeadOfCS = false,
   canEditLimited = false,
@@ -942,7 +943,7 @@ export function UserDetailPage({
                     <Button type="button" variant="secondary" size="sm" onClick={() => setShowResetPassword(true)}>
                       Reset Password
                     </Button>
-                    {(user.status === 'ACTIVE' || user.status === 'PENDING') && isSuperAdmin && (
+                    {(user.status === 'ACTIVE' || user.status === 'PENDING') && canDeactivateStaff && (
                       <Button
                         type="button"
                         variant="danger"
@@ -1042,7 +1043,7 @@ export function UserDetailPage({
                     >
                       Reset Password
                     </Button>
-                    {(user.status === 'ACTIVE' || user.status === 'PENDING') && isSuperAdmin && (
+                    {(user.status === 'ACTIVE' || user.status === 'PENDING') && canDeactivateStaff && (
                       <Button
                         type="button"
                         variant="danger"
@@ -1699,7 +1700,7 @@ export function UserDetailPage({
           {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
             <>
               <Button type="button" variant="secondary" size="sm" className="w-full justify-center" onClick={() => { setMobileProfileSheetOpen(false); setShowResetPassword(true); }}>Reset Password</Button>
-              {(user.status === 'ACTIVE' || user.status === 'PENDING') && isSuperAdmin && (
+              {(user.status === 'ACTIVE' || user.status === 'PENDING') && canDeactivateStaff && (
                 <Button type="button" variant="danger" size="sm" className="w-full justify-center bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700" onClick={() => { setMobileProfileSheetOpen(false); setShowDeactivateConfirm(true); }}>Deactivate</Button>
               )}
               {(user.status === 'INACTIVE' || user.status === 'ARCHIVED' || (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
@@ -1901,9 +1902,9 @@ export function UserDetailPage({
             </ul>
           </div>
           <p className="text-xs text-app-fg-muted">
-            Only Super Admins can use the Deactivate button here. To pause access without this flow, set
-            status to <strong>Inactive</strong> or <strong>Archived</strong> on the edit form (those can
-            also be reactivated from the profile).
+            Deactivate requires Super Admin, HR Manager, or the users.deactivate permission. To pause
+            access without this flow, set status to <strong>Inactive</strong> or <strong>Archived</strong> on
+            the edit form (those can also be reactivated from the profile).
           </p>
           {actionData?.error && !dismissedError ? (
             <InlineNotification

@@ -320,6 +320,9 @@ export function canAccessStaffHrUserDetail(
   /** Same branch as `requireStaffAccountsAccess` — primary Finance Officer only (not hat-only). */
   if (hasFinanceAccess(viewer)) return true;
 
+  // HR Manager is staff-directory org role (same as roster / deactivate authority).
+  if (viewer.role === 'HR_MANAGER') return true;
+
   const perms = viewer.permissions ?? [];
   for (const p of perms) {
     if (STAFF_ACCOUNTS_DIRECTORY_PERMISSIONS.has(p)) return true;
