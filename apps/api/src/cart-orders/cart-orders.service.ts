@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, ne, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
+import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay, type OrderStatus } from '@yannis/shared';
 import type { ListCartOrdersInput, UpdateCartOrderInput, CreateCartOrderRoutingRuleInput, UpdateCartOrderRoutingRuleInput } from '@yannis/shared';
 import { DRIZZLE, PG_CLIENT_RAW } from '../database/database.module';
 import type postgres from 'postgres';
@@ -10,6 +10,7 @@ import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { isTransitionAllowed } from '../orders/order-state-machine';
 import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
 // Raw SQL pull/backfill calls PostgreSQL uuidv7().
@@ -297,13 +298,17 @@ export class CartOrdersService {
     }
 
     const total = totalRows[0]?.count ?? 0;
-    const enrichedOrders = orders.map((o) => ({
-      ...o,
-      assignedCsName: o.assignedCsId ? userMap.get(o.assignedCsId) ?? null : null,
-      mediaBuyerName: o.mediaBuyerId ? userMap.get(o.mediaBuyerId) ?? null : null,
-      campaignName: o.campaignId ? campaignMap.get(o.campaignId) ?? null : null,
-      orderItems: itemsMap.get(o.id) ?? [],
-    }));
+    const enrichedOrders = orders.map((o) => {
+      const { customerPhone, customerPhoneHash, ...rest } = o;
+      return {
+        ...rest,
+        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, customerPhoneHash),
+        assignedCsName: o.assignedCsId ? userMap.get(o.assignedCsId) ?? null : null,
+        mediaBuyerName: o.mediaBuyerId ? userMap.get(o.mediaBuyerId) ?? null : null,
+        campaignName: o.campaignId ? campaignMap.get(o.campaignId) ?? null : null,
+        orderItems: itemsMap.get(o.id) ?? [],
+      };
+    });
 
     return {
       orders: enrichedOrders,
@@ -605,6 +610,15 @@ export class CartOrdersService {
         code: 'BAD_REQUEST',
         message: 'Remitted cart orders are settled. Only deletion is allowed.',
       });
+    }
+    if (newStatus !== order.status) {
+      const skipMachineCheck = newStatus === 'DELETED' && order.status === 'DELIVERED';
+      if (!skipMachineCheck && !isTransitionAllowed(order.status as OrderStatus, newStatus as OrderStatus)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Invalid cart order status transition from ${order.status} to ${newStatus}`,
+        });
+      }
     }
 
     // Pre-delivery duplicate guard: check BEFORE committing DELIVERED so we
@@ -1373,8 +1387,10 @@ export class CartOrdersService {
           ...timeline,
         ];
 
+    const { customerPhone, customerPhoneHash, ...orderRest } = order;
     return {
-      ...order,
+      ...orderRest,
+      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, customerPhoneHash),
       assignedCsName: order.assignedCsId ? userMap.get(order.assignedCsId) ?? null : null,
       mediaBuyerName: order.mediaBuyerId ? userMap.get(order.mediaBuyerId) ?? null : null,
       pendingOrderLinePriceRequestId: prReq?.id ?? null,

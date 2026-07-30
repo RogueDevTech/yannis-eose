@@ -2761,9 +2761,10 @@ export const ordersRouter = router({
       branchId: z.string().uuid().optional(),
       startDate: z.string().optional(),
       endDate: z.string().optional(),
+      assignedCsId: z.string().uuid().optional(),
     }).optional().default({}))
     .query(async ({ input, ctx }) => {
-      const assignedCsId = ctx.user?.role === 'CS_CLOSER' ? ctx.user.id : null;
+      const assignedCsId = input.assignedCsId ?? (ctx.user?.role === 'CS_CLOSER' ? ctx.user.id : null);
       const branchId = input.branchId ?? ctx.currentBranchId ?? undefined;
       const viewerCloserId = ctx.user?.role === 'CS_CLOSER' ? ctx.user.id : null;
       return getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, assignedCsId, input.startDate, input.endDate, ctx.effectiveBranchIds, viewerCloserId);

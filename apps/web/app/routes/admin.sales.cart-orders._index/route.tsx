@@ -139,7 +139,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         id: o.id as string,
         orderNumber: o.orderNumber as number | null,
         customerName: o.customerName as string,
-        customerPhoneDisplay: '',
+        customerPhoneDisplay: (o.customerPhoneDisplay as string) ?? '',
         status: o.status as string,
         totalAmount: (o.totalAmount as string) ?? null,
         createdAt: o.createdAt as string,

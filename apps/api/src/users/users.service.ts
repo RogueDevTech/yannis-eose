@@ -1921,20 +1921,17 @@ export class UsersService {
 
     // Admin-class viewers already get full edit via `canEditUser`; their permission snapshots
     // may still include supervise/update_supervised codes — do not treat them as branch team leads.
-    if ((actorIsTeamLead && !isAdminLevelRole(actor.role)) || editAccess === 'limited') {
-      if (editAccess === 'limited' || actorIsTeamLead) {
-      if (!targetFitsTeamLeadScope && editAccess !== 'limited') {
+    const enforceLimitedEdit =
+      editAccess === 'limited' || (actorIsTeamLead && !isAdminLevelRole(actor.role));
+    if (enforceLimitedEdit) {
+      if (!targetFitsTeamLeadScope) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: actorIsCsLead
             ? 'You can only edit Sales Closers on your team. Contact an administrator for anything else.'
-            : 'You can only edit Media Buyers on your team. Contact an administrator for anything else.',
-        });
-      }
-      if (editAccess === 'limited' && !targetFitsTeamLeadScope) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'You can only edit direct reports on your team.',
+            : actorIsMarketingLead
+              ? 'You can only edit Media Buyers on your team. Contact an administrator for anything else.'
+              : 'You can only edit direct reports on your team.',
         });
       }
       if (!sameBranch) {

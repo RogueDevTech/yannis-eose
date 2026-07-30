@@ -37,6 +37,39 @@ function logOrderDetailLoaderWarning(orderId: string, callName: string, detail?:
   console.warn(`[OrderDetailLoader] ${callName} failed for order ${orderId}${suffix}`);
 }
 
+/** Masked phone from API; never fall back to raw customerPhone (Lead Fortress). */
+function resolveCustomerPhoneDisplay(data: Record<string, unknown>): string {
+  const display = data.customerPhoneDisplay;
+  if (typeof display === 'string' && display.length > 0) return display;
+  return '••••••••';
+}
+
+/** Adjacent-only transitions for cart / follow-up pipelines (no state skipping). */
+function pipelineOrderAllowedTransitions(status: string): string[] {
+  switch (status) {
+    case 'UNPROCESSED':
+      return ['CS_ASSIGNED', 'CS_ENGAGED', 'DELETED'];
+    case 'CS_ASSIGNED':
+      return ['CS_ENGAGED', 'DELETED'];
+    case 'CS_ENGAGED':
+      return ['CONFIRMED', 'DELETED'];
+    case 'CONFIRMED':
+      return ['AGENT_ASSIGNED'];
+    case 'AGENT_ASSIGNED':
+      return ['DISPATCHED', 'DELIVERED'];
+    case 'DISPATCHED':
+      return ['IN_TRANSIT'];
+    case 'IN_TRANSIT':
+      return ['DELIVERED'];
+    case 'DELIVERED':
+      return ['REMITTED'];
+    case 'DELETED':
+      return ['UNPROCESSED'];
+    default:
+      return [];
+  }
+}
+
 function branchIdFromForm(formData: FormData): { branchId: string } | Record<string, never> {
   const b = formData.get('branchId')?.toString()?.trim();
   return b ? { branchId: b } : {};
@@ -115,7 +148,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             id: coData.id as string,
             orderNumber: coData.orderNumber != null ? Number(coData.orderNumber) : null,
             customerName: coData.customerName as string,
-            customerPhoneDisplay: (coData.customerPhone as string) ? `••••${(coData.customerPhone as string).slice(-4)}` : '••••••••',
+            customerPhoneDisplay: resolveCustomerPhoneDisplay(coData),
             customerAddress: (coData.customerAddress as string) ?? null,
             deliveryAddress: (coData.deliveryAddress as string) ?? null,
             deliveryNotes: (coData.deliveryNotes as string) ?? null,
@@ -159,22 +192,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               offerLabel: (it.offerLabel as string) ?? null,
             })),
             callLogs: synthesizeCallLogs(coTimeline),
-            allowedTransitions: (() => {
-              const s = coData.status as string;
-              const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT' || user?.role === 'HEAD_OF_CS';
-              if (s === 'UNPROCESSED') return elevated ? ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ASSIGNED', 'CS_ENGAGED', 'DELETED'];
-              if (s === 'CS_ASSIGNED') return elevated ? ['CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ENGAGED', 'DELETED'];
-              if (s === 'CS_ENGAGED') return ['CONFIRMED', 'DELETED'];
-              if (s === 'CONFIRMED') return ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'];
-              if (s === 'AGENT_ASSIGNED') return ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'DELETED'];
-              if (s === 'DISPATCHED') return ['IN_TRANSIT', 'DELIVERED', 'DELETED'];
-              if (s === 'IN_TRANSIT') return ['DELIVERED', 'DELETED'];
-              if (s === 'DELIVERED') return ['REMITTED'];
-              if (s === 'DELETED') return ['UNPROCESSED'];
-              return ['DELETED'];
-            })(),
+            allowedTransitions: pipelineOrderAllowedTransitions(coData.status as string),
           };
-          const coPhone = (coData.customerPhone as string) ?? null;
           const timelineData = coTimeline.map((t) => ({
             id: t.id as string,
             orderId: coData.id as string,
@@ -194,7 +213,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             timeline: timelineData as unknown as Promise<typeof timelineData>,
             itemOffers: [],
             productsForAdjust: cartProductsForAdjust,
-            callablePhone: coPhone ? { phone: coPhone, isDialable: true } : null,
+            callablePhone: null,
             isFollowUpOrder: false,
             isCartOrder: true,
           };
@@ -231,7 +250,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               id: fuData.id as string,
               orderNumber: fuData.orderNumber != null ? Number(fuData.orderNumber) : null,
               customerName: fuData.customerName as string,
-              customerPhoneDisplay: (fuData.customerPhone as string) ? `••••${(fuData.customerPhone as string).slice(-4)}` : '••••••••',
+              customerPhoneDisplay: resolveCustomerPhoneDisplay(fuData),
               customerAddress: (fuData.customerAddress as string) ?? null,
               deliveryAddress: (fuData.deliveryAddress as string) ?? null,
               deliveryNotes: (fuData.deliveryNotes as string) ?? null,
@@ -277,21 +296,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               // Follow-up lifecycle: UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → AGENT_ASSIGNED → DELIVERED
               // No skipping — must go through engagement before confirming.
               // Post-CONFIRMED transitions (assign agent, dispatch, deliver) are open to all CS.
-              allowedTransitions: (() => {
-                const s = fuData.status as string;
-                const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT' || user?.role === 'HEAD_OF_CS';
-                if (s === 'UNPROCESSED') return elevated ? ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ASSIGNED', 'CS_ENGAGED', 'DELETED'];
-                if (s === 'CS_ASSIGNED') return elevated ? ['CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ENGAGED', 'DELETED'];
-                if (s === 'CS_ENGAGED') return ['CONFIRMED', 'DELETED'];
-                if (s === 'CONFIRMED') return ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'];
-                if (s === 'AGENT_ASSIGNED') return ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'DELETED'];
-                if (s === 'DISPATCHED') return ['IN_TRANSIT', 'DELIVERED', 'DELETED'];
-                if (s === 'IN_TRANSIT') return ['DELIVERED', 'DELETED'];
-                if (s === 'DELIVERED') return ['REMITTED'];
-                return ['DELETED'];
-              })(),
+              allowedTransitions: pipelineOrderAllowedTransitions(fuData.status as string),
             };
-            const fuPhone = (fuData.customerPhone as string) ?? null;
             return {
               order,
               voipEnabled: false,
@@ -309,7 +315,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               })) as unknown as Promise<TimelineEvent[]>,
               itemOffers: [],
               productsForAdjust: await fetchProductsForAdjust(),
-              callablePhone: fuPhone ? { phone: fuPhone, isDialable: true } : null,
+              callablePhone: null,
               isFollowUpOrder: true,
             };
           }
@@ -328,7 +334,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               id: coData.id as string,
               orderNumber: coData.orderNumber != null ? Number(coData.orderNumber) : null,
               customerName: coData.customerName as string,
-              customerPhoneDisplay: (coData.customerPhone as string) ? `••••${(coData.customerPhone as string).slice(-4)}` : '••••••••',
+              customerPhoneDisplay: resolveCustomerPhoneDisplay(coData),
               customerAddress: (coData.customerAddress as string) ?? null,
               deliveryAddress: (coData.deliveryAddress as string) ?? null,
               deliveryNotes: (coData.deliveryNotes as string) ?? null,
@@ -371,22 +377,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 offerLabel: (it.offerLabel as string) ?? null,
               })),
               callLogs: synthesizeCallLogs(coTimeline),
-              // Cart order lifecycle mirrors follow-up: post-CONFIRMED transitions open to all CS.
-              allowedTransitions: (() => {
-                const s = coData.status as string;
-                const elevated = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPPORT' || user?.role === 'HEAD_OF_CS';
-                if (s === 'UNPROCESSED') return elevated ? ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ASSIGNED', 'CS_ENGAGED', 'DELETED'];
-                if (s === 'CS_ASSIGNED') return elevated ? ['CS_ENGAGED', 'CONFIRMED', 'DELETED'] : ['CS_ENGAGED', 'DELETED'];
-                if (s === 'CS_ENGAGED') return ['CONFIRMED', 'DELETED'];
-                if (s === 'CONFIRMED') return ['AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED', 'DELETED'];
-                if (s === 'AGENT_ASSIGNED') return ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'DELETED'];
-                if (s === 'DISPATCHED') return ['IN_TRANSIT', 'DELIVERED', 'DELETED'];
-                if (s === 'IN_TRANSIT') return ['DELIVERED', 'DELETED'];
-                if (s === 'DELIVERED') return ['REMITTED'];
-                return ['DELETED'];
-              })(),
+              allowedTransitions: pipelineOrderAllowedTransitions(coData.status as string),
             };
-            const coPhone = (coData.customerPhone as string) ?? null;
             return {
               order,
               voipEnabled: false,
@@ -404,7 +396,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               })) as unknown as Promise<TimelineEvent[]>,
               itemOffers: [],
               productsForAdjust: await fetchProductsForAdjust(),
-              callablePhone: coPhone ? { phone: coPhone, isDialable: true } : null,
+              callablePhone: null,
               isFollowUpOrder: false,
               isCartOrder: true,
             };

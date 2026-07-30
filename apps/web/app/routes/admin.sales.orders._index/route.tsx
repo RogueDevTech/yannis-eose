@@ -376,8 +376,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const bundleInput = encodeURIComponent(
       JSON.stringify({
         countsAssignedCsId: assignedCsId,
-        countsStartDate: apiStartDate,
-        countsEndDate: apiEndDate,
+        ...(!hasScheduleListFilter && apiStartDate ? { countsStartDate: apiStartDate } : {}),
+        ...(!hasScheduleListFilter && apiEndDate ? { countsEndDate: apiEndDate } : {}),
         trendStatus: status,
         heatYearMonth: calendarMonth,
         heatStatus: status,
