@@ -232,16 +232,37 @@ export function CEODashboardPage({
     fulfillmentCost: rawCostBreakdown?.fulfillmentCost ?? 0,
     operationalLoss: rawCostBreakdown?.operationalLoss ?? 0,
   };
+  // Prefer totalOrdersCounts (same query as Cash Remittances Remitted / SuperAdmin
+  // TOTAL ORDERS) so "Cash Remitted" on this page matches
+  // /admin/finance/delivery-remittances for the same date range.
+  const remittanceAlignedCounts = data?.totalOrdersCounts ?? {};
+  const useRemittanceAligned = Object.keys(remittanceAlignedCounts).length > 0;
+  const pipelineStatusCounts = useRemittanceAligned
+    ? remittanceAlignedCounts
+    : (rawOrderPipeline?.statusCounts ?? {});
+  const pipelineTotal = Object.entries(pipelineStatusCounts)
+    .filter(([status]) => status !== 'DELETED' && status !== 'CANCELLED')
+    .reduce((sum, [, n]) => sum + (n || 0), 0);
   const orderPipeline = {
-    total: rawOrderPipeline?.total ?? 0,
+    total: useRemittanceAligned ? pipelineTotal : (rawOrderPipeline?.total ?? 0),
     active: rawOrderPipeline?.active ?? 0,
-    delivered: rawOrderPipeline?.delivered ?? 0,
+    delivered: useRemittanceAligned
+      ? (pipelineStatusCounts['DELIVERED'] ?? 0) + (pipelineStatusCounts['REMITTED'] ?? 0)
+      : (rawOrderPipeline?.delivered ?? 0),
     cancelled: rawOrderPipeline?.cancelled ?? 0,
-    returned: rawOrderPipeline?.returned ?? 0,
-    statusCounts: rawOrderPipeline?.statusCounts ?? {},
+    returned: useRemittanceAligned
+      ? (pipelineStatusCounts['RETURNED'] ?? 0)
+      : (rawOrderPipeline?.returned ?? 0),
+    statusCounts: pipelineStatusCounts,
   };
+  // Ad Spend / CPA / ROAS all use APPROVED AD_SPEND only (same as SuperAdmin
+  // home + MarketingService.getPerformanceMetrics). totalSpend still includes
+  // pending for optional "logged" context but must not drive hero KPIs.
   const marketingSafe = {
     totalSpend: marketing?.totalSpend ?? 0,
+    approvedSpend: marketing?.approvedSpend ?? marketing?.totalSpend ?? 0,
+    pendingSpend: marketing?.pendingSpend ?? 0,
+    deliveredRevenue: marketing?.deliveredRevenue ?? 0,
     cpa: marketing?.cpa ?? 0,
     roas: marketing?.roas ?? 0,
     deliveryRate: marketing?.deliveryRate ?? 0,
@@ -509,17 +530,18 @@ export function CEODashboardPage({
               {marketingSafe.roas.toFixed(2)}x
             </p>
             <p className="text-sm text-app-fg-muted mt-1">
-              Revenue / Ad Spend = {fmt(revenue)} / {fmt(marketingSafe.totalSpend)}
+              Delivered revenue / Approved ad spend = {fmt(marketingSafe.deliveredRevenue)} /{' '}
+              {fmt(marketingSafe.approvedSpend)}
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
             <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
-              <p className="text-mini font-medium text-app-fg-muted">Revenue</p>
-              <p className="text-base font-bold text-app-fg tabular-nums">{fmt(revenue)}</p>
+              <p className="text-mini font-medium text-app-fg-muted">Delivered revenue</p>
+              <p className="text-base font-bold text-app-fg tabular-nums">{fmt(marketingSafe.deliveredRevenue)}</p>
             </div>
             <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
               <p className="text-mini font-medium text-app-fg-muted">Ad Spend</p>
-              <p className="text-base font-bold text-danger-600 dark:text-danger-400 tabular-nums">{fmt(marketingSafe.totalSpend)}</p>
+              <p className="text-base font-bold text-danger-600 dark:text-danger-400 tabular-nums">{fmt(marketingSafe.approvedSpend)}</p>
             </div>
             <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
               <p className="text-mini font-medium text-app-fg-muted">Profit</p>
@@ -548,7 +570,7 @@ export function CEODashboardPage({
         </h2>
         <div className="card px-4 py-2">
           <StatRowGroup divided>
-            <StatRow label="Ad Spend" value={fmt(marketingSafe.totalSpend)} variant="deduction" />
+            <StatRow label="Ad Spend" value={fmt(marketingSafe.approvedSpend)} variant="deduction" />
             <StatRow label="Order Count" value={orderPipeline.total.toLocaleString()} />
             <StatRow
               label="CPA"
@@ -839,7 +861,10 @@ export function CEODashboardPage({
             </div>
           </div>
           <div className="space-y-3">
-            <MetricRow label="Total Ad Spend" value={fmt(marketingSafe.totalSpend)} />
+            <MetricRow label="Approved Ad Spend" value={fmt(marketingSafe.approvedSpend)} />
+            {marketingSafe.pendingSpend > 0 ? (
+              <MetricRow label="Pending Ad Spend" value={fmt(marketingSafe.pendingSpend)} />
+            ) : null}
             <MetricRow
               label="CPA"
               value={fmt(marketingSafe.cpa)}

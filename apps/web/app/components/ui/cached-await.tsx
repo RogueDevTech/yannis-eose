@@ -5,6 +5,7 @@ import {
   setCachedLoaderEntry,
   setFullLoaderEntry,
 } from '~/lib/loader-cache';
+import { runSafeRevalidate } from '~/lib/safe-revalidate';
 
 /**
  * Drop-in replacement for `<Suspense fallback>` + `<Await resolve>` that
@@ -137,14 +138,15 @@ export function CachedAwait<T>({
   // On mount with a fresh cache hit, kick off background revalidation so the
   // user sees fresh data within ~300ms even though they're already looking at
   // the cached snapshot. Mount-only — subsequent renders shouldn't re-trigger.
+  //
+  // After a backgrounded PWA resumes, remount + revalidate races the network
+  // stack. App-wide settle gate defers until it's safe (any page, not just this one).
   const didMountRef = useRef(false);
   useEffect(() => {
     if (didMountRef.current) return;
     didMountRef.current = true;
-    if (cachedRef.current) {
-      // We started with a cache hit — fire revalidation so fresh data lands.
-      revalidator.revalidate();
-    }
+    if (!cachedRef.current) return;
+    runSafeRevalidate(() => revalidator.revalidate());
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: mount-only
   }, []);
 

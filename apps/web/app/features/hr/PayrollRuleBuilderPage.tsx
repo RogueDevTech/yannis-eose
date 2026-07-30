@@ -61,6 +61,9 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
   const [reportsToRequired, setReportsToRequired] = useState(payRole?.reportsToRequired ?? false);
   const [perProductBonus, setPerProductBonus] = useState(payRole?.perProductBonus ?? false);
   const [category, setCategory] = useState(payRole?.category ?? '');
+  const [defaultTaxStatus, setDefaultTaxStatus] = useState(
+    payRole?.defaultTaxStatus ?? 'STANDARD_PAYE',
+  );
   const showPerProductBonus = category === 'CS';
 
   useFetcherToast(fetcher.data, {
@@ -159,6 +162,18 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
                 onChange={(e) => setCategory(e.target.value)}
                 placeholder="Select category..."
                 options={CATEGORY_OPTIONS}
+              />
+              <FormSelect
+                label="Tax"
+                name="defaultTaxStatus"
+                value={defaultTaxStatus}
+                onChange={(e) => setDefaultTaxStatus(e.target.value)}
+                options={[
+                  { value: 'STANDARD_PAYE', label: 'Standard PAYE' },
+                  { value: 'EMPLOYER_SUBSIDIZED_PAYE', label: 'Employer subsidized PAYE' },
+                  { value: 'GROSS_NO_DEDUCTION', label: 'None (no tax)' },
+                ]}
+                hint="Applies to all staff and contractors on this pay role. Choose None to skip PAYE."
               />
             </div>
             {showPerProductBonus && (

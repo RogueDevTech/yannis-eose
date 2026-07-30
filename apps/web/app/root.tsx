@@ -16,6 +16,7 @@ import {
   useLoaderData,
   useNavigate,
   useRouteError,
+  type ShouldRevalidateFunction,
 } from '@remix-run/react';
 import { PwaInstallPrompt } from '~/components/ui/pwa-install-prompt';
 import { dismissInstallPromotion, isInstallPromotionDismissed } from '~/lib/install-promotion-dismiss';
@@ -32,6 +33,7 @@ import {
   isNetworkErrorLike,
   normalizeRouteErrorData,
 } from '~/lib/network-error';
+import { installResumeSettleTracking } from '~/lib/safe-revalidate';
 
 declare global {
   interface Window {
@@ -90,6 +92,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
 }
+
+/**
+ * Root only carries boot ENV + saved filter prefs. Neither needs to re-fetch on
+ * every child `revalidate()` (orders list refresh, CachedAwait remount after a
+ * backgrounded PWA resumes, socket-driven refresh, etc.).
+ *
+ * Revalidating root on those paths was a frequent "Connection issue / Failed to
+ * fetch" surface: iOS/Android PWAs often wake with the network stack not ready
+ * yet, the root data request fails, and Remix replaces the whole app with the
+ * root ErrorBoundary — even though the page the user was on was still fine.
+ *
+ * Filter prefs mutate via client fetchers + context (`setPagePrefs`); they do
+ * not rely on this loader re-running mid-session.
+ */
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  formMethod,
+  defaultShouldRevalidate,
+}) => {
+  if (formMethod && formMethod !== 'GET') return defaultShouldRevalidate;
+  return false;
+};
 
 const THEME_SCRIPT = getThemeBootScript();
 const FONT_SCALE_SCRIPT = getFontScaleBootScript();
@@ -172,6 +195,12 @@ export default function App() {
   useServerAppThemeSync(isLoggedInArea);
   useServerFontScaleSync(isLoggedInArea);
   useScrollToTopOnRouteChange();
+
+  // App-wide: after background→foreground, delay automatic revalidates until
+  // the network stack is ready (see `~/lib/safe-revalidate`).
+  useEffect(() => {
+    installResumeSettleTracking();
+  }, []);
 
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
@@ -483,12 +512,17 @@ export function ErrorBoundary() {
   const [detailsCopied, setDetailsCopied] = useState(false);
 
   const isResponse = isRouteErrorResponse(error);
+  // Non-Response throws (e.g. TypeError: Failed to fetch on a client data
+  // request) are not HTTP statuses — Remix has no status code. Using 500 here
+  // only for legacy branching; never report it as "HTTP 500" for network blips.
   const status = isResponse ? error.status : 500;
   const is404 = status === 404;
   const is401 = status === 401;
   const errorPayload = isResponse ? normalizeRouteErrorData(error.data) : error;
-  const isNetworkIssue = !is404 && !is401 && isNetworkErrorLike(errorPayload, status);
-  const networkCopy = isNetworkIssue ? getNetworkErrorCopy(errorPayload, status) : null;
+  const isNetworkIssue = !is404 && !is401 && isNetworkErrorLike(errorPayload, isResponse ? status : undefined);
+  const networkCopy = isNetworkIssue
+    ? getNetworkErrorCopy(errorPayload, isResponse ? status : undefined)
+    : null;
 
   // Hydrate online status + restore retry counter from the previous attempt
   // (a successful render mounts <App> instead, which clears the counter).
@@ -585,15 +619,18 @@ export function ErrorBoundary() {
       parts.push(`HTTP ${networkCopy.upstreamStatus}`);
     } else if (isResponse) {
       parts.push(`HTTP ${status}`);
+    } else if (isNetworkIssue) {
+      parts.push('Network');
     }
     return parts.join(' · ');
-  }, [networkCopy?.code, networkCopy?.upstreamStatus, isResponse, status]);
+  }, [networkCopy?.code, networkCopy?.upstreamStatus, isResponse, status, isNetworkIssue]);
 
   const handleCopyDetails = async () => {
+    const reportStatus = isResponse ? String(status) : isNetworkIssue ? 'network' : String(status);
     const lines = [
       'Yannis EOSE error report',
       `Path: ${location.pathname}${location.search}`,
-      `Status: ${status}`,
+      `Status: ${reportStatus}`,
     ];
     if (detailsLine) lines.push(`Details: ${detailsLine}`);
     lines.push(`Time: ${new Date().toISOString()}`);

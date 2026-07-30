@@ -498,6 +498,16 @@ export function PayrollContractorDetailPage({
               label="Monthly fee"
               value={<NairaPrice amount={Number(contractor.monthlyFee)} />}
             />
+            <DetailRow
+              label="Tax status"
+              value={
+                contractor.taxStatus === 'STANDARD_PAYE'
+                  ? 'Standard PAYE'
+                  : contractor.taxStatus === 'EMPLOYER_SUBSIDIZED_PAYE'
+                    ? 'Employer subsidized PAYE'
+                    : 'Gross (no deduction)'
+              }
+            />
             <DetailRow label="Branch" value={branchName} />
             {contractor.bankName ? <DetailRow label="Bank" value={contractor.bankName} /> : null}
             {accountLine ? <DetailRow label="Account" value={accountLine} /> : null}
@@ -711,13 +721,24 @@ function EditContractorModal({
               { value: '', label: 'Not linked' },
               ...payRoles.map((r) => ({ value: r.id, label: r.name })),
             ]}
-            hint="Counts this contractor in the pay role's headcount on Payroll Config."
+            hint="Links this contractor to a pay role for headcount. Set tax status below for PAYE on the fee."
           />
         ) : null}
         <div>
           <label className="block text-sm font-medium text-app-fg-muted mb-1">Monthly fee (₦)</label>
           <AmountInput name="monthlyFee" className="input" defaultValue={String(Number(contractor.monthlyFee))} />
         </div>
+        <FormSelect
+          label="Tax status"
+          name="taxStatus"
+          defaultValue={contractor.taxStatus ?? 'GROSS_NO_DEDUCTION'}
+          options={[
+            { value: 'GROSS_NO_DEDUCTION', label: 'Gross (no deduction)' },
+            { value: 'STANDARD_PAYE', label: 'Standard PAYE' },
+            { value: 'EMPLOYER_SUBSIDIZED_PAYE', label: 'Employer subsidized PAYE' },
+          ]}
+          hint="Applied to the monthly fee when contractor lines are included in a payroll batch."
+        />
         <FormSelect
           label="Branch (optional)"
           name="branchId"

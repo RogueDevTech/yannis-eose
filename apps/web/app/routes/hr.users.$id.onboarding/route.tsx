@@ -17,6 +17,8 @@ import {
 import { UserOnboardingLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
+import { isAdminLevel } from '~/lib/rbac';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 
 export const meta: MetaFunction = () => [{ title: 'Staff Onboarding — Yannis EOSE' }];
 
@@ -83,11 +85,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
   }
 
+  const actorPerms = (actor?.permissions ?? []).map((p) => canonicalPermissionCode(p));
+  const canHrEdit =
+    !!actor &&
+    (isAdminLevel(actor) ||
+      actorPerms.includes(canonicalPermissionCode('hr.onboarding.write')) ||
+      actorPerms.includes(canonicalPermissionCode('hr.onboarding.approve')));
+
   return {
     record,
     subject: { id: user.id, name: user.name, role: user.role },
     approverName,
     isMirroring,
+    canHrEdit,
   };
   })();
 
@@ -113,14 +123,80 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const fd = await request.formData();
   const intent = fd.get('intent')?.toString();
 
-  if (intent === 'updateOnboarding' || intent === 'submitOnboarding') {
+  if (intent === 'submitOnboarding') {
     return json(
       {
         error:
-          'Onboarding can only be edited or submitted by the staff member from their own page under Admin → Your onboarding (/admin/onboarding).',
+          'Only the staff member can submit their onboarding from Admin → Your onboarding.',
       },
       { status: 403 },
     );
+  }
+
+  if (intent === 'updateOnboarding') {
+    const supportingDocsRaw = fd.get('supportingDocuments')?.toString() ?? '[]';
+    let supportingDocuments: Array<{ label: string; url: string }>;
+    try {
+      const parsed = JSON.parse(supportingDocsRaw) as unknown;
+      supportingDocuments = Array.isArray(parsed) ? (parsed as Array<{ label: string; url: string }>) : [];
+    } catch {
+      return json({ error: 'Invalid supporting documents payload' }, { status: 400 });
+    }
+
+    const emptyToNull = (v: FormDataEntryValue | null) => {
+      const s = v?.toString().trim();
+      return s ? s : null;
+    };
+
+    const body = {
+      userId,
+      gender: emptyToNull(fd.get('gender')),
+      dateOfBirth: emptyToNull(fd.get('dateOfBirth')),
+      residentialAddress: emptyToNull(fd.get('residentialAddress')),
+      currentStateOfResidence: emptyToNull(fd.get('currentStateOfResidence')),
+      proofOfAddressUrl: emptyToNull(fd.get('proofOfAddressUrl')),
+      supportingDocuments,
+      signedContractUrl: emptyToNull(fd.get('signedContractUrl')),
+      governmentIdUrl: emptyToNull(fd.get('governmentIdUrl')),
+      additionalPhoneNumbers: emptyToNull(fd.get('additionalPhoneNumbers')),
+      taxId: emptyToNull(fd.get('taxId')),
+      rentReceiptUrl: emptyToNull(fd.get('rentReceiptUrl')),
+      academicRecordsUrl: emptyToNull(fd.get('academicRecordsUrl')),
+      employmentHistoryUrl: emptyToNull(fd.get('employmentHistoryUrl')),
+      guarantor1FormUrl: emptyToNull(fd.get('guarantor1FormUrl')),
+      guarantor1IdUrl: emptyToNull(fd.get('guarantor1IdUrl')),
+      guarantor1Name: emptyToNull(fd.get('guarantor1Name')),
+      guarantor1Phone: emptyToNull(fd.get('guarantor1Phone')),
+      guarantor1Email: emptyToNull(fd.get('guarantor1Email')),
+      guarantor1Address: emptyToNull(fd.get('guarantor1Address')),
+      guarantor1Relationship: emptyToNull(fd.get('guarantor1Relationship')),
+      guarantor1LetterUrl: emptyToNull(fd.get('guarantor1LetterUrl')),
+      guarantor2FormUrl: emptyToNull(fd.get('guarantor2FormUrl')),
+      guarantor2IdUrl: emptyToNull(fd.get('guarantor2IdUrl')),
+      guarantor2Name: emptyToNull(fd.get('guarantor2Name')),
+      guarantor2Phone: emptyToNull(fd.get('guarantor2Phone')),
+      guarantor2Email: emptyToNull(fd.get('guarantor2Email')),
+      guarantor2Address: emptyToNull(fd.get('guarantor2Address')),
+      guarantor2Relationship: emptyToNull(fd.get('guarantor2Relationship')),
+      guarantor2LetterUrl: emptyToNull(fd.get('guarantor2LetterUrl')),
+      payoutBankName: emptyToNull(fd.get('payoutBankName')),
+      payoutAccountName: emptyToNull(fd.get('payoutAccountName')),
+      payoutAccountNumber: emptyToNull(fd.get('payoutAccountNumber')),
+      payoutBankCode: emptyToNull(fd.get('payoutBankCode')),
+    };
+
+    const res = await apiRequest<unknown>('/trpc/onboarding.hrUpdate', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to save onboarding') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
   }
 
   if (intent === 'approveOnboarding') {
@@ -181,6 +257,7 @@ export default function HrOnboardingRoute() {
             showBackToProfile
             approverName={data.approverName}
             isMirroring={data.isMirroring}
+            canHrEdit={data.canHrEdit}
           />
         )}
       </CachedAwait>

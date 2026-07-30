@@ -80,6 +80,8 @@ export async function action({ request }: ActionFunctionArgs) {
     if (jobTitle) body.jobTitle = jobTitle;
     const payRoleId = pickOptional('payRoleId');
     if (payRoleId) body.payRoleId = payRoleId;
+    const taxStatus = pickOptional('taxStatus');
+    if (taxStatus) body.taxStatus = taxStatus;
     const bankName = pickOptional('bankName');
     if (bankName) body.bankName = bankName;
     const bankCode = pickOptional('bankCode');

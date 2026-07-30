@@ -236,7 +236,7 @@ export function PayrollPayRoleViewPage({
 
       <div className="card p-4 space-y-3">
         <h3 className="text-sm font-semibold text-app-fg">Role details</h3>
-        <dl className="grid gap-2 sm:grid-cols-2 text-sm">
+        <dl className="grid gap-2 sm:grid-cols-3 text-sm">
           <div className="flex justify-between gap-3 sm:block sm:space-y-0.5">
             <dt className="text-app-fg-muted">Category</dt>
             <dd className="text-app-fg font-medium">{formatRoleLabel(payRole.category)}</dd>
@@ -262,6 +262,16 @@ export function PayrollPayRoleViewPage({
           <div className="flex justify-between gap-3 sm:block sm:space-y-0.5">
             <dt className="text-app-fg-muted">Per-product bonus</dt>
             <dd className="text-app-fg font-medium">{payRole.perProductBonus ? 'Yes' : 'No'}</dd>
+          </div>
+          <div className="flex justify-between gap-3 sm:block sm:space-y-0.5">
+            <dt className="text-app-fg-muted">Tax</dt>
+            <dd className="text-app-fg font-medium">
+              {payRole.defaultTaxStatus === 'GROSS_NO_DEDUCTION'
+                ? 'None (no tax)'
+                : payRole.defaultTaxStatus === 'EMPLOYER_SUBSIDIZED_PAYE'
+                  ? 'Employer subsidized PAYE'
+                  : 'Standard PAYE'}
+            </dd>
           </div>
         </dl>
       </div>

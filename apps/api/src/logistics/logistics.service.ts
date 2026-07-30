@@ -2490,24 +2490,14 @@ export class LogisticsService {
       .where(and(...awaitingPeriodConditions));
 
     // Count all delivered orders in the period (both awaiting and on remittance).
-    // Uses the SAME scoping as awaitingConditions (minus the status + notExists filters)
-    // so the stat strip reconciles: delivered = awaiting + remitted.
-    // Include orders with NULL logisticsLocationId — they're still delivered/remitted
-    // and must count toward the total.
+    // Intentionally scoped by servicing branch (+ optional location filter) ONLY —
+    // do NOT filter by logistics provider group here. Remitted / Delivered tiles
+    // must match SuperAdmin TOTAL ORDERS and CEO Cash Remitted
+    // (`getStatusCounts` with `onlyGraduateNonMarketing`), which also ignore 3PL group.
     const deliveredConditions: SQL[] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       isNull(schema.orders.deletedAt),
     ];
-    if (groupId) {
-      // Include orders with NULL logisticsLocationId (not yet assigned to a 3PL)
-      deliveredConditions.push(
-        sql`(${schema.orders.logisticsLocationId} IS NULL OR ${schema.orders.logisticsLocationId} IN (
-          SELECT ll.id FROM logistics_locations ll
-          JOIN logistics_providers lp ON lp.id = ll.provider_id
-          WHERE (lp.group_id = ${groupId} OR lp.group_id IS NULL)
-        ))`,
-      );
-    }
     if (isTplCaller && !canListGlobal) {
       deliveredConditions.push(eq(schema.orders.logisticsLocationId, actor.logisticsLocationId!));
     } else if (input.logisticsLocationId) {

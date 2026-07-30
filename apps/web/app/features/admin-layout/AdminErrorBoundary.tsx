@@ -105,13 +105,16 @@ export function AdminErrorBoundary({
   // minimal "page couldn't load" placeholder so the admin shell (sidebar + header,
   // already preserved by the parent layout) stays interactive underneath.
   const normalizedPayload = isResponse ? normalizeRouteErrorData(errorData) : _error;
-  const isNetworkIssue = isNetworkErrorLike(normalizedPayload, status);
+  // Non-Response throws have no HTTP status — don't treat Remix's synthetic 500
+  // as an upstream server code (that produced the misleading "HTTP 500" pill).
+  const statusForNetwork = isResponse ? status : undefined;
+  const isNetworkIssue = isNetworkErrorLike(normalizedPayload, statusForNetwork);
 
   if (isNetworkIssue) {
     return (
       <NetworkErrorModalLayout
         payload={normalizedPayload}
-        status={status}
+        status={statusForNetwork}
         homePath={homePath}
         onRefresh={() => window.location.reload()}
       />
@@ -158,7 +161,7 @@ function NetworkErrorModalLayout({
   onRefresh,
 }: {
   payload: unknown;
-  status: number;
+  status?: number;
   homePath: string;
   onRefresh: () => void;
 }) {

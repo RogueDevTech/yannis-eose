@@ -25,11 +25,8 @@ export interface PermissionSeedResult {
 /**
  * Apply the canonical RBAC catalog to the live DB.
  *
- * Idempotent — safe to call on every API boot. Same logic the standalone
- * `db:seed-permissions` CLI runs, extracted so the API's
- * `PermissionSeedService` can keep the live DB in sync without depending on
- * anyone remembering to run a separate command (or being able to reach the
- * DB from an allowlisted IP).
+ * Idempotent — safe to call on every API boot via `PermissionSeedService`
+ * so the live DB stays in sync with `permission-catalog.ts`.
  *
  * Steps:
  *   1. INSERT…ON CONFLICT DO NOTHING for every entry in the canonical

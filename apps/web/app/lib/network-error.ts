@@ -93,6 +93,16 @@ export function isNetworkErrorLike(payload: unknown, status?: number): boolean {
   return false;
 }
 
+/**
+ * True when a thrown client-side Error is a TCP/DNS/"Failed to fetch" blip
+ * (typical after a backgrounded PWA resumes before the network stack is ready).
+ * Used by `cachedClientLoader` to keep serving last-good data instead of
+ * blowing the route into an ErrorBoundary.
+ */
+export function isClientNetworkFailure(err: unknown): boolean {
+  return isNetworkErrorLike(err);
+}
+
 /** Generic copy when we can't classify the error any further. */
 export const NETWORK_ERROR_MESSAGE = {
   title: 'Connection issue',
@@ -144,13 +154,19 @@ export function getNetworkErrorCopy(payload: unknown, status?: number): NetworkE
 
   // Pull payload-supplied title/description if the API attached them — service may
   // have richer copy than the static map (e.g. when behaviour differs by endpoint).
+  // Skip raw browser/Node fetch text ("Failed to fetch", "NetworkError when
+  // attempting to fetch resource.") — those are technical markers, not UI copy.
   let payloadTitle: string | undefined;
   let payloadDescription: string | undefined;
   let upstreamStatus: number | undefined;
   if (typeof normalized === 'object' && normalized !== null) {
     const obj = normalized as { title?: unknown; message?: unknown; upstreamStatus?: unknown };
-    if (typeof obj.title === 'string') payloadTitle = obj.title;
-    if (typeof obj.message === 'string') payloadDescription = obj.message;
+    if (typeof obj.title === 'string' && !isRawFetchFailureText(obj.title)) {
+      payloadTitle = obj.title;
+    }
+    if (typeof obj.message === 'string' && !isRawFetchFailureText(obj.message)) {
+      payloadDescription = obj.message;
+    }
     if (typeof obj.upstreamStatus === 'number') upstreamStatus = obj.upstreamStatus;
   }
 
@@ -170,5 +186,16 @@ export function getNetworkErrorCopy(payload: unknown, status?: number): NetworkE
     description: payloadDescription ?? NETWORK_ERROR_MESSAGE.description,
     ...(status != null ? { upstreamStatus: status } : {}),
   };
+}
+
+function isRawFetchFailureText(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  return (
+    t === 'failed to fetch' ||
+    t === 'load failed' ||
+    t === 'networkerror when attempting to fetch resource.' ||
+    t === 'network error' ||
+    t.startsWith('networkerror')
+  );
 }
 

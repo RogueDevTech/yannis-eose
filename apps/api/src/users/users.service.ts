@@ -806,7 +806,7 @@ export class UsersService {
       throw new TRPCError({
         code: 'PRECONDITION_FAILED',
         message:
-          'Role templates are not initialized for this environment. Run migrations + `pnpm db:seed-permissions`.',
+          'Role templates are not initialized for this environment. Run migrations and restart the API so the permission catalog can sync.',
       });
     }
 
@@ -2528,7 +2528,7 @@ export class UsersService {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
           message:
-            'No role template found for this user. Run `pnpm db:seed-permissions` (or restart the API) and try again.',
+            'No role template found for this user. Restart the API so the permission catalog can sync, then try again.',
         });
       }
 
@@ -2648,7 +2648,7 @@ export class UsersService {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
           message:
-            'No role template found for this user. Run `pnpm db:seed-permissions` (or restart the API) and try again.',
+            'No role template found for this user. Restart the API so the permission catalog can sync, then try again.',
         });
       }
 

@@ -176,6 +176,11 @@ export interface CompactTableProps<T> {
    * with the Columns control instead of a separate bar above the table.
    */
   toolbarLeading?: ReactNode;
+  /**
+   * Row/cell padding. `dense` halves vertical padding for long list pages
+   * (e.g. staff directories) where default `py-[5px]` still feels tall.
+   */
+  density?: 'default' | 'dense';
 }
 
 const ALIGN_CLASS: Record<CompactTableAlign, string> = {
@@ -457,10 +462,14 @@ export function CompactTable<T>({
   rowHref,
   columnVisibilityKey,
   toolbarLeading,
+  density = 'default',
 }: CompactTableProps<T>) {
   const navigate = useNavigate();
   const hasRows = rows.length > 0;
   const showOverlay = loading && loadingVariant === 'overlay';
+  const cellPad = density === 'dense' ? 'px-2.5 py-0.5' : 'px-3 py-[5px]';
+  const headPad = density === 'dense' ? 'px-2.5 py-1' : 'px-3 py-[5px]';
+  const selectPad = density === 'dense' ? 'px-1.5 py-0.5' : 'px-2 py-[5px]';
 
   // ── Column Visibility (self-managed) ─────────────────────────────
   // When `columnVisibilityKey` is provided, the table reads/writes column
@@ -659,7 +668,7 @@ export function CompactTable<T>({
   function renderHeaderSelection(): ReactNode {
     if (!selection?.onToggleAll) return null;
     return (
-      <th scope="col" className="w-px px-2 py-[5px]">
+      <th scope="col" className={`w-px ${selectPad}`}>
         <Checkbox
           checked={allSelectableSelected}
           onChange={(e) => selection.onToggleAll!(e.target.checked)}
@@ -805,7 +814,7 @@ export function CompactTable<T>({
                 <th
                   key={col.key}
                   className={[
-                    'px-3 py-[5px] font-semibold text-xs text-app-fg-muted uppercase tracking-wide whitespace-nowrap',
+                    `${headPad} font-semibold text-xs text-app-fg-muted uppercase tracking-wide whitespace-nowrap`,
                     alignClass,
                     col.tight ? 'w-px' : '',
                     col.hideOnMobile ? 'hidden sm:table-cell' : '',
@@ -860,7 +869,7 @@ export function CompactTable<T>({
                   }}
                 >
                   {selection ? (
-                    <td className="px-2 py-[5px] align-middle">{renderSelectionCell(row, i)}</td>
+                    <td className={`${selectPad} align-middle`}>{renderSelectionCell(row, i)}</td>
                   ) : null}
                   {desktopColumns.map((col) => {
                     const alignClass = ALIGN_CLASS[col.align ?? 'left'];
@@ -876,7 +885,8 @@ export function CompactTable<T>({
                       <td
                         key={col.key}
                         className={[
-                          'px-3 py-[5px]',
+                          cellPad,
+                          'align-middle',
                           alignClass,
                           col.nowrap || col.tight ? 'whitespace-nowrap' : '',
                           col.hideOnMobile ? 'hidden sm:table-cell' : '',
@@ -895,7 +905,7 @@ export function CompactTable<T>({
                 </tr>
                 {detailContent != null && detailContent !== false ? (
                   <tr className="border-t border-app-border bg-app-hover/40">
-                    <td colSpan={colCount} className="px-3 py-[5px] text-sm text-app-fg">
+                    <td colSpan={colCount} className={`${cellPad} text-sm text-app-fg`}>
                       {detailContent}
                     </td>
                   </tr>
@@ -907,7 +917,7 @@ export function CompactTable<T>({
         {footer ? (
           <tfoot>
             <tr className="border-t border-app-border-strong bg-app-elevated">
-              <td colSpan={colCount} className="px-3 py-[5px] text-sm">
+              <td colSpan={colCount} className={`${cellPad} text-sm`}>
                 {footer}
               </td>
             </tr>

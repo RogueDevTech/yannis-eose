@@ -21,6 +21,8 @@ export type PayRole = {
   category: string;
   reportsToRequired: boolean;
   perProductBonus: boolean;
+  /** Role-level PAYE default; GROSS_NO_DEDUCTION = none (no tax). */
+  defaultTaxStatus?: 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION' | string;
   commissionPlanId: string | null;
   active: boolean;
   /** Combined headcount: active employees + active contractors on this role. */
@@ -135,8 +137,18 @@ export type PayrollContractor = {
   name: string;
   jobTitle: string | null;
   payRoleId?: string | null;
+  /** Pay role library name (when `payRoleId` is set). */
+  payRoleName?: string | null;
+  /** Linked commission-plan / formula name from the pay role. */
+  formulaName?: string | null;
   branchId: string | null;
   monthlyFee: string;
+  /** Est. employee PAYE on fee (company tax bands); from `listContractors`. */
+  estimatedPaye?: string;
+  /** Est. net = fee − employee PAYE; from `listContractors`. */
+  estimatedNet?: string;
+  /** PAYE treatment on monthly fee; default GROSS_NO_DEDUCTION. */
+  taxStatus?: 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION' | string;
   bankName: string | null;
   bankCode: string | null;
   accountNumber: string | null;

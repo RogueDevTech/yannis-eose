@@ -54,6 +54,14 @@ export class PayrollComputeService {
     periodEnd: Date,
     groupId?: string | null,
     branchId?: string | null,
+    opts?: {
+      /**
+       * Skip fan-out over branch reportees + team DR (expensive on large CS/MB teams).
+       * Used by Earnings outlook so Head profiles still return a base-salary estimate.
+       * TEAM_DR formula tiers fall back to individual DR when teamDr is absent.
+       */
+      skipTeamMetrics?: boolean;
+    },
   ): Promise<ComputedPayslipLine | null> {
     // Derive team membership from branch + subordinate role instead of explicit reportsTo links.
     const subordinateRoles: Record<string, string[]> = {
@@ -63,7 +71,7 @@ export class PayrollComputeService {
     };
     const subRoles = subordinateRoles[member.role];
     let reporteeIds: string[] = [];
-    if (subRoles?.length && branchId) {
+    if (!opts?.skipTeamMetrics && subRoles?.length && branchId) {
       const reporteeRows = await tx
         .select({ id: schema.users.id })
         .from(schema.users)
@@ -107,16 +115,33 @@ export class PayrollComputeService {
     const productTiers = await this.loadProductTiers(tx, groupId);
     const formulaResult = computePayrollFormula(formula, metrics, productTiers);
 
-    const payRoleName = member.payRoleId
-      ? (await tx.select({ name: schema.payrollPayRoles.name }).from(schema.payrollPayRoles).where(eq(schema.payrollPayRoles.id, member.payRoleId)).limit(1))[0]?.name ?? plan.planName
-      : plan.planName;
+    let payRoleName: string | null = plan.planName;
+    let taxStatus: 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION' =
+      (member.taxStatus as 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION') ??
+      'STANDARD_PAYE';
+
+    if (member.payRoleId) {
+      const [payRole] = await tx
+        .select({
+          name: schema.payrollPayRoles.name,
+          defaultTaxStatus: schema.payrollPayRoles.defaultTaxStatus,
+        })
+        .from(schema.payrollPayRoles)
+        .where(eq(schema.payrollPayRoles.id, member.payRoleId))
+        .limit(1);
+      payRoleName = payRole?.name ?? plan.planName;
+      // Pay-role Config tax is authoritative for everyone assigned to the role.
+      if (payRole?.defaultTaxStatus) {
+        taxStatus = payRole.defaultTaxStatus as typeof taxStatus;
+      }
+    }
 
     const grossBeforeAdj = formulaResult.grossBeforeAdjustments;
     const taxConfig = await this.loadTaxConfig(tx, groupId);
     const paye = computePaye(
       {
         monthlyGross: grossBeforeAdj,
-        taxStatus: (member.taxStatus as 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION') ?? 'STANDARD_PAYE',
+        taxStatus,
         employerSubsidyPercent: formulaResult.employerPayeSubsidyPercent,
       },
       taxConfig,

@@ -1026,6 +1026,7 @@ export function StaffOnboardingDocsLoadingShell() {
       <div className="list-panel">
         <CompactTable<{ id: string }>
           withCard={false}
+          density="dense"
           columns={ONBOARDING_DOCS_SHELL_COLS}
           rows={rows}
           rowKey={(r) => r.id}

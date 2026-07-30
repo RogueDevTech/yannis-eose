@@ -87,6 +87,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         category,
         reportsToRequired: formData.get('reportsToRequired') === 'true',
         perProductBonus: formData.get('perProductBonus') === 'true',
+        defaultTaxStatus: formData.get('defaultTaxStatus')?.toString() ?? 'STANDARD_PAYE',
       };
       const updateRes = await apiRequest<unknown>('/trpc/hr.updatePayRole', {
         method: 'POST',

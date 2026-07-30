@@ -27,7 +27,8 @@ export function FunnelBreakdownModal({
   onClose: () => void;
   title: string;
   description: string;
-  lines: Array<{ label: string; value: number; bold?: boolean; muted?: boolean }>;
+  /** Numeric values use locale formatting; pass a string for currency / ROAS. */
+  lines: Array<{ label: string; value: number | string; bold?: boolean; muted?: boolean }>;
 }) {
   return (
     <Modal open={open} onClose={onClose} maxWidth="max-w-sm" contentClassName="p-5">
@@ -40,7 +41,9 @@ export function FunnelBreakdownModal({
             className={`flex items-center justify-between gap-4 py-1.5 ${l.bold ? 'font-semibold border-t border-app-border pt-2.5 mt-1' : ''}`}
           >
             <span className={`text-sm ${l.muted ? 'text-app-fg-muted' : 'text-app-fg'}`}>{l.label}</span>
-            <span className="text-sm tabular-nums text-app-fg">{l.value.toLocaleString()}</span>
+            <span className="text-sm tabular-nums text-app-fg">
+              {typeof l.value === 'number' ? l.value.toLocaleString() : l.value}
+            </span>
           </div>
         ))}
       </div>

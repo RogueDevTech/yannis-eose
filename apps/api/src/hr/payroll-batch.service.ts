@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { eq, and, or, desc, gte, lte, isNull, ilike, count, sum, inArray, sql, type SQL } from 'drizzle-orm';
 // `isNotNull` is imported separately so the compile-time exports list stays sorted.
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema } from '@yannis/shared';
+import { computePaye, db as schema } from '@yannis/shared';
 import type {
   GenerateBatchInput,
   GenerateBatchesBulkInput,
@@ -233,11 +233,24 @@ export class PayrollBatchService {
    * from the latest commission plans + delivered orders.
    */
   async generateBatch(input: GenerateBatchInput, actor: SessionUser) {
-    if (!(await this.canPrepareDept(actor, input.branchId, input.department))) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: `You cannot prepare a payroll batch for ${input.department} on this branch.`,
-      });
+    const scopeBranchIds = [
+      ...new Set(
+        (input.scopeBranchIds?.length ? input.scopeBranchIds : [input.branchId]).filter(Boolean),
+      ),
+    ];
+    if (!scopeBranchIds.includes(input.branchId)) {
+      scopeBranchIds.unshift(input.branchId);
+    }
+    const scopeType =
+      input.scopeType ?? (scopeBranchIds.length > 1 ? 'BRANCHES' : 'DEPARTMENT');
+
+    for (const bid of scopeBranchIds) {
+      if (!(await this.canPrepareDept(actor, bid, input.department))) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `You cannot prepare a payroll batch for ${input.department} on one of the selected branches.`,
+        });
+      }
     }
 
     // periodMonth is validated as YYYY-MM-01 — do not append another `-01`.
@@ -291,8 +304,8 @@ export class PayrollBatchService {
             preparedBy: actor.id,
             preparedAt: new Date(),
             includeContractors: input.includeContractors ?? false,
-            scopeType: input.scopeType ?? 'DEPARTMENT',
-            scopeBranchIds: input.scopeBranchIds ?? null,
+            scopeType,
+            scopeBranchIds: scopeBranchIds.length > 1 ? scopeBranchIds : null,
             scopeEmployeeIds: input.scopeEmployeeIds ?? null,
             runLabel: input.runLabel ?? null,
             updatedAt: new Date(),
@@ -309,8 +322,8 @@ export class PayrollBatchService {
             preparedBy: actor.id,
             preparedAt: new Date(),
             includeContractors: input.includeContractors ?? false,
-            scopeType: input.scopeType ?? 'DEPARTMENT',
-            scopeBranchIds: input.scopeBranchIds ?? null,
+            scopeType,
+            scopeBranchIds: scopeBranchIds.length > 1 ? scopeBranchIds : null,
             scopeEmployeeIds: input.scopeEmployeeIds ?? null,
             runLabel: input.runLabel ?? null,
           })
@@ -330,6 +343,7 @@ export class PayrollBatchService {
         {
           includeContractors: input.includeContractors ?? false,
           scopeEmployeeIds: input.scopeEmployeeIds ?? null,
+          scopeBranchIds,
         },
       );
       return { batchId, generated, totalAmount };
@@ -339,8 +353,56 @@ export class PayrollBatchService {
   /**
    * Create DRAFT batches for every (branchId × department) slot that has no row yet.
    * Existing slots (any status, including DRAFT) are skipped — use `generateBatch` to refresh a single DRAFT.
+   *
+   * When `combineBranches` is true, each department gets one batch spanning all
+   * selected branches (home branch = first id) instead of a cartesian fan-out.
    */
   async generateBatchesBulk(input: GenerateBatchesBulkInput, actor: SessionUser) {
+    if (input.combineBranches) {
+      const homeBranchId = input.branchIds[0];
+      if (!homeBranchId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Select at least one branch.' });
+      }
+      const created: Array<{ batchId: string; branchId: string; department: PayrollDepartment }> = [];
+      const skipped: Array<{
+        branchId: string;
+        department: PayrollDepartment;
+        reason: 'FORBIDDEN' | 'EXISTS';
+        status?: PayrollBatchStatus;
+      }> = [];
+
+      for (const department of input.departments as PayrollDepartment[]) {
+        try {
+          const out = await this.generateBatch(
+            {
+              branchId: homeBranchId,
+              department,
+              periodMonth: input.periodMonth,
+              scopeType: input.branchIds.length > 1 ? 'BRANCHES' : 'DEPARTMENT',
+              scopeBranchIds: input.branchIds,
+              includeContractors: input.includeContractors ?? false,
+              runLabel: input.runLabel,
+            },
+            actor,
+          );
+          created.push({ batchId: out.batchId, branchId: homeBranchId, department });
+        } catch (err) {
+          if (err instanceof TRPCError && err.code === 'FORBIDDEN') {
+            skipped.push({ branchId: homeBranchId, department, reason: 'FORBIDDEN' });
+            continue;
+          }
+          if (err instanceof TRPCError && err.code === 'CONFLICT') {
+            skipped.push({ branchId: homeBranchId, department, reason: 'EXISTS' });
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      const summaryMessage = `Created ${created.length} batch${created.length === 1 ? '' : 'es'} · skipped ${skipped.length}`;
+      return { created, skipped, summaryMessage };
+    }
+
     const periodStart = nigeriaDayStart(input.periodMonth);
     const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
     const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
@@ -437,16 +499,25 @@ export class PayrollBatchService {
     department: PayrollDepartment,
     periodStart: Date,
     periodEnd: Date,
-    opts: { includeContractors?: boolean; scopeEmployeeIds?: string[] | null } = {},
+    opts: {
+      includeContractors?: boolean;
+      scopeEmployeeIds?: string[] | null;
+      scopeBranchIds?: string[] | null;
+    } = {},
   ): Promise<{ generated: number; totalAmount: number }> {
     const departmentRoles = DEPARTMENT_ROLES[department];
+    const staffBranchIds = [
+      ...new Set(
+        (opts.scopeBranchIds?.length ? opts.scopeBranchIds : [branchId]).filter(Boolean),
+      ),
+    ];
     let staff = await tx
       .select()
       .from(schema.users)
       .where(
         and(
           eq(schema.users.status, 'ACTIVE'),
-          eq(schema.users.primaryBranchId, branchId),
+          inArray(schema.users.primaryBranchId, staffBranchIds),
           inArray(schema.users.role, departmentRoles as unknown as typeof schema.users.$inferSelect['role'][]),
         ),
       );
@@ -518,7 +589,7 @@ export class PayrollBatchService {
           and(
             eq(schema.payrollContractors.active, true),
             or(
-              eq(schema.payrollContractors.branchId, branchId),
+              inArray(schema.payrollContractors.branchId, staffBranchIds),
               isNull(schema.payrollContractors.branchId),
             ),
             // Exact company only — never include null-scoped shared contractors.
@@ -528,9 +599,38 @@ export class PayrollBatchService {
           ),
         );
 
+      // Company PAYE bands for contractor fee tax (same config as staff lines).
+      const taxConfig = await this.payrollCompute.loadTaxConfig(tx, branchRow?.groupId ?? null);
+
+      const contractorRoleIds = [
+        ...new Set(
+          contractors
+            .map((c) => c.payRoleId)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      ];
+      const roleTaxRows =
+        contractorRoleIds.length > 0
+          ? await tx
+              .select({
+                id: schema.payrollPayRoles.id,
+                defaultTaxStatus: schema.payrollPayRoles.defaultTaxStatus,
+              })
+              .from(schema.payrollPayRoles)
+              .where(inArray(schema.payrollPayRoles.id, contractorRoleIds))
+          : [];
+      const roleTaxById = new Map(roleTaxRows.map((r) => [r.id, r.defaultTaxStatus]));
+
       for (const contractor of contractors) {
         const fee = Number(contractor.monthlyFee);
         if (fee <= 0) continue;
+        const roleTax = contractor.payRoleId ? roleTaxById.get(contractor.payRoleId) : undefined;
+        const taxStatus =
+          (roleTax as 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION' | undefined) ??
+          (contractor.taxStatus as 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION') ??
+          'GROSS_NO_DEDUCTION';
+        const paye = computePaye({ monthlyGross: fee, taxStatus }, taxConfig);
+        const netPay = Math.max(0, fee - paye.employeePaye);
         await tx.insert(schema.payoutRecords).values({
           batchId,
           contractorId: contractor.id,
@@ -540,13 +640,13 @@ export class PayrollBatchService {
           baseSalary: sql`${fee.toFixed(2)}::numeric`,
           performanceBonus: sql`0::numeric`,
           addOnsTotal: sql`0::numeric`,
-          deductionsTotal: sql`0::numeric`,
-          totalPayout: sql`${fee.toFixed(2)}::numeric`,
+          deductionsTotal: sql`${paye.employeePaye.toFixed(2)}::numeric`,
+          totalPayout: sql`${netPay.toFixed(2)}::numeric`,
           allowancesTotal: sql`0::numeric`,
           grossPay: sql`${fee.toFixed(2)}::numeric`,
-          payeTax: sql`0::numeric`,
-          employerPayeSubsidy: sql`0::numeric`,
-          netPay: sql`${fee.toFixed(2)}::numeric`,
+          payeTax: sql`${paye.employeePaye.toFixed(2)}::numeric`,
+          employerPayeSubsidy: sql`${paye.employerSubsidy.toFixed(2)}::numeric`,
+          netPay: sql`${netPay.toFixed(2)}::numeric`,
           payRoleName: contractor.name,
           lineStatus: 'OK',
           status: 'DRAFT',
@@ -556,11 +656,11 @@ export class PayrollBatchService {
           baseSalary: fee,
           performanceBonus: 0,
           addOnsTotal: 0,
-          deductionsTotal: 0,
-          totalPayout: fee,
+          deductionsTotal: paye.employeePaye,
+          totalPayout: netPay,
           grossPay: fee,
-          payeTax: 0,
-          netPay: fee,
+          payeTax: paye.employeePaye,
+          netPay,
           payRoleName: contractor.name,
         });
       }
@@ -586,11 +686,20 @@ export class PayrollBatchService {
   }
 
   async previewBatch(input: GenerateBatchInput, actor: SessionUser) {
-    if (!(await this.canPrepareDept(actor, input.branchId, input.department))) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: `You cannot preview payroll for ${input.department} on this branch.`,
-      });
+    const scopeBranchIds = [
+      ...new Set(
+        (input.scopeBranchIds?.length ? input.scopeBranchIds : [input.branchId]).filter(Boolean),
+      ),
+    ];
+    if (!scopeBranchIds.includes(input.branchId)) scopeBranchIds.unshift(input.branchId);
+
+    for (const bid of scopeBranchIds) {
+      if (!(await this.canPrepareDept(actor, bid, input.department))) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `You cannot preview payroll for ${input.department} on one of the selected branches.`,
+        });
+      }
     }
     const periodStart = nigeriaDayStart(input.periodMonth);
     const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
@@ -609,7 +718,7 @@ export class PayrollBatchService {
         .where(
           and(
             eq(schema.users.status, 'ACTIVE'),
-            eq(schema.users.primaryBranchId, input.branchId),
+            inArray(schema.users.primaryBranchId, scopeBranchIds),
             inArray(schema.users.role, departmentRoles as unknown as typeof schema.users.$inferSelect['role'][]),
           ),
         );
@@ -1200,6 +1309,7 @@ export class PayrollBatchService {
           {
             includeContractors: batch.includeContractors ?? false,
             scopeEmployeeIds: batch.scopeEmployeeIds ?? null,
+            scopeBranchIds: batch.scopeBranchIds ?? null,
           },
         );
       },

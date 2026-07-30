@@ -14,6 +14,7 @@ import {
   type PayrollFormula,
   type PayrollMetrics,
   type SaveProductTierConfigInput,
+  type DeleteProductTierConfigInput,
   type DeleteTaxBandConfigInput,
   type SaveTaxBandConfigInput,
   type UpdateContractorInput,
@@ -109,6 +110,7 @@ export class PayrollConfigService {
           category: input.category,
           reportsToRequired: input.reportsToRequired,
           perProductBonus: input.perProductBonus,
+          defaultTaxStatus: input.defaultTaxStatus ?? 'STANDARD_PAYE',
           commissionPlanId: input.commissionPlanId ?? null,
         })
         .returning();
@@ -126,6 +128,12 @@ export class PayrollConfigService {
           ...(input.category != null ? { category: input.category } : {}),
           ...(input.reportsToRequired != null ? { reportsToRequired: input.reportsToRequired } : {}),
           ...(input.perProductBonus != null ? { perProductBonus: input.perProductBonus } : {}),
+          ...(input.defaultTaxStatus != null
+            ? {
+                defaultTaxStatus:
+                  input.defaultTaxStatus as typeof schema.payrollPayRoles.$inferInsert.defaultTaxStatus,
+              }
+            : {}),
           ...(input.commissionPlanId != null ? { commissionPlanId: input.commissionPlanId } : {}),
           ...(input.active != null ? { active: input.active } : {}),
           updatedAt: new Date(),
@@ -138,6 +146,12 @@ export class PayrollConfigService {
         )
         .returning();
       if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Pay role not found in this company' });
+
+      // Keep assigned people aligned when HR changes role-level tax on Config.
+      if (input.defaultTaxStatus != null) {
+        await this.restampAssigneesTaxStatus(tx, row.id, input.defaultTaxStatus);
+      }
+
       return row;
     });
   }
@@ -250,6 +264,35 @@ export class PayrollConfigService {
       )
       .returning({ id: schema.users.id });
     return rows.length;
+  }
+
+  /** Stamp role-level tax onto assigned staff + contractors. */
+  private async restampAssigneesTaxStatus(
+    tx: PostgresJsDatabase<typeof schema>,
+    payRoleId: string,
+    taxStatus: 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION',
+  ): Promise<void> {
+    await Promise.all([
+      tx
+        .update(schema.users)
+        .set({
+          taxStatus: taxStatus as typeof schema.users.$inferInsert.taxStatus,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(schema.users.payRoleId, payRoleId), eq(schema.users.status, 'ACTIVE'))),
+      tx
+        .update(schema.payrollContractors)
+        .set({
+          taxStatus: taxStatus as typeof schema.payrollContractors.$inferInsert.taxStatus,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.payrollContractors.payRoleId, payRoleId),
+            eq(schema.payrollContractors.active, true),
+          ),
+        ),
+    ]);
   }
 
   async saveFormulaConfig(
@@ -396,6 +439,25 @@ export class PayrollConfigService {
     });
   }
 
+  async deleteProductTierConfig(input: DeleteProductTierConfigInput, actor: SessionUser, groupId?: string | null) {
+    const companyId = requireCompanyId(groupId);
+    return withActor(this.db, actor, async (tx) => {
+      const [row] = await tx
+        .delete(schema.payrollProductTierConfigs)
+        .where(
+          and(
+            eq(schema.payrollProductTierConfigs.id, input.id),
+            eq(schema.payrollProductTierConfigs.groupId, companyId),
+          ),
+        )
+        .returning({ id: schema.payrollProductTierConfigs.id });
+      if (!row) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Product tier config not found' });
+      }
+      return { id: row.id };
+    });
+  }
+
   async listTaxBandConfigs(groupId?: string | null) {
     return this.db
       .select()
@@ -493,16 +555,53 @@ export class PayrollConfigService {
 
   async listContractors(groupId?: string | null, opts?: { active?: boolean }) {
     const active = opts?.active ?? true;
-    return this.db
-      .select()
-      .from(schema.payrollContractors)
-      .where(
-        and(
-          eq(schema.payrollContractors.active, active),
-          companyEq(schema.payrollContractors.groupId, groupId),
-        ),
-      )
-      .orderBy(schema.payrollContractors.name);
+    const [rows, taxConfig] = await Promise.all([
+      this.db
+        .select({
+          contractor: schema.payrollContractors,
+          payRoleName: schema.payrollPayRoles.name,
+          formulaName: schema.commissionPlans.planName,
+        })
+        .from(schema.payrollContractors)
+        .leftJoin(
+          schema.payrollPayRoles,
+          eq(schema.payrollPayRoles.id, schema.payrollContractors.payRoleId),
+        )
+        .leftJoin(
+          schema.commissionPlans,
+          eq(schema.commissionPlans.id, schema.payrollPayRoles.commissionPlanId),
+        )
+        .where(
+          and(
+            eq(schema.payrollContractors.active, active),
+            companyEq(schema.payrollContractors.groupId, groupId),
+          ),
+        )
+        .orderBy(schema.payrollContractors.name),
+      this.loadActiveTaxBandConfig(groupId),
+    ]);
+
+    return rows.map((row) => {
+      const fee = Number(row.contractor.monthlyFee);
+      const taxStatus =
+        (row.contractor.taxStatus as
+          | 'STANDARD_PAYE'
+          | 'EMPLOYER_SUBSIDIZED_PAYE'
+          | 'GROSS_NO_DEDUCTION') ?? 'GROSS_NO_DEDUCTION';
+      const paye = computePaye({ monthlyGross: fee, taxStatus }, taxConfig);
+      const estimatedPaye = Math.round(paye.employeePaye * 100) / 100;
+      const estimatedNet = Math.round((fee - estimatedPaye) * 100) / 100;
+      return {
+        ...row.contractor,
+        payRoleName: row.payRoleName ?? null,
+        /** Linked pay-role formula (`commission_plans.plan_name`); null when unassigned / no plan. */
+        formulaName: row.formulaName ?? null,
+        /** Est. employee PAYE on monthly fee using active company tax bands. */
+        estimatedPaye: estimatedPaye.toFixed(2),
+        /** Est. net = monthly fee − employee PAYE (same basis as batch generate). */
+        estimatedNet: estimatedNet.toFixed(2),
+      };
+    });
   }
 
   async getContractor(id: string, groupId?: string | null) {
@@ -589,6 +688,7 @@ export class PayrollConfigService {
           payRoleId: input.payRoleId ?? null,
           branchId: input.branchId ?? null,
           monthlyFee: sql`${input.monthlyFee}::numeric`,
+          taxStatus: input.taxStatus ?? 'GROSS_NO_DEDUCTION',
           bankName: input.bankName ?? null,
           bankCode: input.bankCode ?? null,
           accountNumber: input.accountNumber ?? null,
@@ -611,6 +711,9 @@ export class PayrollConfigService {
           ...(input.payRoleId !== undefined ? { payRoleId: input.payRoleId } : {}),
           ...(input.branchId != null ? { branchId: input.branchId } : {}),
           ...(input.monthlyFee != null ? { monthlyFee: sql`${input.monthlyFee}::numeric` } : {}),
+          ...(input.taxStatus != null
+            ? { taxStatus: input.taxStatus as typeof schema.payrollContractors.$inferInsert.taxStatus }
+            : {}),
           ...(input.bankName != null ? { bankName: input.bankName } : {}),
           ...(input.bankCode != null ? { bankCode: input.bankCode } : {}),
           ...(input.accountNumber != null ? { accountNumber: input.accountNumber } : {}),
@@ -729,13 +832,18 @@ export class PayrollConfigService {
     },
     actor: SessionUser,
   ) {
-    // Verify pay role exists
+    // Verify pay role exists; role-level tax is the assign stamp source of truth.
     const [payRole] = await this.db
-      .select({ id: schema.payrollPayRoles.id })
+      .select({
+        id: schema.payrollPayRoles.id,
+        defaultTaxStatus: schema.payrollPayRoles.defaultTaxStatus,
+      })
       .from(schema.payrollPayRoles)
       .where(eq(schema.payrollPayRoles.id, input.payRoleId))
       .limit(1);
     if (!payRole) throw new TRPCError({ code: 'NOT_FOUND', message: 'Pay role not found' });
+
+    const taxStatus = payRole.defaultTaxStatus ?? input.taxStatus;
 
     return withActor(this.db, actor, async (tx) => {
       const clearFlat = input.salaryBasis === 'FORMULA_BASED';
@@ -745,7 +853,7 @@ export class PayrollConfigService {
           payRoleId: input.payRoleId,
           employmentType: input.employmentType as typeof schema.users.$inferInsert.employmentType,
           salaryBasis: input.salaryBasis as typeof schema.users.$inferInsert.salaryBasis,
-          taxStatus: input.taxStatus as typeof schema.users.$inferInsert.taxStatus,
+          taxStatus: taxStatus as typeof schema.users.$inferInsert.taxStatus,
           crmLinked: input.crmLinked,
           ...(clearFlat ? { flatMonthlyAmount: null } : {}),
           updatedAt: new Date(),
@@ -757,18 +865,25 @@ export class PayrollConfigService {
   }
 
   /**
-   * Attach active contractors to a pay role (or clear with payRoleId null via
-   * updateContractor). Used by the Assign page Contractor tab so Cleaner /
-   * Video Editor style roles can be managed without leaving Contractors CRUD.
+   * Attach active contractors to a pay role and stamp tax treatment.
+   * Used by the Assign page Contractor tab so Cleaner / Video Editor style
+   * roles get headcount + PAYE status without leaving Contractors CRUD.
    */
   async bulkAssignContractorsToPayRole(
-    input: { contractorIds: string[]; payRoleId: string },
+    input: {
+      contractorIds: string[];
+      payRoleId: string;
+      taxStatus?: 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION';
+    },
     actor: SessionUser,
     groupId?: string | null,
   ) {
     const companyId = requireCompanyId(groupId);
     const [payRole] = await this.db
-      .select({ id: schema.payrollPayRoles.id })
+      .select({
+        id: schema.payrollPayRoles.id,
+        defaultTaxStatus: schema.payrollPayRoles.defaultTaxStatus,
+      })
       .from(schema.payrollPayRoles)
       .where(
         and(
@@ -779,11 +894,15 @@ export class PayrollConfigService {
       .limit(1);
     if (!payRole) throw new TRPCError({ code: 'NOT_FOUND', message: 'Pay role not found in this company' });
 
+    // Explicit assign override wins; otherwise stamp the role default.
+    const taxStatus = input.taxStatus ?? payRole.defaultTaxStatus ?? 'STANDARD_PAYE';
+
     return withActor(this.db, actor, async (tx) => {
       const rows = await tx
         .update(schema.payrollContractors)
         .set({
           payRoleId: input.payRoleId,
+          taxStatus,
           updatedAt: new Date(),
         })
         .where(

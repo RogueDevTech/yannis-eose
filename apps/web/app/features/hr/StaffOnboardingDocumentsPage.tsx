@@ -68,9 +68,9 @@ const SORT_OPTIONS = [
 ] as const;
 
 function formatTs(iso: string | null): string {
-  if (!iso) return '—';
+  if (!iso) return '-';
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
+  if (Number.isNaN(d.getTime())) return '-';
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
@@ -136,7 +136,7 @@ export function StaffOnboardingDocumentsPage({
         <Link
           to={`/hr/users/${row.userId}`}
           prefetch="intent"
-          className="text-sm font-medium leading-none text-brand-600 dark:text-brand-400 hover:underline"
+          className="text-xs font-medium leading-none text-brand-600 dark:text-brand-400 hover:underline"
         >
           {row.name}
         </Link>
@@ -145,19 +145,21 @@ export function StaffOnboardingDocumentsPage({
     {
       key: 'onboardingStatus',
       header: 'Onboarding',
+      nowrap: true,
       render: (row) => (
-        <StatusBadge status={row.onboardingStatus} size="sm" className="!py-0 leading-none" />
+        <StatusBadge status={row.onboardingStatus} size="sm" className="!py-0 !leading-none text-2xs" />
       ),
     },
     {
       key: 'payrollStatus',
       header: 'Payroll',
+      nowrap: true,
       render: (row) => (
         <StatusBadge
           status={row.payRoleId ? 'Set up' : 'Not set up'}
           variant={row.payRoleId ? 'success' : 'warning'}
           size="sm"
-          className="!py-0 leading-none"
+          className="!py-0 !leading-none text-2xs"
         />
       ),
     },
@@ -165,16 +167,18 @@ export function StaffOnboardingDocumentsPage({
       key: 'submittedAt',
       header: 'Submitted',
       hideOnMobile: true,
+      nowrap: true,
       render: (row) => (
-        <span className="text-xs leading-none text-app-muted whitespace-nowrap">{formatTs(row.submittedAt)}</span>
+        <span className="text-2xs leading-none text-app-muted whitespace-nowrap">{formatTs(row.submittedAt)}</span>
       ),
     },
     {
       key: 'approvedAt',
       header: 'Approved',
       hideOnMobile: true,
+      nowrap: true,
       render: (row) => (
-        <span className="text-xs leading-none text-app-muted whitespace-nowrap">{formatTs(row.approvedAt)}</span>
+        <span className="text-2xs leading-none text-app-muted whitespace-nowrap">{formatTs(row.approvedAt)}</span>
       ),
     },
     {
@@ -347,6 +351,7 @@ export function StaffOnboardingDocumentsPage({
 
         <CompactTable<StaffOnboardingDocumentRow>
           columnVisibilityKey="hr.staff-onboarding"
+          density="dense"
           columns={columns}
           rows={rows}
           rowKey={(r) => r.userId}
@@ -359,7 +364,7 @@ export function StaffOnboardingDocumentsPage({
             <Link
               to={`/hr/users/${row.userId}/onboarding`}
               prefetch="intent"
-              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
+              className="-mx-3 -my-1.5 block w-[calc(100%+1.5rem)] px-3 py-1.5 space-y-0.5 text-left"
             >
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-app-fg leading-snug truncate">{row.name}</p>

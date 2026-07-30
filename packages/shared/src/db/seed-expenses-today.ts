@@ -17,7 +17,12 @@ config({ path: resolve(__dirname, '../../../../.env') });
 
 import postgres from 'postgres';
 
-const COMPANY_ID = '833a1030-292c-4988-9c3f-6bd8450b8635';
+/**
+ * Target company. Override with COMPANY_ID=<uuid>; otherwise the script picks
+ * the company that actually has active branches (the hardcoded id here was
+ * from a long-gone database and made this script a no-op on fresh dev DBs).
+ */
+const COMPANY_ID_ENV = process.env['COMPANY_ID'] ?? null;
 const PLATFORMS = ['FACEBOOK', 'TIKTOK', 'GOOGLE', 'FACEBOOK', 'FACEBOOK'] as const;
 
 async function seedExpensesToday() {
@@ -29,16 +34,27 @@ async function seedExpensesToday() {
 
   const sql = postgres(connectionString, { max: 1 });
 
+  // Resolve the company: explicit override, else the one with the most active branches.
+  const COMPANY_ID = COMPANY_ID_ENV ?? (
+    await sql<{ id: string }[]>`
+      SELECT bg.id
+      FROM branch_groups bg
+      JOIN branches b ON b.group_id = bg.id AND b.status = 'ACTIVE'
+      GROUP BY bg.id
+      ORDER BY count(b.id) DESC
+      LIMIT 1`
+  )[0]?.id;
+
   console.log('========================================');
   console.log('  Seed Today\'s Expenses (PENDING)');
-  console.log(`  Company: ${COMPANY_ID}`);
+  console.log(`  Company: ${COMPANY_ID ?? '(none found)'}`);
   console.log('========================================\n');
 
   // 1. Resolve branches for this company
-  const branches = await sql`
+  const branches = COMPANY_ID ? await sql`
     SELECT id, name FROM branches
     WHERE group_id = ${COMPANY_ID} AND status = 'ACTIVE'
-  `;
+  ` : [];
   if (branches.length === 0) {
     console.error('No active branches found for company. Aborting.');
     await sql.end();

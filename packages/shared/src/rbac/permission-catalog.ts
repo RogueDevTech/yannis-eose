@@ -1,12 +1,8 @@
 /**
- * RBAC permission catalog — single source of truth for both:
- *   1. The CLI seed script (`packages/shared/scripts/seed-permissions.ts`)
- *   2. The API boot-time `PermissionSeedService`
+ * RBAC permission catalog — single source of truth for the API boot-time
+ * `PermissionSeedService` (`applyPermissionCatalog` in seed-runner.ts).
  *
- * Both contexts read from this module so the live DB stays in sync with the
- * code without requiring anyone to remember `pnpm db:seed-permissions`. New
- * permissions added here flow into the next API restart automatically.
- *
+ * New permissions added here flow into the live DB on the next API restart.
  * Keep additions sorted by domain and add a brief description so the
  * Permission catalog page renders human copy without a migration.
  */

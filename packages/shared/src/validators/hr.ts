@@ -189,6 +189,13 @@ export const generateBatchesBulkSchema = z.object({
   branchIds: z.array(z.string().uuid()).min(1).max(50),
   departments: z.array(payrollDepartmentSchema).min(1).max(4),
   periodMonth: periodMonthSchema,
+  /**
+   * When true, each department gets ONE batch spanning all `branchIds`
+   * (`scopeType: BRANCHES`) instead of one batch per branch × department.
+   */
+  combineBranches: z.boolean().default(false).optional(),
+  includeContractors: z.boolean().default(false).optional(),
+  runLabel: z.string().max(200).optional(),
 });
 export type GenerateBatchesBulkInput = z.infer<typeof generateBatchesBulkSchema>;
 

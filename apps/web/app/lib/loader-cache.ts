@@ -24,6 +24,8 @@
  * directly.
  */
 
+import { isClientNetworkFailure } from './network-error';
+
 interface CacheEntry {
   data: unknown;
   ts: number;
@@ -236,6 +238,27 @@ interface CachedClientLoaderFn {
   hydrate?: boolean;
 }
 
+async function serverLoaderOrCached(
+  serverLoader: () => Promise<unknown>,
+  key: string,
+): Promise<unknown> {
+  try {
+    return await serverLoader();
+  } catch (err) {
+    // Background→foreground PWAs often hit TypeError: Failed to fetch before the
+    // network stack is ready. Prefer last-good data over replacing the page with
+    // the ErrorBoundary; keep the key flagged so the next revalidate retries.
+    if (isClientNetworkFailure(err)) {
+      const cached = getFullLoaderEntry(key);
+      if (cached !== null) {
+        inFlightRevalidations.add(key);
+        return cached;
+      }
+    }
+    throw err;
+  }
+}
+
 const cachedClientLoaderImpl = async (
   args: CachedClientLoaderArgs,
 ): Promise<unknown> => {
@@ -251,8 +274,7 @@ const cachedClientLoaderImpl = async (
   if (flaggedExact || flaggedPath) {
     if (flaggedExact) inFlightRevalidations.delete(key);
     if (flaggedPath) inFlightRevalidations.delete(url.pathname);
-    const fresh = await args.serverLoader();
-    return fresh;
+    return serverLoaderOrCached(args.serverLoader, key);
   }
 
   const cached = getFullLoaderEntry(key);
@@ -262,7 +284,7 @@ const cachedClientLoaderImpl = async (
     return cached;
   }
 
-  return args.serverLoader();
+  return serverLoaderOrCached(args.serverLoader, key);
 };
 
 export const cachedClientLoader: CachedClientLoaderFn = cachedClientLoaderImpl;

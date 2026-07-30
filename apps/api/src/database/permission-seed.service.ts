@@ -12,11 +12,8 @@ import { PG_CLIENT } from './database.tokens';
 /**
  * Auto-seed RBAC permissions on application bootstrap.
  *
- * Background: the standalone `pnpm db:seed-permissions` CLI is fragile in
- * deploy contexts (the operator's IP must be in Aiven's allowlist; people
- * forget to run it after a release that adds new permission codes). Running
- * the same logic on every API boot guarantees the catalog stays in sync with
- * source code — exactly like migrations.
+ * Running the catalog sync on every API boot keeps RBAC in sync with
+ * `permission-catalog.ts` — exactly like migrations.
  *
  * Idempotent. Failures log a warning but do NOT abort startup — a partial
  * sync is better than a refusal-to-boot, and the previous catalog still works

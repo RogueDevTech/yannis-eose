@@ -128,6 +128,10 @@ export const saveProductTierConfigSchema = z.object({
   effectiveFrom: z.string().datetime().or(z.string().date()),
 });
 
+export const deleteProductTierConfigSchema = z.object({
+  id: z.string().uuid(),
+});
+
 export const payeBandRowSchema = z.object({
   fromAmount: z.number().min(0),
   toAmount: z.number().min(0).nullable().optional(),
@@ -192,11 +196,19 @@ export const payrollPayRoleCategorySchema = z.enum([
   'AUDITOR',
 ]);
 
+export const payRoleTaxStatusSchema = z.enum([
+  'STANDARD_PAYE',
+  'EMPLOYER_SUBSIDIZED_PAYE',
+  'GROSS_NO_DEDUCTION',
+]);
+
 export const createPayRoleSchema = z.object({
   name: z.string().min(2).max(200),
   category: payrollPayRoleCategorySchema,
   reportsToRequired: z.boolean().default(false),
   perProductBonus: z.boolean().default(false),
+  /** Default PAYE treatment for people on this role. GROSS_NO_DEDUCTION = none. */
+  defaultTaxStatus: payRoleTaxStatusSchema.default('STANDARD_PAYE'),
   commissionPlanId: z.string().uuid().optional(),
 });
 
@@ -211,6 +223,9 @@ export const createContractorSchema = z.object({
   payRoleId: z.string().uuid().nullish(),
   branchId: z.string().uuid().nullish(),
   monthlyFee: z.coerce.number().min(0),
+  taxStatus: z
+    .enum(['STANDARD_PAYE', 'EMPLOYER_SUBSIDIZED_PAYE', 'GROSS_NO_DEDUCTION'])
+    .default('GROSS_NO_DEDUCTION'),
   bankName: z.string().optional(),
   bankCode: z.string().optional(),
   accountNumber: z.string().length(10).optional(),
@@ -283,6 +298,10 @@ export const bulkAssignPayRoleSchema = z.object({
 export const bulkAssignContractorsToPayRoleSchema = z.object({
   contractorIds: z.array(z.string().uuid()).min(1).max(200),
   payRoleId: z.string().uuid(),
+  /** Stamped onto contractors on assign so batch PAYE matches pay-role config intent. */
+  taxStatus: z
+    .enum(['STANDARD_PAYE', 'EMPLOYER_SUBSIDIZED_PAYE', 'GROSS_NO_DEDUCTION'])
+    .default('STANDARD_PAYE'),
 });
 
 export const markBatchPaidExtendedSchema = z.object({
@@ -318,6 +337,7 @@ export const listPayslipsSchema = z.object({
 export type CreatePayRoleInput = z.infer<typeof createPayRoleSchema>;
 export type UpdatePayRoleInput = z.infer<typeof updatePayRoleSchema>;
 export type SaveProductTierConfigInput = z.infer<typeof saveProductTierConfigSchema>;
+export type DeleteProductTierConfigInput = z.infer<typeof deleteProductTierConfigSchema>;
 export type SaveTaxBandConfigInput = z.infer<typeof saveTaxBandConfigSchema>;
 export type DeleteTaxBandConfigInput = z.infer<typeof deleteTaxBandConfigSchema>;
 export type CreateContractorInput = z.infer<typeof createContractorSchema>;

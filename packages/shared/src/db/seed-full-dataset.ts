@@ -236,8 +236,13 @@ async function main() {
   const [{ n: realOrders }] = await sql<{ n: number }[]>`SELECT count(*)::int n FROM orders`;
   console.log(`Attempted ${created} orders; DB now has ${realOrders} orders.`);
 
-  // 10. Cart orders (~120) — separate pipeline
+  // 10. Cart orders (~120) — separate pipeline.
+  // Each cart order descends from a cart_abandonments row (FK
+  // cart_orders.source_cart_id → cart_abandonments.id), so seed the parent
+  // first. Errors are surfaced, not swallowed: silently catching them made
+  // this block report success while inserting nothing.
   let carts = 0;
+  let cartFailures = 0;
   for (let i = 0; i < 120; i++) {
     const branch = pick(BRANCHES);
     const product = pick(PRODUCTS);
@@ -245,21 +250,34 @@ async function main() {
     const status = pick(['UNPROCESSED', 'CS_ENGAGED', 'CONFIRMED', 'DELIVERED', 'REMITTED']);
     const phone = randomPhone();
     const cartId = uuidv7();
+    const abandonmentId = uuidv7();
     const daysAgo = randInt(0, 90);
     const createdAt = new Date(now - daysAgo * 86400000);
-    await sql`INSERT INTO cart_orders (id, source_cart_id, status, branch_id, servicing_branch_id, media_buyer_id,
-        customer_name, customer_phone, customer_phone_hash, total_amount, landed_cost, created_at)
-      VALUES (${cartId}, ${uuidv7()}, ${status}, ${branch.id}, ${branch.id}, ${pick(mbs).id},
-        ${'Cart Cust ' + i}, ${phone}, ${hashPhone(phone)}, ${product.price * qty},
-        ${DELIVERED_SET.has(status) ? Math.round(product.cost * 1.15) * qty : null}, ${createdAt})`.catch(() => {});
-    await sql`INSERT INTO cart_order_items (id, cart_order_id, product_id, quantity, unit_price)
-      VALUES (${uuidv7()}, ${cartId}, ${product.id}, ${qty}, ${product.price})`.catch(() => {});
-    carts++;
+    const campaignId = pick(campaigns);
+    try {
+      await sql`INSERT INTO cart_abandonments (id, campaign_id, media_buyer_id, product_id,
+          customer_name, customer_phone, customer_phone_hash, quantity, status, created_at, updated_at)
+        VALUES (${abandonmentId}, ${campaignId}, ${pick(mbs).id}, ${product.id},
+          ${'Cart Cust ' + i}, ${phone}, ${hashPhone(phone)}, ${qty}, ${'CONVERTED'},
+          ${createdAt}, ${createdAt})`;
+      await sql`INSERT INTO cart_orders (id, source_cart_id, status, branch_id, servicing_branch_id, media_buyer_id,
+          customer_name, customer_phone, customer_phone_hash, total_amount, landed_cost, created_at)
+        VALUES (${cartId}, ${abandonmentId}, ${status}, ${branch.id}, ${branch.id}, ${pick(mbs).id},
+          ${'Cart Cust ' + i}, ${phone}, ${hashPhone(phone)}, ${product.price * qty},
+          ${DELIVERED_SET.has(status) ? Math.round(product.cost * 1.15) * qty : null}, ${createdAt})`;
+      await sql`INSERT INTO cart_order_items (id, cart_order_id, product_id, quantity, unit_price)
+        VALUES (${uuidv7()}, ${cartId}, ${product.id}, ${qty}, ${product.price})`;
+      carts++;
+    } catch (err) {
+      cartFailures++;
+      if (cartFailures === 1) console.warn(`  cart order insert failed: ${err instanceof Error ? err.message : err}`);
+    }
   }
-  console.log(`Created ${carts} cart orders.`);
+  console.log(`Created ${carts} cart orders${cartFailures ? ` (${cartFailures} failed)` : ''}.`);
 
   // 11. Follow-up orders (~80)
   let fus = 0;
+  let fuFailures = 0;
   for (let i = 0; i < 80; i++) {
     const branch = pick(BRANCHES);
     const product = pick(PRODUCTS);
@@ -267,14 +285,19 @@ async function main() {
     const phone = randomPhone();
     const fuId = uuidv7();
     const daysAgo = randInt(0, 90);
-    await sql`INSERT INTO follow_up_orders (id, status, branch_id, servicing_branch_id, media_buyer_id,
-        customer_name, customer_phone, customer_phone_hash, total_amount, created_at)
-      VALUES (${fuId}, ${status}, ${branch.id}, ${branch.id}, ${pick(mbs).id},
-        ${'FollowUp Cust ' + i}, ${phone}, ${hashPhone(phone)}, ${product.price},
-        ${new Date(now - daysAgo * 86400000)})`.catch(() => {});
-    fus++;
+    try {
+      await sql`INSERT INTO follow_up_orders (id, status, branch_id, servicing_branch_id, media_buyer_id,
+          customer_name, customer_phone, customer_phone_hash, total_amount, created_at)
+        VALUES (${fuId}, ${status}, ${branch.id}, ${branch.id}, ${pick(mbs).id},
+          ${'FollowUp Cust ' + i}, ${phone}, ${hashPhone(phone)}, ${product.price},
+          ${new Date(now - daysAgo * 86400000)})`;
+      fus++;
+    } catch (err) {
+      fuFailures++;
+      if (fuFailures === 1) console.warn(`  follow-up insert failed: ${err instanceof Error ? err.message : err}`);
+    }
   }
-  console.log(`Created ${fus} follow-up orders.`);
+  console.log(`Created ${fus} follow-up orders${fuFailures ? ` (${fuFailures} failed)` : ''}.`);
 
   console.log('\n✅ Full dataset seed complete.');
   await sql.end();
