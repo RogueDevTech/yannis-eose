@@ -845,7 +845,7 @@ export function UsersListPage({
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <CompactUserAvatar name={user.name} />
-                      <span className="font-medium text-app-fg truncate">{user.name}</span>
+                      <span className="text-sm font-medium text-app-fg truncate">{user.name}</span>
                     </div>
                     <RoleBadge variant="text" role={user.role} label={formatRole(user.role)} />
                   </div>
@@ -1052,7 +1052,7 @@ export function UsersListPage({
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <CompactUserAvatar name={user.name} />
-                      <span className="font-medium text-app-fg truncate">{user.name}</span>
+                      <span className="text-sm font-medium text-app-fg truncate">{user.name}</span>
                     </div>
                     <StatusBadge status={user.status} />
                   </div>

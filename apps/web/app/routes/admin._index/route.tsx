@@ -84,11 +84,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return defer({ variant: 'super_admin' as const, filters, pageData });
   }
 
-  // Admin (non-SuperAdmin): lightweight quick overview.
+  // Admin (non-SuperAdmin): lightweight quick overview. Thread the selected date
+  // range through so the dashboard's date filter actually scopes the numbers
+  // (defaults to today server-side when no dates are sent).
   if (role && isAdminLevel({ role })) {
     const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
+    const quickInput = JSON.stringify({ startDate, endDate });
     const pageData = apiRequest<{ result?: { data?: QuickOverviewData } }>(
-      '/trpc/dashboard.quickOverview',
+      `/trpc/dashboard.quickOverview?input=${encodeURIComponent(quickInput)}`,
       deferredOpt,
     ).then((res) =>
       res.ok && res.data?.result?.data ? res.data.result.data : defaultQuickOverview
