@@ -1791,7 +1791,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
               ? `Reassigned to logistics${locationLabel ? ` at ${locationLabel}` : ''}.`
               : `Order assigned to logistics${locationLabel ? ` at ${locationLabel}` : ''}.`;
             break;
-          case 'DISPATCHED': description = 'Order dispatched to rider.'; break;
+          case 'DISPATCHED': description = 'Order dispatched.'; break;
           case 'IN_TRANSIT': description = 'Order in transit.'; break;
           case 'DELIVERED': description = 'Order marked delivered.'; break;
           case 'DELETED': description = 'Order deleted.'; break;

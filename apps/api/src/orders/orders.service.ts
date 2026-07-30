@@ -5597,7 +5597,7 @@ export class OrdersService {
       this.notifications.enqueueCreateForLocation(updated.logisticsLocationId, {
         type: 'order:allocated',
         title: 'Agent-assigned order at your location',
-        body: 'An order was assigned for delivery here. Please assign a rider.',
+        body: 'An order was assigned for delivery here. Ready to dispatch.',
         data: { orderId: order.id },
       });
     }
