@@ -254,12 +254,17 @@ export class PayrollMetricsService {
       eq(schema.orders.mediaBuyerId, staffId),
     );
 
+    // ISO string + ::timestamptz: raw Date binds inside sql`` FILTER break postgres-js
+    // ("Received an instance of Date") and zero out Earnings outlook for every staff.
+    const startIso = periodStart.toISOString();
+    const endIso = periodEnd.toISOString();
+
     const rows = await tx
       .select({
         productId: schema.orderItems.productId,
         delivered: count(),
-        cohortDelivered: sql<number>`count(*) filter (where ${schema.orders.createdAt} >= ${periodStart} and ${schema.orders.createdAt} <= ${periodEnd})`,
-        totalCreated: sql<number>`count(distinct ${schema.orders.id}) filter (where ${schema.orders.createdAt} >= ${periodStart} and ${schema.orders.createdAt} <= ${periodEnd})`,
+        cohortDelivered: sql<number>`count(*) filter (where ${schema.orders.createdAt} >= ${startIso}::timestamptz and ${schema.orders.createdAt} <= ${endIso}::timestamptz)`,
+        totalCreated: sql<number>`count(distinct ${schema.orders.id}) filter (where ${schema.orders.createdAt} >= ${startIso}::timestamptz and ${schema.orders.createdAt} <= ${endIso}::timestamptz)`,
       })
       .from(schema.orders)
       .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))

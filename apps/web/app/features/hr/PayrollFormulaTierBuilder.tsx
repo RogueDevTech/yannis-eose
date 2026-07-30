@@ -15,18 +15,9 @@ const METRIC_OPTIONS = [
   { value: 'NONE', label: 'None (flat)' },
 ];
 
-/** Metrics offered through the fallback dropdown next to the DR % / CPA quick picks. */
-const OTHER_METRIC_OPTIONS = METRIC_OPTIONS.filter(
-  (o) => o.value !== 'INDIVIDUAL_DR' && o.value !== 'CPA',
-);
-
 type MetricValue = (typeof METRIC_OPTIONS)[number]['value'];
 
-/**
- * DR % and CPA are the two primary tier metrics, so they sit side by side as
- * one-tap picks. Everything else stays reachable through the dropdown.
- */
-function MetricQuickSelect({
+function MetricSelect({
   value,
   disabled,
   onChange,
@@ -35,53 +26,21 @@ function MetricQuickSelect({
   disabled?: boolean;
   onChange: (metric: MetricValue) => void;
 }) {
-  const isOther = value !== 'INDIVIDUAL_DR' && value !== 'CPA';
-  const pickClass = (active: boolean) =>
-    `text-xs font-medium px-2.5 py-1 rounded transition-colors disabled:opacity-60 ${
-      active
-        ? 'bg-white dark:bg-transparent text-app-fg shadow-sm border border-app-border'
-        : 'text-app-fg-muted hover:text-app-fg'
-    }`;
   return (
-    <div className="flex items-center gap-1.5">
-      <div
-        className="flex items-center gap-1 rounded-md border border-app-border bg-app-hover p-1 shrink-0"
-        role="group"
-        aria-label="Tier metric"
-      >
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange('INDIVIDUAL_DR')}
-          className={pickClass(value === 'INDIVIDUAL_DR')}
-        >
-          DR %
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange('CPA')}
-          className={pickClass(value === 'CPA')}
-        >
-          CPA
-        </button>
-      </div>
-      <FormSelect
-        aria-label="Other metric"
-        value={isOther ? value : ''}
-        disabled={disabled}
-        onChange={(e) => {
-          if (e.target.value) onChange(e.target.value as MetricValue);
-        }}
-        options={[
-          { value: '', label: isOther ? 'Other' : 'Other…' },
-          ...OTHER_METRIC_OPTIONS,
-        ]}
-        wrapperClassName="min-w-[110px]"
-      />
-    </div>
+    <FormSelect
+      aria-label="Tier metric"
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value as MetricValue)}
+      options={METRIC_OPTIONS}
+    />
   );
 }
+
+const BONUS_GRID =
+  'grid grid-cols-[1.25rem_minmax(11rem,1.5fr)_minmax(7.5rem,1fr)_4.5rem_minmax(6.5rem,0.9fr)_minmax(7rem,1fr)_1.5rem] gap-x-2 gap-y-1.5 items-center';
+const BASE_GRID =
+  'grid grid-cols-[1.25rem_minmax(11rem,1.5fr)_minmax(7.5rem,1fr)_4.5rem_minmax(7rem,1fr)_1.5rem] gap-x-2 gap-y-1.5 items-center';
 
 const OPERATOR_OPTIONS = [
   { value: 'GTE', label: 'At least (≥)' },
@@ -100,27 +59,32 @@ function emptyCondition(): TierCondition {
 }
 
 /**
- * Extra AND-conditions for a tier. Renders below the primary metric row so a tier
- * can require, e.g., `DR% >= 85 AND CPA < 1000` before it pays. All conditions
- * (primary + these) must pass. Empty by default — no visual change for tiers that
- * only use one metric.
+ * Extra AND-conditions aligned to the same column grid as the primary tier row
+ * (metric / operator / threshold). Kind + amount stay on the primary row only.
  */
-function TierExtraConditions({
+function TierExtraConditionRows({
   conditions,
   disabled,
+  gridClass,
+  trailingCols = 0,
   onChange,
 }: {
   conditions: TierCondition[] | undefined;
   disabled?: boolean;
+  gridClass: string;
+  /** Empty cells after threshold (kind + amount on bonus, amount on base). */
+  trailingCols?: number;
   onChange: (next: TierCondition[]) => void;
 }) {
   const list = conditions ?? [];
   return (
-    <div className="mt-1.5 space-y-1.5">
+    <>
       {list.map((cond, ci) => (
-        <div key={`cond-${ci}`} className="flex items-center gap-1.5">
-          <span className="text-micro font-semibold uppercase tracking-wide text-app-fg-muted shrink-0 w-8">and</span>
-          <MetricQuickSelect
+        <div key={`cond-${ci}`} className={gridClass}>
+          <span className="text-[10px] font-bold uppercase tracking-wide text-app-fg-muted text-center">
+            and
+          </span>
+          <MetricSelect
             value={cond.metric}
             disabled={disabled}
             onChange={(metric) =>
@@ -131,10 +95,13 @@ function TierExtraConditions({
             value={cond.operator}
             disabled={disabled}
             onChange={(e) =>
-              onChange(list.map((c, i) => (i === ci ? { ...c, operator: e.target.value as TierCondition['operator'] } : c)))
+              onChange(
+                list.map((c, i) =>
+                  i === ci ? { ...c, operator: e.target.value as TierCondition['operator'] } : c,
+                ),
+              )
             }
             options={OPERATOR_OPTIONS}
-            wrapperClassName="min-w-[130px]"
           />
           <TextInput
             type="number"
@@ -143,29 +110,58 @@ function TierExtraConditions({
             onChange={(e) =>
               onChange(list.map((c, i) => (i === ci ? { ...c, threshold: Number(e.target.value) } : c)))
             }
-            className="w-[90px]"
           />
-          {!disabled && (
+          {Array.from({ length: trailingCols }, (_, i) => (
+            <span key={`pad-${i}`} aria-hidden className="block" />
+          ))}
+          {!disabled ? (
             <button
               type="button"
               onClick={() => onChange(list.filter((_, i) => i !== ci))}
-              className="text-danger-600 hover:text-danger-500 text-lg leading-none"
+              className="text-danger-600 hover:text-danger-500 text-base leading-none justify-self-end"
               aria-label="Remove condition"
             >
               &times;
             </button>
+          ) : (
+            <span aria-hidden />
           )}
         </div>
       ))}
-      {!disabled && list.length < 4 && (
-        <button
-          type="button"
-          onClick={() => onChange([...list, emptyCondition()])}
-          className="text-xs font-medium text-brand-600 hover:text-brand-500 dark:text-brand-400"
+      {!disabled && list.length < 4 ? (
+        <div className={`${gridClass} !gap-y-0`}>
+          <span aria-hidden />
+          <button
+            type="button"
+            onClick={() => onChange([...list, emptyCondition()])}
+            className="col-span-3 justify-self-start text-2xs font-medium text-brand-600 hover:text-brand-500 dark:text-brand-400"
+          >
+            + AND condition
+          </button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function TierGridHeader({
+  gridClass,
+  columns,
+}: {
+  gridClass: string;
+  columns: string[];
+}) {
+  return (
+    <div className={`${gridClass} px-2.5 pb-1 border-b border-app-border`}>
+      {columns.map((label) => (
+        <span
+          key={label}
+          className="text-micro font-semibold uppercase tracking-wide text-app-fg-muted"
         >
-          + AND condition
-        </button>
-      )}
+          {label}
+        </span>
+      ))}
+      <span aria-hidden />
     </div>
   );
 }
@@ -341,51 +337,93 @@ export function PayrollFormulaTierBuilder({
         onAdd={() => setBaseTiers((rows) => [...rows, emptyBaseTier()])}
         hasRows={baseTiers.length > 0}
       >
-        {baseTiers.length > 0 && (
-          <div className="overflow-x-auto -mx-3 sm:mx-0">
-            <table className="min-w-full border-separate border-spacing-y-1 px-3 sm:px-0">
-              <thead>
-                <tr className="text-left">
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted w-8">#</th>
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[230px]">Metric</th>
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[140px]">Operator</th>
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[90px]">Threshold</th>
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[120px]">Amount (NGN)</th>
-                  {canWrite && <th className="px-1 pb-1 w-8" aria-label="Remove" />}
-                </tr>
-              </thead>
-              <tbody>
-                {baseTiers.map((tier, idx) => (
-                  <tr key={`base-${idx}`} className="align-top">
-                    <td className="px-1 py-0.5 text-xs font-semibold text-app-fg-muted tabular-nums">{idx + 1}</td>
-                    <td className="px-1 py-0.5">
-                      <MetricQuickSelect value={tier.metric} disabled={!canWrite} onChange={(metric) => setBaseTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, metric: metric as BaseTier['metric'] } : r)))} />
-                      <TierExtraConditions
-                        conditions={tier.extraConditions}
-                        disabled={!canWrite}
-                        onChange={(next) => setBaseTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, extraConditions: next.length ? next : undefined } : r)))}
-                      />
-                    </td>
-                    <td className="px-1 py-0.5">
-                      <FormSelect value={tier.operator} disabled={!canWrite} onChange={(e) => setBaseTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, operator: e.target.value as BaseTier['operator'] } : r)))} options={OPERATOR_OPTIONS} />
-                    </td>
-                    <td className="px-1 py-0.5">
-                      <TextInput type="number" value={String(tier.threshold)} disabled={!canWrite} onChange={(e) => setBaseTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, threshold: Number(e.target.value) } : r)))} />
-                    </td>
-                    <td className="px-1 py-0.5">
-                      <AmountInput prefix="NGN" className="input w-full" value={String(tier.amount)} disabled={!canWrite} onChange={(v) => setBaseTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, amount: Number(v) || 0 } : r)))} />
-                    </td>
-                    {canWrite && (
-                      <td className="px-1 py-0.5 text-right">
-                        <button type="button" onClick={() => setBaseTiers((rows) => rows.filter((_, i) => i !== idx))} className="text-danger-600 hover:text-danger-500 text-lg leading-none" aria-label="Remove tier">&times;</button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {baseTiers.length > 0 ? (
+          <div className="overflow-x-auto space-y-2">
+            <TierGridHeader
+              gridClass={BASE_GRID}
+              columns={['#', 'Metric', 'Operator', 'Threshold', 'Amount']}
+            />
+            {baseTiers.map((tier, idx) => (
+              <div
+                key={`base-${idx}`}
+                className="rounded-lg border border-app-border bg-app-canvas/40 px-2.5 py-2 space-y-1.5 min-w-[36rem]"
+              >
+                <div className={BASE_GRID}>
+                  <span className="text-xs font-semibold text-app-fg-muted tabular-nums text-center">
+                    {idx + 1}
+                  </span>
+                  <MetricSelect
+                    value={tier.metric}
+                    disabled={!canWrite}
+                    onChange={(metric) =>
+                      setBaseTiers((rows) =>
+                        rows.map((r, i) => (i === idx ? { ...r, metric: metric as BaseTier['metric'] } : r)),
+                      )
+                    }
+                  />
+                  <FormSelect
+                    value={tier.operator}
+                    disabled={!canWrite}
+                    onChange={(e) =>
+                      setBaseTiers((rows) =>
+                        rows.map((r, i) =>
+                          i === idx ? { ...r, operator: e.target.value as BaseTier['operator'] } : r,
+                        ),
+                      )
+                    }
+                    options={OPERATOR_OPTIONS}
+                  />
+                  <TextInput
+                    type="number"
+                    value={String(tier.threshold)}
+                    disabled={!canWrite}
+                    onChange={(e) =>
+                      setBaseTiers((rows) =>
+                        rows.map((r, i) => (i === idx ? { ...r, threshold: Number(e.target.value) } : r)),
+                      )
+                    }
+                  />
+                  <AmountInput
+                    prefix="NGN"
+                    className="input w-full"
+                    value={String(tier.amount)}
+                    disabled={!canWrite}
+                    onChange={(v) =>
+                      setBaseTiers((rows) =>
+                        rows.map((r, i) => (i === idx ? { ...r, amount: Number(v) || 0 } : r)),
+                      )
+                    }
+                  />
+                  {canWrite ? (
+                    <button
+                      type="button"
+                      onClick={() => setBaseTiers((rows) => rows.filter((_, i) => i !== idx))}
+                      className="text-danger-600 hover:text-danger-500 text-base leading-none justify-self-end"
+                      aria-label="Remove tier"
+                    >
+                      &times;
+                    </button>
+                  ) : (
+                    <span aria-hidden />
+                  )}
+                </div>
+                <TierExtraConditionRows
+                  conditions={tier.extraConditions}
+                  disabled={!canWrite}
+                  gridClass={BASE_GRID}
+                  trailingCols={1}
+                  onChange={(next) =>
+                    setBaseTiers((rows) =>
+                      rows.map((r, i) =>
+                        i === idx ? { ...r, extraConditions: next.length ? next : undefined } : r,
+                      ),
+                    )
+                  }
+                />
+              </div>
+            ))}
           </div>
-        )}
+        ) : null}
       </TierSection>
 
       {gapWarning ? (
@@ -402,55 +440,108 @@ export function PayrollFormulaTierBuilder({
         onAdd={() => setBonusTiers((rows) => [...rows, emptyBonusTier()])}
         hasRows={bonusTiers.length > 0}
       >
-        {bonusTiers.length > 0 && (
-          <div className="overflow-x-auto -mx-3 sm:mx-0">
-            <table className="min-w-full border-separate border-spacing-y-1 px-3 sm:px-0">
-              <thead>
-                <tr className="text-left">
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted w-8">#</th>
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[230px]">Metric</th>
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[140px]">Operator</th>
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[90px]">Threshold</th>
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[110px]">Kind</th>
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[120px]">Amount (NGN)</th>
-                  {canWrite && <th className="px-1 pb-1 w-8" aria-label="Remove" />}
-                </tr>
-              </thead>
-              <tbody>
-                {bonusTiers.map((tier, idx) => (
-                  <tr key={`bonus-${idx}`} className="align-top">
-                    <td className="px-1 py-0.5 text-xs font-semibold text-app-fg-muted tabular-nums">{idx + 1}</td>
-                    <td className="px-1 py-0.5">
-                      <MetricQuickSelect value={tier.metric} disabled={!canWrite} onChange={(metric) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, metric: metric as BonusTier['metric'] } : r)))} />
-                      <TierExtraConditions
-                        conditions={tier.extraConditions}
-                        disabled={!canWrite}
-                        onChange={(next) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, extraConditions: next.length ? next : undefined } : r)))}
-                      />
-                    </td>
-                    <td className="px-1 py-0.5">
-                      <FormSelect value={tier.operator} disabled={!canWrite} onChange={(e) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, operator: e.target.value as BonusTier['operator'] } : r)))} options={OPERATOR_OPTIONS} />
-                    </td>
-                    <td className="px-1 py-0.5">
-                      <TextInput type="number" value={String(tier.threshold)} disabled={!canWrite} onChange={(e) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, threshold: Number(e.target.value) } : r)))} />
-                    </td>
-                    <td className="px-1 py-0.5">
-                      <FormSelect value={tier.kind} disabled={!canWrite} onChange={(e) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, kind: e.target.value as BonusTier['kind'] } : r)))} options={[{ value: 'FLAT', label: 'Flat amount' }, { value: 'PER_ORDER', label: 'Per order' }]} />
-                    </td>
-                    <td className="px-1 py-0.5">
-                      <AmountInput prefix="NGN" className="input w-full" value={String(tier.amount)} disabled={!canWrite} onChange={(v) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, amount: Number(v) || 0 } : r)))} />
-                    </td>
-                    {canWrite && (
-                      <td className="px-1 py-0.5 text-right">
-                        <button type="button" onClick={() => setBonusTiers((rows) => rows.filter((_, i) => i !== idx))} className="text-danger-600 hover:text-danger-500 text-lg leading-none" aria-label="Remove tier">&times;</button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {bonusTiers.length > 0 ? (
+          <div className="overflow-x-auto space-y-2">
+            <TierGridHeader
+              gridClass={BONUS_GRID}
+              columns={['#', 'Metric', 'Operator', 'Thresh.', 'Kind', 'Amount']}
+            />
+            {bonusTiers.map((tier, idx) => (
+              <div
+                key={`bonus-${idx}`}
+                className="rounded-lg border border-app-border bg-app-canvas/40 px-2.5 py-2 space-y-1.5 min-w-[42rem]"
+              >
+                <div className={BONUS_GRID}>
+                  <span className="text-xs font-semibold text-app-fg-muted tabular-nums text-center">
+                    {idx + 1}
+                  </span>
+                  <MetricSelect
+                    value={tier.metric}
+                    disabled={!canWrite}
+                    onChange={(metric) =>
+                      setBonusTiers((rows) =>
+                        rows.map((r, i) => (i === idx ? { ...r, metric: metric as BonusTier['metric'] } : r)),
+                      )
+                    }
+                  />
+                  <FormSelect
+                    value={tier.operator}
+                    disabled={!canWrite}
+                    onChange={(e) =>
+                      setBonusTiers((rows) =>
+                        rows.map((r, i) =>
+                          i === idx ? { ...r, operator: e.target.value as BonusTier['operator'] } : r,
+                        ),
+                      )
+                    }
+                    options={OPERATOR_OPTIONS}
+                  />
+                  <TextInput
+                    type="number"
+                    value={String(tier.threshold)}
+                    disabled={!canWrite}
+                    onChange={(e) =>
+                      setBonusTiers((rows) =>
+                        rows.map((r, i) => (i === idx ? { ...r, threshold: Number(e.target.value) } : r)),
+                      )
+                    }
+                  />
+                  <FormSelect
+                    value={tier.kind}
+                    disabled={!canWrite}
+                    onChange={(e) =>
+                      setBonusTiers((rows) =>
+                        rows.map((r, i) =>
+                          i === idx ? { ...r, kind: e.target.value as BonusTier['kind'] } : r,
+                        ),
+                      )
+                    }
+                    options={[
+                      { value: 'FLAT', label: 'Flat' },
+                      { value: 'PER_ORDER', label: 'Per order' },
+                    ]}
+                  />
+                  <AmountInput
+                    prefix="NGN"
+                    className="input w-full"
+                    value={String(tier.amount)}
+                    disabled={!canWrite}
+                    onChange={(v) =>
+                      setBonusTiers((rows) =>
+                        rows.map((r, i) => (i === idx ? { ...r, amount: Number(v) || 0 } : r)),
+                      )
+                    }
+                  />
+                  {canWrite ? (
+                    <button
+                      type="button"
+                      onClick={() => setBonusTiers((rows) => rows.filter((_, i) => i !== idx))}
+                      className="text-danger-600 hover:text-danger-500 text-base leading-none justify-self-end"
+                      aria-label="Remove tier"
+                    >
+                      &times;
+                    </button>
+                  ) : (
+                    <span aria-hidden />
+                  )}
+                </div>
+                <TierExtraConditionRows
+                  conditions={tier.extraConditions}
+                  disabled={!canWrite}
+                  gridClass={BONUS_GRID}
+                  trailingCols={2}
+                  onChange={(next) =>
+                    setBonusTiers((rows) =>
+                      rows.map((r, i) =>
+                        i === idx ? { ...r, extraConditions: next.length ? next : undefined } : r,
+                      ),
+                    )
+                  }
+                />
+              </div>
+            ))}
           </div>
-        )}
+        ) : null}
       </TierSection>
 
       {!showSamplePreview ? null : (

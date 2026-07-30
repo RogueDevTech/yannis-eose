@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRevalidator } from '@remix-run/react';
 import { io, type Socket } from 'socket.io-client';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
+import { runSafeRevalidate } from '~/lib/safe-revalidate';
 
 interface RealtimeNotification {
   id: string;
@@ -289,7 +290,8 @@ export function usePageRefreshOnEvent(events: string[]): void {
         if (typeof window !== 'undefined') {
           invalidateCachedLoader(window.location.pathname);
         }
-        revalidateRef.current();
+        // Resume-safe: socket often reconnects before the network stack is ready.
+        runSafeRevalidate(() => revalidateRef.current());
       }, 500);
     };
 
@@ -315,7 +317,11 @@ export function usePollingFallback(intervalMs = 30_000): void {
 
   useEffect(() => {
     if (isConnected) return; // socket is healthy — no polling needed
-    const id = setInterval(() => revalidateRef.current(), intervalMs);
+    // Background tabs often drop the socket; polling while the PWA is still
+    // waking is a top cause of random-page "Failed to fetch" ErrorBoundaries.
+    const id = setInterval(() => {
+      runSafeRevalidate(() => revalidateRef.current());
+    }, intervalMs);
     return () => clearInterval(id);
   }, [isConnected, intervalMs]);
 }

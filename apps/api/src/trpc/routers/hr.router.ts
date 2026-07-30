@@ -20,6 +20,7 @@ import {
   createPayRoleSchema,
   updatePayRoleSchema,
   saveProductTierConfigSchema,
+  deleteProductTierConfigSchema,
   saveTaxBandConfigSchema,
   deleteTaxBandConfigSchema,
   createContractorSchema,
@@ -506,6 +507,12 @@ export const hrRouter = router({
     .input(saveProductTierConfigSchema)
     .mutation(async ({ input, ctx }) => {
       return getPayrollConfigService().saveProductTierConfig(input, ctx.user, ctx.activeGroupId);
+    }),
+
+  deleteProductTierConfig: permissionProcedure('payroll.config.write')
+    .input(deleteProductTierConfigSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().deleteProductTierConfig(input, ctx.user, ctx.activeGroupId);
     }),
 
   listTaxBandConfigs: permissionProcedure('payroll.config.read')

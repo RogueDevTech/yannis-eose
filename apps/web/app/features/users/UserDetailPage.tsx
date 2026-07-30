@@ -1485,6 +1485,7 @@ export function UserDetailPage({
                         heading={ep.isCurrentMonth ? 'This month (so far)' : ep.month.periodLabel}
                         periodLabel={ep.isCurrentMonth ? ep.month.periodLabel : ''}
                         preview={ep.month.preview}
+                        monthIndex1={ep.month.monthIndex1}
                       />
                     </Suspense>
                   ) : null}

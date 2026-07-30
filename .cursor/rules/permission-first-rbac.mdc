@@ -22,8 +22,8 @@ alwaysApply: true
 | Scope / mirror / branch helpers | `apps/api/src/common/authz.ts` |
 | Finance strip gate | `apps/api/src/common/utils/strip-finance-fields.ts` |
 | Schema + migration | `packages/shared/src/db/schema/rbac.ts`, `packages/shared/drizzle/0093_permission_first_role_templates.sql` |
-| Seed + catalog | `packages/shared/scripts/seed-permissions.ts` |
-| SYSTEM template sync from seed | same script (reconciles `role_template_permissions` for `kind = SYSTEM`) |
+| Catalog + role grants | `packages/shared/src/rbac/permission-catalog.ts` |
+| Boot-time catalog sync | `packages/shared/src/rbac/seed-runner.ts`, `apps/api/src/database/permission-seed.service.ts` |
 | Role template CRUD | `apps/api/src/permissions/role-templates.service.ts`, `apps/api/src/trpc/routers/role-templates.router.ts` |
 | Permission catalog API | `apps/api/src/trpc/routers/permissions.router.ts` |
 | Staff create + scope/template | `apps/api/src/users/users.service.ts`, `apps/web/app/features/users/UserCreatePage.tsx`, `apps/web/app/routes/hr.users.new/route.tsx` |
@@ -32,7 +32,7 @@ alwaysApply: true
 
 ## Operational commands
 
-- After changing permission strings or `ROLE_PERMISSIONS`: `pnpm --filter @yannis/shared db:seed-permissions`
+- After changing permission strings or `ROLE_PERMISSIONS`: restart the API (boot sync applies the catalog)
 - Coverage spot-check: `pnpm --filter @yannis/shared db:audit-permission-coverage`
 
 ## When editing guards

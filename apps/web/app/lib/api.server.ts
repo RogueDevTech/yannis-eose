@@ -719,7 +719,7 @@ export async function requirePermission(
   return user;
 }
 
-/** Permissions for HR-facing onboarding pages (list + per-user HR view). Catalog: `seed-permissions.ts`. */
+/** Permissions for HR-facing onboarding pages (list + per-user HR view). Catalog: `permission-catalog.ts`. */
 export const HR_ONBOARDING_PAGE_PERMISSIONS = [
   'hr.onboarding.read',
   'hr.onboarding.write',

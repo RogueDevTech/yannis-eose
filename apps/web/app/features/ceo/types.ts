@@ -37,15 +37,27 @@ export interface CEODashboardData {
     offlineStatusCounts?: Record<string, number>;
   };
 
+  /**
+   * Bird's-eye order counts (`onlyGraduateNonMarketing`, servicing branch).
+   * Cash Remitted / Delivered here must match Cash Remittances for the same dates.
+   */
+  totalOrdersCounts?: Record<string, number>;
+
   // Marketing
   marketing: {
     totalSpend: number;
+    approvedSpend?: number;
+    pendingSpend?: number;
+    deliveredRevenue?: number;
+    /** Pieces of deliveredRevenue for hero breakdown (funnel orders + cart graduated). */
+    deliveredRevenueBreakdown?: { funnel: number; cart: number };
     totalOrders: number;
     confirmedOrders: number;
     deliveredOrders: number;
     cpa: number;
     roas: number;
     deliveryRate: number;
+    confirmationRate?: number;
   };
 
   // Sales Team

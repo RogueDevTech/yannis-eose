@@ -35,7 +35,18 @@ export interface SuperAdminDashboardProps {
 
 export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashboardProps) {
   const firstName = userName?.split(' ')[0] ?? 'Admin';
-  const [breakdownModal, setBreakdownModal] = useState<'totalBreakdown' | 'totalDelivered' | 'totalRemitted' | 'mktTotal' | 'csTotal' | 'csDelivered' | null>(null);
+  const [breakdownModal, setBreakdownModal] = useState<
+    | 'heroRoas'
+    | 'heroRevenue'
+    | 'heroAdSpend'
+    | 'totalBreakdown'
+    | 'totalDelivered'
+    | 'totalRemitted'
+    | 'mktTotal'
+    | 'csTotal'
+    | 'csDelivered'
+    | null
+  >(null);
 
   /** Build a link with current date filter context. */
   function buildLink(base: string, extra?: Record<string, string>): string {
@@ -92,17 +103,20 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
   }
 
   const revenue = data?.revenue ?? 0;
+  const marketingBreakdown = data?.marketing?.deliveredRevenueBreakdown;
   const marketingSafe = {
     totalSpend: data?.marketing?.totalSpend ?? 0,
-    approvedSpend: (data?.marketing as Record<string, number> | undefined)?.approvedSpend ?? data?.marketing?.totalSpend ?? 0,
-    pendingSpend: (data?.marketing as Record<string, number> | undefined)?.pendingSpend ?? 0,
-    deliveredRevenue: (data?.marketing as Record<string, number> | undefined)?.deliveredRevenue ?? 0,
+    approvedSpend: data?.marketing?.approvedSpend ?? data?.marketing?.totalSpend ?? 0,
+    pendingSpend: data?.marketing?.pendingSpend ?? 0,
+    deliveredRevenue: data?.marketing?.deliveredRevenue ?? 0,
+    funnelRevenue: marketingBreakdown?.funnel ?? data?.marketing?.deliveredRevenue ?? 0,
+    cartRevenue: marketingBreakdown?.cart ?? 0,
     totalOrders: data?.marketing?.totalOrders ?? 0,
     confirmedOrders: data?.marketing?.confirmedOrders ?? 0,
     deliveredOrders: data?.marketing?.deliveredOrders ?? 0,
     cpa: data?.marketing?.cpa ?? 0,
     roas: data?.marketing?.roas ?? 0,
-    confirmationRate: (data?.marketing as Record<string, number> | undefined)?.confirmationRate ?? 0,
+    confirmationRate: data?.marketing?.confirmationRate ?? 0,
     deliveryRate: data?.marketing?.deliveryRate ?? 0,
   };
   const orderPipeline = {
@@ -159,7 +173,12 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         mobileGridCols={3}
         items={[
           {
-            label: 'ROAS',
+            label: (
+              <span className="flex items-center">
+                ROAS
+                <FunnelInfoIcon onClick={() => setBreakdownModal('heroRoas')} />
+              </span>
+            ),
             value: `${marketingSafe.roas.toFixed(2)}x`,
             valueClassName: marketingSafe.roas >= 2
               ? 'text-success-600 dark:text-success-400'
@@ -168,24 +187,64 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 : 'text-danger-600 dark:text-danger-400',
           },
           {
-            label: 'Delivered revenue',
+            label: (
+              <span className="flex items-center">
+                Delivered revenue
+                <FunnelInfoIcon onClick={() => setBreakdownModal('heroRevenue')} />
+              </span>
+            ),
             value: fmt(marketingSafe.deliveredRevenue),
             valueClassName: 'text-success-600 dark:text-success-400',
           },
           {
-            label: 'Ad spend',
+            label: (
+              <span className="flex items-center">
+                Ad spend
+                <FunnelInfoIcon onClick={() => setBreakdownModal('heroAdSpend')} />
+              </span>
+            ),
             value: fmt(marketingSafe.approvedSpend),
             valueClassName: 'text-danger-600 dark:text-danger-400',
-            title:
-              marketingSafe.pendingSpend > 0
-                ? `Approved ad spend (basis for ROAS). Pending unapproved: ${fmt(marketingSafe.pendingSpend)}`
-                : 'Approved ad spend (basis for ROAS)',
           },
           {
             label: 'Deep analysis',
             value: '→',
             to: '/admin/ceo',
           },
+        ]}
+      />
+
+      <FunnelBreakdownModal
+        open={breakdownModal === 'heroRoas'}
+        onClose={() => setBreakdownModal(null)}
+        title="ROAS: Breakdown"
+        description="Return on ad spend for the selected period. ROAS = Delivered revenue ÷ Approved ad spend."
+        lines={[
+          { label: 'Delivered revenue', value: fmt(marketingSafe.deliveredRevenue) },
+          { label: 'Approved ad spend', value: fmt(marketingSafe.approvedSpend) },
+          { label: 'ROAS', value: `${marketingSafe.roas.toFixed(2)}x`, bold: true },
+        ]}
+      />
+      <FunnelBreakdownModal
+        open={breakdownModal === 'heroRevenue'}
+        onClose={() => setBreakdownModal(null)}
+        title="Delivered revenue: Breakdown"
+        description="DELIVERED + REMITTED order value, by created date in the selected period. Includes marketing funnel (edge-form/import) and cart graduated only."
+        lines={[
+          { label: 'Funnel (edge-form / import)', value: fmt(marketingSafe.funnelRevenue) },
+          { label: 'Cart graduated', value: fmt(marketingSafe.cartRevenue) },
+          { label: 'Total', value: fmt(marketingSafe.deliveredRevenue), bold: true },
+        ]}
+      />
+      <FunnelBreakdownModal
+        open={breakdownModal === 'heroAdSpend'}
+        onClose={() => setBreakdownModal(null)}
+        title="Ad spend: Breakdown"
+        description="The hero tile shows approved AD_SPEND only. That approved amount is the denominator for ROAS."
+        lines={[
+          { label: 'Approved (ROAS basis)', value: fmt(marketingSafe.approvedSpend) },
+          { label: 'Pending (unapproved)', value: fmt(marketingSafe.pendingSpend), muted: true },
+          { label: 'Total logged', value: fmt(marketingSafe.totalSpend), bold: true },
         ]}
       />
 
@@ -747,8 +806,12 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         const marginPct = data?.margin ?? 0;
         const costs = data?.costBreakdown ?? { landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0 };
         const totalExpenses = costs.landedCost + costs.deliveryFee + costs.adSpend + costs.commission + costs.fulfillmentCost + costs.operationalLoss;
-        const remitted = orderPipeline.statusCounts['REMITTED'] ?? 0;
-        const delivered = orderPipeline.statusCounts['DELIVERED'] ?? 0;
+        // Same source as TOTAL ORDERS Remitted / Delivered (onlyGraduateNonMarketing)
+        // so these tiles match Cash Remittances for the same date range.
+        const remittanceSc = orderPipeline.totalOrdersCounts ?? {};
+        const remitted = remittanceSc['REMITTED'] ?? 0;
+        const awaitingRemittance = remittanceSc['DELIVERED'] ?? 0;
+        const remittancesHref = buildLink('/admin/finance/delivery-remittances');
         return (
           <div className="space-y-4">
             <div>
@@ -801,15 +864,15 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     label: 'Remitted',
                     value: remitted.toLocaleString(),
                     valueClassName: 'text-success-600 dark:text-success-400',
-                    title: 'Orders fully remitted',
-                    to: '/admin/finance/cash-remittances',
+                    title: 'Orders fully remitted (same count as Cash Remittances Remitted)',
+                    to: remittancesHref,
                   },
                   {
                     label: 'Awaiting Remittance',
-                    value: delivered.toLocaleString(),
-                    valueClassName: delivered > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted',
-                    title: 'Delivered but not yet remitted',
-                    to: '/admin/finance/cash-remittances',
+                    value: awaitingRemittance.toLocaleString(),
+                    valueClassName: awaitingRemittance > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted',
+                    title: 'Delivered but not yet remitted (same as Cash Remittances Awaiting)',
+                    to: remittancesHref,
                   },
                 ]}
               />

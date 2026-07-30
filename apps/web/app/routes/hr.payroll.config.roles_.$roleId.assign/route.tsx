@@ -219,6 +219,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const body = {
       contractorIds,
       payRoleId: formData.get('payRoleId')?.toString() ?? '',
+      taxStatus: formData.get('taxStatus')?.toString() ?? 'STANDARD_PAYE',
     };
 
     const res = await apiRequest<unknown>('/trpc/hr.bulkAssignContractorsToPayRole', {

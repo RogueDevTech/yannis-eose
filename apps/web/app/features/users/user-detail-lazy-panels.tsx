@@ -5,6 +5,28 @@ import { Pagination } from '~/components/ui/pagination';
 import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
 import type { StaffPayoutEstimate, UserAuditEntry } from './types';
 
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const;
+
+/** "Carry-over → June" when viewing July: prior calendar month source label. */
+function carryOverSourceLabel(monthIndex1?: number): string {
+  if (!monthIndex1 || monthIndex1 < 1 || monthIndex1 > 12) return 'Carry-over (prior months)';
+  const priorIndex0 = (monthIndex1 - 2 + 12) % 12;
+  return `Carry-over → ${MONTH_NAMES[priorIndex0]}`;
+}
+
 function auditActivityRowKey(entry: UserAuditEntry, position: number): string {
   return `${entry.tableName}-${entry.id}-${entry.createdAt}-${position}`;
 }
@@ -14,11 +36,19 @@ export function UserDetailEarningsOutlookCard({
   heading,
   periodLabel,
   preview,
+  monthIndex1,
 }: {
   heading: string;
   periodLabel: string;
   preview: StaffPayoutEstimate | null;
+  /** 1-indexed calendar month of the outlook period (for carry-over source label). */
+  monthIndex1?: number;
 }) {
+  const carryOver = preview?.deliveredCarryOverCount ?? 0;
+  const samePeriodDelivered = preview
+    ? Math.max(0, preview.deliveredCount - carryOver)
+    : 0;
+
   return (
     <div className="card p-0 overflow-hidden">
       <div className="px-4 py-3 border-b border-app-border">
@@ -40,7 +70,20 @@ export function UserDetailEarningsOutlookCard({
             </p>
             <StatRowGroup divided>
               <StatRow label="Attributed orders (period)" value={preview.totalOrders.toLocaleString()} />
-              <StatRow label="Delivered" value={preview.deliveredCount.toLocaleString()} />
+              <StatRow
+                label="Delivered (bonus basis)"
+                value={preview.deliveredCount.toLocaleString()}
+              />
+              <StatRow
+                label={carryOverSourceLabel(monthIndex1)}
+                value={carryOver.toLocaleString()}
+                indent
+              />
+              <StatRow
+                label="Same-period deliveries"
+                value={samePeriodDelivered.toLocaleString()}
+                indent
+              />
               <StatRow label="Returns" value={preview.returnedCount.toLocaleString()} />
               <StatRow label="Delivery rate" value={`${preview.deliveryRate.toFixed(1)}%`} />
               <StatRow label="Base salary (estimate)" value="" amount={preview.baseSalary} variant="subtotal" />
@@ -71,6 +114,10 @@ export function UserDetailEarningsOutlookCard({
                 variant="total"
               />
             </StatRowGroup>
+            <p className="text-mini text-app-fg-muted">
+              Carry-over deliveries are included in the bonus basis. Delivery rate uses orders
+              generated this period only.
+            </p>
           </div>
         )}
       </div>

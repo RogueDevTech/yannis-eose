@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, type ReactNode } from 'react';
 import { Form, useFetcher, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
@@ -87,8 +87,9 @@ export interface StaffOnboardingPageProps {
   /** Current onboarding record (synthetic NOT_STARTED placeholder when no row yet). */
   record: OnboardingRecord;
   /**
-   * `self`  — the actor IS the subject. Form follows lock rules (SUBMITTED/APPROVED → read-only).
-   * `hr`    — HR / admin viewing a staff member. Fields are read-only; staff edit on `/admin/onboarding`. Approve when SUBMITTED.
+   * `self`  — the actor IS the subject. Editable until APPROVED.
+   * `hr`    — HR / admin reviewing a staff member. Defaults to read-only review;
+   *           field edits require an explicit Edit click when `canHrEdit`.
    */
   mode: 'self' | 'hr';
   /** Action endpoint — defaults to current route. */
@@ -104,6 +105,8 @@ export interface StaffOnboardingPageProps {
    * mirror check — this prop is the UX layer that disables the affordance up-front.
    */
   isMirroring?: boolean;
+  /** HR mode: allow field edits (requires hr.onboarding.write). Approve can still show without this. */
+  canHrEdit?: boolean;
 }
 
 /**
@@ -128,13 +131,21 @@ const GENDER_OPTIONS = [
   { value: 'FEMALE', label: 'Female' }
 ];
 
-function formatStatusLabel(status: OnboardingStatus): string {
+function formatStatusLabel(status: OnboardingStatus, subjectRole?: string): string {
   switch (status) {
     case 'NOT_STARTED':
       return 'Not started';
     case 'IN_PROGRESS':
       return 'In progress';
     case 'SUBMITTED':
+      // HR / Admin / SuperAdmin packets are reviewed by Super Admin, not peer HR.
+      if (
+        subjectRole === 'HR_MANAGER' ||
+        subjectRole === 'SUPER_ADMIN' ||
+        subjectRole === 'ADMIN'
+      ) {
+        return 'Pending Super Admin review';
+      }
       return 'Pending HR review';
     case 'APPROVED':
       return 'Approved';
@@ -154,234 +165,327 @@ function formatDobDisplay(isoDate: string | null): string {
   return d.toLocaleDateString('en-NG', { dateStyle: 'long' });
 }
 
-function DocumentOpenLink({ href, label }: { href: string; label: string }) {
+function looksLikeImageUrl(url: string): boolean {
+  const path = url.split('?')[0]?.toLowerCase() ?? '';
+  return /\.(png|jpe?g|gif|webp|avif|bmp)$/.test(path);
+}
+
+/** Dense review/edit chip: small thumb + short label. */
+function DocumentChip({ href, label }: { href: string; label: string }) {
+  const isImage = looksLikeImageUrl(href);
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex w-fit items-center rounded-md border border-app-border bg-app-elevated px-3 py-2 text-sm font-medium text-brand-600 shadow-sm transition-colors hover:border-brand-400/40 hover:bg-app-hover dark:text-brand-400"
+      className="inline-flex max-w-full items-center gap-1.5 rounded border border-app-border bg-app-elevated p-0.5 pr-2 text-left transition-colors hover:border-brand-400/40 hover:bg-app-hover"
     >
-      {label}
-      <span className="ml-1.5 text-xs font-normal text-app-fg-muted">↗</span>
+      {isImage ? (
+        <img
+          src={href}
+          alt=""
+          className="h-8 w-8 shrink-0 rounded-sm object-cover bg-app-hover"
+        />
+      ) : (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm bg-app-hover text-[9px] font-semibold uppercase tracking-wide text-app-fg-muted">
+          PDF
+        </div>
+      )}
+      <span className="min-w-0">
+        <span className="block truncate text-2xs font-medium leading-tight text-app-fg">{label}</span>
+        <span className="block text-micro leading-tight text-brand-600 dark:text-brand-400">Open ↗</span>
+      </span>
     </a>
   );
 }
 
-function OnboardingReadOnlyView({ record }: { record: OnboardingRecord }) {
+function ReviewSection({
+  title,
+  actions,
+  children,
+}: {
+  title: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <Card padding="sm" className="!rounded-lg">
+      <CardHeader
+        title={title}
+        actions={actions}
+        className="!mb-2"
+      />
+      <CardBody>{children}</CardBody>
+    </Card>
+  );
+}
+
+/** Compact upload field: existing file as chip + Remove, or minimal FileUpload when empty. */
+function DocumentFieldEditor({
+  label,
+  hint,
+  url,
+  onChange,
+  className,
+}: {
+  label: string;
+  hint?: ReactNode;
+  url: string;
+  onChange: (url: string) => void;
+  className?: string;
+}) {
+  return (
+    <FormField label={label} hint={hint} className={className}>
+      {url ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <DocumentChip href={url} label="On file" />
+          <Button type="button" variant="ghost" size="sm" onClick={() => onChange('')}>
+            Remove
+          </Button>
+        </div>
+      ) : (
+        <FileUpload
+          folder={ASSET_FOLDERS.ONBOARDING_DOCS}
+          accept="application/pdf,image/*"
+          onUpload={onChange}
+          variant="minimal"
+          size="sm"
+        />
+      )}
+    </FormField>
+  );
+}
+
+function OnboardingReadOnlyView({
+  record,
+  hideBank = false,
+  onEditBank,
+}: {
+  record: OnboardingRecord;
+  /** When HR is editing payroll bank below, skip the read-only bank card. */
+  hideBank?: boolean;
+  /** HR: show Edit on the payroll card (read-only until clicked). */
+  onEditBank?: () => void;
+}) {
   const genderDisplay = formatGenderLabel(record.gender);
   const dobDisplay = formatDobDisplay(record.dateOfBirth);
   const empty = <span className="text-app-fg-muted">Not provided</span>;
 
+  const docChips: Array<{ href: string; label: string }> = [
+    record.proofOfAddressUrl ? { href: record.proofOfAddressUrl, label: 'Proof of address' } : null,
+    record.signedContractUrl ? { href: record.signedContractUrl, label: 'Signed contract' } : null,
+    record.governmentIdUrl ? { href: record.governmentIdUrl, label: 'Government ID' } : null,
+    record.rentReceiptUrl ? { href: record.rentReceiptUrl, label: 'Rent receipt' } : null,
+    record.academicRecordsUrl ? { href: record.academicRecordsUrl, label: 'Academic records' } : null,
+    record.employmentHistoryUrl
+      ? { href: record.employmentHistoryUrl, label: 'Employment history' }
+      : null,
+    ...record.supportingDocuments.map((doc) => ({
+      href: doc.url,
+      label: doc.label?.trim() || 'Untitled',
+    })),
+  ].filter((x): x is { href: string; label: string } => x != null);
+
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader title="Personal details" description="Information on file from the staff member." />
-        <CardBody>
-          <DescriptionList
-            layout="grid"
-            divided
-            items={[
-              { label: 'Gender', value: genderDisplay || empty },
-              { label: 'Date of birth', value: dobDisplay || empty },
-              {
-                label: 'Current state of residence',
-                value: record.currentStateOfResidence?.trim() ? record.currentStateOfResidence : empty,
-              },
-              {
-                label: 'Residential address',
-                value: record.residentialAddress?.trim() ? (
-                  <span className="whitespace-pre-wrap">{record.residentialAddress}</span>
-                ) : (
-                  empty
-                ),
-                fullWidth: true,
-              },
-              {
-                label: 'Additional phone numbers',
-                value: record.additionalPhoneNumbers?.trim() ? record.additionalPhoneNumbers : empty,
-                fullWidth: true,
-              },
-              {
-                label: 'Proof of address',
-                value: record.proofOfAddressUrl ? (
-                  <DocumentOpenLink href={record.proofOfAddressUrl} label="Open proof of address" />
-                ) : (
-                  empty
-                ),
-                fullWidth: true,
-              },
-            ]}
-          />
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader
-          title="Identification & contracts"
-          description="Signed contract and government-issued ID. Optional at submit; HR may request them later."
-        />
-        <CardBody>
-          <DescriptionList
-            layout="grid"
-            divided
-            items={[
-              {
-                label: 'Signed contract',
-                value: record.signedContractUrl ? (
-                  <DocumentOpenLink href={record.signedContractUrl} label="Open signed contract" />
-                ) : (
-                  empty
-                ),
-                fullWidth: true,
-              },
-              {
-                label: 'Government ID (NIN slip or international passport)',
-                value: record.governmentIdUrl ? (
-                  <DocumentOpenLink href={record.governmentIdUrl} label="Open ID document" />
-                ) : (
-                  empty
-                ),
-                fullWidth: true,
-              },
-            ]}
-          />
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader
-          title="Statutory documents"
-          description="Tax ID and any rent relief documents for payroll."
-        />
-        <CardBody>
-          <DescriptionList
-            layout="grid"
-            divided
-            items={[
-              {
-                label: 'Tax ID (TIN)',
-                value: record.taxId?.trim() ? (
-                  <span className="tabular-nums">{record.taxId}</span>
-                ) : (
-                  empty
-                ),
-              },
-              {
-                label: 'Rent receipt',
-                value: record.rentReceiptUrl ? (
-                  <DocumentOpenLink href={record.rentReceiptUrl} label="Open rent receipt" />
-                ) : (
-                  empty
-                ),
-              },
-            ]}
-          />
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader
-          title="Academic & employment background"
-          description="Records covering the applicant's education and prior employment."
-        />
-        <CardBody>
-          <DescriptionList
-            layout="grid"
-            divided
-            items={[
-              {
-                label: 'Academic records',
-                value: record.academicRecordsUrl ? (
-                  <DocumentOpenLink href={record.academicRecordsUrl} label="Open academic records" />
-                ) : (
-                  empty
-                ),
-                fullWidth: true,
-              },
-              {
-                label: 'Employment history',
-                value: record.employmentHistoryUrl ? (
-                  <DocumentOpenLink href={record.employmentHistoryUrl} label="Open employment history" />
-                ) : (
-                  empty
-                ),
-                fullWidth: true,
-              },
-            ]}
-          />
-        </CardBody>
-      </Card>
-
-      {record.supportingDocuments.length > 0 ? (
-        <Card>
-          <CardHeader
-            title="Other supporting documents"
-            description="Extras outside the standard checklist."
-          />
-          <CardBody className="space-y-2">
-            <ul className="space-y-2">
-              {record.supportingDocuments.map((doc, idx) => (
-                <li
-                  key={`${doc.url}-${idx}`}
-                  className="flex flex-col gap-2 rounded-lg border border-app-border bg-app-elevated/80 p-3 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-app-fg">{doc.label?.trim() || 'Untitled document'}</p>
-                  </div>
-                  <DocumentOpenLink href={doc.url} label="Open file" />
-                </li>
-              ))}
-            </ul>
-          </CardBody>
-        </Card>
-      ) : null}
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <GuarantorReadOnlyCard index={1} record={record} />
-        <GuarantorReadOnlyCard index={2} record={record} />
-      </div>
-
-      <BankDetailsReadOnlyCard record={record} />
-    </div>
-  );
-}
-
-function BankDetailsReadOnlyCard({ record }: { record: OnboardingRecord }) {
-  const empty = <span className="text-app-fg-muted">Not provided</span>;
-  return (
-    <Card>
-      <CardHeader
-        title="Payout bank details"
-        description="Used by Finance to process monthly payroll. Visible only to Finance and HR."
-      />
-      <CardBody>
+    <div className="space-y-2">
+      <ReviewSection title="Personal details">
         <DescriptionList
           layout="grid"
-          divided
+          dense
+          mobileColumns={2}
+          gridColumns={3}
           items={[
-            { label: 'Bank name', value: record.payoutBankName?.trim() ? record.payoutBankName : empty },
-            { label: 'Account name', value: record.payoutAccountName?.trim() ? record.payoutAccountName : empty },
+            { label: 'Gender', value: genderDisplay || empty },
+            { label: 'Date of birth', value: dobDisplay || empty },
             {
-              label: 'Account number',
-              value: record.payoutAccountNumber?.trim() ? (
-                <span className="tabular-nums">{record.payoutAccountNumber}</span>
+              label: 'State',
+              value: record.currentStateOfResidence?.trim()
+                ? record.currentStateOfResidence
+                : empty,
+            },
+            {
+              label: 'Address',
+              value: record.residentialAddress?.trim() ? (
+                <span className="whitespace-pre-wrap">{record.residentialAddress}</span>
               ) : (
                 empty
               ),
+              fullWidth: true,
             },
             {
-              label: 'Bank code',
-              value: record.payoutBankCode?.trim() ? (
-                <span className="tabular-nums">{record.payoutBankCode}</span>
+              label: 'Extra phones',
+              value: record.additionalPhoneNumbers?.trim()
+                ? record.additionalPhoneNumbers
+                : empty,
+              fullWidth: true,
+            },
+            {
+              label: 'Tax ID (TIN)',
+              value: record.taxId?.trim() ? (
+                <span className="tabular-nums">{record.taxId}</span>
               ) : (
                 empty
               ),
             },
           ]}
         />
+      </ReviewSection>
+
+      <ReviewSection title="Documents">
+        {docChips.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {docChips.map((doc) => (
+              <DocumentChip key={`${doc.label}-${doc.href}`} href={doc.href} label={doc.label} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-app-fg-muted">No documents on file.</p>
+        )}
+      </ReviewSection>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <GuarantorReadOnlyCard index={1} record={record} />
+        <GuarantorReadOnlyCard index={2} record={record} />
+      </div>
+
+      {hideBank ? null : <BankDetailsReadOnlyCard record={record} onEdit={onEditBank} />}
+    </div>
+  );
+}
+
+/** HR-only payroll bank editor (shown only after Edit on the read-only card). */
+function HrPayrollBankForm({
+  bankName,
+  bankCode,
+  accountName,
+  accountNumber,
+  onBankChange,
+  onAccountNameChange,
+  onAccountNumberChange,
+  saving,
+  error,
+  onSave,
+  onCancel,
+}: {
+  bankName: string;
+  bankCode: string;
+  accountName: string;
+  accountNumber: string;
+  onBankChange: (next: { bankName: string; bankCode: string }) => void;
+  onAccountNameChange: (value: string) => void;
+  onAccountNumberChange: (value: string) => void;
+  saving: boolean;
+  error?: string;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Card>
+      <CardHeader
+        title="Payroll account"
+        description="Edit the staff member's bank details used for monthly payroll. Changes save to their user record immediately."
+      />
+      <CardBody className="space-y-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <BankSelect
+            id="hr-onboarding-bank"
+            bankName={bankName}
+            bankCode={bankCode}
+            onChange={onBankChange}
+            nameBankName="payoutBankName"
+            nameBankCode="payoutBankCode"
+            label="Bank"
+            hint="Search and pick the staff member's bank. Bank code fills in automatically."
+            placeholder="Select bank…"
+            className="sm:col-span-2"
+            required
+          />
+          <FormField label="Account name" hint="As it appears on the bank statement">
+            <TextInput
+              name="payoutAccountName"
+              value={accountName}
+              onChange={(e) => onAccountNameChange(e.target.value)}
+              maxLength={120}
+            />
+          </FormField>
+          <FormField label="Account number" hint="10-digit NUBAN">
+            <TextInput
+              name="payoutAccountNumber"
+              value={accountNumber}
+              onChange={(e) => onAccountNumberChange(e.target.value)}
+              maxLength={20}
+              inputMode="numeric"
+              pattern="[0-9]*"
+            />
+          </FormField>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onCancel} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="button" variant="primary" loading={saving} onClick={onSave}>
+            Save payroll account
+          </Button>
+        </div>
+        {error ? (
+          <p className="rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-900/30 dark:text-danger-200">
+            {error}
+          </p>
+        ) : null}
       </CardBody>
     </Card>
+  );
+}
+
+function BankDetailsReadOnlyCard({
+  record,
+  onEdit,
+}: {
+  record: OnboardingRecord;
+  onEdit?: () => void;
+}) {
+  const empty = <span className="text-app-fg-muted">Not provided</span>;
+  return (
+    <ReviewSection
+      title="Payroll account"
+      actions={
+        onEdit ? (
+          <Button type="button" variant="secondary" size="sm" onClick={onEdit}>
+            Edit
+          </Button>
+        ) : undefined
+      }
+    >
+      <DescriptionList
+        layout="grid"
+        dense
+        mobileColumns={2}
+        gridColumns={4}
+        items={[
+          { label: 'Bank', value: record.payoutBankName?.trim() ? record.payoutBankName : empty },
+          {
+            label: 'Account name',
+            value: record.payoutAccountName?.trim() ? record.payoutAccountName : empty,
+          },
+          {
+            label: 'Account number',
+            value: record.payoutAccountNumber?.trim() ? (
+              <span className="tabular-nums">{record.payoutAccountNumber}</span>
+            ) : (
+              empty
+            ),
+          },
+          {
+            label: 'Bank code',
+            value: record.payoutBankCode?.trim() ? (
+              <span className="tabular-nums">{record.payoutBankCode}</span>
+            ) : (
+              empty
+            ),
+          },
+        ]}
+      />
+    </ReviewSection>
   );
 }
 
@@ -396,55 +500,29 @@ function GuarantorReadOnlyCard({ index, record }: { index: 1 | 2; record: Onboar
   const legacyLetter = record[`${prefix}LetterUrl` as const];
   const hasLegacy = !!(legacyName?.trim() || legacyPhone?.trim() || legacyLetter?.trim());
 
-  const empty = <span className="text-app-fg-muted">Not provided</span>;
+  const chips: Array<{ href: string; label: string }> = [
+    formUrl ? { href: formUrl, label: 'Form' } : null,
+    idUrl ? { href: idUrl, label: 'ID' } : null,
+    legacyLetter?.trim() ? { href: legacyLetter, label: 'Legacy letter' } : null,
+  ].filter((x): x is { href: string; label: string } => x != null);
 
   return (
-    <Card>
-      <CardHeader title={`Guarantor ${index}`} description="Signed guarantor form and means of ID on file." />
-      <CardBody>
-        <DescriptionList
-          layout="grid"
-          divided
-          items={[
-            {
-              label: 'Guarantor form',
-              value: formUrl ? (
-                <DocumentOpenLink href={formUrl} label="Open signed guarantor form" />
-              ) : (
-                empty
-              ),
-              fullWidth: true,
-            },
-            {
-              label: 'Means of ID',
-              value: idUrl ? (
-                <DocumentOpenLink href={idUrl} label="Open means of ID" />
-              ) : (
-                empty
-              ),
-              fullWidth: true,
-            },
-            ...(hasLegacy
-              ? [
-                  {
-                    label: 'Legacy reference (pre HR feedback 2026-05)',
-                    value: (
-                      <div className="space-y-1 text-sm">
-                        {legacyName?.trim() ? <p>{legacyName}</p> : null}
-                        {legacyPhone?.trim() ? <p className="text-app-fg-muted">{legacyPhone}</p> : null}
-                        {legacyLetter?.trim() ? (
-                          <DocumentOpenLink href={legacyLetter} label="Open legacy signed letter" />
-                        ) : null}
-                      </div>
-                    ),
-                    fullWidth: true,
-                  },
-                ]
-              : []),
-          ]}
-        />
-      </CardBody>
-    </Card>
+    <ReviewSection title={`Guarantor ${index}`}>
+      {chips.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {chips.map((c) => (
+            <DocumentChip key={`${c.label}-${c.href}`} href={c.href} label={c.label} />
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-app-fg-muted">Not provided</p>
+      )}
+      {hasLegacy && (legacyName?.trim() || legacyPhone?.trim()) ? (
+        <p className="mt-1.5 text-2xs text-app-fg-muted">
+          {[legacyName?.trim(), legacyPhone?.trim()].filter(Boolean).join(' · ')}
+        </p>
+      ) : null}
+    </ReviewSection>
   );
 }
 
@@ -456,16 +534,29 @@ export function StaffOnboardingPage({
   showBackToProfile,
   approverName,
   isMirroring = false,
+  canHrEdit = false,
 }: StaffOnboardingPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const navigation = useNavigation();
 
   useFetcherToast(fetcher.data, { successMessage: 'Onboarding saved' });
 
-  // Lock rules: staff lose write access once SUBMITTED or APPROVED. HR profile view is always
-  // read-only for fields. Mirror Mode is also strictly view-only — see CLAUDE.md → "Mirror Mode".
-  const lockedForStaff = record.status === 'SUBMITTED' || record.status === 'APPROVED';
-  const readOnly = (mode === 'self' && lockedForStaff) || mode === 'hr' || isMirroring;
+  // HR lands on review; edit form only after explicit Edit. Self stays editable
+  // until APPROVED. Payroll bank has a dedicated editor on the review surface
+  // (including after approval).
+  const canEnterHrEdit =
+    mode === 'hr' && canHrEdit && !isMirroring && record.status !== 'APPROVED';
+  const [hrEditing, setHrEditing] = useState(false);
+  /** Payroll bank has its own Edit gate (including after approval). */
+  const [hrEditingPayroll, setHrEditingPayroll] = useState(false);
+  const showEditForm =
+    !isMirroring &&
+    record.status !== 'APPROVED' &&
+    (mode === 'self' || (mode === 'hr' && canHrEdit && hrEditing));
+  const showHrReviewActions =
+    mode === 'hr' && record.status === 'SUBMITTED' && !isMirroring && !hrEditing;
+  const canEditPayrollBank = mode === 'hr' && canHrEdit && !isMirroring && !hrEditing;
+  const showHrPayrollBankEditor = canEditPayrollBank && hrEditingPayroll;
 
   const [proofUrl, setProofUrl] = useState(record.proofOfAddressUrl ?? '');
   const [signedContractUrl, setSignedContractUrl] = useState(record.signedContractUrl ?? '');
@@ -485,6 +576,8 @@ export function StaffOnboardingPage({
   });
   const [bankName, setBankName] = useState(initialBank?.name ?? record.payoutBankName ?? '');
   const [bankCode, setBankCode] = useState(initialBank?.code ?? record.payoutBankCode ?? '');
+  const [accountName, setAccountName] = useState(record.payoutAccountName ?? '');
+  const [accountNumber, setAccountNumber] = useState(record.payoutAccountNumber ?? '');
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
@@ -493,6 +586,28 @@ export function StaffOnboardingPage({
   const handleBankChange = (next: { bankName: string; bankCode: string }) => {
     setBankName(next.bankName);
     setBankCode(next.bankCode);
+  };
+
+  const resetDocumentStateFromRecord = () => {
+    setProofUrl(record.proofOfAddressUrl ?? '');
+    setSignedContractUrl(record.signedContractUrl ?? '');
+    setGovernmentIdUrl(record.governmentIdUrl ?? '');
+    setRentReceiptUrl(record.rentReceiptUrl ?? '');
+    setAcademicRecordsUrl(record.academicRecordsUrl ?? '');
+    setEmploymentHistoryUrl(record.employmentHistoryUrl ?? '');
+    setG1Form(record.guarantor1FormUrl ?? '');
+    setG1IdDoc(record.guarantor1IdUrl ?? '');
+    setG2Form(record.guarantor2FormUrl ?? '');
+    setG2IdDoc(record.guarantor2IdUrl ?? '');
+    setSupportingDocs(record.supportingDocuments);
+    const bank = resolveNigerianBank({
+      name: record.payoutBankName,
+      code: record.payoutBankCode,
+    });
+    setBankName(bank?.name ?? record.payoutBankName ?? '');
+    setBankCode(bank?.code ?? record.payoutBankCode ?? '');
+    setAccountName(record.payoutAccountName ?? '');
+    setAccountNumber(record.payoutAccountNumber ?? '');
   };
 
   // Close confirm modals only AFTER the action returns success — keeps the
@@ -504,6 +619,17 @@ export function StaffOnboardingPage({
     setRequestChangesOpen(false);
     setRequestChangesReason('');
   });
+  // HR edit session ends after a successful save so they land back on review.
+  useCloseOnFetcherSuccess(
+    fetcher,
+    () => {
+      if (mode === 'hr') {
+        setHrEditing(false);
+        setHrEditingPayroll(false);
+      }
+    },
+    { intent: 'updateOnboarding' },
+  );
 
   const isSavingDraft =
     fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'updateOnboarding';
@@ -543,6 +669,20 @@ export function StaffOnboardingPage({
     // stays in sync (matching the NIGERIAN_BANKS auto-fill above).
     fd.set('payoutBankName', bankName);
     fd.set('payoutBankCode', bankCode);
+    fd.set('payoutAccountName', accountName);
+    fd.set('payoutAccountNumber', accountNumber);
+    fetcher.submit(fd, { method: 'post', action: actionUrl });
+  };
+
+  const handleSavePayrollBank = () => {
+    const fd = new FormData();
+    fd.set('intent', 'updateOnboarding');
+    fd.set('payoutBankName', bankName);
+    fd.set('payoutBankCode', bankCode);
+    fd.set('payoutAccountName', accountName);
+    fd.set('payoutAccountNumber', accountNumber);
+    // Keep supporting docs shape valid for the shared update schema.
+    fd.set('supportingDocuments', JSON.stringify(supportingDocs));
     fetcher.submit(fd, { method: 'post', action: actionUrl });
   };
 
@@ -555,7 +695,9 @@ export function StaffOnboardingPage({
         description={
           mode === 'self'
             ? 'Complete your documents and submit when ready.'
-            : 'Review the documents below and approve when ready.'
+            : hrEditing
+              ? 'Editing staff onboarding. Save or cancel when done.'
+              : 'Review the documents below. Use Edit to correct details, or approve when ready.'
         }
         actions={
           <PageHeaderMobileTools
@@ -563,23 +705,66 @@ export function StaffOnboardingPage({
             triggerAriaLabel="Onboarding toolbar"
             saveFilterKey
             desktop={
-              <div className="flex items-center gap-2">
-                <StatusBadge status={record.status} label={formatStatusLabel(record.status)} />
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge
+                  status={record.status}
+                  label={formatStatusLabel(record.status, subject.role)}
+                />
                 {submittedDate ? (
                   <span className="text-xs text-app-fg-muted">Submitted {submittedDate}</span>
                 ) : null}
                 {approvedDate ? (
                   <span className="text-xs text-app-fg-muted">Approved {approvedDate}</span>
                 ) : null}
+                {canEnterHrEdit && !hrEditing ? (
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setHrEditing(true)}>
+                    Edit
+                  </Button>
+                ) : null}
+                {hrEditing ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      resetDocumentStateFromRecord();
+                      setHrEditing(false);
+                    }}
+                  >
+                    Cancel edit
+                  </Button>
+                ) : null}
                 <PageRefreshButton />
               </div>
             }
             sheet={
-              <div className="flex items-center justify-between gap-2 px-1">
-                <StatusBadge status={record.status} label={formatStatusLabel(record.status)} />
-                <span className="text-xs text-app-fg-muted">
-                  {approvedDate ? `Approved ${approvedDate}` : submittedDate ? `Submitted ${submittedDate}` : ''}
-                </span>
+              <div className="flex flex-col gap-3 px-1">
+                <div className="flex items-center justify-between gap-2">
+                  <StatusBadge
+                    status={record.status}
+                    label={formatStatusLabel(record.status, subject.role)}
+                  />
+                  <span className="text-xs text-app-fg-muted">
+                    {approvedDate ? `Approved ${approvedDate}` : submittedDate ? `Submitted ${submittedDate}` : ''}
+                  </span>
+                </div>
+                {canEnterHrEdit && !hrEditing ? (
+                  <Button type="button" variant="secondary" onClick={() => setHrEditing(true)}>
+                    Edit
+                  </Button>
+                ) : null}
+                {hrEditing ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      resetDocumentStateFromRecord();
+                      setHrEditing(false);
+                    }}
+                  >
+                    Cancel edit
+                  </Button>
+                ) : null}
               </div>
             }
           />
@@ -599,18 +784,28 @@ export function StaffOnboardingPage({
         </div>
       ) : null}
 
-      {readOnly && mode === 'self' && !isMirroring ? (
+      {mode === 'self' && !isMirroring && record.status === 'APPROVED' ? (
         <div className="rounded-lg border border-app-border bg-app-hover/50 p-3 text-sm text-app-fg-muted">
-          {record.status === 'APPROVED'
-            ? `Your onboarding has been approved by ${reviewerLabel(subject.role)} and is now locked. Contact ${reviewerLabel(subject.role)} if anything needs to change.`
-            : `Your onboarding has been submitted and is waiting for review by ${reviewerLabel(subject.role)}. The form is locked until it's approved.`}
-          {approverName && record.status === 'APPROVED' ? (
-            <span className="ml-1">Approved by {approverName}.</span>
-          ) : null}
+          Your onboarding has been approved by {reviewerLabel(subject.role)} and is now locked.
+          Contact {reviewerLabel(subject.role)} if anything needs to change.
+          {approverName ? <span className="ml-1">Approved by {approverName}.</span> : null}
         </div>
       ) : null}
 
-      {mode === 'self' && !readOnly && record.changesRequestedReason ? (
+      {mode === 'self' && !isMirroring && record.status === 'SUBMITTED' ? (
+        <div className="rounded-lg border border-app-border bg-app-hover/50 p-3 text-sm text-app-fg-muted">
+          Your onboarding is waiting for review by {reviewerLabel(subject.role)}. You can still
+          update your details until it is approved.
+        </div>
+      ) : null}
+
+      {mode === 'hr' && !isMirroring && record.status === 'SUBMITTED' && !hrEditing ? (
+        <div className="rounded-lg border border-brand-200 bg-brand-50 p-3 text-sm text-brand-900 dark:border-brand-800 dark:bg-brand-900/20 dark:text-brand-100">
+          Pending review. Use Edit to correct details, or request changes / approve below.
+        </div>
+      ) : null}
+
+      {mode === 'self' && showEditForm && record.changesRequestedReason ? (
         <div className="rounded-lg border border-warning-300 bg-warning-50 p-3 text-sm text-warning-900 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-100">
           <p className="font-semibold">{reviewerLabel(subject.role)} requested changes</p>
           <p className="mt-1 whitespace-pre-wrap">{record.changesRequestedReason}</p>
@@ -629,34 +824,67 @@ export function StaffOnboardingPage({
           </p>
         </div>
       ) : null}
-      {readOnly ? (
+      {!showEditForm ? (
         <div className="space-y-4">
-          <OnboardingReadOnlyView record={record} />
+          {canEnterHrEdit ? (
+            <div className="flex flex-wrap items-center justify-end gap-2 sm:hidden">
+              <Button type="button" variant="secondary" onClick={() => setHrEditing(true)}>
+                Edit
+              </Button>
+            </div>
+          ) : null}
 
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {mode === 'hr' && record.status === 'SUBMITTED' && !isMirroring ? (
-              <>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  loading={isRequestingChanges}
-                  onClick={() => setRequestChangesOpen(true)}
-                >
-                  Request changes
-                </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  loading={isApproving}
-                  onClick={() => setConfirmApprove(true)}
-                >
-                  Approve onboarding
-                </Button>
-              </>
-            ) : null}
-          </div>
+          <OnboardingReadOnlyView
+            record={record}
+            hideBank={showHrPayrollBankEditor}
+            onEditBank={
+              canEditPayrollBank && !hrEditingPayroll
+                ? () => setHrEditingPayroll(true)
+                : undefined
+            }
+          />
 
-          {fetcher.data?.error ? (
+          {showHrPayrollBankEditor ? (
+            <HrPayrollBankForm
+              bankName={bankName}
+              bankCode={bankCode}
+              accountName={accountName}
+              accountNumber={accountNumber}
+              onBankChange={handleBankChange}
+              onAccountNameChange={setAccountName}
+              onAccountNumberChange={setAccountNumber}
+              saving={isSavingDraft}
+              error={fetcher.data?.error}
+              onSave={handleSavePayrollBank}
+              onCancel={() => {
+                resetDocumentStateFromRecord();
+                setHrEditingPayroll(false);
+              }}
+            />
+          ) : null}
+
+          {showHrReviewActions ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                loading={isRequestingChanges}
+                onClick={() => setRequestChangesOpen(true)}
+              >
+                Request changes
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                loading={isApproving}
+                onClick={() => setConfirmApprove(true)}
+              >
+                Approve onboarding
+              </Button>
+            </div>
+          ) : null}
+
+          {fetcher.data?.error && !showHrPayrollBankEditor ? (
             <p className="rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-900/30 dark:text-danger-200">
               {fetcher.data.error}
             </p>
@@ -711,16 +939,13 @@ export function StaffOnboardingPage({
                   placeholder="Street, area, city, state"
                 />
               </FormField>
-              <FormField label="Proof of address" hint="Utility bill or bank statement (PDF / image, ≤10MB)" className="sm:col-span-2">
-                <FileUpload
-                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
-                  accept="application/pdf,image/*"
-                  onUpload={setProofUrl}
-                />
-                {proofUrl ? (
-                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {proofUrl}</p>
-                ) : null}
-              </FormField>
+              <DocumentFieldEditor
+                label="Proof of address"
+                hint="Utility bill or bank statement (PDF / image, ≤10MB)"
+                url={proofUrl}
+                onChange={setProofUrl}
+                className="sm:col-span-2"
+              />
             </CardBody>
           </Card>
 
@@ -730,30 +955,18 @@ export function StaffOnboardingPage({
               description="Signed contract and a government-issued ID. Optional for now; HR may ask for them later."
             />
             <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField label="Signed contract" hint="PDF or image, ≤10MB" className="sm:col-span-2">
-                <FileUpload
-                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
-                  accept="application/pdf,image/*"
-                  onUpload={setSignedContractUrl}
-                />
-                {signedContractUrl ? (
-                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {signedContractUrl}</p>
-                ) : null}
-              </FormField>
-              <FormField
+              <DocumentFieldEditor
+                label="Signed contract"
+                hint="PDF or image, ≤10MB"
+                url={signedContractUrl}
+                onChange={setSignedContractUrl}
+              />
+              <DocumentFieldEditor
                 label="Government ID"
                 hint="NIN slip OR international passport (PDF / image, ≤10MB)"
-                className="sm:col-span-2"
-              >
-                <FileUpload
-                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
-                  accept="application/pdf,image/*"
-                  onUpload={setGovernmentIdUrl}
-                />
-                {governmentIdUrl ? (
-                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {governmentIdUrl}</p>
-                ) : null}
-              </FormField>
+                url={governmentIdUrl}
+                onChange={setGovernmentIdUrl}
+              />
             </CardBody>
           </Card>
 
@@ -786,16 +999,12 @@ export function StaffOnboardingPage({
                   inputMode="numeric"
                 />
               </FormField>
-              <FormField label="Rent receipt" hint="Optional. PDF or image, ≤10MB.">
-                <FileUpload
-                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
-                  accept="application/pdf,image/*"
-                  onUpload={setRentReceiptUrl}
-                />
-                {rentReceiptUrl ? (
-                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {rentReceiptUrl}</p>
-                ) : null}
-              </FormField>
+              <DocumentFieldEditor
+                label="Rent receipt"
+                hint="Optional. PDF or image, ≤10MB."
+                url={rentReceiptUrl}
+                onChange={setRentReceiptUrl}
+              />
             </CardBody>
           </Card>
 
@@ -805,26 +1014,18 @@ export function StaffOnboardingPage({
               description="Attach one combined PDF per row: certificates, transcripts, CV, prior employment letters."
             />
             <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField label="Academic records" hint="PDF or image, ≤10MB">
-                <FileUpload
-                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
-                  accept="application/pdf,image/*"
-                  onUpload={setAcademicRecordsUrl}
-                />
-                {academicRecordsUrl ? (
-                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {academicRecordsUrl}</p>
-                ) : null}
-              </FormField>
-              <FormField label="Employment history" hint="PDF or image, ≤10MB">
-                <FileUpload
-                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
-                  accept="application/pdf,image/*"
-                  onUpload={setEmploymentHistoryUrl}
-                />
-                {employmentHistoryUrl ? (
-                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {employmentHistoryUrl}</p>
-                ) : null}
-              </FormField>
+              <DocumentFieldEditor
+                label="Academic records"
+                hint="PDF or image, ≤10MB"
+                url={academicRecordsUrl}
+                onChange={setAcademicRecordsUrl}
+              />
+              <DocumentFieldEditor
+                label="Employment history"
+                hint="PDF or image, ≤10MB"
+                url={employmentHistoryUrl}
+                onChange={setEmploymentHistoryUrl}
+              />
             </CardBody>
           </Card>
 
@@ -837,23 +1038,10 @@ export function StaffOnboardingPage({
               {supportingDocs.length === 0 ? (
                 <p className="text-sm text-app-fg-muted">No documents attached yet.</p>
               ) : (
-                <ul className="space-y-2">
+                <div className="flex flex-wrap gap-2">
                   {supportingDocs.map((doc, idx) => (
-                    <li
-                      key={`${doc.url}-${idx}`}
-                      className="flex items-center justify-between rounded-md border border-app-border bg-app-elevated px-3 py-2"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-app-fg">{doc.label || 'Untitled document'}</p>
-                        <a
-                          href={doc.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="truncate text-xs text-brand-500 hover:text-brand-600 break-all"
-                        >
-                          {doc.url}
-                        </a>
-                      </div>
+                    <div key={`${doc.url}-${idx}`} className="inline-flex items-center gap-1">
+                      <DocumentChip href={doc.url} label={doc.label || 'Untitled'} />
                       <Button
                         type="button"
                         variant="ghost"
@@ -862,9 +1050,9 @@ export function StaffOnboardingPage({
                       >
                         Remove
                       </Button>
-                    </li>
+                    </div>
                   ))}
-                </ul>
+                </div>
               )}
               <AddSupportingDocument
                 onAdd={(doc) => setSupportingDocs((prev) => [...prev, doc])}
@@ -892,8 +1080,12 @@ export function StaffOnboardingPage({
 
           <Card>
             <CardHeader
-              title="Payout bank details"
-              description="Where Finance sends your payroll. Bank, bank code, account name, and account number are required before review."
+              title={mode === 'hr' ? 'Payroll account' : 'Payout bank details'}
+              description={
+                mode === 'hr'
+                  ? 'Staff payroll bank account used by Finance. You can correct these details while reviewing.'
+                  : 'Where Finance sends your payroll. Bank, bank code, account name, and account number are required before review.'
+              }
             />
             <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <BankSelect
@@ -904,22 +1096,28 @@ export function StaffOnboardingPage({
                 nameBankName="payoutBankName"
                 nameBankCode="payoutBankCode"
                 label="Bank"
-                hint="Search and pick your bank. The NIBSS bank code fills in automatically."
-                placeholder="Select your bank…"
+                hint={
+                  mode === 'hr'
+                    ? 'Search and pick the staff member\'s bank. Bank code fills in automatically.'
+                    : 'Search and pick your bank. The NIBSS bank code fills in automatically.'
+                }
+                placeholder="Select bank…"
                 className="sm:col-span-2"
                 required
               />
-              <FormField label="Account name" hint="As it appears on your bank statement">
+              <FormField label="Account name" hint="As it appears on the bank statement">
                 <TextInput
                   name="payoutAccountName"
-                  defaultValue={record.payoutAccountName ?? ''}
+                  value={accountName}
+                  onChange={(e) => setAccountName(e.target.value)}
                   maxLength={120}
                 />
               </FormField>
               <FormField label="Account number" hint="10-digit NUBAN">
                 <TextInput
                   name="payoutAccountNumber"
-                  defaultValue={record.payoutAccountNumber ?? ''}
+                  value={accountNumber}
+                  onChange={(e) => setAccountNumber(e.target.value)}
                   maxLength={20}
                   inputMode="numeric"
                   pattern="[0-9]*"
@@ -929,10 +1127,28 @@ export function StaffOnboardingPage({
           </Card>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
+            {mode === 'hr' ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  resetDocumentStateFromRecord();
+                  setHrEditing(false);
+                }}
+                disabled={isSavingDraft}
+              >
+                Cancel
+              </Button>
+            ) : null}
             <Button type="submit" variant="secondary" loading={isSavingDraft || navigation.state === 'submitting'}>
-              Save draft
+              {mode === 'hr'
+                ? 'Save changes'
+                : record.status === 'SUBMITTED'
+                  ? 'Save changes'
+                  : 'Save draft'}
             </Button>
-            {mode === 'self' && record.status === 'IN_PROGRESS' ? (
+            {mode === 'self' &&
+            (record.status === 'IN_PROGRESS' || record.status === 'NOT_STARTED') ? (
               <Button
                 type="button"
                 variant="primary"
@@ -956,7 +1172,7 @@ export function StaffOnboardingPage({
         open={confirmSubmit}
         onClose={() => setConfirmSubmit(false)}
         title="Submit your onboarding?"
-        description="After submission, the form stays locked until HR reviews it."
+        description="After submission, HR will review it. You can still update your details while it is pending."
         confirmLabel="Submit for review"
         variant="warning"
         loading={isSubmitting}
@@ -1069,12 +1285,18 @@ function AddSupportingDocument({
       </FormField>
       <FormField label="File" hint="PDF or image, ≤10MB">
         {url ? (
-          <p className="rounded-md border border-app-border bg-app-elevated px-2 py-1.5 text-xs text-app-fg-muted break-all">{url}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <DocumentChip href={url} label="Ready to add" />
+            <Button type="button" variant="ghost" size="sm" onClick={() => setUrl('')} disabled={disabled}>
+              Remove
+            </Button>
+          </div>
         ) : (
           <FileUpload
             folder={ASSET_FOLDERS.ONBOARDING_DOCS}
             accept="application/pdf,image/*"
             onUpload={setUrl}
+            variant="minimal"
             size="sm"
           />
         )}
@@ -1118,27 +1340,19 @@ function GuarantorCard({
         title={`Guarantor ${index}`}
         description="Upload the signed guarantor form and a means of ID. Optional for now; HR may ask for them later."
       />
-      <CardBody className="grid grid-cols-1 gap-4">
-        <FormField label="Signed guarantor form" hint="PDF or image, ≤10MB">
-          <FileUpload
-            folder={ASSET_FOLDERS.ONBOARDING_DOCS}
-            accept="application/pdf,image/*"
-            onUpload={onFormUpload}
-          />
-          {formUrl ? (
-            <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {formUrl}</p>
-          ) : null}
-        </FormField>
-        <FormField label="Means of ID" hint="NIN slip / passport / driver's licence (PDF / image, ≤10MB)">
-          <FileUpload
-            folder={ASSET_FOLDERS.ONBOARDING_DOCS}
-            accept="application/pdf,image/*"
-            onUpload={onIdUpload}
-          />
-          {idUrl ? (
-            <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {idUrl}</p>
-          ) : null}
-        </FormField>
+      <CardBody className="grid grid-cols-1 gap-3">
+        <DocumentFieldEditor
+          label="Signed guarantor form"
+          hint="PDF or image, ≤10MB"
+          url={formUrl}
+          onChange={onFormUpload}
+        />
+        <DocumentFieldEditor
+          label="Means of ID"
+          hint="NIN slip / passport / driver's licence (PDF / image, ≤10MB)"
+          url={idUrl}
+          onChange={onIdUpload}
+        />
       </CardBody>
     </Card>
   );

@@ -76,7 +76,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!previewRes.ok) {
     return json({
       ok: false as const,
-      error: extractApiErrorMessage(previewRes.data, 'Could not compute earnings estimate'),
+      error: extractApiErrorMessage(
+        previewRes.data,
+        previewRes.status === 504
+          ? 'Earnings estimate timed out. Try again in a moment.'
+          : 'Could not compute earnings estimate',
+      ),
     });
   }
 

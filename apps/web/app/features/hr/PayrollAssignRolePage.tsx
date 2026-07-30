@@ -120,6 +120,9 @@ export function PayrollAssignRolePage({
   const fetcher = useFetcher<{ success?: boolean; error?: string; assignedCount?: number }>();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showAssignConfirm, setShowAssignConfirm] = useState(false);
+  const [contractorTaxStatus, setContractorTaxStatus] = useState(
+    payRole.defaultTaxStatus ?? 'STANDARD_PAYE',
+  );
 
   const isContractors = people === 'contractors';
   const noun = isContractors ? 'contractor' : 'staff';
@@ -589,18 +592,34 @@ export function PayrollAssignRolePage({
           </>
         }
         details={
-          <ul className="list-disc pl-4 space-y-1 text-sm">
-            <li>
-              {isContractors
-                ? 'Contractors already on another pay role will be moved to this role'
-                : 'Staff already on another pay role will be moved to this role'}
-            </li>
-            <li>
-              {isContractors
-                ? 'They will count toward this role headcount and contractor payroll batches'
-                : "Future payroll batches will use this role's rules for these staff"}
-            </li>
-          </ul>
+          <div className="space-y-3">
+            <ul className="list-disc pl-4 space-y-1 text-sm">
+              <li>
+                {isContractors
+                  ? 'Contractors already on another pay role will be moved to this role'
+                  : 'Staff already on another pay role will be moved to this role'}
+              </li>
+              <li>
+                {isContractors
+                  ? 'They will count toward this role headcount, and the tax status below will apply to their monthly fee on contractor payroll batches'
+                  : "Future payroll batches will use this role's rules for these staff"}
+              </li>
+            </ul>
+            {isContractors ? (
+              <FormSelect
+                label="Tax status"
+                name="taxStatus"
+                value={contractorTaxStatus}
+                onChange={(e) => setContractorTaxStatus(e.target.value)}
+                options={[
+                  { value: 'STANDARD_PAYE', label: 'Standard PAYE' },
+                  { value: 'EMPLOYER_SUBSIDIZED_PAYE', label: 'Employer subsidized PAYE' },
+                  { value: 'GROSS_NO_DEDUCTION', label: 'None (no tax)' },
+                ]}
+                hint="Defaults from this pay role's Tax setting. Override here if needed for this assign."
+              />
+            ) : null}
+          </div>
         }
         confirmLabel={`Assign ${newSelections.length} ${newSelections.length === 1 ? noun : nounPlural}`}
         variant="warning"
@@ -612,6 +631,7 @@ export function PayrollAssignRolePage({
                 intent: 'bulkAssignContractorsToPayRole',
                 payRoleId: payRole.id,
                 contractorIds: JSON.stringify(newSelections),
+                taxStatus: contractorTaxStatus,
               },
               { method: 'post' },
             );

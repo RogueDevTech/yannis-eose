@@ -220,7 +220,12 @@ export interface StaffPayoutEstimate {
   staffName: string;
   role: string;
   planName: string;
+  /** DELIVERED/REMITTED by delivered_at in period (per-order bonus basis; includes carry-over). */
   deliveredCount: number;
+  /** Slice of deliveredCount created before the period; still pays per-order bonus. */
+  deliveredCarryOverCount?: number;
+  /** Delivered with created_at in period (delivery-rate numerator). */
+  deliveredCohortCount?: number;
   totalOrders: number;
   returnedCount: number;
   deliveryRate: number;

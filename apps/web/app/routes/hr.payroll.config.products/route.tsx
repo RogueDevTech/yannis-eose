@@ -95,6 +95,25 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'deleteProductTierConfig') {
+    const configId = formData.get('configId')?.toString();
+    if (!configId) {
+      return json({ error: 'Product tier config id is required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/hr.deleteProductTierConfig', {
+      method: 'POST',
+      cookie,
+      body: { id: configId },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to delete product tier config') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true, message: 'Product tier config deleted' });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 

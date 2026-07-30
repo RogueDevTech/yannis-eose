@@ -59,6 +59,18 @@ export class OnboardingService {
     );
   }
 
+  /**
+   * Cross-user edits: write or approve. Approvers must be able to correct the
+   * payroll bank account while reviewing a packet.
+   */
+  private canWriteAnyOnboarding(actor: SessionUser): boolean {
+    return (
+      actor.role === 'SUPER_ADMIN' ||
+      this.actorHasPermission(actor, 'hr.onboarding.write') ||
+      this.actorHasPermission(actor, 'hr.onboarding.approve')
+    );
+  }
+
   private canApproveOnboarding(actor: SessionUser): boolean {
     return actor.role === 'SUPER_ADMIN' || this.actorHasPermission(actor, 'hr.onboarding.approve');
   }
@@ -164,10 +176,11 @@ export class OnboardingService {
     input: UpdateOnboardingProfileInput,
     actor: SessionUser,
   ) {
-    if (targetUserId !== actor.id) {
+    const isSelf = targetUserId === actor.id;
+    if (!isSelf && !this.canWriteAnyOnboarding(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Only the staff member can update onboarding details from their own session.',
+        message: 'You do not have permission to update another staff member\'s onboarding.',
       });
     }
 
@@ -178,14 +191,59 @@ export class OnboardingService {
         .where(eq(schema.staffOnboarding.userId, targetUserId))
         .limit(1);
 
-      if (existing && (existing.status === 'SUBMITTED' || existing.status === 'APPROVED')) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message:
-            existing.status === 'APPROVED'
+      // Bank fields live on `users`. Written in the same withActor tx for audit.
+      const bankPatch: Record<string, unknown> = {};
+      const setBankIfPresent = (
+        key: keyof UpdateOnboardingProfileInput,
+        column: 'payoutBankName' | 'payoutAccountName' | 'payoutAccountNumber' | 'payoutBankCode',
+      ) => {
+        const value = input[key];
+        if (value === undefined) return;
+        bankPatch[column] = value === '' ? null : value;
+      };
+      setBankIfPresent('payoutBankName', 'payoutBankName');
+      setBankIfPresent('payoutAccountName', 'payoutAccountName');
+      setBankIfPresent('payoutAccountNumber', 'payoutAccountNumber');
+      setBankIfPresent('payoutBankCode', 'payoutBankCode');
+
+      // Approved packets: staff stay locked; HR may still correct payroll bank only.
+      if (existing?.status === 'APPROVED') {
+        if (isSelf || !this.canWriteAnyOnboarding(actor)) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: isSelf
               ? 'Your onboarding has been approved and is locked. Contact HR for changes.'
-              : 'Your onboarding is awaiting HR review and is locked for edits.',
-        });
+              : 'This onboarding has been approved and is locked.',
+          });
+        }
+        if (Object.keys(bankPatch).length === 0) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Approved onboarding only allows payroll bank account updates.',
+          });
+        }
+        await tx
+          .update(schema.users)
+          .set({ ...bankPatch, updatedAt: new Date() })
+          .where(eq(schema.users.id, targetUserId));
+        const [userBank] = await tx
+          .select({
+            payoutBankName: schema.users.payoutBankName,
+            payoutAccountName: schema.users.payoutAccountName,
+            payoutAccountNumber: schema.users.payoutAccountNumber,
+            payoutBankCode: schema.users.payoutBankCode,
+          })
+          .from(schema.users)
+          .where(eq(schema.users.id, targetUserId))
+          .limit(1);
+        await this.invalidateUserBundle(targetUserId);
+        return {
+          ...existing,
+          payoutBankName: userBank?.payoutBankName ?? null,
+          payoutAccountName: userBank?.payoutAccountName ?? null,
+          payoutAccountNumber: userBank?.payoutAccountNumber ?? null,
+          payoutBankCode: userBank?.payoutBankCode ?? null,
+        };
       }
 
       const patch: Record<string, unknown> = { updatedAt: new Date() };
@@ -233,22 +291,6 @@ export class OnboardingService {
       setIfPresent('guarantor2FormUrl', 'guarantor2FormUrl');
       setIfPresent('guarantor2IdUrl', 'guarantor2IdUrl');
 
-      // Bank fields live on `users` (finance-only visibility). Write them in
-      // the same withActor transaction so the audit trigger attributes them to
-      // the staff member doing the update.
-      const bankPatch: Record<string, unknown> = {};
-      const setBankIfPresent = (
-        key: keyof UpdateOnboardingProfileInput,
-        column: 'payoutBankName' | 'payoutAccountName' | 'payoutAccountNumber' | 'payoutBankCode',
-      ) => {
-        const value = input[key];
-        if (value === undefined) return;
-        bankPatch[column] = value === '' ? null : value;
-      };
-      setBankIfPresent('payoutBankName', 'payoutBankName');
-      setBankIfPresent('payoutAccountName', 'payoutAccountName');
-      setBankIfPresent('payoutAccountNumber', 'payoutAccountNumber');
-      setBankIfPresent('payoutBankCode', 'payoutBankCode');
       if (Object.keys(bankPatch).length > 0) {
         await tx.update(schema.users).set(bankPatch).where(eq(schema.users.id, targetUserId));
       }

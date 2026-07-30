@@ -9,6 +9,7 @@ import {
   payrollPayRoleCategoryEnum,
   payrollBatchScopeTypeEnum,
   payrollPayslipLineStatusEnum,
+  payrollTaxStatusEnum,
 } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
@@ -44,6 +45,11 @@ export const payrollPayRoles = pgTable('payroll_pay_roles', {
   reportsToRequired: boolean('reports_to_required').default(false).notNull(),
   perProductBonus: boolean('per_product_bonus').default(false).notNull(),
   commissionPlanId: uuid('commission_plan_id').references(() => commissionPlans.id),
+  /**
+   * Default PAYE treatment stamped onto staff/contractors when assigned to this role.
+   * Migration 0281. `GROSS_NO_DEDUCTION` = no PAYE ("None" in Payroll Config UI).
+   */
+  defaultTaxStatus: payrollTaxStatusEnum('default_tax_status').default('STANDARD_PAYE').notNull(),
   active: boolean('active').default(true).notNull(),
   ...temporalColumns,
   ...timestampColumns,
@@ -84,7 +90,7 @@ export const payrollTaxBandConfigs = pgTable('payroll_tax_band_configs', {
   ...timestampColumns,
 });
 
-/** External agency contractors — fixed monthly fee, no PAYE. */
+/** External agency contractors — fixed monthly fee; PAYE optional via taxStatus. */
 export const payrollContractors = pgTable('payroll_contractors', {
   id: uuidv7Pk(),
   groupId: uuid('group_id').references(() => branchGroups.id),
@@ -93,6 +99,11 @@ export const payrollContractors = pgTable('payroll_contractors', {
   /** Pay role this contractor counts toward on Payroll Config headcounts. */
   payRoleId: uuid('pay_role_id').references(() => payrollPayRoles.id),
   monthlyFee: numeric('monthly_fee', { precision: 14, scale: 2 }).notNull(),
+  /**
+   * Per-contractor PAYE treatment (same enum as users.tax_status).
+   * Migration 0280. Default GROSS_NO_DEDUCTION keeps legacy "no PAYE" behaviour.
+   */
+  taxStatus: payrollTaxStatusEnum('tax_status').default('GROSS_NO_DEDUCTION').notNull(),
   bankName: text('bank_name'),
   bankCode: text('bank_code'),
   accountNumber: text('account_number'),

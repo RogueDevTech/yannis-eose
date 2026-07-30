@@ -183,6 +183,8 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     const monthlyFee = formData.get('monthlyFee')?.toString();
     if (monthlyFee) body.monthlyFee = Number(monthlyFee);
+    const taxStatus = pickOptional('taxStatus');
+    if (taxStatus) body.taxStatus = taxStatus;
     const branchId = formData.get('branchId')?.toString();
     if (branchId !== undefined) body.branchId = branchId || null;
     const bankName = pickOptional('bankName');

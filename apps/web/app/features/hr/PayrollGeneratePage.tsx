@@ -1,19 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { Button } from '~/components/ui/button';
+import { Checkbox } from '~/components/ui/checkbox';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { PageHeader } from '~/components/ui/page-header';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
-import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { CONTROL_HEIGHT_CLASS } from '~/components/ui/_control-heights';
 import type { BranchOption, ViewerInfo, PayrollDepartment } from './types';
 import {
-  ALL_BRANCHES_SENTINEL,
   ALL_DEPARTMENTS,
   ALL_DEPARTMENTS_SENTINEL,
   ADMIN_ROLES,
@@ -34,6 +34,11 @@ const MONTH_OPTIONS = [
   { value: '10', label: 'October' },
   { value: '11', label: 'November' },
   { value: '12', label: 'December' },
+];
+
+const INCLUDE_OPTIONS = [
+  { value: 'staff', label: 'Staff only' },
+  { value: 'staff_and_contractors', label: 'Staff + agency contractors' },
 ];
 
 interface PreviewRow {
@@ -58,6 +63,131 @@ export interface PayrollGenerateLoaderData {
   viewer: ViewerInfo;
 }
 
+/** Searchable multi-select with checkboxes for combining branches into one batch. */
+function BranchMultiSelect({
+  id,
+  label,
+  options,
+  value,
+  onChange,
+  required,
+}: {
+  id: string;
+  label: string;
+  options: Array<{ value: string; label: string }>;
+  value: string[];
+  onChange: (next: string[]) => void;
+  required?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => o.label.toLowerCase().includes(q));
+  }, [options, query]);
+
+  const selectedLabels = options.filter((o) => value.includes(o.value)).map((o) => o.label);
+  const triggerText =
+    selectedLabels.length === 0
+      ? 'Select branches…'
+      : selectedLabels.length === 1
+        ? selectedLabels[0]
+        : selectedLabels.length === options.length && options.length > 1
+          ? `All branches (${selectedLabels.length})`
+          : `${selectedLabels.length} branches`;
+
+  const toggle = (idValue: string) => {
+    if (value.includes(idValue)) onChange(value.filter((v) => v !== idValue));
+    else onChange([...value, idValue]);
+  };
+
+  const allSelected = options.length > 0 && options.every((o) => value.includes(o.value));
+
+  return (
+    <div ref={rootRef} className="relative">
+      <label htmlFor={id} className="block text-sm font-medium text-app-fg mb-1">
+        {label}
+        {required ? <span className="text-danger-500 ml-0.5">*</span> : null}
+      </label>
+      <button
+        id={id}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={[
+          CONTROL_HEIGHT_CLASS,
+          'w-full flex items-center justify-between gap-2 rounded-lg border border-app-border bg-app-canvas px-3 text-sm text-left',
+          'hover:border-brand-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+          selectedLabels.length === 0 ? 'text-app-fg-muted' : 'text-app-fg',
+        ].join(' ')}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="truncate">{triggerText}</span>
+        <svg className="w-3.5 h-3.5 shrink-0 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open ? (
+        <div className="absolute z-40 mt-1 w-full rounded-lg border border-app-border bg-app-elevated shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-app-border">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search branches…"
+              className="w-full h-8 rounded-md border border-app-border bg-app-canvas px-2 text-sm text-app-fg placeholder:text-app-fg-muted focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          {options.length > 1 ? (
+            <button
+              type="button"
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-brand-600 dark:text-brand-400 hover:bg-app-hover border-b border-app-border"
+              onClick={() => {
+                onChange(allSelected ? [] : options.map((o) => o.value));
+              }}
+            >
+              {allSelected ? 'Clear all' : 'Select all'}
+            </button>
+          ) : null}
+          <ul className="max-h-56 overflow-y-auto py-1" role="listbox" aria-multiselectable>
+            {filtered.length === 0 ? (
+              <li className="px-3 py-2 text-xs text-app-fg-muted">No branches match.</li>
+            ) : (
+              filtered.map((opt) => {
+                const checked = value.includes(opt.value);
+                return (
+                  <li key={opt.value}>
+                    <label className="flex items-center gap-2.5 px-3 py-1.5 text-sm text-app-fg cursor-pointer hover:bg-app-hover">
+                      <Checkbox
+                        checked={checked}
+                        onChange={() => toggle(opt.value)}
+                        aria-label={opt.label}
+                      />
+                      <span className="truncate">{opt.label}</span>
+                    </label>
+                  </li>
+                );
+              })
+            )}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderData) {
   const fetcher = useFetcher();
   const previewFetcher = useFetcher<{ success?: boolean; preview?: PayrollPreview | null; error?: string }>();
@@ -67,14 +197,16 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
   const firstNow = new Date();
   const [monthMm, setMonthMm] = useState(() => String(firstNow.getMonth() + 1).padStart(2, '0'));
   const [yearYyyy, setYearYyyy] = useState(() => String(firstNow.getFullYear()));
-  const [branchSel, setBranchSel] = useState('');
+  const [branchIds, setBranchIds] = useState<string[]>([]);
   const [deptSel, setDeptSel] = useState('');
+  const [includeMode, setIncludeMode] = useState<'staff' | 'staff_and_contractors'>('staff');
   const [preview, setPreview] = useState<PayrollPreview | null>(null);
-  const [includeContractors, setIncludeContractors] = useState(false);
   const [runLabel, setRunLabel] = useState('');
   const [dismissedPreviewError, setDismissedPreviewError] = useState(false);
   const [dismissedGenerateError, setDismissedGenerateError] = useState(false);
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
+
+  const includeContractors = includeMode === 'staff_and_contractors';
 
   const generatableDepartments: PayrollDepartment[] = useMemo(() => {
     if (ADMIN_ROLES.has(viewer.role)) return ALL_DEPARTMENTS;
@@ -94,8 +226,10 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
   }, [viewer, branches]);
 
   useEffect(() => {
-    if (!branchSel && generatableBranches[0]) setBranchSel(generatableBranches[0].id);
-  }, [branchSel, generatableBranches]);
+    if (branchIds.length === 0 && generatableBranches[0]) {
+      setBranchIds([generatableBranches[0].id]);
+    }
+  }, [branchIds.length, generatableBranches]);
 
   useEffect(() => {
     const first = generatableDepartments[0];
@@ -104,13 +238,10 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
     }
   }, [deptSel, generatableDepartments]);
 
-  const branchOptions = useMemo(() => {
-    const base = generatableBranches.map((b) => ({ value: b.id, label: b.name }));
-    if (generatableBranches.length > 1) {
-      return [{ value: ALL_BRANCHES_SENTINEL, label: 'All branches' }, ...base];
-    }
-    return base;
-  }, [generatableBranches]);
+  const branchOptions = useMemo(
+    () => generatableBranches.map((b) => ({ value: b.id, label: b.name })),
+    [generatableBranches],
+  );
 
   const deptOptions = useMemo(() => {
     const base = generatableDepartments.map((d) => ({ value: d, label: DEPT_LABEL[d] }));
@@ -120,16 +251,14 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
     return base;
   }, [generatableDepartments]);
 
-  const isBulkBranch = branchSel === ALL_BRANCHES_SENTINEL;
   const isBulkDept = deptSel === ALL_DEPARTMENTS_SENTINEL;
-  const showScopeHint = isBulkBranch || isBulkDept;
-  const resolvedBranchCount = isBulkBranch ? generatableBranches.length : branchSel ? 1 : 0;
   const resolvedDeptCount = isBulkDept ? generatableDepartments.length : deptSel ? 1 : 0;
-  const slotCount = resolvedBranchCount * resolvedDeptCount;
+  const combinedBatch = branchIds.length > 1;
+  /** One batch per department when combining branches; otherwise one slot per selection. */
+  const slotCount = isBulkDept ? resolvedDeptCount : deptSel ? 1 : 0;
 
   const periodMonth = `${yearYyyy}-${monthMm}-01`;
-
-  const showPreview = !isBulkBranch && !isBulkDept && branchSel && deptSel;
+  const showPreview = !isBulkDept && branchIds.length >= 1 && !!deptSel;
 
   useEffect(() => {
     if (previewFetcher.data && typeof previewFetcher.data === 'object') {
@@ -235,7 +364,8 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
     fetcher.state === 'submitting' &&
     (fetcher.formData?.get('intent') === 'generateBatch' ||
       fetcher.formData?.get('intent') === 'generateBatchesBulk');
-  const canGenerate = !!branchSel && !!deptSel && !generating;
+  const canGenerate = branchIds.length > 0 && !!deptSel && !generating;
+  const homeBranchId = branchIds[0] ?? '';
 
   return (
     <div className="space-y-6">
@@ -278,7 +408,7 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
 
       <div className="card space-y-5">
         <fetcher.Form method="post" id="payroll-generate-form" className="space-y-5">
-          {isBulkBranch || isBulkDept ? (
+          {isBulkDept ? (
             <input type="hidden" name="intent" value="generateBatchesBulk" />
           ) : (
             <input type="hidden" name="intent" value="generateBatch" />
@@ -286,14 +416,14 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
           <input type="hidden" name="periodMonth" value={periodMonth} />
           {includeContractors ? <input type="hidden" name="includeContractors" value="on" /> : null}
           {runLabel ? <input type="hidden" name="runLabel" value={runLabel} /> : null}
+          {combinedBatch || isBulkDept ? (
+            <input type="hidden" name="combineBranches" value="on" />
+          ) : null}
 
-          {isBulkBranch
-            ? generatableBranches.map((b) => (
-                <input key={b.id} type="hidden" name="branchIds" value={b.id} />
-              ))
-            : branchSel && branchSel !== ALL_BRANCHES_SENTINEL ? (
-                <input type="hidden" name="branchId" value={branchSel} />
-              ) : null}
+          {branchIds.map((id) => (
+            <input key={id} type="hidden" name="branchIds" value={id} />
+          ))}
+          {homeBranchId ? <input type="hidden" name="branchId" value={homeBranchId} /> : null}
 
           {isBulkDept
             ? generatableDepartments.map((d) => (
@@ -305,17 +435,16 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 items-end">
             <div className="sm:col-span-1 xl:col-span-2">
-              <SearchableSelect
+              <BranchMultiSelect
                 id="payroll-gen-branch"
                 label="Branch"
                 required
-                value={branchSel}
-                onChange={(v) => {
-                  setBranchSel(v);
+                options={branchOptions}
+                value={branchIds}
+                onChange={(next) => {
+                  setBranchIds(next);
                   setPreview(null);
                 }}
-                options={branchOptions}
-                searchPlaceholder="Search branches..."
               />
             </div>
             <FormSelect
@@ -365,6 +494,15 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+            <FormSelect
+              label="Include"
+              name="_includeUi"
+              options={INCLUDE_OPTIONS}
+              value={includeMode}
+              onChange={(e) =>
+                setIncludeMode(e.target.value === 'staff_and_contractors' ? 'staff_and_contractors' : 'staff')
+              }
+            />
             <TextInput
               label="Run label (optional)"
               name="_runLabelUi"
@@ -372,25 +510,27 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
               onChange={(e) => setRunLabel(e.target.value)}
               placeholder="e.g. April 2026 CS run"
             />
-            <label className="flex items-center gap-2 text-sm text-app-fg cursor-pointer h-10 md:h-9">
-              <input
-                type="checkbox"
-                checked={includeContractors}
-                onChange={(e) => setIncludeContractors(e.target.checked)}
-                className="rounded border-app-border text-brand-600 focus:ring-brand-500"
-              />
-              <span>Include agency contractors</span>
-            </label>
           </div>
 
-          {showScopeHint && (
+          {(combinedBatch || isBulkDept) && (
             <p className="text-xs text-app-fg-muted rounded-md border border-app-border bg-app-hover px-3 py-2">
-              Will check up to <span className="font-medium text-app-fg">{slotCount}</span> batch slot
-              {slotCount === 1 ? '' : 's'} ({resolvedBranchCount} branch
-              {resolvedBranchCount === 1 ? '' : 'es'} × {resolvedDeptCount} department
-              {resolvedDeptCount === 1 ? '' : 's'}) for{' '}
-              <span className="font-medium text-app-fg">{formatMonthLabel}</span>. Existing batches are
-              skipped.
+              {combinedBatch ? (
+                <>
+                  Selected branches combine into{' '}
+                  <span className="font-medium text-app-fg">
+                    {slotCount} batch{slotCount === 1 ? '' : 'es'}
+                  </span>{' '}
+                  for <span className="font-medium text-app-fg">{formatMonthLabel}</span>
+                  {isBulkDept ? ' (one per department)' : ''}.
+                </>
+              ) : (
+                <>
+                  Will create up to <span className="font-medium text-app-fg">{slotCount}</span> batch
+                  {slotCount === 1 ? '' : 'es'} for{' '}
+                  <span className="font-medium text-app-fg">{formatMonthLabel}</span>. Existing batches
+                  for the same scope are skipped.
+                </>
+              )}
             </p>
           )}
 
@@ -401,19 +541,17 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
                   type="button"
                   variant="secondary"
                   size="sm"
-                  disabled={!branchSel || !deptSel || previewFetcher.state === 'submitting'}
+                  disabled={branchIds.length === 0 || !deptSel || previewFetcher.state === 'submitting'}
                   loading={previewFetcher.state === 'submitting'}
                   loadingText="Previewing…"
                   onClick={() => {
-                    previewFetcher.submit(
-                      {
-                        intent: 'previewBatch',
-                        branchId: branchSel,
-                        department: deptSel,
-                        periodMonth: periodMonth.slice(0, 10),
-                      },
-                      { method: 'post', action: '/hr/payroll/generate' },
-                    );
+                    const fd = new FormData();
+                    fd.set('intent', 'previewBatch');
+                    fd.set('branchId', homeBranchId);
+                    fd.set('department', deptSel);
+                    fd.set('periodMonth', periodMonth.slice(0, 10));
+                    for (const id of branchIds) fd.append('branchIds', id);
+                    previewFetcher.submit(fd, { method: 'post', action: '/hr/payroll/generate' });
                   }}
                 >
                   Preview roster
@@ -473,7 +611,7 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
                   />
                 ) : (
                   <p className="text-xs text-app-fg-muted">
-                    No staff in scope for this branch and department.
+                    No staff in scope for the selected branches and department.
                   </p>
                 )
               ) : null}
@@ -490,17 +628,21 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
           <>
             Create payroll batch{slotCount > 1 ? 'es' : ''} for{' '}
             <strong>{formatMonthLabel}</strong>
-            {showScopeHint
-              ? ` across up to ${slotCount} branch/department slot${slotCount === 1 ? '' : 's'}`
+            {combinedBatch
+              ? ` combining ${branchIds.length} branches`
               : ''}
-            ? Existing batches for the same scope are skipped.
+            {isBulkDept ? ` across ${resolvedDeptCount} departments` : ''}
+            ? Existing non-draft batches for the same home branch and department are skipped.
           </>
         }
         details={
           <ul className="list-disc pl-4 space-y-1 text-sm">
             <li>Draft payouts are created from current rules and delivered orders</li>
             <li>You can review and adjust before submitting to HR</li>
-            {includeContractors ? <li>Contractors will be included in this run</li> : null}
+            {includeContractors ? <li>Agency contractors will be included in this run</li> : null}
+            {combinedBatch ? (
+              <li>Staff from all selected branches go into one batch per department</li>
+            ) : null}
           </ul>
         }
         confirmLabel="Generate"

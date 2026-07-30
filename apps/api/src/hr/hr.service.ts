@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { eq, and, or, desc, gte, lte, isNull, count, sum, inArray, sql, exists } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -29,6 +29,8 @@ import { PayrollMetricsService } from './payroll-metrics.service';
 
 @Injectable()
 export class HrService {
+  private readonly logger = new Logger(HrService.name);
+
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly events: EventsService,
@@ -688,9 +690,16 @@ export class HrService {
         end,
         groupId,
         user.primaryBranchId ?? null,
+        // Outlook must stay fast: HoCS/HoM team-DR fan-out was timing out the
+        // Remix earnings loader and leaving preview=null ("No estimate yet").
+        { skipTeamMetrics: true },
       );
     } catch (err) {
       computeError = err instanceof Error ? err.message : 'Payroll formula failed';
+      this.logger.warn(
+        `previewPayout compute failed for staff=${staffId}: ${computeError}`,
+        err instanceof Error ? err.stack : undefined,
+      );
     }
 
     // Staff with no resolvable plan still get their real order metrics shown.
@@ -709,6 +718,8 @@ export class HrService {
       }
     }
     const deliveredCount = metrics?.deliveredCount ?? 0;
+    const deliveredCarryOverCount = metrics?.deliveredCarryOverCount ?? 0;
+    const deliveredCohortCount = metrics?.deliveredCohortCount ?? 0;
     const totalOrders = metrics?.totalOrders ?? 0;
     const returnedCount = metrics?.returnedCount ?? 0;
     const deliveryRate = metrics?.individualDr ?? 0;
@@ -782,6 +793,10 @@ export class HrService {
       role: user.role,
       planName,
       deliveredCount,
+      /** Slice of deliveredCount generated before this period; included in per-order bonus. */
+      deliveredCarryOverCount,
+      /** Delivered orders whose created_at falls in this period (DR numerator). */
+      deliveredCohortCount,
       totalOrders,
       returnedCount,
       deliveryRate,

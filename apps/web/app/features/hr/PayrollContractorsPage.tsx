@@ -81,6 +81,8 @@ export function PayrollContractorsPage({
       const haystack = [
         c.name,
         c.jobTitle,
+        c.payRoleName,
+        c.formulaName,
         c.bankName,
         c.accountName,
         c.accountNumber,
@@ -116,10 +118,62 @@ export function PayrollContractorsPage({
         render: (row) => <span className="text-app-fg-muted">{row.jobTitle || 'Not set'}</span>,
       },
       {
+        key: 'formula',
+        header: 'Payroll formula',
+        render: (row) => (
+          <div className="min-w-0">
+            <p className="text-sm text-app-fg truncate">
+              {row.formulaName || row.payRoleName || 'Not assigned'}
+            </p>
+            {row.formulaName && row.payRoleName ? (
+              <p className="text-xs text-app-fg-muted truncate">{row.payRoleName}</p>
+            ) : null}
+          </div>
+        ),
+      },
+      {
         key: 'fee',
         header: 'Monthly fee',
         align: 'right',
-        render: (row) => <NairaPrice amount={Number(row.monthlyFee)} />,
+        render: (row) => (
+          <div className="text-right">
+            <NairaPrice amount={Number(row.monthlyFee)} />
+            <p className="text-[11px] text-app-fg-muted mt-0.5">Gross</p>
+          </div>
+        ),
+      },
+      {
+        key: 'paye',
+        header: 'Est. PAYE',
+        align: 'right',
+        render: (row) => {
+          const paye = Number(row.estimatedPaye ?? 0);
+          const none = (row.taxStatus ?? 'GROSS_NO_DEDUCTION') === 'GROSS_NO_DEDUCTION';
+          return (
+            <div className="text-right">
+              <span className="text-sm text-app-fg">
+                {none || paye <= 0 ? '₦0' : <NairaPrice amount={paye} />}
+              </span>
+              <p className="text-[11px] text-app-fg-muted mt-0.5">
+                {none
+                  ? 'No deduction'
+                  : row.taxStatus === 'EMPLOYER_SUBSIDIZED_PAYE'
+                    ? 'Subsidized'
+                    : 'Standard'}
+              </p>
+            </div>
+          );
+        },
+      },
+      {
+        key: 'net',
+        header: 'Est. net',
+        align: 'right',
+        render: (row) => (
+          <NairaPrice
+            amount={Number(row.estimatedNet ?? Number(row.monthlyFee) - Number(row.estimatedPaye ?? 0))}
+          />
+        ),
       },
       {
         key: 'bank',
@@ -153,6 +207,18 @@ export function PayrollContractorsPage({
     () => contractors.reduce((sum, c) => sum + Number(c.monthlyFee), 0),
     [contractors],
   );
+  const monthlyNet = useMemo(
+    () =>
+      contractors.reduce(
+        (sum, c) => sum + Number(c.estimatedNet ?? Number(c.monthlyFee) - Number(c.estimatedPaye ?? 0)),
+        0,
+      ),
+    [contractors],
+  );
+  const monthlyPaye = useMemo(
+    () => contractors.reduce((sum, c) => sum + Number(c.estimatedPaye ?? 0), 0),
+    [contractors],
+  );
 
   // Headcount per job title so HR sees role coverage without counting rows.
   const jobTitleBreakdown = useMemo(() => {
@@ -181,7 +247,7 @@ export function PayrollContractorsPage({
       <PageHeader
         title="Contractors"
         mobileInlineActions
-        description="External agency contractors on fixed monthly fees (no PAYE)."
+        description="External agency contractors on fixed monthly fees. Est. PAYE and net use the company tax bands and each contractor tax status."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Filters"
@@ -252,8 +318,16 @@ export function PayrollContractorsPage({
             value: contractors.length,
           },
           {
-            label: 'Monthly cost',
+            label: 'Monthly gross',
             value: <NairaPrice amount={monthlyCost} />,
+          },
+          {
+            label: 'Est. PAYE',
+            value: <NairaPrice amount={monthlyPaye} />,
+          },
+          {
+            label: 'Est. net',
+            value: <NairaPrice amount={monthlyNet} />,
           },
           ...jobTitleBreakdown.map(([title, n]) => ({
             label: title,
@@ -272,7 +346,7 @@ export function PayrollContractorsPage({
             <PageSearchControl
               value={search}
               onApply={setSearch}
-              placeholder="Search by name, job title, or bank"
+              placeholder="Search by name, job title, formula, or bank"
               title="Search contractors"
             />
           }
@@ -319,10 +393,32 @@ export function PayrollContractorsPage({
                     {row.jobTitle || 'Contractor'}
                   </p>
                 </div>
-                <span className="text-sm font-semibold text-app-fg">
-                  <NairaPrice amount={Number(row.monthlyFee)} />
-                </span>
+                <div className="text-right">
+                  <p className="text-sm font-semibold text-app-fg">
+                    <NairaPrice
+                      amount={Number(
+                        row.estimatedNet ?? Number(row.monthlyFee) - Number(row.estimatedPaye ?? 0),
+                      )}
+                    />
+                  </p>
+                  <p className="text-[11px] text-app-fg-muted mt-0.5">
+                    Net · fee <NairaPrice amount={Number(row.monthlyFee)} />
+                  </p>
+                </div>
               </div>
+              <p className="text-xs text-app-fg-muted">
+                PAYE:{' '}
+                {(row.taxStatus ?? 'GROSS_NO_DEDUCTION') === 'GROSS_NO_DEDUCTION' ||
+                Number(row.estimatedPaye ?? 0) <= 0 ? (
+                  '₦0 (no deduction)'
+                ) : (
+                  <NairaPrice amount={Number(row.estimatedPaye)} />
+                )}
+              </p>
+              <p className="text-xs text-app-fg-muted">
+                {row.formulaName || row.payRoleName || 'No payroll formula'}
+                {row.formulaName && row.payRoleName ? ` · ${row.payRoleName}` : ''}
+              </p>
               <p className="text-xs text-app-fg-muted">
                 {row.bankName ?? 'Bank not set'}
                 {row.accountNumber ? ` · ${row.accountNumber}` : ''}
@@ -405,7 +501,7 @@ function ContractorModal({
               { value: '', label: 'Not linked' },
               ...payRoles.map((r) => ({ value: r.id, label: r.name })),
             ]}
-            hint="Counts this contractor in the pay role's headcount on Payroll Config."
+            hint="Links this contractor to a pay role for headcount. Set tax status below for PAYE on the fee."
           />
         ) : null}
         <div>
@@ -416,6 +512,17 @@ function ContractorModal({
             defaultValue={contractor ? String(Number(contractor.monthlyFee)) : ''}
           />
         </div>
+        <FormSelect
+          label="Tax status"
+          name="taxStatus"
+          defaultValue={contractor?.taxStatus ?? 'GROSS_NO_DEDUCTION'}
+          options={[
+            { value: 'GROSS_NO_DEDUCTION', label: 'Gross (no deduction)' },
+            { value: 'STANDARD_PAYE', label: 'Standard PAYE' },
+            { value: 'EMPLOYER_SUBSIDIZED_PAYE', label: 'Employer subsidized PAYE' },
+          ]}
+          hint="Applied to the monthly fee when contractor lines are included in a payroll batch."
+        />
         <BankSelect
           id={isEdit ? `contractor-bank-${contractor.id}` : 'contractor-bank-new'}
           defaultBankName={contractor?.bankName}

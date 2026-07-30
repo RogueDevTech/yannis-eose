@@ -98,13 +98,19 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'previewBatch') {
     const rawMonth = formData.get('periodMonth')?.toString() ?? '';
     const periodMonth = normalizePeriodMonth(rawMonth);
+    const branchIds = Array.from(formData.getAll('branchIds'))
+      .map((v) => v.toString().trim())
+      .filter(Boolean);
+    const branchId = formData.get('branchId')?.toString() || branchIds[0] || '';
     const res = await apiRequest<unknown>('/trpc/hr.previewBatch', {
       method: 'POST',
       cookie,
       body: {
-        branchId: formData.get('branchId')?.toString() ?? '',
+        branchId,
         department: formData.get('department')?.toString() ?? '',
         periodMonth,
+        scopeType: branchIds.length > 1 ? 'BRANCHES' : 'DEPARTMENT',
+        scopeBranchIds: branchIds.length > 0 ? branchIds : undefined,
       },
     });
     if (!res.ok) {
@@ -120,13 +126,19 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'generateBatch') {
     const rawMonth = formData.get('periodMonth')?.toString() ?? '';
     const periodMonth = normalizePeriodMonth(rawMonth);
+    const branchIds = Array.from(formData.getAll('branchIds'))
+      .map((v) => v.toString().trim())
+      .filter(Boolean);
+    const branchId = formData.get('branchId')?.toString() || branchIds[0] || '';
     const res = await apiRequest<unknown>('/trpc/hr.generateBatch', {
       method: 'POST',
       cookie,
       body: {
-        branchId: formData.get('branchId')?.toString() ?? '',
+        branchId,
         department: formData.get('department')?.toString() ?? '',
         periodMonth,
+        scopeType: branchIds.length > 1 ? 'BRANCHES' : 'DEPARTMENT',
+        scopeBranchIds: branchIds.length > 0 ? branchIds : undefined,
         includeContractors: formData.get('includeContractors') === 'on',
         runLabel: formData.get('runLabel')?.toString() || undefined,
       },
@@ -162,7 +174,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const res = await apiRequest<unknown>('/trpc/hr.generateBatchesBulk', {
       method: 'POST',
       cookie,
-      body: { branchIds, departments, periodMonth },
+      body: {
+        branchIds,
+        departments,
+        periodMonth,
+        combineBranches: formData.get('combineBranches') === 'on' || branchIds.length > 1,
+        includeContractors: formData.get('includeContractors') === 'on',
+        runLabel: formData.get('runLabel')?.toString() || undefined,
+      },
     });
     if (!res.ok) {
       return json(

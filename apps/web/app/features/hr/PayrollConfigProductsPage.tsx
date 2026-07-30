@@ -47,14 +47,20 @@ function formatEffective(from: string, to: string | null): string {
 
 export function PayrollConfigProductsPage({ configs, products = [], canWrite, createOpen, onCreateClose }: PayrollConfigProductsPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const deleteFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
   const surface = useFetcherActionSurface(fetcher);
   const [editConfig, setEditConfig] = useState<ProductTierConfig | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ProductTierConfig | null>(null);
   const isCreateOpen = showCreate || !!createOpen;
 
   useFetcherToast(fetcher.data, {
     successMessage: 'Product tier config saved',
     skipErrorToast: showCreate || !!editConfig,
+  });
+  useFetcherToast(deleteFetcher.data, {
+    successMessage: 'Product tier config deleted',
+    skipErrorToast: !!deleteTarget,
   });
 
   const handleSaveSuccess = useCallback(() => {
@@ -62,6 +68,7 @@ export function PayrollConfigProductsPage({ configs, products = [], canWrite, cr
     setEditConfig(null);
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleSaveSuccess, { intent: 'saveProductTierConfig' });
+  useCloseOnFetcherSuccess(deleteFetcher, () => setDeleteTarget(null), { intent: 'deleteProductTierConfig' });
 
   const columns: CompactTableColumn<ProductTierConfig>[] = useMemo(
     () => [
@@ -103,14 +110,22 @@ export function PayrollConfigProductsPage({ configs, products = [], canWrite, cr
         align: 'right',
         tight: true,
         hideable: false,
-        render: (row) =>
-          canWrite ? (
-            <CompactTableActionButton tone="brand" onClick={() => setEditConfig(row)}>
-              Edit
-            </CompactTableActionButton>
-          ) : (
-            <CompactTableActionButton onClick={() => setEditConfig(row)}>View</CompactTableActionButton>
-          ),
+        render: (row) => (
+          <div className="flex items-center justify-end gap-3">
+            {canWrite ? (
+              <CompactTableActionButton tone="brand" onClick={() => setEditConfig(row)}>
+                Edit
+              </CompactTableActionButton>
+            ) : (
+              <CompactTableActionButton onClick={() => setEditConfig(row)}>View</CompactTableActionButton>
+            )}
+            {canWrite ? (
+              <CompactTableActionButton tone="danger" onClick={() => setDeleteTarget(row)}>
+                Delete
+              </CompactTableActionButton>
+            ) : null}
+          </div>
+        ),
       },
     ],
     [canWrite],
@@ -136,19 +151,35 @@ export function PayrollConfigProductsPage({ configs, products = [], canWrite, cr
           emptyTitle="No configs"
           emptyDescription=""
           renderMobileCard={(row) => (
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-semibold text-app-fg leading-snug">{row.productName}</p>
-                {!row.active ? (
-                  <span className="badge-danger text-2xs">Inactive</span>
-                ) : null}
-              </div>
-              <p className="text-xs text-app-fg-muted">
-                {row.tierRows.length} {row.tierRows.length === 1 ? 'tier' : 'tiers'}
-              </p>
-              <p className="text-xs text-app-fg-muted truncate">
-                {formatEffective(row.effectiveFrom, row.effectiveTo)}
-              </p>
+            <div className="-mx-3 -my-2.5 space-y-2 px-3 py-2.5">
+              <button
+                type="button"
+                className="block w-full space-y-1 text-left"
+                onClick={() => setEditConfig(row)}
+              >
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-app-fg leading-snug">{row.productName}</p>
+                  {!row.active ? (
+                    <span className="badge-danger text-2xs">Inactive</span>
+                  ) : null}
+                </div>
+                <p className="text-xs text-app-fg-muted">
+                  {row.tierRows.length} {row.tierRows.length === 1 ? 'tier' : 'tiers'}
+                </p>
+                <p className="text-xs text-app-fg-muted truncate">
+                  {formatEffective(row.effectiveFrom, row.effectiveTo)}
+                </p>
+              </button>
+              {canWrite ? (
+                <div className="flex justify-end gap-3">
+                  <CompactTableActionButton tone="brand" onClick={() => setEditConfig(row)}>
+                    Edit
+                  </CompactTableActionButton>
+                  <CompactTableActionButton tone="danger" onClick={() => setDeleteTarget(row)}>
+                    Delete
+                  </CompactTableActionButton>
+                </div>
+              ) : null}
             </div>
           )}
         />
@@ -170,6 +201,48 @@ export function PayrollConfigProductsPage({ configs, products = [], canWrite, cr
           }}
         />
       )}
+
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => {
+          if (deleteFetcher.state !== 'idle') return;
+          setDeleteTarget(null);
+        }}
+        maxWidth="max-w-sm"
+        contentClassName="p-6 space-y-4"
+      >
+        <h3 className="text-lg font-semibold text-app-fg">Delete product tier</h3>
+        <p className="text-sm text-app-fg-muted">
+          Delete <strong className="text-app-fg">{deleteTarget?.productName}</strong>? This cannot be
+          undone. Payroll formulas that use per-product bonuses will stop applying this config.
+        </p>
+        {deleteFetcher.data?.error ? (
+          <p className="text-sm text-danger-600 dark:text-danger-400">{deleteFetcher.data.error}</p>
+        ) : null}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button
+            variant="secondary"
+            disabled={deleteFetcher.state !== 'idle'}
+            onClick={() => setDeleteTarget(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            loading={deleteFetcher.state !== 'idle'}
+            loadingText="Deleting…"
+            onClick={() => {
+              if (!deleteTarget) return;
+              deleteFetcher.submit(
+                { intent: 'deleteProductTierConfig', configId: deleteTarget.id },
+                { method: 'post' },
+              );
+            }}
+          >
+            Delete
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

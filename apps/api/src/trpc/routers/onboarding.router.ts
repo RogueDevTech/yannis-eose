@@ -62,7 +62,7 @@ export const onboardingRouter = router({
     return getService().updateProfile(ctx.user.id, input, ctx.user);
   }),
 
-  /** Legacy shape — only succeeds when `userId` is the authenticated user (same as `update`). */
+  /** HR/admin update of any staff member's onboarding (requires hr.onboarding.write). */
   hrUpdate: authedProcedure.input(hrUpdateOnboardingSchema).mutation(async ({ input, ctx }) => {
     const { userId, ...patch } = input;
     return getService().updateProfile(userId, patch, ctx.user);

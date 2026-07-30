@@ -5000,6 +5000,7 @@ export class MarketingService {
         deliveredOrders: 0,
         deliveredThisMonth: 0,
         deliveredRevenue: 0,
+        deliveredRevenueBreakdown: { funnel: 0, cart: 0 },
         confirmedOrders: 0,
         confirmationRate: 0,
         cpa: 0,
@@ -5318,9 +5319,10 @@ export class MarketingService {
     const totalSpend = approvedSpend + pendingSpend;
     const cartDelivered = cartDeliveredRows[0]?.deliveredCount ?? 0;
     const cartRevenue = cartDeliveredRows[0]?.deliveredRevenue ?? 0;
+    const funnelRevenue = Number(deliveredRevenueRows[0]?.total ?? 0);
     const totalOrders = (totalOrdersRows[0]?.count ?? 0) + cartDelivered;
     const deliveredOrders = (deliveredOrdersRows[0]?.count ?? 0) + cartDelivered;
-    const deliveredRevenue = Number(deliveredRevenueRows[0]?.total ?? 0) + cartRevenue;
+    const deliveredRevenue = funnelRevenue + cartRevenue;
     const confirmedOrders = (confirmedOrdersRows[0]?.count ?? 0) + cartDelivered;
     const confirmationRate = totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0;
     // Carry-over-inclusive delivered count (by delivered_at). Additive/display-only.
@@ -5338,6 +5340,11 @@ export class MarketingService {
       // Display-only — intentionally NOT used in deliveryRate/cpa/roas below.
       deliveredThisMonth,
       deliveredRevenue,
+      /** Pieces of `deliveredRevenue` for CEO hero breakdown modals. */
+      deliveredRevenueBreakdown: {
+        funnel: funnelRevenue,
+        cart: cartRevenue,
+      },
       confirmedOrders,
       confirmationRate,
       // CPA uses approved spend only — pending spend is unverified and would
