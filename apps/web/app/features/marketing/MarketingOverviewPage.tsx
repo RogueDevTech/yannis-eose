@@ -341,9 +341,21 @@ export function MarketingOverviewPage({
   const statItems: OverviewStatStripItem[] = [
     {
       label: 'Ad Spend',
-      value: formatNaira(Math.round(metrics.totalSpend)),
+      value: formatNaira(Math.round(metrics.approvedSpend ?? metrics.totalSpend)),
       valueClassName: 'text-app-fg',
+      title:
+        (metrics.pendingSpend ?? 0) > 0
+          ? `Approved ad spend (basis for CPA/ROAS). Pending unapproved: ${formatNaira(Math.round(metrics.pendingSpend ?? 0))}`
+          : 'Approved ad spend (basis for CPA/ROAS)',
     },
+    ...((metrics.pendingSpend ?? 0) > 0
+      ? [{
+          label: 'Pending Spend',
+          value: formatNaira(Math.round(metrics.pendingSpend ?? 0)),
+          valueClassName: 'text-warning-600 dark:text-warning-400',
+          title: 'Unapproved ad spend: excluded from CPA and ROAS',
+        }]
+      : []),
     ...((metrics.otherExpenses ?? 0) > 0
       ? [{
           label: 'Other Expenses',

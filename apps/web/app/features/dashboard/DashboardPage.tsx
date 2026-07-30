@@ -724,7 +724,16 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
             valueClassName: 'text-success-600 dark:text-success-400',
             title: 'Carry-over delivered: orders delivered this period but generated in a prior month. Does not affect Delivery Rate.',
           },
-          { label: 'Ad Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg', to: '/admin/marketing/expenses' },
+          {
+            label: 'Ad Spend',
+            value: naira(Math.round(metrics.approvedSpend ?? metrics.totalSpend)),
+            valueClassName: 'text-app-fg',
+            to: '/admin/marketing/expenses',
+            title:
+              (metrics.pendingSpend ?? 0) > 0
+                ? `Approved ad spend (basis for CPA/ROAS). Pending unapproved: ${naira(Math.round(metrics.pendingSpend ?? 0))}`
+                : 'Approved ad spend (basis for CPA/ROAS)',
+          },
         ]}
       />
       <FunnelBreakdownModal
