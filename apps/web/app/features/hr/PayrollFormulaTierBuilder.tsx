@@ -93,6 +93,82 @@ const OPERATOR_OPTIONS = [
 
 type BaseTier = NonNullable<PayrollFormula['baseSalaryTiers']>[number];
 type BonusTier = NonNullable<PayrollFormula['bonusTiers']>[number];
+type TierCondition = NonNullable<BonusTier['extraConditions']>[number];
+
+function emptyCondition(): TierCondition {
+  return { metric: 'CPA', operator: 'LT', threshold: 0 };
+}
+
+/**
+ * Extra AND-conditions for a tier. Renders below the primary metric row so a tier
+ * can require, e.g., `DR% >= 85 AND CPA < 1000` before it pays. All conditions
+ * (primary + these) must pass. Empty by default — no visual change for tiers that
+ * only use one metric.
+ */
+function TierExtraConditions({
+  conditions,
+  disabled,
+  onChange,
+}: {
+  conditions: TierCondition[] | undefined;
+  disabled?: boolean;
+  onChange: (next: TierCondition[]) => void;
+}) {
+  const list = conditions ?? [];
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      {list.map((cond, ci) => (
+        <div key={`cond-${ci}`} className="flex items-center gap-1.5">
+          <span className="text-micro font-semibold uppercase tracking-wide text-app-fg-muted shrink-0 w-8">and</span>
+          <MetricQuickSelect
+            value={cond.metric}
+            disabled={disabled}
+            onChange={(metric) =>
+              onChange(list.map((c, i) => (i === ci ? { ...c, metric: metric as TierCondition['metric'] } : c)))
+            }
+          />
+          <FormSelect
+            value={cond.operator}
+            disabled={disabled}
+            onChange={(e) =>
+              onChange(list.map((c, i) => (i === ci ? { ...c, operator: e.target.value as TierCondition['operator'] } : c)))
+            }
+            options={OPERATOR_OPTIONS}
+            wrapperClassName="min-w-[130px]"
+          />
+          <TextInput
+            type="number"
+            value={String(cond.threshold)}
+            disabled={disabled}
+            onChange={(e) =>
+              onChange(list.map((c, i) => (i === ci ? { ...c, threshold: Number(e.target.value) } : c)))
+            }
+            className="w-[90px]"
+          />
+          {!disabled && (
+            <button
+              type="button"
+              onClick={() => onChange(list.filter((_, i) => i !== ci))}
+              className="text-danger-600 hover:text-danger-500 text-lg leading-none"
+              aria-label="Remove condition"
+            >
+              &times;
+            </button>
+          )}
+        </div>
+      ))}
+      {!disabled && list.length < 4 && (
+        <button
+          type="button"
+          onClick={() => onChange([...list, emptyCondition()])}
+          className="text-xs font-medium text-brand-600 hover:text-brand-500 dark:text-brand-400"
+        >
+          + AND condition
+        </button>
+      )}
+    </div>
+  );
+}
 
 export interface FormulaPreviewResult {
   formulaResult: {
@@ -178,9 +254,15 @@ export function PayrollFormulaTierBuilder({
 
   /** Which sample inputs to show: driven only by metrics/kinds currently on the form. */
   const sampleFields = useMemo(() => {
+    // Include both each tier's primary metric and any AND extra-condition metrics,
+    // so e.g. a DR tier with a `CPA < 1000` extra condition surfaces the CPA input.
+    const tierMetrics = (t: BaseTier | BonusTier) => [
+      t.metric,
+      ...(t.extraConditions ?? []).map((c) => c.metric),
+    ];
     const usedMetrics = new Set([
-      ...baseTiers.map((t) => t.metric),
-      ...bonusTiers.map((t) => t.metric),
+      ...baseTiers.flatMap(tierMetrics),
+      ...bonusTiers.flatMap(tierMetrics),
     ]);
     return {
       individualDr: usedMetrics.has('INDIVIDUAL_DR'),
@@ -278,6 +360,11 @@ export function PayrollFormulaTierBuilder({
                     <td className="px-1 py-0.5 text-xs font-semibold text-app-fg-muted tabular-nums">{idx + 1}</td>
                     <td className="px-1 py-0.5">
                       <MetricQuickSelect value={tier.metric} disabled={!canWrite} onChange={(metric) => setBaseTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, metric: metric as BaseTier['metric'] } : r)))} />
+                      <TierExtraConditions
+                        conditions={tier.extraConditions}
+                        disabled={!canWrite}
+                        onChange={(next) => setBaseTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, extraConditions: next.length ? next : undefined } : r)))}
+                      />
                     </td>
                     <td className="px-1 py-0.5">
                       <FormSelect value={tier.operator} disabled={!canWrite} onChange={(e) => setBaseTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, operator: e.target.value as BaseTier['operator'] } : r)))} options={OPERATOR_OPTIONS} />
@@ -335,6 +422,11 @@ export function PayrollFormulaTierBuilder({
                     <td className="px-1 py-0.5 text-xs font-semibold text-app-fg-muted tabular-nums">{idx + 1}</td>
                     <td className="px-1 py-0.5">
                       <MetricQuickSelect value={tier.metric} disabled={!canWrite} onChange={(metric) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, metric: metric as BonusTier['metric'] } : r)))} />
+                      <TierExtraConditions
+                        conditions={tier.extraConditions}
+                        disabled={!canWrite}
+                        onChange={(next) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, extraConditions: next.length ? next : undefined } : r)))}
+                      />
                     </td>
                     <td className="px-1 py-0.5">
                       <FormSelect value={tier.operator} disabled={!canWrite} onChange={(e) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, operator: e.target.value as BonusTier['operator'] } : r)))} options={OPERATOR_OPTIONS} />

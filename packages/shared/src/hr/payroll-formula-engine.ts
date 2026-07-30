@@ -71,11 +71,49 @@ function passesCondition(
   }
 }
 
+/**
+ * A tier matches only when its primary condition AND every extra condition pass.
+ * Extra conditions (optional) are ANDed with the primary one, e.g. a tier that
+ * requires `DR% >= 85` AND `CPA < 1000`. Tiers with no `extraConditions` behave
+ * exactly as a single-condition tier (backward compatible).
+ */
+function tierMatches(
+  tier: {
+    metric: string;
+    operator: 'GTE' | 'GT' | 'LTE' | 'LT' | 'EQ';
+    threshold: number;
+    extraConditions?: Array<{ metric: string; operator: 'GTE' | 'GT' | 'LTE' | 'LT' | 'EQ'; threshold: number }>;
+  },
+  formula: PayrollFormula,
+  metrics: PayrollMetrics,
+): boolean {
+  if (!passesCondition(tier.metric, tier.operator, tier.threshold, formula, metrics)) return false;
+  for (const cond of tier.extraConditions ?? []) {
+    if (!passesCondition(cond.metric, cond.operator, cond.threshold, formula, metrics)) return false;
+  }
+  return true;
+}
+
+/** Human-readable summary of a tier's conditions for breakdown labels. */
+function tierConditionLabel(tier: {
+  metric: string;
+  operator: 'GTE' | 'GT' | 'LTE' | 'LT' | 'EQ';
+  threshold: number;
+  extraConditions?: Array<{ metric: string; operator: 'GTE' | 'GT' | 'LTE' | 'LT' | 'EQ'; threshold: number }>;
+}): string {
+  const opSym: Record<string, string> = { GTE: '≥', GT: '>', LTE: '≤', LT: '<', EQ: '=' };
+  const parts = [`${tier.metric} ${opSym[tier.operator] ?? tier.operator} ${tier.threshold}`];
+  for (const c of tier.extraConditions ?? []) {
+    parts.push(`${c.metric} ${opSym[c.operator] ?? c.operator} ${c.threshold}`);
+  }
+  return parts.join(' & ');
+}
+
 function resolveBaseSalary(formula: PayrollFormula, metrics: PayrollMetrics): number {
   if (formula.baseSalaryTiers?.length) {
     const sorted = [...formula.baseSalaryTiers].sort((a, b) => b.threshold - a.threshold);
     for (const tier of sorted) {
-      if (passesCondition(tier.metric, tier.operator, tier.threshold, formula, metrics)) {
+      if (tierMatches(tier, formula, metrics)) {
         return tier.amount;
       }
     }
@@ -104,13 +142,13 @@ function resolveBonusFromTiers(
 
   const sorted = [...tiers].sort((a, b) => b.threshold - a.threshold);
   for (const tier of sorted) {
-    if (passesCondition(tier.metric, tier.operator, tier.threshold, formula, metrics)) {
+    if (tierMatches(tier, formula, metrics)) {
       if (tier.kind === 'FLAT') {
         flatBonus = tier.amount;
-        lines.push({ label: `${labelPrefix} ${tier.metric} ≥ ${tier.threshold}%`, amount: tier.amount });
+        lines.push({ label: `${labelPrefix} ${tierConditionLabel(tier)}`, amount: tier.amount });
       } else {
         const orderBonus = deliveredCount * tier.amount;
-        lines.push({ label: `${labelPrefix} ${tier.metric} tier @ ₦${tier.amount}/order × ${deliveredCount}`, amount: orderBonus });
+        lines.push({ label: `${labelPrefix} ${tierConditionLabel(tier)} @ ₦${tier.amount}/order × ${deliveredCount}`, amount: orderBonus });
         return { bonus: flatBonus + orderBonus, lines };
       }
       break;
