@@ -2943,8 +2943,6 @@ function UnifiedReceivedTable({
           const isTransfer = entry.entryType === 'transfer';
           const canMarkReceived =
             isTransfer && entry.status === 'SENT' && entry.receiverId === currentUserId;
-          const canResend =
-            !isTransfer && entry.status === 'PENDING' && entry.requesterId === currentUserId;
           const entryLabel = isTransfer
             ? (entry.senderName ?? userNameById(entry.senderId) ?? 'Transfer')
             : (entry.requesterName ?? 'Request');
@@ -2975,31 +2973,6 @@ function UnifiedReceivedTable({
                   tone: 'danger',
                   onClick: () => onOpenNotReceived(transferToFundingRecord(entry as DistributingFundingTransferEntry)),
                   show: canMarkReceived,
-                },
-                {
-                  key: 'resend',
-                  kind: 'custom',
-                  show: canResend,
-                  render: ({ close }) => (
-                    <fetcher.Form method="post" className="w-full" onSubmit={() => close()}>
-                      <input type="hidden" name="intent" value="resendFundingRequest" />
-                      <input type="hidden" name="requestId" value={entry.id} />
-                      <button
-                        type="submit"
-                        className="flex w-full items-center justify-between rounded-xl border bg-app-elevated px-4 py-3.5 text-left text-sm font-semibold transition-colors text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-900/20 border-brand-200 dark:border-brand-800 md:hidden"
-                      >
-                        Resend
-                      </button>
-                      <CompactTableActionButton
-                        type="submit"
-                        tone="brand"
-                        className="hidden md:inline-flex"
-                        title="Send a reminder (once every 30 minutes)"
-                      >
-                        Resend
-                      </CompactTableActionButton>
-                    </fetcher.Form>
-                  ),
                 },
               ]}
             />

@@ -127,11 +127,13 @@ export function WarehousesPage({
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
+  const [coordinates, setCoordinates] = useState('');
 
   // Edit modal — `editTarget` is the warehouse row being edited (null = closed).
   const [editTarget, setEditTarget] = useState<WarehouseRow | null>(null);
   const [editName, setEditName] = useState('');
   const [editAddress, setEditAddress] = useState('');
+  const [editCoordinates, setEditCoordinates] = useState('');
 
   useFetcherToast(fetcher.data, {
     successMessage: 'Warehouse saved',
@@ -147,6 +149,7 @@ export function WarehousesPage({
     setShowCreate(false);
     setName('');
     setAddress('');
+    setCoordinates('');
     setEditTarget(null);
   });
 
@@ -206,6 +209,7 @@ export function WarehousesPage({
     fd.set('intent', 'createWarehouse');
     fd.set('name', name.trim());
     fd.set('address', address.trim());
+    if (coordinates.trim()) fd.set('coordinates', coordinates.trim());
     fetcher.submit(fd, { method: 'post', action: '/admin/inventory/warehouses' });
   };
 
@@ -213,6 +217,7 @@ export function WarehousesPage({
     setEditTarget(w);
     setEditName(w.name);
     setEditAddress(w.address);
+    setEditCoordinates(w.coordinates ?? '');
   };
 
   const submitEdit = () => {
@@ -222,6 +227,7 @@ export function WarehousesPage({
     fd.set('warehouseId', editTarget.id);
     fd.set('name', editName.trim());
     fd.set('address', editAddress.trim());
+    fd.set('coordinates', editCoordinates.trim());
     fetcher.submit(fd, { method: 'post', action: '/admin/inventory/warehouses' });
   };
 
@@ -684,6 +690,14 @@ export function WarehousesPage({
               rows={2}
             />
           </FormField>
+          <FormField label="Coordinates (optional)" hint="e.g. 6.5244, 3.3792">
+            <TextInput
+              value={coordinates}
+              onChange={(e) => setCoordinates(e.target.value)}
+              maxLength={100}
+              placeholder="lat, lng"
+            />
+          </FormField>
           <div className="flex justify-end gap-2 pt-1">
             <Button
               type="button"
@@ -736,6 +750,14 @@ export function WarehousesPage({
               onChange={(e) => setEditAddress(e.target.value)}
               maxLength={500}
               rows={2}
+            />
+          </FormField>
+          <FormField label="Coordinates (optional)" hint="e.g. 6.5244, 3.3792">
+            <TextInput
+              value={editCoordinates}
+              onChange={(e) => setEditCoordinates(e.target.value)}
+              maxLength={100}
+              placeholder="lat, lng"
             />
           </FormField>
           <div className="flex justify-end gap-2 pt-1">

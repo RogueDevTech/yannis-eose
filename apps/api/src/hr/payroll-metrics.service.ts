@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { and, count, eq, gte, inArray, lte, or, sql, sum } from 'drizzle-orm';
+import { and, count, eq, gte, inArray, lt, lte, or, sql, sum } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type { PayrollMetrics } from '@yannis/shared';
@@ -26,7 +26,7 @@ export class PayrollMetricsService {
       eq(schema.orders.mediaBuyerId, input.staffId),
     );
 
-    const [deliveredRows, totalOrdersRows, deliveredCohortRows, returnedRows] = await Promise.all([
+    const [deliveredRows, totalOrdersRows, deliveredCohortRows, returnedRows, carryOverRows] = await Promise.all([
       tx
         .select({ count: count() })
         .from(schema.orders)
@@ -71,12 +71,31 @@ export class PayrollMetricsService {
             attribution,
           ),
         ),
+      // Carry-over delivered: DELIVERED/REMITTED this period (by delivered_at)
+      // whose order was GENERATED in a PRIOR period (created_at < periodStart).
+      // DISPLAY-ONLY — this is the "of which carried over" slice of deliveredCount.
+      // It is NOT fed into pay math, individualDr, or missingData. Commission
+      // already pays the full deliveredCount (by delivered_at); this just breaks
+      // out how much of it originated before the period.
+      tx
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(
+          and(
+            inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+            gte(schema.orders.deliveredAt, input.periodStart),
+            lte(schema.orders.deliveredAt, input.periodEnd),
+            lt(schema.orders.createdAt, input.periodStart),
+            attribution,
+          ),
+        ),
     ]);
 
     const deliveredCount = Number(deliveredRows[0]?.count ?? 0);
     const totalOrders = Number(totalOrdersRows[0]?.count ?? 0);
     const deliveredCohortCount = Number(deliveredCohortRows[0]?.count ?? 0);
     const returnedCount = Number(returnedRows[0]?.count ?? 0);
+    const deliveredCarryOverCount = Number(carryOverRows[0]?.count ?? 0);
     const individualDr = totalOrders > 0 ? (deliveredCohortCount / totalOrders) * 100 : 0;
 
     let teamDr: number | undefined;
@@ -108,6 +127,9 @@ export class PayrollMetricsService {
       cpa,
       deliveredCount,
       deliveredCohortCount,
+      // Display-only breakdown of deliveredCount: how many delivered this period
+      // were generated in a prior period. Not used in any pay/rate calculation.
+      deliveredCarryOverCount,
       totalOrders,
       returnedCount,
       deliveredByProduct,

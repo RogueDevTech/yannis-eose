@@ -1437,6 +1437,17 @@ export function MarketingAdSpendPage({
               />
               <p className="text-xs text-app-fg-muted mt-1">Mandatory. No screenshot, no log entry accepted.</p>
             </div>
+            <div className="sm:col-span-2">
+              <TextInput
+                label="Ad link (optional)"
+                id="marketing-adspend-create-ad-url"
+                name="adUrl"
+                type="url"
+                placeholder="https://..."
+                maxLength={500}
+              />
+              <p className="text-xs text-app-fg-muted mt-1">Link to the ad in Ads Manager or the platform.</p>
+            </div>
           </div>
 
           {formCampaignId && formProductId && formSpendDate && (

@@ -429,7 +429,9 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true, succeeded: data?.succeeded ?? 0, failed: data?.failed ?? 0 });
   }
 
-  if (intent === 'createOfflineOrder') {
+  // CreateOfflineOrderModal submits intent 'createOffline'; the legacy
+  // 'createOfflineOrder' name is kept for compatibility.
+  if (intent === 'createOffline' || intent === 'createOfflineOrder') {
     const itemsRaw = formData.get('items')?.toString();
     let items: Array<{ productId: string; quantity: number; unitPrice: string; offerLabel?: string }>;
     try {
@@ -478,6 +480,16 @@ export async function action({ request }: ActionFunctionArgs) {
     if (customerEmail) body.customerEmail = customerEmail;
     const totalAmount = formData.get('totalAmount')?.toString()?.trim();
     if (totalAmount) body.totalAmount = Number(totalAmount);
+    const offlineOrderCategory = formData.get('offlineOrderCategory')?.toString()?.trim();
+    if (offlineOrderCategory) body.offlineOrderCategory = offlineOrderCategory;
+    const customFieldsRaw = formData.get('customFields')?.toString();
+    if (customFieldsRaw) {
+      try {
+        body.customFields = JSON.parse(customFieldsRaw);
+      } catch { /* ignore invalid JSON */ }
+    }
+    const explicitBranchId = formData.get('branchId')?.toString()?.trim();
+    if (explicitBranchId) body.branchId = explicitBranchId;
 
     const res = await apiRequest<unknown>('/trpc/orders.createOffline', {
       method: 'POST',

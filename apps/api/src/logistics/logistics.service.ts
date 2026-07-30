@@ -1674,34 +1674,23 @@ export class LogisticsService {
         .where(eq(schema.transferRemittances.id, input.remittanceId));
 
       if (input.quantityReceived > 0) {
-        const destLevel = await tx
-          .select()
-          .from(schema.inventoryLevels)
-          .where(
-            and(
-              eq(schema.inventoryLevels.productId, found.productId),
-              eq(schema.inventoryLevels.locationId, found.toLocationId),
-            ),
-          )
-          .limit(1);
-
-        if (destLevel[0]) {
-          await tx
-            .update(schema.inventoryLevels)
-            .set({
-              stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantityReceived}`,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.inventoryLevels.id, destLevel[0].id));
-        } else {
-          await tx.insert(schema.inventoryLevels).values({
+        // Atomic upsert on the (product_id, location_id) unique index.
+        await tx
+          .insert(schema.inventoryLevels)
+          .values({
             productId: found.productId,
             locationId: found.toLocationId,
             stockCount: input.quantityReceived,
             reservedCount: 0,
             status: 'AVAILABLE',
+          })
+          .onConflictDoUpdate({
+            target: [schema.inventoryLevels.productId, schema.inventoryLevels.locationId],
+            set: {
+              stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantityReceived}`,
+              updatedAt: new Date(),
+            },
           });
-        }
 
         await tx.insert(schema.stockMovements).values({
           productId: found.productId,

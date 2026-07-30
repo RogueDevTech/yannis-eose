@@ -85,6 +85,9 @@ export const payrollMetricsSchema = z.object({
   cpa: z.number().min(0).nullable().optional(),
   deliveredCount: z.number().int().min(0),
   deliveredCohortCount: z.number().int().min(0).optional(),
+  // Display-only: of deliveredCount, how many were generated in a prior period
+  // (carry-over). Never used in pay math or any rate.
+  deliveredCarryOverCount: z.number().int().min(0).optional(),
   totalOrders: z.number().int().min(0),
   returnedCount: z.number().int().min(0).optional(),
   targetMet: z.boolean().optional(),
@@ -188,6 +191,7 @@ export const updatePayRoleSchema = createPayRoleSchema.partial().extend({
 export const createContractorSchema = z.object({
   name: z.string().min(2).max(200),
   jobTitle: z.string().max(200).optional(),
+  payRoleId: z.string().uuid().nullish(),
   branchId: z.string().uuid().nullish(),
   monthlyFee: z.coerce.number().min(0),
   bankName: z.string().optional(),

@@ -41,6 +41,7 @@ export interface PayrollContractorDetailPageProps {
   history: HistoryEntry[];
   actorNames: ActorMap;
   branches: BranchOption[];
+  payRoles?: Array<{ id: string; name: string }>;
   canWrite: boolean;
   filters: {
     startDate: string;
@@ -52,6 +53,7 @@ export interface PayrollContractorDetailPageProps {
 const FIELD_LABELS: Record<string, string> = {
   name: 'Name',
   job_title: 'Job title',
+  pay_role_id: 'Pay role',
   monthly_fee: 'Monthly fee',
   branch_id: 'Branch',
   bank_name: 'Bank',
@@ -277,6 +279,7 @@ export function PayrollContractorDetailPage({
   history,
   actorNames,
   branches,
+  payRoles = [],
   canWrite,
   filters,
 }: PayrollContractorDetailPageProps) {
@@ -625,6 +628,7 @@ export function PayrollContractorDetailPage({
         <EditContractorModal
           contractor={contractor}
           branches={branches}
+          payRoles={payRoles}
           submitting={fetcher.state === 'submitting'}
           error={surface.errorMatchingIntent('updateContractor') ?? undefined}
           fetcher={fetcher}
@@ -660,6 +664,7 @@ export function PayrollContractorDetailPage({
 function EditContractorModal({
   contractor,
   branches,
+  payRoles = [],
   submitting,
   error,
   fetcher,
@@ -667,6 +672,7 @@ function EditContractorModal({
 }: {
   contractor: PayrollContractor;
   branches: BranchOption[];
+  payRoles?: Array<{ id: string; name: string }>;
   submitting: boolean;
   error?: string;
   fetcher: ReturnType<typeof useFetcher>;
@@ -696,6 +702,18 @@ function EditContractorModal({
           placeholder="e.g. IT Support, Cleaning Services"
           defaultValue={contractor.jobTitle ?? ''}
         />
+        {payRoles.length > 0 ? (
+          <FormSelect
+            label="Pay role"
+            name="payRoleId"
+            defaultValue={contractor.payRoleId ?? ''}
+            options={[
+              { value: '', label: 'Not linked' },
+              ...payRoles.map((r) => ({ value: r.id, label: r.name })),
+            ]}
+            hint="Counts this contractor in the pay role's headcount on Payroll Config."
+          />
+        ) : null}
         <div>
           <label className="block text-sm font-medium text-app-fg-muted mb-1">Monthly fee (₦)</label>
           <AmountInput name="monthlyFee" className="input" defaultValue={String(Number(contractor.monthlyFee))} />

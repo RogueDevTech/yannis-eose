@@ -14,7 +14,7 @@ import {
   writeRemittanceBatchDraft,
   clearRemittanceBatch,
 } from '~/hooks/usePersistedRemittanceSelection';
-import type { EligibleOrder } from './CashRemittanceCreateModal';
+import type { EligibleOrder } from './eligible-order';
 
 type DuplicateWarning = {
   orderId: string;

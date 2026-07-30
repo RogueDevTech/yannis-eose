@@ -436,6 +436,7 @@ export async function action({ request }: ActionFunctionArgs) {
         items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, offerLabel: i.offerLabel })),
         totalAmount: parseFloat((form.get('totalAmount') as string) || '0') || undefined,
         ...(form.get('customFields') ? { customFields: JSON.parse(form.get('customFields') as string) } : {}),
+        ...(form.get('branchId')?.toString()?.trim() ? { branchId: form.get('branchId')!.toString().trim() } : {}),
       },
     });
     if (!res.ok) {
@@ -492,13 +493,50 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'bulkAssign') {
     await requirePermission(request, 'orders.bulkAssign');
     const orderIds = JSON.parse(form.get('orderIds') as string) as string[];
-    const csCloserId = form.get('csCloserId') as string;
+    // OrdersListPage submits csCloserIds (JSON array); accept the legacy
+    // singular key too. Mirrors admin.sales.orders._index.
+    const csCloserIdsRaw = form.get('csCloserIds')?.toString();
+    const csCloserIdSingle = (form.get('csCloserId') as string | null) ?? '';
+
+    let csCloserIds: string[] = [];
+    if (csCloserIdsRaw) {
+      try {
+        const parsed = JSON.parse(csCloserIdsRaw) as unknown;
+        if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string')) {
+          csCloserIds = parsed as string[];
+        }
+      } catch {
+        return json(
+          { success: false, error: 'Invalid closer selection', succeeded: 0, failed: orderIds.length },
+          { status: 400 },
+        );
+      }
+    }
+    if (csCloserIds.length === 0 && csCloserIdSingle) {
+      csCloserIds = [csCloserIdSingle];
+    }
+    if (csCloserIds.length === 0) {
+      return json(
+        { success: false, error: 'Pick at least one closer', succeeded: 0, failed: orderIds.length },
+        { status: 400 },
+      );
+    }
+
+    const explicitBranchId = form.get('branchId')?.toString() || undefined;
+    const reason = form.get('reason')?.toString()?.trim() || undefined;
+    const body: Record<string, unknown> =
+      csCloserIds.length === 1
+        ? { orderIds, csCloserId: csCloserIds[0] }
+        : { orderIds, csCloserIds };
+    if (explicitBranchId) body.branchId = explicitBranchId;
+    if (reason) body.reason = reason;
+
     const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number } } }>(
-      '/trpc/orders.bulkReassign',
+      '/trpc/orders.bulkAssignToCS',
       {
         method: 'POST',
         cookie,
-        body: { orderIds, csCloserId },
+        body,
         timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
       },
     );

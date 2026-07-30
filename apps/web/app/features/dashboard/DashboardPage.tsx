@@ -3,6 +3,7 @@ import { Link, useSearchParams } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
+import { carryOverTileLabel } from '~/features/marketing/carry-over-label';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageHeader } from '~/components/ui/page-header';
@@ -168,6 +169,7 @@ export function DashboardPage({
           naira={naira}
           userId={userId}
           isMarketingTeamSupervisor={isMarketingTeamSupervisor}
+          filters={dateFilters}
         />
       )}
       {hasFinanceAccess({ role: role ?? '' }) && !isAdminLevel({ role: role ?? '' }) && <FinanceDashboard data={data} naira={naira} />}
@@ -621,7 +623,7 @@ function CSDashboard({
 
 // ── Marketing Dashboard ──────────────────────────────────
 
-function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBuyerId, cartOrdersCounts, marketingStatusCounts }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; abandonedCartCount?: number; mediaBuyerId?: string; cartOrdersCounts?: Record<string, number>; marketingStatusCounts?: Record<string, number> }) {
+function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBuyerId, cartOrdersCounts, marketingStatusCounts, startDate, endDate }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; abandonedCartCount?: number; mediaBuyerId?: string; cartOrdersCounts?: Record<string, number>; marketingStatusCounts?: Record<string, number>; startDate?: string; endDate?: string }) {
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   /** Append `&mediaBuyerId=…` when viewing personal performance so the orders
    *  page lands on the "My Orders" tab with the correct filter pre-selected. */
@@ -716,6 +718,14 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
             title: 'Captured carts not yet recovered (browsing + dropped off)',
             to: q('/admin/marketing/orders?fromCart=1'),
           },
+          {
+            // Carry-over only: orders delivered this period but generated in a
+            // prior month. Display-only; excluded from DR above.
+            label: carryOverTileLabel(startDate, endDate),
+            value: (metrics.deliveredThisMonth ?? 0).toString(),
+            valueClassName: 'text-success-600 dark:text-success-400',
+            title: 'Carry-over delivered: orders delivered this period but generated in a prior month. Does not affect Delivery Rate.',
+          },
           { label: 'Ad Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg', to: '/admin/marketing/expenses' },
         ]}
       />
@@ -770,12 +780,14 @@ function MarketingDashboard({
   naira,
   userId,
   isMarketingTeamSupervisor = false,
+  filters,
 }: {
   data: DashboardPageData;
   role: string;
   naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string;
   userId?: string;
   isMarketingTeamSupervisor?: boolean;
+  filters?: { startDate: string; endDate: string; periodAllTime?: boolean };
 }) {
   const isHeadOfMarketing = role === 'HEAD_OF_MARKETING';
   const showsTeamManagementCard = isHeadOfMarketing || isMarketingTeamSupervisor;
@@ -800,11 +812,11 @@ function MarketingDashboard({
           onChange={(v) => setViewTab(v as 'personal' | 'team')}
         />
 
-        <DashboardSupervisorMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
+        <DashboardSupervisorMetricsSection fallback={<OverviewStatStripSkeleton count={11} />}>
           {(teamMetrics, personalMetrics, abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => {
             const isPersonal = viewTab === 'personal';
             const active = isPersonal ? (personalMetrics ?? teamMetrics) : teamMetrics;
-            return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={isPersonal ? 0 : abandonedCartCount} cartOrdersCounts={isPersonal ? undefined : cartOrdersCounts} marketingStatusCounts={isPersonal ? undefined : marketingStatusCounts} mediaBuyerId={isPersonal ? userId : undefined} />;
+            return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={isPersonal ? 0 : abandonedCartCount} cartOrdersCounts={isPersonal ? undefined : cartOrdersCounts} marketingStatusCounts={isPersonal ? undefined : marketingStatusCounts} mediaBuyerId={isPersonal ? userId : undefined} startDate={filters?.startDate} endDate={filters?.endDate} />;
           }}
         </DashboardSupervisorMetricsSection>
 
@@ -842,8 +854,8 @@ function MarketingDashboard({
   if (isHeadOfMarketing) {
     return (
       <>
-        <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
-          {(metrics, abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} />}
+        <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={11} />}>
+          {(metrics, abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} startDate={filters?.startDate} endDate={filters?.endDate} />}
         </DashboardMetricsSection>
 
         <div className="card">
@@ -875,8 +887,8 @@ function MarketingDashboard({
   // Non-supervisor MB: original layout
   return (
     <>
-      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
-        {(metrics, abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} />}
+      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={11} />}>
+        {(metrics, abandonedCartCount, cartOrdersCounts, marketingStatusCounts) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} cartOrdersCounts={cartOrdersCounts} marketingStatusCounts={marketingStatusCounts} startDate={filters?.startDate} endDate={filters?.endDate} />}
       </DashboardMetricsSection>
 
       {showsTeamManagementCard && (

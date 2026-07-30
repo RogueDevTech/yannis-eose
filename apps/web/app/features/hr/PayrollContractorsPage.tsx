@@ -29,6 +29,7 @@ interface PayrollContractorsPageProps {
   contractors: PayrollContractor[];
   statusFilter: 'active' | 'inactive';
   canWrite: boolean;
+  payRoles?: Array<{ id: string; name: string }>;
 }
 
 const STATUS_OPTIONS = [
@@ -40,6 +41,7 @@ export function PayrollContractorsPage({
   contractors,
   statusFilter,
   canWrite,
+  payRoles = [],
 }: PayrollContractorsPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const surface = useFetcherActionSurface(fetcher);
@@ -152,6 +154,16 @@ export function PayrollContractorsPage({
     [contractors],
   );
 
+  // Headcount per job title so HR sees role coverage without counting rows.
+  const jobTitleBreakdown = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of contractors) {
+      const title = c.jobTitle?.trim() || 'No job title';
+      counts.set(title, (counts.get(title) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [contractors]);
+
   const renderStatusSelect = (opts?: { className?: string; wrapperClassName?: string }) => (
     <FormSelect
       label=""
@@ -243,6 +255,10 @@ export function PayrollContractorsPage({
             label: 'Monthly cost',
             value: <NairaPrice amount={monthlyCost} />,
           },
+          ...jobTitleBreakdown.map(([title, n]) => ({
+            label: title,
+            value: n,
+          })),
         ]}
       />
 
@@ -319,6 +335,7 @@ export function PayrollContractorsPage({
       {showCreate && (
         <ContractorModal
           contractor={null}
+          payRoles={payRoles}
           submitting={fetcher.state === 'submitting'}
           error={surface.errorMatchingIntent('createContractor') ?? undefined}
           fetcher={fetcher}
@@ -338,12 +355,14 @@ function ContractorModal({
   error,
   fetcher,
   onClose,
+  payRoles = [],
 }: {
   contractor: PayrollContractor | null;
   submitting: boolean;
   error?: string;
   fetcher: ReturnType<typeof useFetcher>;
   onClose: () => void;
+  payRoles?: Array<{ id: string; name: string }>;
 }) {
   const isEdit = !!contractor;
   return (
@@ -377,6 +396,18 @@ function ContractorModal({
           placeholder="e.g. IT Support, Cleaning Services"
           defaultValue={contractor?.jobTitle ?? ''}
         />
+        {payRoles.length > 0 ? (
+          <FormSelect
+            label="Pay role"
+            name="payRoleId"
+            defaultValue={contractor?.payRoleId ?? ''}
+            options={[
+              { value: '', label: 'Not linked' },
+              ...payRoles.map((r) => ({ value: r.id, label: r.name })),
+            ]}
+            hint="Counts this contractor in the pay role's headcount on Payroll Config."
+          />
+        ) : null}
         <div>
           <label className="block text-sm font-medium text-app-fg mb-1">Monthly fee</label>
           <AmountInput

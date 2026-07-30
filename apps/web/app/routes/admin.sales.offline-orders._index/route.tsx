@@ -449,6 +449,7 @@ export async function action({ request }: ActionFunctionArgs) {
         totalAmount: parseFloat((form.get('totalAmount') as string) || '0') || undefined,
         offlineOrderCategory: (form.get('offlineOrderCategory') as string) || undefined,
         ...(form.get('customFields') ? { customFields: JSON.parse(form.get('customFields') as string) } : {}),
+        ...(form.get('branchId')?.toString()?.trim() ? { branchId: form.get('branchId')!.toString().trim() } : {}),
       },
     });
     if (!res.ok) {

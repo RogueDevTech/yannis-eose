@@ -227,6 +227,8 @@ export interface StaffPayoutEstimate {
   deliveryRate: number;
   baseSalary: number;
   performanceBonus: number;
+  allowancesTotal?: number;
+  addOnsTotal?: number;
   penalties: number;
   clawbacks: number;
   deductionsTotal: number;

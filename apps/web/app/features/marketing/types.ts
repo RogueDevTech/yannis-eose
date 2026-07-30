@@ -38,6 +38,8 @@ export interface FundingBalanceRow {
   confirmedOrders?: number;
   /** Orders delivered + remitted */
   deliveredOrders?: number;
+  /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
+  deliveredThisMonth?: number;
   /** AD_SPEND-only total (drives CPA/ROAS), when merged from leaderboard */
   adSpend?: number;
   /** Ad spend / total orders (period), when merged from leaderboard */
@@ -60,6 +62,8 @@ export interface MarketingTeamOverviewStats {
   totalDisbursed: number;
   mbUnspentBalance: number;
   mbCount: number;
+  /** Sum of carry-over delivered across all members: delivered this period but generated in a prior month. Display-only. */
+  totalCarryOver?: number;
 }
 
 /** Rolled-up metrics for one marketing squad (`branch_teams` MARKETING). */
@@ -73,6 +77,8 @@ export interface MarketingSquadOverview {
   totalOrders: number;
   confirmedOrders: number;
   deliveredOrders: number;
+  /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
+  deliveredThisMonth?: number;
   confirmationRate: number | null;
   deliveryRate: number | null;
   totalAdSpend: number;
@@ -195,6 +201,8 @@ export interface Metrics {
   otherExpenses?: number;
   totalOrders: number;
   deliveredOrders: number;
+  /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
+  deliveredThisMonth?: number;
   deliveredRevenue: number;
   confirmedOrders: number;
   confirmationRate: number;
@@ -210,6 +218,8 @@ export interface LeaderboardEntry {
   totalSpend: number;
   totalOrders: number;
   deliveredOrders: number;
+  /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
+  deliveredThisMonth?: number;
   deliveredRevenue: number;
   confirmedOrders: number;
   confirmationRate: number;

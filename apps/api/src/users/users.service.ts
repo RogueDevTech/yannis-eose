@@ -1232,27 +1232,32 @@ export class UsersService {
         )`,
       );
     } else if (skipBranchScopeButGroupScoped) {
-      // Company-wide list but group-scoped: show ONLY users who have at least
-      // one branch in the active group. Org-wide users (no branch membership)
-      // are excluded when a group is active — they are cross-group and cannot
-      // be tied to a specific company. CEO directive: complete group isolation.
+      // Company-wide list but group-scoped: users in the active company via
+      // user_branches OR primary_branch_id. Primary-only memberships used to be
+      // dropped when user_branches rows were missing, under-counting CS Closers.
       conditions.push(
-        inArray(
-          schema.users.id,
-          this.db
-            .select({ userId: schema.userBranches.userId })
-            .from(schema.userBranches)
-            .where(inArray(schema.userBranches.branchId, effectiveBranchIds!)),
-        ),
+        or(
+          inArray(
+            schema.users.id,
+            this.db
+              .select({ userId: schema.userBranches.userId })
+              .from(schema.userBranches)
+              .where(inArray(schema.userBranches.branchId, effectiveBranchIds!)),
+          ),
+          inArray(schema.users.primaryBranchId, effectiveBranchIds!),
+        )!,
       );
     } else if (branchFilter) {
       conditions.push(
-        sql<boolean>`EXISTS (
-          SELECT 1
-          FROM user_branches ub
-          WHERE ub.user_id = ${schema.users.id}
-            AND ub.branch_id = ${branchFilter}
-        )`,
+        or(
+          sql<boolean>`EXISTS (
+            SELECT 1
+            FROM user_branches ub
+            WHERE ub.user_id = ${schema.users.id}
+              AND ub.branch_id = ${branchFilter}
+          )`,
+          eq(schema.users.primaryBranchId, branchFilter),
+        )!,
       );
     } else if (
       !skipBranchScope &&
@@ -1261,16 +1266,19 @@ export class UsersService {
       effectiveBranchIds.length > 0
     ) {
       // Company-group isolation: user has no specific branch selected but is
-      // scoped to a set of branches via effectiveBranchIds. Only show users
-      // who have at least one branch in the active group — complete isolation.
+      // scoped to a set of branches via effectiveBranchIds. Include primary
+      // branch as well as user_branches membership.
       conditions.push(
-        inArray(
-          schema.users.id,
-          this.db
-            .select({ userId: schema.userBranches.userId })
-            .from(schema.userBranches)
-            .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
-        ),
+        or(
+          inArray(
+            schema.users.id,
+            this.db
+              .select({ userId: schema.userBranches.userId })
+              .from(schema.userBranches)
+              .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
+          ),
+          inArray(schema.users.primaryBranchId, effectiveBranchIds),
+        )!,
       );
     } else if (
       !skipBranchScope &&

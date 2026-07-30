@@ -6,7 +6,7 @@
     "./trpc": "./src/trpc/app-router.d.ts"
   },
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "NODE_OPTIONS=--max-old-space-size=4096 nest start --watch",
     "start:dev": "nest start --watch",
     "build": "nest build",
     "start": "node dist/main",

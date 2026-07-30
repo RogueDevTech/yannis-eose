@@ -563,7 +563,9 @@ export async function action({ request }: ActionFunctionArgs) {
         customerEmail: paymentMethod === 'PAY_ONLINE' ? customerEmail : undefined,
         items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, offerLabel: i.offerLabel })),
         totalAmount: parseFloat((form.get('totalAmount') as string) || '0') || undefined,
+        offlineOrderCategory: (form.get('offlineOrderCategory') as string) || undefined,
         ...(form.get('customFields') ? { customFields: JSON.parse(form.get('customFields') as string) } : {}),
+        ...(form.get('branchId')?.toString()?.trim() ? { branchId: form.get('branchId')!.toString().trim() } : {}),
       },
     });
     if (!res.ok) {

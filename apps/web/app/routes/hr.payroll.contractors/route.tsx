@@ -26,20 +26,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
   const statusParam = url.searchParams.get('status');
-  const statusFilter = statusParam === 'inactive' ? 'inactive' : 'active';
+  const statusFilter: 'active' | 'inactive' = statusParam === 'inactive' ? 'inactive' : 'active';
 
   const pageData = (async () => {
     const listInput = encodeURIComponent(
       JSON.stringify({ active: statusFilter === 'active' }),
     );
-    const contractorsRes = await apiRequest<unknown>(
-      `/trpc/hr.listContractors?input=${listInput}`,
-      { method: 'GET', cookie },
-    );
+    const [contractorsRes, payRolesRes] = await Promise.all([
+      apiRequest<unknown>(`/trpc/hr.listContractors?input=${listInput}`, { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/hr.listPayRoles', { method: 'GET', cookie }),
+    ]);
 
     const contractors = contractorsRes.ok
       ? (((contractorsRes.data as { result?: { data?: PayrollContractor[] } })?.result?.data) ?? [])
       : [];
+    const payRolesRaw = payRolesRes.ok
+      ? (((payRolesRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data) ?? [])
+      : [];
+    const payRoles = payRolesRaw.map((r) => ({ id: r.id, name: r.name }));
 
     const perms = user.permissions ?? [];
     const canWrite =
@@ -48,7 +52,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       user.role === 'ADMIN' ||
       user.role === 'HR_MANAGER';
 
-    return { contractors, statusFilter, canWrite };
+    return { contractors, statusFilter, canWrite, payRoles };
   })();
 
   return defer({ pageData });
@@ -74,6 +78,8 @@ export async function action({ request }: ActionFunctionArgs) {
     };
     const jobTitle = pickOptional('jobTitle');
     if (jobTitle) body.jobTitle = jobTitle;
+    const payRoleId = pickOptional('payRoleId');
+    if (payRoleId) body.payRoleId = payRoleId;
     const bankName = pickOptional('bankName');
     if (bankName) body.bankName = bankName;
     const bankCode = pickOptional('bankCode');
@@ -107,6 +113,7 @@ export default function PayrollContractorsRoute() {
           contractors={data.contractors}
           statusFilter={data.statusFilter}
           canWrite={data.canWrite}
+          payRoles={data.payRoles}
         />
       )}
     </CachedAwait>

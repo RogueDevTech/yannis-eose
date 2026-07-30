@@ -10,7 +10,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeliveryRemittancesPage } from '~/features/finance/DeliveryRemittancesPage';
 import { DeliveryRemittancesLoadingShell } from '~/features/finance/FinanceDeferredLoadingShells';
 import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemittancesPage';
-import type { EligibleOrder } from '~/features/finance/CashRemittanceCreateModal';
+import type { EligibleOrder } from '~/features/finance/eligible-order';
 
 const DEFAULT_ELIGIBLE_PAGE_SIZE = 500;
 

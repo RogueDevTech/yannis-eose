@@ -88,7 +88,6 @@ const EXTRA_ROLES: ExtraRole[] = [
 /** system role → pay role name (canonical seed names + extras above). */
 const ROLE_TO_PAY_ROLE: Record<string, string> = {
   CS_CLOSER: 'Sales Closer (CS)',
-  MEDIA_BUYER: 'Remote Media Buyer',
   HEAD_OF_CS: 'Head of CS',
   HEAD_OF_MARKETING: 'Manager / Head of Marketing (runs ads)',
   HEAD_OF_LOGISTICS: 'Head of Logistics',

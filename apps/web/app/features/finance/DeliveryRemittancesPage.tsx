@@ -35,7 +35,7 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { useNavigate } from '@remix-run/react';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
-import type { EligibleOrder } from './CashRemittanceCreateModal';
+import type { EligibleOrder } from './eligible-order';
 import { CashStatementExportModal } from './CashStatementExportModal';
 
 export interface DeliveryRemittanceListItem {

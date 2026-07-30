@@ -24,6 +24,7 @@ import {
 import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { DateTimeText } from '~/components/ui/date-time-text';
+import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -91,6 +92,21 @@ export function ExpenseSubmissionsPage({
   const submitFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const approveFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const rejectFetcher = useFetcher<{ success?: boolean; error?: string }>();
+
+  // Org-wide users (All Branches) must pick which branch the expense belongs
+  // to; branch-scoped users auto-proceed with their active branch.
+  const { ensureBranchForAction } = useBranchScopeActionGuard();
+  const handleSubmitExpense = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    ensureBranchForAction({
+      actionLabel: 'submitting this expense',
+      onProceed: (branchId) => {
+        fd.set('branchId', branchId);
+        submitFetcher.submit(fd, { method: 'post' });
+      },
+    });
+  };
 
   useFetcherToast(submitFetcher.data);
   useFetcherToast(approveFetcher.data);
@@ -465,7 +481,7 @@ export function ExpenseSubmissionsPage({
         <Modal open onClose={() => setShowSubmitModal(false)} maxWidth="max-w-lg">
           <div className="p-6 space-y-4">
             <h2 className="text-lg font-semibold text-app-fg">Submit Expense</h2>
-            <submitFetcher.Form method="post" className="space-y-3">
+            <submitFetcher.Form method="post" className="space-y-3" onSubmit={handleSubmitExpense}>
               <input type="hidden" name="intent" value="submitExpense" />
 
               <TextInput label="Vendor Name" name="vendorName" required />

@@ -111,6 +111,11 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
         render: (row) => (
           <span className={`text-sm tabular-nums ${(row.staffCount ?? 0) > 0 ? 'font-medium text-app-fg' : 'text-app-fg-muted'}`}>
             {row.staffCount ?? 0}
+            {(row.contractorCount ?? 0) > 0 ? (
+              <span className="ml-1 text-2xs font-normal text-app-fg-muted">
+                ({row.contractorCount} contract)
+              </span>
+            ) : null}
           </span>
         ),
       },

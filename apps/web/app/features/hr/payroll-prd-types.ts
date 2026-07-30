@@ -23,7 +23,10 @@ export type PayRole = {
   perProductBonus: boolean;
   commissionPlanId: string | null;
   active: boolean;
+  /** Combined headcount: active employees + active contractors on this role. */
   staffCount?: number;
+  employeeCount?: number;
+  contractorCount?: number;
 };
 
 export type PayeBandRow = {
@@ -131,6 +134,7 @@ export type PayrollContractor = {
   id: string;
   name: string;
   jobTitle: string | null;
+  payRoleId?: string | null;
   branchId: string | null;
   monthlyFee: string;
   bankName: string | null;

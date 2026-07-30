@@ -198,6 +198,16 @@ function MarketingSquadOverviewCard({
             </span>
           }
         />
+        {squad.deliveredThisMonth != null && (
+          <MarketingTeamCompactStat
+            label="Carry-over"
+            value={
+              <span className="tabular-nums text-success-600 dark:text-success-400">
+                {squad.deliveredThisMonth.toLocaleString()}
+              </span>
+            }
+          />
+        )}
       </div>
 
       <p className="text-xs font-medium text-brand-600 dark:text-brand-400">View members →</p>
@@ -353,6 +363,16 @@ function MarketingTeamMemberCard({
             )
           }
         />
+        {member.deliveredThisMonth != null && (
+          <MarketingTeamCompactStat
+            label="Carry-over"
+            value={
+              <span className="tabular-nums text-success-600 dark:text-success-400">
+                {member.deliveredThisMonth.toLocaleString()}
+              </span>
+            }
+          />
+        )}
         <MarketingTeamCompactStat
           label="Profit"
           value={member.profitabilityScore != null ? member.profitabilityScore.toFixed(1) : '—'}
@@ -836,6 +856,20 @@ export function MarketingTeamPage({
         },
       },
       {
+        // Carry-over delivered: delivered this period but generated in a prior
+        // month. Display-only column; does not affect the Delivered % above.
+        key: 'totalDelivered',
+        header: 'Carry-over',
+        align: 'right',
+        nowrap: true,
+        render: (m) =>
+          m.deliveredThisMonth != null ? (
+            <span className="tabular-nums text-success-600 dark:text-success-400">{m.deliveredThisMonth.toLocaleString()}</span>
+          ) : (
+            '—'
+          ),
+      },
+      {
         key: 'profitability',
         header: 'Profit',
         align: 'right',
@@ -994,6 +1028,14 @@ export function MarketingTeamPage({
                 ? `${Math.round(overviewStats.averageDeliveryRate)}%`
                 : '\u2014',
             valueClassName: deliveryRateColorClass(overviewStats.averageDeliveryRate),
+          },
+          {
+            // Sum of carry-over across all members: delivered this period but
+            // generated in a prior month. Display-only; not in any rate above.
+            label: 'Total Carry-over',
+            value: (overviewStats.totalCarryOver ?? 0).toLocaleString(),
+            valueClassName: 'text-success-600 dark:text-success-400',
+            title: 'Total orders delivered this period but generated in a prior month, across all members. Does not affect Avg Delivery %.',
           },
           {
             label: 'Total Ad Spend',

@@ -42,6 +42,7 @@ function rollupSquadOverview(
   let totalOrders = 0;
   let confirmedOrders = 0;
   let deliveredOrders = 0;
+  let deliveredThisMonth = 0;
   let totalAdSpend = 0;
   let totalBalance = 0;
   let totalReceived = 0;
@@ -53,6 +54,7 @@ function rollupSquadOverview(
     totalOrders += m.totalOrders ?? 0;
     confirmedOrders += m.confirmedOrders ?? 0;
     deliveredOrders += m.deliveredOrders ?? 0;
+    deliveredThisMonth += m.deliveredThisMonth ?? 0;
     totalAdSpend += m.adSpend ?? 0;
     totalBalance += Number(m.balance) || 0;
     totalReceived += Number(m.totalReceived) || 0;
@@ -71,6 +73,7 @@ function rollupSquadOverview(
     totalOrders,
     confirmedOrders,
     deliveredOrders,
+    deliveredThisMonth,
     confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : null,
     deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : null,
     totalAdSpend,
@@ -94,6 +97,7 @@ function computeMarketingTeamOverview(
     totalOrders: number;
     confirmedOrders: number;
     deliveredOrders: number;
+    deliveredThisMonth?: number;
   }>,
 ): MarketingTeamOverviewStats {
   const mbMembers = teamMembers.filter((m) => m.role === 'MEDIA_BUYER');
@@ -107,6 +111,7 @@ function computeMarketingTeamOverview(
       acc.confirmedOrders += entry.confirmedOrders;
       acc.deliveredOrders += entry.deliveredOrders;
       acc.totalAdSpend += entry.totalSpend;
+      acc.totalCarryOver += entry.deliveredThisMonth ?? 0;
       if (activeMemberIds.has(entry.mediaBuyerId)) {
         acc.activeOrders += entry.totalOrders;
       } else {
@@ -114,7 +119,7 @@ function computeMarketingTeamOverview(
       }
       return acc;
     },
-    { totalOrders: 0, confirmedOrders: 0, deliveredOrders: 0, totalAdSpend: 0, activeOrders: 0, inactiveOrders: 0 },
+    { totalOrders: 0, confirmedOrders: 0, deliveredOrders: 0, totalAdSpend: 0, totalCarryOver: 0, activeOrders: 0, inactiveOrders: 0 },
   );
 
   const totalDisbursed = mbMembers.reduce((s, m) => s + Number(m.totalReceived), 0);
@@ -136,6 +141,7 @@ function computeMarketingTeamOverview(
     totalDisbursed,
     mbUnspentBalance,
     mbCount: mbMembers.length,
+    totalCarryOver: totals.totalCarryOver,
   };
 }
 
@@ -218,6 +224,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         totalOrders: e.totalOrders,
         confirmedOrders: e.confirmedOrders,
         deliveredOrders: e.deliveredOrders,
+        deliveredThisMonth: e.deliveredThisMonth,
         confirmationRate: e.confirmationRate,
         deliveryRate: e.deliveryRate,
         cpa: e.cpa,
@@ -238,6 +245,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           totalOrders: metrics.totalOrders,
           confirmedOrders: metrics.confirmedOrders,
           deliveredOrders: metrics.deliveredOrders,
+          deliveredThisMonth: metrics.deliveredThisMonth,
           confirmationRate: metrics.confirmationRate,
           deliveryRate: metrics.deliveryRate,
           cpa: metrics.cpa,
@@ -263,6 +271,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalOrders: e.totalOrders,
       confirmedOrders: e.confirmedOrders,
       deliveredOrders: e.deliveredOrders,
+      deliveredThisMonth: e.deliveredThisMonth,
       confirmationRate: e.confirmationRate,
       deliveryRate: e.deliveryRate,
       cpa: e.cpa,

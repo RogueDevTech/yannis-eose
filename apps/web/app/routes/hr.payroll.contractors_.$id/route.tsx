@@ -68,7 +68,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       JSON.stringify({ tableName: 'payroll_contractors', recordId: contractorId, page: 1, limit: 40 }),
     );
 
-    const [contractorRes, payoutsRes, branchesRes, historyRes] = await Promise.all([
+    const [contractorRes, payoutsRes, branchesRes, historyRes, payRolesRes] = await Promise.all([
       apiRequest<unknown>(`/trpc/hr.getContractor?input=${contractorInput}`, { method: 'GET', cookie }),
       apiRequest<unknown>(`/trpc/hr.listContractorPayouts?input=${payoutsInput}`, {
         method: 'GET',
@@ -76,6 +76,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }),
       apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
       apiRequest<unknown>(`/trpc/audit.recordHistory?input=${historyInput}`, { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/hr.listPayRoles', { method: 'GET', cookie }),
     ]);
 
     if (!contractorRes.ok) throw new Response('Contractor not found', { status: 404 });
@@ -91,6 +92,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const branches = branchesRes.ok
       ? (((branchesRes.data as { result?: { data?: BranchOption[] } })?.result?.data) ?? [])
+      : [];
+
+    const payRoles = payRolesRes.ok
+      ? (((payRolesRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data) ?? []).map(
+          (r) => ({ id: r.id, name: r.name }),
+        )
       : [];
 
     let history = historyRes.ok
@@ -136,6 +143,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       history,
       actorNames,
       branches,
+      payRoles,
       canWrite,
       filters: {
         startDate: periodAllTime ? '' : startDate,
@@ -169,6 +177,10 @@ export async function action({ request }: ActionFunctionArgs) {
     if (name) body.name = name;
     const jobTitle = pickOptional('jobTitle');
     if (jobTitle !== undefined) body.jobTitle = jobTitle;
+    if (formData.has('payRoleId')) {
+      const payRoleId = formData.get('payRoleId')?.toString().trim();
+      body.payRoleId = payRoleId || null;
+    }
     const monthlyFee = formData.get('monthlyFee')?.toString();
     if (monthlyFee) body.monthlyFee = Number(monthlyFee);
     const branchId = formData.get('branchId')?.toString();
@@ -239,6 +251,7 @@ export default function PayrollContractorDetailRoute() {
           history={data.history}
           actorNames={data.actorNames ?? {}}
           branches={data.branches}
+          payRoles={data.payRoles}
           canWrite={data.canWrite}
           filters={data.filters}
         />

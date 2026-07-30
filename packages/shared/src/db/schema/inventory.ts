@@ -17,9 +17,11 @@ export const stockBatches = pgTable('stock_batches', {
   productId: uuid('product_id')
     .notNull()
     .references(() => products.id),
-  factoryCost: numeric('factory_cost', { precision: 12, scale: 2 }).notNull(),
-  landingCost: numeric('landing_cost', { precision: 12, scale: 2 }).notNull(),
-  totalLandedCost: numeric('total_landed_cost', { precision: 12, scale: 2 }).notNull(),
+  // 4dp since migration 0277: per-unit landing = line landing / qty, and 2dp
+  // storage left a rounding residue FIFO could never recover vs the GL.
+  factoryCost: numeric('factory_cost', { precision: 14, scale: 4 }).notNull(),
+  landingCost: numeric('landing_cost', { precision: 14, scale: 4 }).notNull(),
+  totalLandedCost: numeric('total_landed_cost', { precision: 14, scale: 4 }).notNull(),
   quantity: integer('quantity').notNull(),
   remainingQuantity: integer('remaining_quantity').notNull(),
   receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow().notNull(),

@@ -269,12 +269,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (intent === 'updatePayrollProfile') {
     const payRoleRaw = formData.get('payRoleId')?.toString() ?? '';
     const reportsRaw = formData.get('reportsToUserId')?.toString() ?? '';
+    const crmLinkedRaw = formData.get('crmLinked')?.toString();
     const res = await apiRequest<unknown>('/trpc/hr.updatePayrollProfile', {
       method: 'POST',
       cookie,
       body: {
         userId,
         payRoleId: payRoleRaw || null,
+        reportsToUserId: reportsRaw || null,
+        crmLinked: crmLinkedRaw === undefined ? undefined : crmLinkedRaw === 'true',
         employmentType: formData.get('employmentType')?.toString() ?? 'STAFF',
         salaryBasis: formData.get('salaryBasis')?.toString() ?? 'FORMULA_BASED',
         taxStatus: formData.get('taxStatus')?.toString() ?? 'STANDARD_PAYE',
@@ -525,12 +528,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (formData.has('payRoleId')) {
     const payRoleRaw = formData.get('payRoleId')?.toString() ?? '';
     const reportsRaw = formData.get('reportsToUserId')?.toString() ?? '';
+    const crmLinkedRaw = formData.get('crmLinked')?.toString();
     await apiRequest<unknown>('/trpc/hr.updatePayrollProfile', {
       method: 'POST',
       cookie,
       body: {
         userId,
         payRoleId: payRoleRaw || null,
+        reportsToUserId: reportsRaw || null,
+        crmLinked: crmLinkedRaw === undefined ? undefined : crmLinkedRaw === 'true',
         employmentType: formData.get('employmentType')?.toString() ?? 'STAFF',
         salaryBasis: formData.get('salaryBasis')?.toString() ?? 'FORMULA_BASED',
         taxStatus: formData.get('taxStatus')?.toString() ?? 'STANDARD_PAYE',

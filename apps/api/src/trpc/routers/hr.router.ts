@@ -584,6 +584,12 @@ export const hrRouter = router({
       return getPayrollConfigService().bulkAssignPayRole(input, ctx.user);
     }),
 
+  /** Restamp assigned staff onto FORMULA_BASED so Earnings matches Payroll Config bases. */
+  syncUsersToPayRoleBases: permissionProcedure('payroll.config.write')
+    .mutation(async ({ ctx }) => {
+      return getPayrollConfigService().syncUsersToPayRoleBases(ctx.user, ctx.activeGroupId);
+    }),
+
   payrollPageBundle: authedProcedure
     .input(listMonthlyPayrollsSchema.optional())
     .query(async ({ input, ctx }) => {
