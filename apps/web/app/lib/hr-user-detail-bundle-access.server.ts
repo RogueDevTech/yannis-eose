@@ -6,6 +6,7 @@ import {
   getSessionCookie,
 } from '~/lib/api.server';
 import { actorUserIdsMatch } from '~/lib/rbac';
+import { extractTrpc } from '~/lib/trpc-extract.server';
 import type { UserDetail } from '~/features/users/types';
 
 export async function authorizeUserDetailBundle(request: Request, userId: string) {
@@ -24,9 +25,8 @@ export async function authorizeUserDetailBundle(request: Request, userId: string
   if (!userRes.ok) {
     return { ok: false as const, response: json({ ok: false as const, error: 'User not found' }) };
   }
-  const profileUser =
-    (userRes.data as { result?: { data?: UserDetail } })?.result?.data ?? null;
-  if (!profileUser) {
+  const profileUser = extractTrpc<UserDetail | null>(userRes, null);
+  if (!profileUser?.id) {
     return { ok: false as const, response: json({ ok: false as const, error: 'User not found' }) };
   }
 

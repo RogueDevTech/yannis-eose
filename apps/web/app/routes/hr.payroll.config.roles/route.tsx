@@ -156,6 +156,25 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'deleteTaxBandConfig') {
+    const configId = formData.get('configId')?.toString();
+    if (!configId) {
+      return json({ error: 'Tax band config id is required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/hr.deleteTaxBandConfig', {
+      method: 'POST',
+      cookie,
+      body: { id: configId },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to delete tax band config') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true, message: 'Tax band config deleted' });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 

@@ -365,6 +365,8 @@ export interface UserDetailLoaderData {
   canReactivateDeactivatedStaff?: boolean;
   /** Same authority as API `users.deactivate` — show Deactivate on profile. */
   canDeactivateStaff?: boolean;
+  /** Same authority as API `users.create` / resend invite — show Delete user for PENDING only. */
+  canDeletePendingStaff?: boolean;
   isViewerHeadOfMarketing?: boolean;
   isViewerHeadOfCS?: boolean;
   /**

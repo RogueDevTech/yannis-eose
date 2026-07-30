@@ -2873,6 +2873,159 @@ export class UsersService {
   }
 
   /**
+   * Permanently delete a PENDING invite (never logged in).
+   * Removes invite-owned scaffolding, then the user row so the email can be re-invited.
+   * If any non-scaffolding FK still references the user, aborts with a clear error.
+   */
+  async deletePending(userId: string, actor: SessionUser) {
+    const permSet = new Set((actor.permissions ?? []).map((c) => canonicalPermissionCode(c)));
+    const can =
+      actor.role === 'SUPER_ADMIN' ||
+      actor.role === 'HR_MANAGER' ||
+      permSet.has(canonicalPermissionCode('users.create')) ||
+      permSet.has(canonicalPermissionCode('users.staff.create'));
+    if (!can) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Missing users.create permission.',
+      });
+    }
+    if (userId === actor.id) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Cannot delete your own account',
+      });
+    }
+
+    const existing = await this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        email: schema.users.email,
+        role: schema.users.role,
+        status: schema.users.status,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    const user = existing[0];
+    if (!user) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+    }
+    if (user.status !== 'PENDING') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Only pending invites can be deleted. Deactivate the user instead.',
+      });
+    }
+    if (actor.role !== 'SUPER_ADMIN' && isAdminLevelRole(user.role as string)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only SuperAdmin can delete admin-level pending invites.',
+      });
+    }
+
+    try {
+      await withActor(this.db, actor, async (tx) => {
+        // Soft-null optional actor refs that would otherwise block the delete.
+        await tx
+          .update(schema.users)
+          .set({ reportsToUserId: null, updatedAt: new Date() })
+          .where(eq(schema.users.reportsToUserId, userId));
+        await tx
+          .update(schema.userPermissions)
+          .set({ grantedBy: null })
+          .where(eq(schema.userPermissions.grantedBy, userId));
+
+        // Invite-owned scaffolding (safe for never-logged-in PENDING users).
+        await tx.delete(schema.authSessions).where(eq(schema.authSessions.userId, userId));
+        await tx.delete(schema.notifications).where(eq(schema.notifications.userId, userId));
+        await tx
+          .delete(schema.userFilterPreferences)
+          .where(eq(schema.userFilterPreferences.userId, userId));
+        await tx
+          .delete(schema.pushSubscriptions)
+          .where(eq(schema.pushSubscriptions.userId, userId));
+        await tx
+          .delete(schema.branchDepartmentMembers)
+          .where(eq(schema.branchDepartmentMembers.userId, userId));
+        await tx
+          .delete(schema.branchTeamMembers)
+          .where(eq(schema.branchTeamMembers.userId, userId));
+        await tx
+          .delete(schema.userProductAssignments)
+          .where(eq(schema.userProductAssignments.userId, userId));
+        await tx
+          .delete(schema.userPermissions)
+          .where(eq(schema.userPermissions.userId, userId));
+        await tx.delete(schema.userBranches).where(eq(schema.userBranches.userId, userId));
+        await tx
+          .delete(schema.emailChangeRequests)
+          .where(
+            or(
+              eq(schema.emailChangeRequests.userId, userId),
+              eq(schema.emailChangeRequests.requesterId, userId),
+            ),
+          );
+        await tx
+          .delete(schema.permissionRequests)
+          .where(
+            or(
+              eq(schema.permissionRequests.requesterId, userId),
+              eq(schema.permissionRequests.targetUserId, userId),
+            ),
+          );
+        await tx
+          .delete(schema.staffOnboarding)
+          .where(eq(schema.staffOnboarding.userId, userId));
+        await tx.delete(schema.aiUserApiKeys).where(eq(schema.aiUserApiKeys.userId, userId));
+        await tx.delete(schema.aiChatSessions).where(eq(schema.aiChatSessions.userId, userId));
+        await tx
+          .delete(schema.mirrorSessions)
+          .where(
+            or(
+              eq(schema.mirrorSessions.actorId, userId),
+              eq(schema.mirrorSessions.targetId, userId),
+            ),
+          );
+
+        const deleted = await tx
+          .delete(schema.users)
+          .where(and(eq(schema.users.id, userId), eq(schema.users.status, 'PENDING')))
+          .returning({ id: schema.users.id });
+
+        if (!deleted[0]) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'User is no longer pending and cannot be deleted.',
+          });
+        }
+      });
+    } catch (err) {
+      if (err instanceof TRPCError) throw err;
+      const code =
+        typeof err === 'object' && err && 'code' in err
+          ? String((err as { code: unknown }).code)
+          : '';
+      if (code === '23503') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message:
+            'This user cannot be deleted because they already have linked records. Deactivate instead.',
+        });
+      }
+      throw err;
+    }
+
+    await this.authService.killUserSessions(userId).catch(() => {});
+    void this.userBundleCache.invalidate(userId);
+
+    this.logger.log(`Deleted pending invite ${user.email} (${userId}) by ${actor.id}`);
+    return { success: true as const, id: userId, email: user.email, name: user.name };
+  }
+
+  /**
    * Get pending email change request for a user (SuperAdmin only).
    */
   async getPendingEmailChangeForUser(userId: string) {

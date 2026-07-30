@@ -21,6 +21,7 @@ import {
   updatePayRoleSchema,
   saveProductTierConfigSchema,
   saveTaxBandConfigSchema,
+  deleteTaxBandConfigSchema,
   createContractorSchema,
   updateContractorSchema,
   getContractorSchema,
@@ -31,6 +32,7 @@ import {
   payrollOnboardingActionSchema,
   updatePayrollProfileSchema,
   bulkAssignPayRoleSchema,
+  bulkAssignContractorsToPayRoleSchema,
   listPayslipsSchema,
   payrollRegisterSchema,
   payrollReportRangeSchema,
@@ -517,6 +519,12 @@ export const hrRouter = router({
       return getPayrollConfigService().saveTaxBandConfig(input, ctx.user, ctx.activeGroupId);
     }),
 
+  deleteTaxBandConfig: permissionProcedure('payroll.config.write')
+    .input(deleteTaxBandConfigSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().deleteTaxBandConfig(input, ctx.user, ctx.activeGroupId);
+    }),
+
   previewPaye: permissionProcedure('payroll.config.read')
     .input(previewPayeSchema)
     .query(async ({ input, ctx }) => {
@@ -582,6 +590,12 @@ export const hrRouter = router({
     .input(bulkAssignPayRoleSchema)
     .mutation(async ({ input, ctx }) => {
       return getPayrollConfigService().bulkAssignPayRole(input, ctx.user);
+    }),
+
+  bulkAssignContractorsToPayRole: permissionProcedure('payroll.config.write')
+    .input(bulkAssignContractorsToPayRoleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().bulkAssignContractorsToPayRole(input, ctx.user, ctx.activeGroupId);
     }),
 
   /** Restamp assigned staff onto FORMULA_BASED so Earnings matches Payroll Config bases. */

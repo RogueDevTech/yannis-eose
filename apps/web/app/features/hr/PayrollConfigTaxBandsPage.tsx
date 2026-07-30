@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { EmptyState } from '~/components/ui/empty-state';
+import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
 import {
   CompactTable,
@@ -30,14 +32,20 @@ function formatBandsSummary(bands: PayeBandRow[], threshold: string): string {
 }
 
 export function PayrollConfigTaxBandsPage({ configs, canWrite, createOpen, onCreateClose }: PayrollConfigTaxBandsPageProps) {
-  const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const fetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
+  const deleteFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
   const surface = useFetcherActionSurface(fetcher);
   const [showCreate, setShowCreate] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<TaxBandConfig | null>(null);
   const isCreateOpen = showCreate || !!createOpen;
 
   useFetcherToast(fetcher.data, {
     successMessage: 'Tax band config saved',
     skipErrorToast: isCreateOpen,
+  });
+  useFetcherToast(deleteFetcher.data, {
+    successMessage: 'Tax band config deleted',
+    skipErrorToast: !!deleteTarget,
   });
 
   const handleSaveSuccess = useCallback(() => {
@@ -45,6 +53,7 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite, createOpen, onCre
     onCreateClose?.();
   }, [onCreateClose]);
   useCloseOnFetcherSuccess(fetcher, handleSaveSuccess, { intent: 'saveTaxBandConfig' });
+  useCloseOnFetcherSuccess(deleteFetcher, () => setDeleteTarget(null), { intent: 'deleteTaxBandConfig' });
 
   const columns: CompactTableColumn<TaxBandConfig>[] = useMemo(
     () => [
@@ -98,13 +107,20 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite, createOpen, onCre
         tight: true,
         hideable: false,
         render: (row) => (
-          <CompactTableActionButton to={`/hr/payroll/config/tax-bands/${row.id}`} tone="brand">
-            View
-          </CompactTableActionButton>
+          <div className="flex items-center justify-end gap-3">
+            <CompactTableActionButton to={`/hr/payroll/config/tax-bands/${row.id}`} tone="brand">
+              View
+            </CompactTableActionButton>
+            {canWrite ? (
+              <CompactTableActionButton tone="danger" onClick={() => setDeleteTarget(row)}>
+                Delete
+              </CompactTableActionButton>
+            ) : null}
+          </div>
         ),
       },
     ],
-    [],
+    [canWrite],
   );
 
   return (
@@ -127,25 +143,34 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite, createOpen, onCre
           emptyTitle="No configs"
           emptyDescription=""
           renderMobileCard={(row) => (
-            <Link
-              to={`/hr/payroll/config/tax-bands/${row.id}`}
-              prefetch="intent"
-              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
-            >
-              <p className="text-sm font-semibold text-app-fg leading-snug">{row.label}</p>
-              <p className="text-xs text-app-fg-muted">
-                {row.bands.length} {row.bands.length === 1 ? 'band' : 'bands'} · Free ₦
-                {Number(row.taxFreeThreshold).toLocaleString('en-NG')}
-              </p>
-              <p className="text-xs text-app-fg-muted">
-                From{' '}
-                {new Date(row.effectiveFrom).toLocaleDateString('en-NG', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
-              </p>
-            </Link>
+            <div className="-mx-3 -my-2.5 space-y-2 px-3 py-2.5">
+              <Link
+                to={`/hr/payroll/config/tax-bands/${row.id}`}
+                prefetch="intent"
+                className="block space-y-1 text-left"
+              >
+                <p className="text-sm font-semibold text-app-fg leading-snug">{row.label}</p>
+                <p className="text-xs text-app-fg-muted">
+                  {row.bands.length} {row.bands.length === 1 ? 'band' : 'bands'} · Free ₦
+                  {Number(row.taxFreeThreshold).toLocaleString('en-NG')}
+                </p>
+                <p className="text-xs text-app-fg-muted">
+                  From{' '}
+                  {new Date(row.effectiveFrom).toLocaleDateString('en-NG', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })}
+                </p>
+              </Link>
+              {canWrite ? (
+                <div className="flex justify-end">
+                  <CompactTableActionButton tone="danger" onClick={() => setDeleteTarget(row)}>
+                    Delete
+                  </CompactTableActionButton>
+                </div>
+              ) : null}
+            </div>
           )}
         />
       )}
@@ -164,6 +189,48 @@ export function PayrollConfigTaxBandsPage({ configs, canWrite, createOpen, onCre
           }}
         />
       )}
+
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => {
+          if (deleteFetcher.state !== 'idle') return;
+          setDeleteTarget(null);
+        }}
+        maxWidth="max-w-sm"
+        contentClassName="p-6 space-y-4"
+      >
+        <h3 className="text-lg font-semibold text-app-fg">Delete tax band</h3>
+        <p className="text-sm text-app-fg-muted">
+          Delete <strong className="text-app-fg">{deleteTarget?.label}</strong>? This cannot be undone.
+          Payroll will fall back to the next active config, or the system default if none remain.
+        </p>
+        {deleteFetcher.data?.error ? (
+          <p className="text-sm text-danger-600 dark:text-danger-400">{deleteFetcher.data.error}</p>
+        ) : null}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button
+            variant="secondary"
+            disabled={deleteFetcher.state !== 'idle'}
+            onClick={() => setDeleteTarget(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            loading={deleteFetcher.state !== 'idle'}
+            loadingText="Deleting…"
+            onClick={() => {
+              if (!deleteTarget) return;
+              deleteFetcher.submit(
+                { intent: 'deleteTaxBandConfig', configId: deleteTarget.id },
+                { method: 'post' },
+              );
+            }}
+          >
+            Delete
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

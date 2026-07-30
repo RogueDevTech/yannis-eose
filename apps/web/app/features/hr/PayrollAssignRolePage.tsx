@@ -12,6 +12,8 @@ import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Pagination } from '~/components/ui/pagination';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { Tabs } from '~/components/ui/tabs';
+import { NairaPrice } from '~/components/ui/naira-price';
 import {
   CompactTable,
   type CompactTableColumn,
@@ -30,15 +32,26 @@ interface StaffRow {
   payRoleId: string | null;
 }
 
+interface ContractorRow {
+  id: string;
+  name: string;
+  jobTitle: string | null;
+  monthlyFee: string;
+  payRoleId: string | null;
+  branchId: string | null;
+}
+
 interface PayrollAssignRolePageProps {
   payRole: PayRole;
   allRoles: PayRole[];
   staff: StaffRow[];
+  contractors: ContractorRow[];
   total: number;
   page: number;
   limit: number;
   branches: BranchOption[];
   canWrite: boolean;
+  people: 'staff' | 'contractors';
   filters: {
     role?: string;
     branchId?: string;
@@ -73,19 +86,19 @@ const ASSIGN_STATUS_OPTIONS = [
 ];
 
 function PayRoleStatusCell({
-  row,
   payRoleId,
+  rowPayRoleId,
   payRoleById,
 }: {
-  row: StaffRow;
   payRoleId: string;
+  rowPayRoleId: string | null;
   payRoleById: Map<string, string>;
 }) {
-  if (row.payRoleId === payRoleId) {
+  if (rowPayRoleId === payRoleId) {
     return <StatusBadge status="ASSIGNED" label="Already assigned" variant="success" size="sm" />;
   }
-  if (row.payRoleId) {
-    return <span className="text-sm text-app-fg-muted">{payRoleById.get(row.payRoleId) ?? 'Other role'}</span>;
+  if (rowPayRoleId) {
+    return <span className="text-sm text-app-fg-muted">{payRoleById.get(rowPayRoleId) ?? 'Other role'}</span>;
   }
   return <StatusBadge status="UNASSIGNED" label="No pay role" variant="warning" size="sm" />;
 }
@@ -94,11 +107,13 @@ export function PayrollAssignRolePage({
   payRole,
   allRoles,
   staff,
+  contractors,
   total,
   page,
   limit,
   branches,
   canWrite,
+  people,
   filters,
 }: PayrollAssignRolePageProps) {
   const [, setSearchParams] = useSearchParams();
@@ -106,30 +121,38 @@ export function PayrollAssignRolePage({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showAssignConfirm, setShowAssignConfirm] = useState(false);
 
+  const isContractors = people === 'contractors';
+  const noun = isContractors ? 'contractor' : 'staff';
+  const nounPlural = isContractors ? 'contractors' : 'staff';
+
   useFetcherToast(fetcher.data, {
     successMessage: fetcher.data?.assignedCount
-      ? `${fetcher.data.assignedCount} staff assigned successfully`
-      : 'Staff assigned successfully',
+      ? `${fetcher.data.assignedCount} ${nounPlural} assigned successfully`
+      : `${isContractors ? 'Contractors' : 'Staff'} assigned successfully`,
   });
 
   useCloseOnFetcherSuccess(fetcher, () => {
     const assignedIds = [...selected];
     setShowAssignConfirm(false);
     setSelected(new Set());
-    // Drop stale edit-profile caches so the next Edit Profile visit shows the
-    // newly assigned pay role.
     for (const id of assignedIds) {
-      invalidateCachedLoader(`/hr/users/${id}/edit`);
-      invalidateCachedLoader(`/hr/users/${id}`);
+      if (isContractors) {
+        invalidateCachedLoader(`/hr/payroll/contractors/${id}`);
+      } else {
+        invalidateCachedLoader(`/hr/users/${id}/edit`);
+        invalidateCachedLoader(`/hr/users/${id}`);
+      }
     }
-    window.location.href = '/hr/payroll/config/roles';
+    invalidateCachedLoader(`/hr/payroll/config/rules/${payRole.id}`);
+    window.location.href = `/hr/payroll/config/rules/${payRole.id}`;
   });
 
   const payRoleById = useMemo(() => new Map(allRoles.map((r) => [r.id, r.name])), [allRoles]);
+  const rows = isContractors ? contractors : staff;
 
   const alreadyAssigned = useMemo(
-    () => new Set(staff.filter((s) => s.payRoleId === payRole.id).map((s) => s.id)),
-    [staff, payRole.id],
+    () => new Set(rows.filter((s) => s.payRoleId === payRole.id).map((s) => s.id)),
+    [rows, payRole.id],
   );
 
   const newSelections = useMemo(
@@ -161,7 +184,25 @@ export function PayrollAssignRolePage({
     [setSearchParams],
   );
 
-  const columns: CompactTableColumn<StaffRow>[] = useMemo(
+  const setPeople = useCallback(
+    (nextPeople: 'staff' | 'contractors') => {
+      setSelected(new Set());
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (nextPeople === 'contractors') next.set('people', 'contractors');
+          else next.delete('people');
+          next.delete('page');
+          if (nextPeople === 'contractors') next.delete('role');
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const staffColumns: CompactTableColumn<StaffRow>[] = useMemo(
     () => [
       {
         key: 'name',
@@ -178,7 +219,51 @@ export function PayrollAssignRolePage({
         key: 'payRole',
         header: 'Pay role',
         render: (row) => (
-          <PayRoleStatusCell row={row} payRoleId={payRole.id} payRoleById={payRoleById} />
+          <PayRoleStatusCell
+            payRoleId={payRole.id}
+            rowPayRoleId={row.payRoleId}
+            payRoleById={payRoleById}
+          />
+        ),
+      },
+    ],
+    [payRole.id, payRoleById],
+  );
+
+  const contractorColumns: CompactTableColumn<ContractorRow>[] = useMemo(
+    () => [
+      {
+        key: 'name',
+        header: 'Name',
+        hideable: false,
+        render: (row) => (
+          <div className="min-w-0">
+            <span className="font-medium text-app-fg block truncate">{row.name}</span>
+            {row.jobTitle ? (
+              <span className="text-xs text-app-fg-muted truncate block">{row.jobTitle}</span>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        key: 'fee',
+        header: 'Monthly fee',
+        nowrap: true,
+        render: (row) => (
+          <span className="text-sm tabular-nums text-app-fg">
+            <NairaPrice amount={Number(row.monthlyFee)} />
+          </span>
+        ),
+      },
+      {
+        key: 'payRole',
+        header: 'Pay role',
+        render: (row) => (
+          <PayRoleStatusCell
+            payRoleId={payRole.id}
+            rowPayRoleId={row.payRoleId}
+            payRoleById={payRoleById}
+          />
         ),
       },
     ],
@@ -186,36 +271,50 @@ export function PayrollAssignRolePage({
   );
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
-  const hasActiveFilters = !!(filters.role || filters.branchId || filters.assignStatus || filters.search);
+  const hasActiveFilters = !!(
+    (!isContractors && filters.role) ||
+    filters.branchId ||
+    filters.assignStatus ||
+    filters.search
+  );
+  const listCount = isContractors ? contractors.length : staff.length;
+  const listTotal = isContractors ? contractors.length : total;
 
   return (
     <div className="space-y-4">
       <PageHeader
         title={`Assign: ${payRole.name}`}
-        backTo="/hr/payroll/config/roles"
+        backTo={`/hr/payroll/config/rules/${payRole.id}`}
         mobileInlineActions
-        description="Select staff members to assign this pay role."
+        description="Select staff or contractors to attach this pay role for payroll."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Filters"
             triggerAriaLabel="Assign toolbar"
-            filtersBadgeCount={[filters.role, filters.branchId, filters.assignStatus, filters.search].filter(Boolean).length}
+            filtersBadgeCount={[
+              !isContractors ? filters.role : null,
+              filters.branchId,
+              filters.assignStatus,
+              filters.search,
+            ].filter(Boolean).length}
             desktop={
               <div className="flex items-center gap-2">
                 <PageSearchControl
                   value={filters.search ?? ''}
                   placeholder="Search by name"
-                  title="Search staff"
+                  title={`Search ${nounPlural}`}
                   onApply={(query) => setFilter('search', query)}
                 />
-                <FormSelect
-                  label=""
-                  name="role"
-                  options={ROLE_FILTER_OPTIONS}
-                  value={filters.role ?? ''}
-                  onChange={(e) => setFilter('role', e.target.value)}
-                  className="w-44"
-                />
+                {!isContractors ? (
+                  <FormSelect
+                    label=""
+                    name="role"
+                    options={ROLE_FILTER_OPTIONS}
+                    value={filters.role ?? ''}
+                    onChange={(e) => setFilter('role', e.target.value)}
+                    className="w-44"
+                  />
+                ) : null}
                 {branches.length > 1 && (
                   <FormSelect
                     label=""
@@ -242,16 +341,18 @@ export function PayrollAssignRolePage({
                 <PageSearchControl
                   value={filters.search ?? ''}
                   placeholder="Search by name"
-                  title="Search staff"
+                  title={`Search ${nounPlural}`}
                   onApply={(query) => setFilter('search', query)}
                 />
-                <FormSelect
-                  label="System role"
-                  name="role"
-                  options={ROLE_FILTER_OPTIONS}
-                  value={filters.role ?? ''}
-                  onChange={(e) => setFilter('role', e.target.value)}
-                />
+                {!isContractors ? (
+                  <FormSelect
+                    label="System role"
+                    name="role"
+                    options={ROLE_FILTER_OPTIONS}
+                    value={filters.role ?? ''}
+                    onChange={(e) => setFilter('role', e.target.value)}
+                  />
+                ) : null}
                 {branches.length > 1 && (
                   <FormSelect
                     label="Branch"
@@ -276,11 +377,21 @@ export function PayrollAssignRolePage({
 
       <MobileDateFilterRow hideDate />
 
+      <Tabs
+        variant="underline"
+        value={people}
+        onChange={(v) => setPeople(v as 'staff' | 'contractors')}
+        tabs={[
+          { value: 'staff', label: 'Staff' },
+          { value: 'contractors', label: `Contractors (${contractors.length})` },
+        ]}
+      />
+
       <OverviewStatStrip
         mobileGrid
         mobileGridCols={3}
         items={[
-          { label: 'Total staff', value: total },
+          { label: isContractors ? 'Contractors shown' : 'Total staff', value: listTotal },
           {
             label: 'Selected',
             value: selected.size,
@@ -300,18 +411,84 @@ export function PayrollAssignRolePage({
         ]}
       />
 
-      {staff.length === 0 ? (
+      {listCount === 0 ? (
         <EmptyState
-          title={hasActiveFilters ? 'No matching staff' : 'No staff found'}
+          title={hasActiveFilters ? `No matching ${nounPlural}` : `No ${nounPlural} found`}
           description={
-            hasActiveFilters ? 'Try adjusting your filters.' : 'No active staff members available.'
+            hasActiveFilters
+              ? 'Try adjusting your filters.'
+              : isContractors
+                ? 'Create contractors under HR → Contractors, then assign them here.'
+                : 'No active staff members available.'
           }
+        />
+      ) : isContractors ? (
+        <CompactTable<ContractorRow>
+          columnVisibilityKey="hr.payroll.assign.contractors"
+          columns={contractorColumns}
+          rows={contractors}
+          rowKey={(r) => r.id}
+          emptyTitle="No contractors"
+          emptyDescription=""
+          selection={
+            canWrite
+              ? {
+                  selectedIds: selected,
+                  onToggle: (id, isSelected) => {
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      if (isSelected) next.add(id);
+                      else next.delete(id);
+                      return next;
+                    });
+                  },
+                  onToggleAll: (selectAll) => {
+                    if (selectAll) {
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        for (const s of contractors) next.add(s.id);
+                        return next;
+                      });
+                    } else {
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        for (const s of contractors) next.delete(s.id);
+                        return next;
+                      });
+                    }
+                  },
+                }
+              : undefined
+          }
+          renderMobileCard={(row, _i, helpers) => (
+            <div className="rounded-lg border border-app-border bg-app-elevated p-3 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2 min-w-0 flex-1">
+                  {helpers.rowSelection}
+                  <div className="min-w-0">
+                    <p className="font-medium text-app-fg text-sm truncate">{row.name}</p>
+                    {row.jobTitle ? (
+                      <p className="text-xs text-app-fg-muted truncate mt-0.5">{row.jobTitle}</p>
+                    ) : null}
+                    <p className="text-xs text-app-fg-muted tabular-nums mt-0.5">
+                      <NairaPrice amount={Number(row.monthlyFee)} /> / month
+                    </p>
+                  </div>
+                </div>
+                <PayRoleStatusCell
+                  payRoleId={payRole.id}
+                  rowPayRoleId={row.payRoleId}
+                  payRoleById={payRoleById}
+                />
+              </div>
+            </div>
+          )}
         />
       ) : (
         <>
           <CompactTable<StaffRow>
             columnVisibilityKey="hr.payroll.assign"
-            columns={columns}
+            columns={staffColumns}
             rows={staff}
             rowKey={(r) => r.id}
             emptyTitle="No staff"
@@ -358,7 +535,11 @@ export function PayrollAssignRolePage({
                       </div>
                     </div>
                   </div>
-                  <PayRoleStatusCell row={row} payRoleId={payRole.id} payRoleById={payRoleById} />
+                  <PayRoleStatusCell
+                    payRoleId={payRole.id}
+                    rowPayRoleId={row.payRoleId}
+                    payRoleById={payRoleById}
+                  />
                 </div>
               </div>
             )}
@@ -386,7 +567,7 @@ export function PayrollAssignRolePage({
               loadingText="Assigning..."
               onClick={() => setShowAssignConfirm(true)}
             >
-              Assign {newSelections.length} staff
+              Assign {newSelections.length} {newSelections.length === 1 ? noun : nounPlural}
             </Button>
             {newSelections.length > 0 && (
               <span className="text-xs text-app-fg-muted">
@@ -403,28 +584,47 @@ export function PayrollAssignRolePage({
         title="Assign pay role"
         description={
           <>
-            Assign <strong>{payRole.name}</strong> to {newSelections.length} staff member
-            {newSelections.length === 1 ? '' : 's'}?
+            Assign <strong>{payRole.name}</strong> to {newSelections.length}{' '}
+            {newSelections.length === 1 ? noun : nounPlural}?
           </>
         }
         details={
           <ul className="list-disc pl-4 space-y-1 text-sm">
-            <li>Staff already on another pay role will be moved to this role</li>
-            <li>Future payroll batches will use this role&apos;s rules for these staff</li>
+            <li>
+              {isContractors
+                ? 'Contractors already on another pay role will be moved to this role'
+                : 'Staff already on another pay role will be moved to this role'}
+            </li>
+            <li>
+              {isContractors
+                ? 'They will count toward this role headcount and contractor payroll batches'
+                : "Future payroll batches will use this role's rules for these staff"}
+            </li>
           </ul>
         }
-        confirmLabel={`Assign ${newSelections.length} staff`}
+        confirmLabel={`Assign ${newSelections.length} ${newSelections.length === 1 ? noun : nounPlural}`}
         variant="warning"
         loading={fetcher.state === 'submitting'}
         onConfirm={() => {
-          fetcher.submit(
-            {
-              intent: 'bulkAssignPayRole',
-              payRoleId: payRole.id,
-              userIds: JSON.stringify(newSelections),
-            },
-            { method: 'post' },
-          );
+          if (isContractors) {
+            fetcher.submit(
+              {
+                intent: 'bulkAssignContractorsToPayRole',
+                payRoleId: payRole.id,
+                contractorIds: JSON.stringify(newSelections),
+              },
+              { method: 'post' },
+            );
+          } else {
+            fetcher.submit(
+              {
+                intent: 'bulkAssignPayRole',
+                payRoleId: payRole.id,
+                userIds: JSON.stringify(newSelections),
+              },
+              { method: 'post' },
+            );
+          }
         }}
       />
     </div>

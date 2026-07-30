@@ -2,17 +2,21 @@ import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { secondaryCacheJson } from '~/lib/secondary-api-cache';
 import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { authorizeUserDetailBundle } from '~/lib/hr-user-detail-bundle-access.server';
 import { extractTrpc } from '~/lib/trpc-extract.server';
 import type { StaffPayoutEstimate, UserPaidPayoutSnapshot } from '~/features/users/types';
 
-function utcCalendarMonth(year: number, monthIndex0: number) {
-  const start = new Date(Date.UTC(year, monthIndex0, 1, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(year, monthIndex0 + 1, 0, 23, 59, 59, 999));
+/** Calendar month in Africa/Lagos (payroll timezone), returned as ISO bounds. */
+function nigeriaCalendarMonth(year: number, monthIndex0: number) {
+  const month = String(monthIndex0 + 1).padStart(2, '0');
+  const lastDay = new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
+  const start = new Date(`${year}-${month}-01T00:00:00+01:00`);
+  const end = new Date(`${year}-${month}-${String(lastDay).padStart(2, '0')}T23:59:59.999+01:00`);
   const periodLabel = new Intl.DateTimeFormat('en-NG', {
     month: 'long',
     year: 'numeric',
-    timeZone: 'UTC',
+    timeZone: 'Africa/Lagos',
   }).format(start);
   return {
     periodStart: start.toISOString(),
@@ -37,9 +41,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const opt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
 
   const url = new URL(request.url);
-  const now = new Date();
-  const currentYear = now.getUTCFullYear();
-  const currentMonth0 = now.getUTCMonth(); // 0-indexed
+  // Align "current month" with Nigeria (same as payroll), not UTC.
+  const lagosParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(new Date());
+  const currentYear = Number(lagosParts.find((p) => p.type === 'year')?.value);
+  const currentMonth0 = Number(lagosParts.find((p) => p.type === 'month')?.value) - 1;
 
   const qYear = parseInt(url.searchParams.get('year') ?? '', 10);
   const qMonth = parseInt(url.searchParams.get('month') ?? '', 10); // 1-indexed from URL
@@ -48,7 +57,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const isCurrentMonth = targetYear === currentYear && targetMonth0 === currentMonth0;
 
-  const period = utcCalendarMonth(targetYear, targetMonth0);
+  const period = nigeriaCalendarMonth(targetYear, targetMonth0);
 
   const previewInput = encodeURIComponent(
     JSON.stringify({ staffId: userId, periodStart: period.periodStart, periodEnd: period.periodEnd }),
@@ -64,7 +73,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ),
   ]);
 
+  if (!previewRes.ok) {
+    return json({
+      ok: false as const,
+      error: extractApiErrorMessage(previewRes.data, 'Could not compute earnings estimate'),
+    });
+  }
+
   const preview = extractTrpc(previewRes, null) as StaffPayoutEstimate | null;
+  if (!preview) {
+    return json({
+      ok: false as const,
+      error: 'Earnings estimate response was empty. Try again or contact HR.',
+    });
+  }
+
   const paidPayload = extractTrpc(paidRes, null) as { payouts?: unknown[] } | null;
   const firstPaid = paidPayload?.payouts?.[0] as Record<string, unknown> | undefined;
   let lastPaidPayout: UserPaidPayoutSnapshot | null = null;

@@ -14,6 +14,7 @@ import {
   type PayrollFormula,
   type PayrollMetrics,
   type SaveProductTierConfigInput,
+  type DeleteTaxBandConfigInput,
   type SaveTaxBandConfigInput,
   type UpdateContractorInput,
   type UpdatePayRoleInput,
@@ -177,43 +178,51 @@ export class PayrollConfigService {
       plan = linked ?? null;
     }
 
-    const assignedStaff = await this.db
-      .select({
-        id: schema.users.id,
-        name: schema.users.name,
-        role: schema.users.role,
-        email: schema.users.email,
-      })
-      .from(schema.users)
-      .where(
-        and(
-          eq(schema.users.payRoleId, payRoleId),
-          eq(schema.users.status, 'ACTIVE'),
-        ),
-      )
-      .orderBy(schema.users.name);
+    const [assignedStaff, assignedContractors] = await Promise.all([
+      this.db
+        .select({
+          id: schema.users.id,
+          name: schema.users.name,
+          role: schema.users.role,
+          email: schema.users.email,
+        })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.payRoleId, payRoleId),
+            eq(schema.users.status, 'ACTIVE'),
+          ),
+        )
+        .orderBy(schema.users.name),
+      this.db
+        .select({
+          id: schema.payrollContractors.id,
+          name: schema.payrollContractors.name,
+          jobTitle: schema.payrollContractors.jobTitle,
+          monthlyFee: schema.payrollContractors.monthlyFee,
+          branchId: schema.payrollContractors.branchId,
+        })
+        .from(schema.payrollContractors)
+        .where(
+          and(
+            eq(schema.payrollContractors.payRoleId, payRoleId),
+            eq(schema.payrollContractors.active, true),
+            eq(schema.payrollContractors.groupId, companyId),
+          ),
+        )
+        .orderBy(schema.payrollContractors.name),
+    ]);
 
-    const [{ value: contractorCount } = { value: 0 }] = await this.db
-      .select({ value: count() })
-      .from(schema.payrollContractors)
-      .where(
-        and(
-          eq(schema.payrollContractors.payRoleId, payRoleId),
-          eq(schema.payrollContractors.active, true),
-          eq(schema.payrollContractors.groupId, companyId),
-        ),
-      );
-
-    const contractors = Number(contractorCount ?? 0);
     return {
       payRole: {
         ...payRole,
         employeeCount: assignedStaff.length,
-        contractorCount: contractors,
-        staffCount: assignedStaff.length + contractors,
+        contractorCount: assignedContractors.length,
+        staffCount: assignedStaff.length + assignedContractors.length,
       },
       plan,
       assignedStaff,
+      assignedContractors,
     };
   }
 
@@ -423,6 +432,25 @@ export class PayrollConfigService {
         })
         .returning();
       return row;
+    });
+  }
+
+  async deleteTaxBandConfig(input: DeleteTaxBandConfigInput, actor: SessionUser, groupId?: string | null) {
+    const companyId = requireCompanyId(groupId);
+    return withActor(this.db, actor, async (tx) => {
+      const [row] = await tx
+        .delete(schema.payrollTaxBandConfigs)
+        .where(
+          and(
+            eq(schema.payrollTaxBandConfigs.id, input.id),
+            eq(schema.payrollTaxBandConfigs.groupId, companyId),
+          ),
+        )
+        .returning({ id: schema.payrollTaxBandConfigs.id });
+      if (!row) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Tax band config not found' });
+      }
+      return { id: row.id };
     });
   }
 
@@ -724,6 +752,48 @@ export class PayrollConfigService {
         })
         .where(inArray(schema.users.id, input.userIds))
         .returning({ id: schema.users.id });
+      return { assignedCount: rows.length };
+    });
+  }
+
+  /**
+   * Attach active contractors to a pay role (or clear with payRoleId null via
+   * updateContractor). Used by the Assign page Contractor tab so Cleaner /
+   * Video Editor style roles can be managed without leaving Contractors CRUD.
+   */
+  async bulkAssignContractorsToPayRole(
+    input: { contractorIds: string[]; payRoleId: string },
+    actor: SessionUser,
+    groupId?: string | null,
+  ) {
+    const companyId = requireCompanyId(groupId);
+    const [payRole] = await this.db
+      .select({ id: schema.payrollPayRoles.id })
+      .from(schema.payrollPayRoles)
+      .where(
+        and(
+          eq(schema.payrollPayRoles.id, input.payRoleId),
+          eq(schema.payrollPayRoles.groupId, companyId),
+        ),
+      )
+      .limit(1);
+    if (!payRole) throw new TRPCError({ code: 'NOT_FOUND', message: 'Pay role not found in this company' });
+
+    return withActor(this.db, actor, async (tx) => {
+      const rows = await tx
+        .update(schema.payrollContractors)
+        .set({
+          payRoleId: input.payRoleId,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            inArray(schema.payrollContractors.id, input.contractorIds),
+            eq(schema.payrollContractors.groupId, companyId),
+            eq(schema.payrollContractors.active, true),
+          ),
+        )
+        .returning({ id: schema.payrollContractors.id });
       return { assignedCount: rows.length };
     });
   }
