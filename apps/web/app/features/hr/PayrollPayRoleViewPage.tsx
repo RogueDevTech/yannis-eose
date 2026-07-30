@@ -4,6 +4,7 @@ import type { PayrollFormula } from '@yannis/shared';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { EmptyState } from '~/components/ui/empty-state';
+import { NairaPrice } from '~/components/ui/naira-price';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -27,10 +28,19 @@ export type AssignedStaffRow = {
   email: string;
 };
 
+export type AssignedContractorRow = {
+  id: string;
+  name: string;
+  jobTitle: string | null;
+  monthlyFee: string;
+  branchId: string | null;
+};
+
 interface PayrollPayRoleViewPageProps {
   payRole: PayRole;
   plan: CommissionPlan | null;
   assignedStaff: AssignedStaffRow[];
+  assignedContractors: AssignedContractorRow[];
   canWrite: boolean;
 }
 
@@ -38,6 +48,7 @@ export function PayrollPayRoleViewPage({
   payRole,
   plan,
   assignedStaff,
+  assignedContractors,
   canWrite,
 }: PayrollPayRoleViewPageProps) {
   const archiveFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -47,8 +58,12 @@ export function PayrollPayRoleViewPage({
   useCloseOnFetcherSuccess(archiveFetcher, () => setShowArchive(false), { intent: 'archivePayRole' });
 
   const formula = (plan?.rules ?? null) as PayrollFormula | null;
-  const staffCount = payRole.staffCount ?? assignedStaff.length;
-  const assignHref = `/hr/payroll/config/roles/${payRole.id}/assign?assignStatus=assigned_this`;
+  const employeeCount = payRole.employeeCount ?? assignedStaff.length;
+  const contractorCount = payRole.contractorCount ?? assignedContractors.length;
+  const staffCount = payRole.staffCount ?? employeeCount + contractorCount;
+  const assignHref = `/hr/payroll/config/roles/${payRole.id}/assign?assignStatus=assigned_this${
+    contractorCount > 0 && employeeCount === 0 ? '&people=contractors' : ''
+  }`;
   const effectiveLabel = (() => {
     if (!plan) return null;
     const from = new Date(plan.effectiveFrom).toLocaleDateString('en-NG', {
@@ -102,6 +117,51 @@ export function PayrollPayRoleViewPage({
     },
   ];
 
+  const contractorColumns: CompactTableColumn<AssignedContractorRow>[] = [
+    {
+      key: 'name',
+      header: 'Contractor',
+      hideable: false,
+      render: (row) => (
+        <div className="min-w-0">
+          <Link
+            to={`/hr/payroll/contractors/${row.id}`}
+            className="font-medium text-app-fg hover:underline truncate block"
+          >
+            {row.name}
+          </Link>
+          {row.jobTitle ? (
+            <p className="text-xs text-app-fg-muted truncate">{row.jobTitle}</p>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      key: 'fee',
+      header: 'Monthly fee',
+      nowrap: true,
+      render: (row) => (
+        <span className="text-sm text-app-fg tabular-nums">
+          <NairaPrice amount={Number(row.monthlyFee)} />
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      tight: true,
+      hideable: false,
+      render: (row) => (
+        <CompactTableActionButton to={`/hr/payroll/contractors/${row.id}`} tone="brand">
+          View
+        </CompactTableActionButton>
+      ),
+    },
+  ];
+
+  const hasAnyone = assignedStaff.length > 0 || assignedContractors.length > 0;
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -128,7 +188,7 @@ export function PayrollPayRoleViewPage({
                       to={assignHref}
                       className="btn-secondary inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg"
                     >
-                      Assign staff
+                      Assign people
                     </Link>
                     <Button variant="danger" size="sm" onClick={() => setShowArchive(true)}>
                       Archive
@@ -152,7 +212,7 @@ export function PayrollPayRoleViewPage({
                     onClick={closeSheet}
                     className="btn-secondary h-12 w-full flex items-center justify-center text-sm font-medium rounded-lg"
                   >
-                    Assign staff
+                    Assign people
                   </Link>
                   <Button
                     variant="danger"
@@ -182,8 +242,16 @@ export function PayrollPayRoleViewPage({
             <dd className="text-app-fg font-medium">{formatRoleLabel(payRole.category)}</dd>
           </div>
           <div className="flex justify-between gap-3 sm:block sm:space-y-0.5">
-            <dt className="text-app-fg-muted">Staff assigned</dt>
-            <dd className="text-app-fg font-medium tabular-nums">{staffCount}</dd>
+            <dt className="text-app-fg-muted">People assigned</dt>
+            <dd className="text-app-fg font-medium tabular-nums">
+              {staffCount}
+              {staffCount > 0 ? (
+                <span className="text-app-fg-muted font-normal">
+                  {' '}
+                  ({employeeCount} staff · {contractorCount} contractors)
+                </span>
+              ) : null}
+            </dd>
           </div>
           <div className="flex justify-between gap-3 sm:block sm:space-y-0.5">
             <dt className="text-app-fg-muted">Formula</dt>
@@ -201,7 +269,7 @@ export function PayrollPayRoleViewPage({
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-app-fg">
-            Assigned staff ({staffCount})
+            Assigned people ({staffCount})
           </h3>
           {canWrite ? (
             <Link
@@ -212,35 +280,75 @@ export function PayrollPayRoleViewPage({
             </Link>
           ) : null}
         </div>
-        {assignedStaff.length === 0 ? (
+        {!hasAnyone ? (
           <EmptyState
-            title="No staff on this pay role"
+            title="No one on this pay role"
             description={
               canWrite
-                ? 'Assign staff to this formula so payroll can use these rules.'
+                ? 'Assign staff or contractors to this formula so payroll can use these rules.'
                 : 'Nobody is assigned this pay role yet.'
             }
           />
         ) : (
-          <CompactTable<AssignedStaffRow>
-            columnVisibilityKey="hr.payroll.config.rules.assigned-staff"
-            columns={staffColumns}
-            rows={assignedStaff}
-            rowKey={(r) => r.id}
-            emptyTitle="No staff"
-            emptyDescription=""
-            renderMobileCard={(row) => (
-              <Link
-                to={`/hr/users/${row.id}`}
-                prefetch="intent"
-                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
-              >
-                <p className="text-sm font-semibold text-app-fg leading-snug truncate">{row.name}</p>
-                <p className="text-xs text-app-fg-muted truncate">{row.email}</p>
-                <p className="text-xs text-app-fg-muted">{formatRoleLabel(row.role)}</p>
-              </Link>
-            )}
-          />
+          <div className="space-y-4">
+            {assignedStaff.length > 0 ? (
+              <div className="space-y-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
+                  Staff ({assignedStaff.length})
+                </h4>
+                <CompactTable<AssignedStaffRow>
+                  columnVisibilityKey="hr.payroll.config.rules.assigned-staff"
+                  columns={staffColumns}
+                  rows={assignedStaff}
+                  rowKey={(r) => r.id}
+                  emptyTitle="No staff"
+                  emptyDescription=""
+                  renderMobileCard={(row) => (
+                    <Link
+                      to={`/hr/users/${row.id}`}
+                      prefetch="intent"
+                      className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
+                    >
+                      <p className="text-sm font-semibold text-app-fg leading-snug truncate">{row.name}</p>
+                      <p className="text-xs text-app-fg-muted truncate">{row.email}</p>
+                      <p className="text-xs text-app-fg-muted">{formatRoleLabel(row.role)}</p>
+                    </Link>
+                  )}
+                />
+              </div>
+            ) : null}
+
+            {assignedContractors.length > 0 ? (
+              <div className="space-y-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
+                  Contractors ({assignedContractors.length})
+                </h4>
+                <CompactTable<AssignedContractorRow>
+                  columnVisibilityKey="hr.payroll.config.rules.assigned-contractors"
+                  columns={contractorColumns}
+                  rows={assignedContractors}
+                  rowKey={(r) => r.id}
+                  emptyTitle="No contractors"
+                  emptyDescription=""
+                  renderMobileCard={(row) => (
+                    <Link
+                      to={`/hr/payroll/contractors/${row.id}`}
+                      prefetch="intent"
+                      className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1 text-left"
+                    >
+                      <p className="text-sm font-semibold text-app-fg leading-snug truncate">{row.name}</p>
+                      {row.jobTitle ? (
+                        <p className="text-xs text-app-fg-muted truncate">{row.jobTitle}</p>
+                      ) : null}
+                      <p className="text-xs text-app-fg-muted tabular-nums">
+                        <NairaPrice amount={Number(row.monthlyFee)} /> / month
+                      </p>
+                    </Link>
+                  )}
+                />
+              </div>
+            ) : null}
+          </div>
         )}
       </div>
 
@@ -250,7 +358,7 @@ export function PayrollPayRoleViewPage({
         <ConfirmActionModal
           open
           title="Archive pay role"
-          description={`Archive "${payRole.name}"? Staff currently assigned this role will keep their existing payouts, but no new batches will use it.`}
+          description={`Archive "${payRole.name}"? Staff and contractors currently assigned this role will keep their existing payouts, but no new batches will use it.`}
           confirmLabel="Archive"
           variant="danger"
           loading={archiveFetcher.state === 'submitting'}

@@ -29,7 +29,7 @@ export function UserDetailEarningsOutlookCard({
         {!preview ? (
           <EmptyState
             title="No estimate yet"
-            description="If this persists, refresh the tab or contact HR."
+            description="Could not load this month's estimate. Refresh, or ask HR to confirm this staff member's pay role formula is linked."
             variant="inline"
             bordered={false}
           />

@@ -28,6 +28,15 @@ export interface StaffRow {
   payRoleId: string | null;
 }
 
+export interface ContractorAssignRow {
+  id: string;
+  name: string;
+  jobTitle: string | null;
+  monthlyFee: string;
+  payRoleId: string | null;
+  branchId: string | null;
+}
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, { roles: VIEWER_ROLES, permission: 'payroll.config.read' });
   const user = await getCurrentUser(request);
@@ -43,6 +52,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const branchId = url.searchParams.get('branchId') || undefined;
   const search = url.searchParams.get('search') || undefined;
   const assignStatus = url.searchParams.get('assignStatus') || undefined;
+  const peopleParam = url.searchParams.get('people');
+  const people = peopleParam === 'contractors' ? 'contractors' : 'staff';
 
   const pageData = (async () => {
     const usersInput: Record<string, unknown> = {
@@ -56,10 +67,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     if (branchId) usersInput.branchId = branchId;
     if (search) usersInput.search = search;
 
-    const [rolesRes, usersRes, branchesRes] = await Promise.all([
+    const [rolesRes, usersRes, contractorsRes, branchesRes] = await Promise.all([
       apiRequest<unknown>('/trpc/hr.listPayRoles', { method: 'GET', cookie }),
       apiRequest<unknown>(
         `/trpc/users.list?input=${encodeURIComponent(JSON.stringify(usersInput))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/hr.listContractors?input=${encodeURIComponent(JSON.stringify({ active: true }))}`,
         { method: 'GET', cookie },
       ),
       apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
@@ -81,7 +96,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       payRoleId: u.payRoleId ? String(u.payRoleId) : null,
     }));
 
-    // Client-side pay-role assignment status filter (server doesn't know about pay role assignment)
     if (assignStatus === 'unassigned') {
       staff = staff.filter((s) => !s.payRoleId);
     } else if (assignStatus === 'assigned_this') {
@@ -91,6 +105,47 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
 
     const total = usersPayload?.total ?? 0;
+
+    let contractors: ContractorAssignRow[] = contractorsRes.ok
+      ? (((contractorsRes.data as {
+          result?: {
+            data?: Array<{
+              id: string;
+              name: string;
+              jobTitle: string | null;
+              monthlyFee: string;
+              payRoleId: string | null;
+              branchId: string | null;
+            }>;
+          };
+        })?.result?.data) ?? []).map((c) => ({
+          id: c.id,
+          name: c.name,
+          jobTitle: c.jobTitle ?? null,
+          monthlyFee: String(c.monthlyFee ?? '0'),
+          payRoleId: c.payRoleId ?? null,
+          branchId: c.branchId ?? null,
+        }))
+      : [];
+
+    if (search) {
+      const q = search.toLowerCase();
+      contractors = contractors.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          (c.jobTitle?.toLowerCase().includes(q) ?? false),
+      );
+    }
+    if (branchId) {
+      contractors = contractors.filter((c) => c.branchId === branchId);
+    }
+    if (assignStatus === 'unassigned') {
+      contractors = contractors.filter((c) => !c.payRoleId);
+    } else if (assignStatus === 'assigned_this') {
+      contractors = contractors.filter((c) => c.payRoleId === roleId);
+    } else if (assignStatus === 'assigned_other') {
+      contractors = contractors.filter((c) => c.payRoleId && c.payRoleId !== roleId);
+    }
 
     const branches: BranchOption[] = branchesRes.ok
       ? ((branchesRes.data as { result?: { data?: BranchOption[] } })?.result?.data ?? [])
@@ -103,7 +158,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       user.role === 'ADMIN' ||
       user.role === 'HR_MANAGER';
 
-    return { payRole, roles, staff, total, page, limit: PAGE_SIZE, branches, canWrite, filters: { role, branchId, search, assignStatus } };
+    return {
+      payRole,
+      roles,
+      staff,
+      contractors,
+      total,
+      page,
+      limit: PAGE_SIZE,
+      branches,
+      canWrite,
+      people,
+      filters: { role, branchId, search, assignStatus },
+    };
   })();
 
   return defer({ pageData });
@@ -143,6 +210,32 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true, assignedCount: result?.assignedCount ?? 0 });
   }
 
+  if (intent === 'bulkAssignContractorsToPayRole') {
+    const contractorIdsRaw = formData.get('contractorIds')?.toString() ?? '[]';
+    let contractorIds: string[] = [];
+    try { contractorIds = JSON.parse(contractorIdsRaw) as string[]; } catch { /* ignore */ }
+    if (!contractorIds.length) return json({ error: 'No contractors selected' }, { status: 400 });
+
+    const body = {
+      contractorIds,
+      payRoleId: formData.get('payRoleId')?.toString() ?? '',
+    };
+
+    const res = await apiRequest<unknown>('/trpc/hr.bulkAssignContractorsToPayRole', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to assign contractors') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    const result = (res.data as { result?: { data?: { assignedCount: number } } })?.result?.data;
+    return json({ success: true, assignedCount: result?.assignedCount ?? 0 });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
@@ -155,11 +248,13 @@ export default function PayrollAssignRoleRoute() {
           payRole={data.payRole}
           allRoles={data.roles}
           staff={data.staff}
+          contractors={data.contractors}
           total={data.total}
           page={data.page}
           limit={data.limit}
           branches={data.branches}
           canWrite={data.canWrite}
+          people={data.people}
           filters={data.filters}
         />
       )}

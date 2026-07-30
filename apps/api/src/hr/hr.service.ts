@@ -13,6 +13,7 @@ import type {
   CreateAdjustmentInput,
   ApproveAdjustmentInput,
   SetSettlementConfigInput,
+  PayrollMetrics,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
@@ -23,7 +24,7 @@ import { getManageableRolesForViewer } from './payroll-batch.service';
 import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
 import { computeEarningsFromPlanRules, resolveClawbackPerReturnAmount } from './commission-rules-math';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { PayrollComputeService } from './payroll-compute.service';
+import { PayrollComputeService, type ComputedPayslipLine } from './payroll-compute.service';
 import { PayrollMetricsService } from './payroll-metrics.service';
 
 @Injectable()
@@ -642,6 +643,9 @@ export class HrService {
   async previewPayout(staffId: string, periodStart: string, periodEnd: string) {
     const start = new Date(periodStart);
     const end = new Date(periodEnd);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid earnings period dates' });
+    }
 
     const userRows = await this.db
       .select()
@@ -666,40 +670,52 @@ export class HrService {
       groupId = branch?.groupId ?? null;
     }
 
-    const computed = await this.payrollCompute.computeForMember(
-      this.db,
-      {
-        id: user.id,
-        role: user.role,
-        commissionPlanId: user.commissionPlanId ?? null,
-        payRoleId: user.payRoleId ?? null,
-        salaryBasis: user.salaryBasis ?? null,
-        taxStatus: user.taxStatus ?? null,
-        flatMonthlyAmount: user.flatMonthlyAmount != null ? Number(user.flatMonthlyAmount) : null,
-      },
-      start,
-      end,
-      groupId,
-      user.primaryBranchId ?? null,
-    );
+    let computed: ComputedPayslipLine | null = null;
+    let computeError: string | null = null;
+    try {
+      computed = await this.payrollCompute.computeForMember(
+        this.db,
+        {
+          id: user.id,
+          role: user.role,
+          commissionPlanId: user.commissionPlanId ?? null,
+          payRoleId: user.payRoleId ?? null,
+          salaryBasis: user.salaryBasis ?? null,
+          taxStatus: user.taxStatus ?? null,
+          flatMonthlyAmount: user.flatMonthlyAmount != null ? Number(user.flatMonthlyAmount) : null,
+        },
+        start,
+        end,
+        groupId,
+        user.primaryBranchId ?? null,
+      );
+    } catch (err) {
+      computeError = err instanceof Error ? err.message : 'Payroll formula failed';
+    }
 
     // Staff with no resolvable plan still get their real order metrics shown.
-    const metrics = computed?.metricsSnapshot
-      ?? (await this.payrollMetrics.getStaffMetrics({
-        staffId: user.id,
-        staffRole: user.role,
-        periodStart: start,
-        periodEnd: end,
-        crmLinked: true,
-      }));
+    let metrics: PayrollMetrics | null = computed?.metricsSnapshot ?? null;
+    if (!metrics) {
+      try {
+        metrics = await this.payrollMetrics.getStaffMetrics({
+          staffId: user.id,
+          staffRole: user.role,
+          periodStart: start,
+          periodEnd: end,
+          crmLinked: true,
+        });
+      } catch {
+        metrics = null;
+      }
+    }
     const deliveredCount = metrics?.deliveredCount ?? 0;
     const totalOrders = metrics?.totalOrders ?? 0;
     const returnedCount = metrics?.returnedCount ?? 0;
     const deliveryRate = metrics?.individualDr ?? 0;
-    const baseSalary = computed?.baseSalary ?? 0;
-    const performanceBonus = computed?.performanceBonus ?? 0;
-    const allowancesTotal = computed?.allowancesTotal ?? 0;
-    const penalties = computed?.deductionsTotal ?? 0;
+    const baseSalary = Number(computed?.baseSalary ?? 0) || 0;
+    const performanceBonus = Number(computed?.performanceBonus ?? 0) || 0;
+    const allowancesTotal = Number(computed?.allowancesTotal ?? 0) || 0;
+    const penalties = Number(computed?.deductionsTotal ?? 0) || 0;
 
     let planName = computed?.payRoleName ?? 'No plan assigned';
     if (!computed && user.payRoleId) {
@@ -709,8 +725,10 @@ export class HrService {
         .where(eq(schema.payrollPayRoles.id, user.payRoleId))
         .limit(1);
       planName = roleRow
-        ? `${roleRow.name} (formula not linked yet)`
+        ? `${roleRow.name}${computeError ? ' (estimate unavailable)' : ' (formula not linked yet)'}`
         : 'Pay role assigned (formula not linked yet)';
+    } else if (computeError && !computed) {
+      planName = 'Estimate unavailable';
     }
 
     const [pendingClawbacks, bonusRows, otherAddOnRows] = await Promise.all([

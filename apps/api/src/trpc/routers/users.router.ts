@@ -374,4 +374,17 @@ export const usersRouter = router({
       return getUsersService().resendInvite(input.userId, ctx.user);
     }),
 
+  /**
+   * Permanently delete a PENDING invite (never logged in).
+   * Same gate as create / resend invite.
+   */
+  deletePending: permissionProcedure('users.create')
+    .meta({ branchScopedMutation: true })
+    .input(z.object({ userId: z.string().uuid(), branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const res = await getUsersService().deletePending(input.userId, ctx.user);
+      await invalidatePermissionsUserMatrixCache();
+      return res;
+    }),
+
 });

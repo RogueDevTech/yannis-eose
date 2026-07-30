@@ -122,6 +122,7 @@ export function UserDetailPage({
   isSuperAdmin = false,
   canReactivateDeactivatedStaff = false,
   canDeactivateStaff = false,
+  canDeletePendingStaff = false,
   isViewerHeadOfMarketing = false,
   isViewerHeadOfCS = false,
   canEditLimited = false,
@@ -172,6 +173,7 @@ export function UserDetailPage({
   const isSubmitting = navigation.state === 'submitting';
   const formIntent = navigation.formData?.get('intent')?.toString();
   const isDeactivating = isSubmitting && formIntent === 'deactivate';
+  const isDeletingPending = isSubmitting && formIntent === 'deletePending';
   const isReactivating = isSubmitting && formIntent === 'reactivate';
   const isResetting = resetFetcher.state !== 'idle';
   const isUpdating = isSubmitting && formIntent === 'update';
@@ -193,6 +195,7 @@ export function UserDetailPage({
   const [openModal, setOpenModal] = useState<ModalId | null>(null);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
+  const [showDeletePendingConfirm, setShowDeletePendingConfirm] = useState(false);
   const [showReactivateConfirm, setShowReactivateConfirm] = useState(false);
   const [mobileProfileSheetOpen, setMobileProfileSheetOpen] = useState(false);
   const [showEmailChangeModal, setShowEmailChangeModal] = useState<{
@@ -834,6 +837,7 @@ export function UserDetailPage({
       {actionData?.error &&
         !dismissedError &&
         !showDeactivateConfirm &&
+        !showDeletePendingConfirm &&
         !showReactivateConfirm &&
         !showEmailChangeModal && (
         <PageNotification
@@ -943,7 +947,7 @@ export function UserDetailPage({
                     <Button type="button" variant="secondary" size="sm" onClick={() => setShowResetPassword(true)}>
                       Reset Password
                     </Button>
-                    {(user.status === 'ACTIVE' || user.status === 'PENDING') && canDeactivateStaff && (
+                    {user.status === 'ACTIVE' && canDeactivateStaff && (
                       <Button
                         type="button"
                         variant="danger"
@@ -952,6 +956,17 @@ export function UserDetailPage({
                         className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
                       >
                         Deactivate
+                      </Button>
+                    )}
+                    {user.status === 'PENDING' && canDeletePendingStaff && (
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setShowDeletePendingConfirm(true)}
+                        className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
+                      >
+                        Delete user
                       </Button>
                     )}
                     {(user.status === 'INACTIVE' ||
@@ -1043,7 +1058,7 @@ export function UserDetailPage({
                     >
                       Reset Password
                     </Button>
-                    {(user.status === 'ACTIVE' || user.status === 'PENDING') && canDeactivateStaff && (
+                    {user.status === 'ACTIVE' && canDeactivateStaff && (
                       <Button
                         type="button"
                         variant="danger"
@@ -1055,6 +1070,20 @@ export function UserDetailPage({
                         }}
                       >
                         Deactivate
+                      </Button>
+                    )}
+                    {user.status === 'PENDING' && canDeletePendingStaff && (
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        className="h-12 w-full justify-center"
+                        onClick={() => {
+                          closeSheet();
+                          setShowDeletePendingConfirm(true);
+                        }}
+                      >
+                        Delete user
                       </Button>
                     )}
                     {(user.status === 'INACTIVE' ||
@@ -1700,8 +1729,11 @@ export function UserDetailPage({
           {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
             <>
               <Button type="button" variant="secondary" size="sm" className="w-full justify-center" onClick={() => { setMobileProfileSheetOpen(false); setShowResetPassword(true); }}>Reset Password</Button>
-              {(user.status === 'ACTIVE' || user.status === 'PENDING') && canDeactivateStaff && (
+              {user.status === 'ACTIVE' && canDeactivateStaff && (
                 <Button type="button" variant="danger" size="sm" className="w-full justify-center bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700" onClick={() => { setMobileProfileSheetOpen(false); setShowDeactivateConfirm(true); }}>Deactivate</Button>
+              )}
+              {user.status === 'PENDING' && canDeletePendingStaff && (
+                <Button type="button" variant="danger" size="sm" className="w-full justify-center bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700" onClick={() => { setMobileProfileSheetOpen(false); setShowDeletePendingConfirm(true); }}>Delete user</Button>
               )}
               {(user.status === 'INACTIVE' || user.status === 'ARCHIVED' || (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
                 <Button type="button" variant="secondary" size="sm" className="w-full justify-center text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300" onClick={() => { setMobileProfileSheetOpen(false); setShowReactivateConfirm(true); }}>Reactivate</Button>
@@ -1842,6 +1874,88 @@ export function UserDetailPage({
       >
         <input type="hidden" name="intent" value="mirror" />
       </Form>
+
+      {/* ─── Delete pending invite Confirmation Modal ────── */}
+      {showDeletePendingConfirm && (
+        <Modal
+          open
+          onClose={() => !isDeletingPending && setShowDeletePendingConfirm(false)}
+          maxWidth="max-w-lg"
+          role="alertdialog"
+          aria-labelledby="delete-pending-modal-title"
+          aria-describedby="delete-pending-modal-desc"
+          contentClassName="p-6 space-y-5 border-2 border-danger-200 dark:border-danger-800"
+        >
+          <div className="flex items-center gap-3 pb-2 border-b border-danger-100 dark:border-danger-900/50">
+            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/50 flex items-center justify-center">
+              <svg
+                className="w-5 h-5 text-danger-600 dark:text-danger-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
+              </svg>
+            </div>
+            <h3
+              id="delete-pending-modal-title"
+              className="text-lg font-semibold text-danger-700 dark:text-danger-300"
+            >
+              Delete user
+            </h3>
+          </div>
+          <p id="delete-pending-modal-desc" className="text-sm text-app-fg-muted">
+            Permanently delete the pending invite for <strong>{user.name}</strong> ({user.email})?
+            This cannot be undone. The same email can be invited again afterward.
+          </p>
+          <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 p-4 space-y-2">
+            <p className="text-sm font-medium text-danger-800 dark:text-danger-200">
+              Only available for pending invites
+            </p>
+            <ul className="text-sm text-danger-700 dark:text-danger-300 space-y-1.5 list-disc list-inside">
+              <li>This user has not logged in yet.</li>
+              <li>Branch, permission, and onboarding invite rows for this account are removed.</li>
+              <li>
+                If the account already has linked business records, delete is blocked and you should
+                deactivate instead.
+              </li>
+            </ul>
+          </div>
+          {actionData?.error && !dismissedError ? (
+            <InlineNotification
+              variant="danger"
+              message={humanizeZodIssuesString(actionData.error)}
+            />
+          ) : null}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setShowDeletePendingConfirm(false)}
+              disabled={isDeletingPending}
+            >
+              Cancel
+            </Button>
+            <Form method="post" data-branch-scoped-action="true">
+              <input type="hidden" name="intent" value="deletePending" />
+              <Button
+                type="submit"
+                variant="danger"
+                loading={isDeletingPending}
+                loadingText="Deleting..."
+                className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700"
+              >
+                Delete user
+              </Button>
+            </Form>
+          </div>
+        </Modal>
+      )}
 
       {/* ─── Deactivate Confirmation Modal ───────────────── */}
       {showDeactivateConfirm && (

@@ -110,17 +110,18 @@ function tierConditionLabel(tier: {
 }
 
 function resolveBaseSalary(formula: PayrollFormula, metrics: PayrollMetrics): number {
+  const flatBase = Number(formula.flatBaseSalary ?? formula.flatMonthlyAmount ?? 0) || 0;
   if (formula.baseSalaryTiers?.length) {
-    const sorted = [...formula.baseSalaryTiers].sort((a, b) => b.threshold - a.threshold);
+    const sorted = [...formula.baseSalaryTiers].sort((a, b) => Number(b.threshold) - Number(a.threshold));
     for (const tier of sorted) {
       if (tierMatches(tier, formula, metrics)) {
-        return tier.amount;
+        return Number(tier.amount) || 0;
       }
     }
     // No tier matched: use configured flat base (same rule as the formula builder UI).
-    return formula.flatBaseSalary ?? 0;
+    return flatBase;
   }
-  return formula.flatBaseSalary ?? 0;
+  return flatBase;
 }
 
 function resolveBonusFromTiers(

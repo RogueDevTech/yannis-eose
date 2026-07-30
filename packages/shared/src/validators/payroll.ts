@@ -160,6 +160,10 @@ export const saveTaxBandConfigSchema = z.object({
   effectiveFrom: z.string().datetime().or(z.string().date()),
 });
 
+export const deleteTaxBandConfigSchema = z.object({
+  id: z.string().uuid(),
+});
+
 export const payrollPayRoleCategorySchema = z.enum([
   // Legacy department-level categories (kept for existing rows)
   'CS',
@@ -276,6 +280,11 @@ export const bulkAssignPayRoleSchema = z.object({
   crmLinked: z.boolean().default(true),
 });
 
+export const bulkAssignContractorsToPayRoleSchema = z.object({
+  contractorIds: z.array(z.string().uuid()).min(1).max(200),
+  payRoleId: z.string().uuid(),
+});
+
 export const markBatchPaidExtendedSchema = z.object({
   batchId: z.string().uuid(),
   financeReference: z.string().max(200).optional(),
@@ -310,6 +319,7 @@ export type CreatePayRoleInput = z.infer<typeof createPayRoleSchema>;
 export type UpdatePayRoleInput = z.infer<typeof updatePayRoleSchema>;
 export type SaveProductTierConfigInput = z.infer<typeof saveProductTierConfigSchema>;
 export type SaveTaxBandConfigInput = z.infer<typeof saveTaxBandConfigSchema>;
+export type DeleteTaxBandConfigInput = z.infer<typeof deleteTaxBandConfigSchema>;
 export type CreateContractorInput = z.infer<typeof createContractorSchema>;
 export type UpdateContractorInput = z.infer<typeof updateContractorSchema>;
 export type GetContractorInput = z.infer<typeof getContractorSchema>;

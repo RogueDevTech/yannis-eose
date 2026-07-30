@@ -12,7 +12,11 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { PayrollRuleBuilderPage } from '~/features/hr/PayrollRuleBuilderPage';
-import { PayrollPayRoleViewPage, type AssignedStaffRow } from '~/features/hr/PayrollPayRoleViewPage';
+import {
+  PayrollPayRoleViewPage,
+  type AssignedContractorRow,
+  type AssignedStaffRow,
+} from '~/features/hr/PayrollPayRoleViewPage';
 import { PayrollConfigLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type { CommissionPlan } from '~/features/hr/types';
 import type { PayRole } from '~/features/hr/payroll-prd-types';
@@ -40,7 +44,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Create mode — no existing role to fetch
   if (roleId === 'new') {
     if (!canWrite) throw redirect('/hr/payroll/config/roles');
-    return defer({ pageData: { mode: 'create' as const, payRole: null, plan: null, assignedStaff: [], canWrite } });
+    return defer({
+      pageData: {
+        mode: 'create' as const,
+        payRole: null,
+        plan: null,
+        assignedStaff: [],
+        assignedContractors: [],
+        canWrite,
+      },
+    });
   }
 
   const cookie = getSessionCookie(request);
@@ -59,6 +72,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           payRole: PayRole;
           plan: CommissionPlan | null;
           assignedStaff?: AssignedStaffRow[];
+          assignedContractors?: AssignedContractorRow[];
         };
       };
     })?.result?.data;
@@ -69,6 +83,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       payRole: detail.payRole,
       plan: detail.plan ?? null,
       assignedStaff: detail.assignedStaff ?? [],
+      assignedContractors: detail.assignedContractors ?? [],
       canWrite,
     };
   })();
@@ -224,6 +239,7 @@ export default function PayrollPayRoleRoute() {
             payRole={data.payRole}
             plan={data.plan}
             assignedStaff={data.assignedStaff ?? []}
+            assignedContractors={data.assignedContractors ?? []}
             canWrite={data.canWrite}
           />
         )

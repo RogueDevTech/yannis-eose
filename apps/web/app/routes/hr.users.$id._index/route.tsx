@@ -100,6 +100,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       currentUser?.role === 'HR_MANAGER' ||
       permsSetForDeactivate.has(canonicalPermissionCode('users.deactivate')) ||
       permsSetForDeactivate.has(canonicalPermissionCode('users.staff.deactivate'));
+    const canDeletePendingStaff =
+      currentUser?.role === 'SUPER_ADMIN' ||
+      currentUser?.role === 'HR_MANAGER' ||
+      permsSetForDeactivate.has(canonicalPermissionCode('users.create')) ||
+      permsSetForDeactivate.has(canonicalPermissionCode('users.staff.create'));
     const canReactivateDeactivatedStaff =
       isSuperAdmin ||
       currentUser?.role === 'HR_MANAGER' ||
@@ -169,6 +174,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       user,
       isSuperAdmin,
       canDeactivateStaff,
+      canDeletePendingStaff,
       canReactivateDeactivatedStaff,
       isViewerHeadOfMarketing,
       isViewerHeadOfCS,
@@ -455,6 +461,39 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (!res.ok) {
       return json(
         { error: extractApiErrorMessage(res.data, 'Failed to deactivate user') },
+        { status: safeStatus(res.status) },
+      );
+    }
+
+    return redirect('/hr/users');
+  }
+
+  if (intent === 'deletePending') {
+    const currentUser = await getCurrentUser(request);
+    const permSet = new Set(
+      (currentUser?.permissions ?? []).map((c) => canonicalPermissionCode(c)),
+    );
+    const canDeletePending =
+      currentUser?.role === 'SUPER_ADMIN' ||
+      currentUser?.role === 'HR_MANAGER' ||
+      permSet.has(canonicalPermissionCode('users.create')) ||
+      permSet.has(canonicalPermissionCode('users.staff.create'));
+    if (!canDeletePending) {
+      return json(
+        { error: 'You do not have permission to delete pending invites.' },
+        { status: 403 },
+      );
+    }
+
+    const res = await apiRequest<unknown>('/trpc/users.deletePending', {
+      method: 'POST',
+      cookie,
+      body: { userId },
+    });
+
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to delete pending user') },
         { status: safeStatus(res.status) },
       );
     }
