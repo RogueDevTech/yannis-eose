@@ -81,9 +81,10 @@ describe.skipIf(SKIP_IF_NO_DB)('FIFO Inventory Costing — Integration', () => {
     expect(batch).toBeDefined();
     expect(batch!.quantity).toBe(200);
     expect(batch!.remainingQuantity).toBe(200);
-    expect(batch!.factoryCost).toBe('3000.00');
-    expect(batch!.landingCost).toBe('2000.00');
-    expect(batch!.totalLandedCost).toBe('5000.00');
+    // numeric(14,4) since migration 0277 — compare numerically, not as strings.
+    expect(parseFloat(batch!.factoryCost)).toBe(3000);
+    expect(parseFloat(batch!.landingCost)).toBe(2000);
+    expect(parseFloat(batch!.totalLandedCost)).toBe(5000);
 
     const historyRows = await db.execute<{ id: string }>(
       sql`SELECT id FROM stock_batches_history WHERE id = ${batch!.id} LIMIT 1`,

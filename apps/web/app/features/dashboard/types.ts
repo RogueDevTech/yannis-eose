@@ -15,6 +15,8 @@ export interface DashboardData {
     totalSpend: number;
     totalOrders: number;
     deliveredOrders: number;
+    /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
+    deliveredThisMonth?: number;
     deliveredRevenue: number;
     confirmedOrders: number;
     confirmationRate: number;

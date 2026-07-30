@@ -90,6 +90,8 @@ export const payrollContractors = pgTable('payroll_contractors', {
   groupId: uuid('group_id').references(() => branchGroups.id),
   name: text('name').notNull(),
   branchId: uuid('branch_id').references(() => branches.id),
+  /** Pay role this contractor counts toward on Payroll Config headcounts. */
+  payRoleId: uuid('pay_role_id').references(() => payrollPayRoles.id),
   monthlyFee: numeric('monthly_fee', { precision: 14, scale: 2 }).notNull(),
   bankName: text('bank_name'),
   bankCode: text('bank_code'),

@@ -340,6 +340,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
                 offlineCount: number;
                 duplicateCount: number;
                 cartStatusCounts?: Record<string, number>;
+                deliveredThisMonth?: number;
               };
             };
           })?.result?.data
@@ -382,6 +383,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         offlineCount: data?.offlineCount ?? 0,
         duplicateCount: data?.duplicateCount ?? 0,
         cartStatusCounts: data?.cartStatusCounts ?? {},
+        deliveredThisMonth: data?.deliveredThisMonth,
       };
     } catch (err) {
       console.error('[marketing.ordersPageBundle] Secondary bundle failed:', err instanceof Error ? err.message : err);

@@ -60,6 +60,11 @@ export class ShipmentsService {
 
   private hasVerifyPermission(actor: SessionUser): boolean {
     if (isAdminLevel(actor)) return true;
+    // Supplier shipments are a warehouse-side act (Stock Manager / HoL). A 3PL
+    // manager holds `inventory.verifyTransfer` for TRANSFER receipts at their
+    // own warehouse, but has no authority over inbound supplier shipments —
+    // verifying one would create stock and GL entries in someone else's books.
+    if (actor.role === 'TPL_MANAGER') return false;
     const want = canonicalPermissionCode('inventory.verifyTransfer');
     return (actor.permissions ?? []).map((c) => canonicalPermissionCode(c)).includes(want);
   }
@@ -96,7 +101,15 @@ export class ShipmentsService {
     });
     const valueSum = valueWeights.reduce((a, b) => a + b, 0);
 
-    if (valueSum > 0) {
+    // Value-basis allocation is only fair when EVERY received line has a
+    // factory cost. A zero-cost line (cost unknown at intake) would get zero
+    // freight while the other SKUs absorb its share — its batches would enter
+    // FIFO undervalued forever. Mixed-cost shipments fall back to qty basis.
+    const hasZeroCostReceivedLine = lines.some((line, idx) => {
+      return Math.max(0, line.receivedQuantity) > 0 && (valueWeights[idx] ?? 0) <= 0;
+    });
+
+    if (valueSum > 0 && !hasZeroCostReceivedLine) {
       let allocated = 0;
       lines.forEach((line, idx) => {
         if (idx === lines.length - 1) {
@@ -676,10 +689,13 @@ export class ShipmentsService {
     }
 
     const updated = await withActorAndBranch(this.db, actor, async (tx) => {
+      // FOR UPDATE: a line edit racing verifyShipment could delete/reinsert
+      // lines mid-verify, leaving batches referencing deleted line ids.
       const [existing] = await tx
         .select()
         .from(schema.shipments)
         .where(eq(schema.shipments.id, input.shipmentId))
+        .for('update')
         .limit(1);
       if (!existing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Shipment not found.' });
@@ -812,10 +828,14 @@ export class ShipmentsService {
     }
 
     const result = await withActorAndBranch(this.db, actor, async (tx) => {
+      // FOR UPDATE: two concurrent verifies both reading ARRIVED would create
+      // the stock batches and credit inventory twice (and a concurrent cancel
+      // or line edit could interleave). The row lock serialises all of them.
       const [existing] = await tx
         .select()
         .from(schema.shipments)
         .where(eq(schema.shipments.id, input.shipmentId))
+        .for('update')
         .limit(1);
       if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Shipment not found.' });
       if (existing.status !== 'ARRIVED') {
@@ -826,6 +846,25 @@ export class ShipmentsService {
               ? 'Shipment is already verified.'
               : 'Mark the shipment as ARRIVED before verifying receipts.',
         });
+      }
+
+      // Migration 0252 contract, enforced here as promised: when a landed-cost
+      // component breakdown was entered, the four components must sum to
+      // total_landing_cost. All-zero components mean "no breakdown entered".
+      const componentSum = [
+        existing.purchasePriceTotal,
+        existing.inboundLogisticsCost,
+        existing.offloadingCost,
+        existing.importDuties,
+      ].reduce((sum, v) => sum + (parseFloat(v ?? '0') || 0), 0);
+      if (componentSum > 0) {
+        const totalLandingForCheck = parseFloat(existing.totalLandingCost ?? '0') || 0;
+        if (Math.abs(componentSum - totalLandingForCheck) > 0.01) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Landed cost components sum to ${componentSum.toFixed(2)} but total landing cost is ${totalLandingForCheck.toFixed(2)}. Fix the breakdown before verifying.`,
+          });
+        }
       }
 
       const dbLines = await tx
@@ -933,35 +972,25 @@ export class ShipmentsService {
           });
         }
 
-        // 2) Upsert inventory_levels for (product, destination) — mirrors intake()
-        const [existingLevel] = await tx
-          .select()
-          .from(schema.inventoryLevels)
-          .where(
-            and(
-              eq(schema.inventoryLevels.productId, line.productId),
-              eq(schema.inventoryLevels.locationId, existing.destinationLocationId),
-            ),
-          )
-          .limit(1);
-        if (existingLevel) {
-          await tx
-            .update(schema.inventoryLevels)
-            .set({
-              stockCount: sql`${schema.inventoryLevels.stockCount} + ${line.receivedQuantity}`,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.inventoryLevels.id, existingLevel.id));
-        } else {
-          await tx.insert(schema.inventoryLevels).values({
+        // 2) Upsert inventory_levels for (product, destination) — mirrors intake().
+        // Atomic on the (product_id, location_id) unique index; levels carry no
+        // batchId (batch tracking lives in stock_batches).
+        await tx
+          .insert(schema.inventoryLevels)
+          .values({
             productId: line.productId,
             locationId: existing.destinationLocationId,
-            batchId: batch.id,
             stockCount: line.receivedQuantity,
             reservedCount: 0,
             status: 'AVAILABLE',
+          })
+          .onConflictDoUpdate({
+            target: [schema.inventoryLevels.productId, schema.inventoryLevels.locationId],
+            set: {
+              stockCount: sql`${schema.inventoryLevels.stockCount} + ${line.receivedQuantity}`,
+              updatedAt: new Date(),
+            },
           });
-        }
 
         // 3) Log INTAKE movement
         await tx.insert(schema.stockMovements).values({
@@ -1039,6 +1068,7 @@ export class ShipmentsService {
         .select()
         .from(schema.shipments)
         .where(eq(schema.shipments.id, input.shipmentId))
+        .for('update')
         .limit(1);
       if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Shipment not found.' });
       if (existing.status !== 'VERIFIED') {
@@ -1067,10 +1097,13 @@ export class ShipmentsService {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'No permission.' });
     }
     return withActorAndBranch(this.db, actor, async (tx) => {
+      // FOR UPDATE: a cancel racing a verify must not leave a CANCELLED
+      // shipment whose receipts are live in inventory.
       const [existing] = await tx
         .select()
         .from(schema.shipments)
         .where(eq(schema.shipments.id, input.shipmentId))
+        .for('update')
         .limit(1);
       if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Shipment not found.' });
       if (existing.status === 'VERIFIED' || existing.status === 'CLOSED') {

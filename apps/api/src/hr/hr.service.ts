@@ -23,6 +23,8 @@ import { getManageableRolesForViewer } from './payroll-batch.service';
 import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
 import { computeEarningsFromPlanRules, resolveClawbackPerReturnAmount } from './commission-rules-math';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { PayrollComputeService } from './payroll-compute.service';
+import { PayrollMetricsService } from './payroll-metrics.service';
 
 @Injectable()
 export class HrService {
@@ -30,6 +32,8 @@ export class HrService {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly events: EventsService,
     private readonly notifications: NotificationsService,
+    private readonly payrollCompute: PayrollComputeService,
+    private readonly payrollMetrics: PayrollMetricsService,
   ) {}
 
   // ============================================
@@ -629,6 +633,11 @@ export class HrService {
 
   /**
    * Preview payout for a staff member without creating it.
+   *
+   * Uses the same resolution as batch payroll (PayrollComputeService): the
+   * assigned pay role's formula wins, then personal plan, then role default,
+   * and FLAT_RATE basis is honored. Keeping this aligned is what makes the
+   * profile Earnings tab match Payroll Config base salaries.
    */
   async previewPayout(staffId: string, periodStart: string, periodEnd: string) {
     const start = new Date(periodStart);
@@ -645,97 +654,53 @@ export class HrService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Staff not found' });
     }
 
-    // Commission pay is by `deliveredAt` (pay the agent in the period the
-    // delivery actually happened) — never switch this to `createdAt` or
-    // commissions on cross-period orders disappear from every payroll.
-    // Include REMITTED so commission isn't lost when the accountant marks
-    // remittance received before payroll runs (DELIVERED→REMITTED flip).
-    const deliveredRows = await this.db
-      .select({ count: count(), revenue: sum(schema.orders.totalAmount) })
-      .from(schema.orders)
-      .where(
-        and(
-          inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
-          gte(schema.orders.deliveredAt, start),
-          lte(schema.orders.deliveredAt, end),
-          or(
-            eq(schema.orders.assignedCsId, staffId),
-            eq(schema.orders.mediaBuyerId, staffId),
-          ),
-        ),
-      );
+    // Company scope for product tiers + PAYE config comes from the staff's
+    // primary branch.
+    let groupId: string | null = null;
+    if (user.primaryBranchId) {
+      const [branch] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, user.primaryBranchId))
+        .limit(1);
+      groupId = branch?.groupId ?? null;
+    }
 
-    const totalOrdersRows = await this.db
-      .select({ count: count() })
-      .from(schema.orders)
-      .where(
-        and(
-          sql`${schema.orders.status} <> 'DELETED'`,
-          gte(schema.orders.createdAt, start),
-          lte(schema.orders.createdAt, end),
-          or(
-            eq(schema.orders.assignedCsId, staffId),
-            eq(schema.orders.mediaBuyerId, staffId),
-          ),
-        ),
-      );
+    const computed = await this.payrollCompute.computeForMember(
+      this.db,
+      {
+        id: user.id,
+        role: user.role,
+        commissionPlanId: user.commissionPlanId ?? null,
+        payRoleId: user.payRoleId ?? null,
+        salaryBasis: user.salaryBasis ?? null,
+        taxStatus: user.taxStatus ?? null,
+        flatMonthlyAmount: user.flatMonthlyAmount != null ? Number(user.flatMonthlyAmount) : null,
+      },
+      start,
+      end,
+      groupId,
+      user.primaryBranchId ?? null,
+    );
 
-    // Cohort delivered (orders created in period AND now delivered) — drives
-    // the bonus-threshold rate so it's bounded by 100%. Decoupled from the
-    // pay count above so a cross-period delivery still pays out.
-    const deliveredCohortRows = await this.db
-      .select({ count: count() })
-      .from(schema.orders)
-      .where(
-        and(
-          inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
-          gte(schema.orders.createdAt, start),
-          lte(schema.orders.createdAt, end),
-          or(
-            eq(schema.orders.assignedCsId, staffId),
-            eq(schema.orders.mediaBuyerId, staffId),
-          ),
-        ),
-      );
-
-    const returnedRows = await this.db
-      .select({ count: count() })
-      .from(schema.orders)
-      .where(
-        and(
-          eq(schema.orders.status, 'RETURNED'),
-          gte(schema.orders.deliveredAt, start),
-          lte(schema.orders.deliveredAt, end),
-          or(
-            eq(schema.orders.assignedCsId, staffId),
-            eq(schema.orders.mediaBuyerId, staffId),
-          ),
-        ),
-      );
-
-    const deliveredCount = deliveredRows[0]?.count ?? 0;
-    const totalOrders = totalOrdersRows[0]?.count ?? 0;
-    const deliveredCohortCount = deliveredCohortRows[0]?.count ?? 0;
-    const returnedCount = returnedRows[0]?.count ?? 0;
-
-    const plan = await resolveApplicableCommissionPlan(this.db, {
-      commissionPlanId: user.commissionPlanId ?? null,
-      staffRole: user.role,
-      rangeStart: start,
-      rangeEnd: end,
-    });
-
-    const {
-      baseSalary,
-      performanceBonus,
-      penalties,
-      deliveryRate,
-    } = computeEarningsFromPlanRules(plan?.rules, {
-      deliveredCount,
-      totalOrders,
-      returnedCount,
-      deliveredCohortCount,
-    });
+    // Staff with no resolvable plan still get their real order metrics shown.
+    const metrics = computed?.metricsSnapshot
+      ?? (await this.payrollMetrics.getStaffMetrics({
+        staffId: user.id,
+        staffRole: user.role,
+        periodStart: start,
+        periodEnd: end,
+        crmLinked: true,
+      }));
+    const deliveredCount = metrics?.deliveredCount ?? 0;
+    const totalOrders = metrics?.totalOrders ?? 0;
+    const returnedCount = metrics?.returnedCount ?? 0;
+    const deliveryRate = metrics?.individualDr ?? 0;
+    const baseSalary = computed?.baseSalary ?? 0;
+    const performanceBonus = computed?.performanceBonus ?? 0;
+    const allowancesTotal = computed?.allowancesTotal ?? 0;
+    const penalties = computed?.deductionsTotal ?? 0;
+    const planName = computed?.payRoleName ?? 'No plan assigned';
 
     const [pendingClawbacks, bonusRows, otherAddOnRows] = await Promise.all([
       this.db
@@ -777,19 +742,23 @@ export class HrService {
     const addOnsTotal = Number(bonusRows[0]?.total ?? 0) + Number(otherAddOnRows[0]?.total ?? 0);
 
     const deductionsTotal = penalties + clawbackTotal;
-    const totalPayout = Math.max(0, baseSalary + performanceBonus + addOnsTotal - deductionsTotal);
+    const totalPayout = Math.max(
+      0,
+      baseSalary + performanceBonus + allowancesTotal + addOnsTotal - deductionsTotal,
+    );
 
     return {
       staffId,
       staffName: user.name,
       role: user.role,
-      planName: plan?.planName ?? 'No plan assigned',
+      planName,
       deliveredCount,
       totalOrders,
       returnedCount,
       deliveryRate,
       baseSalary,
       performanceBonus,
+      allowancesTotal,
       addOnsTotal,
       penalties,
       clawbacks: clawbackTotal,

@@ -41,14 +41,21 @@ export async function createTestUser(
 }
 
 export async function createTestProduct(db: PostgresJsDatabase<typeof schema>) {
+  // products.group_id is NOT NULL since the multi-company rollout: every test
+  // product needs its own company (branch group).
+  const [group] = await db.insert(schema.branchGroups).values({
+    name: `Test Group ${randomUUID().slice(0, 8)}`,
+  }).returning({ id: schema.branchGroups.id });
+
   const [inserted] = await db.insert(schema.products).values({
     name: `Test Product ${randomUUID().slice(0, 8)}`,
     baseSalePrice: '10000',
     costPrice: '5000',
+    groupId: group!.id,
   }).returning({ id: schema.products.id });
 
   const id = inserted!.id;
-  return { id };
+  return { id, groupId: group!.id };
 }
 
 export async function createTestOrder(

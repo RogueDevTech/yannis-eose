@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { cpaColorClass } from '~/lib/rate-color';
+import { carryOverTileLabel } from './carry-over-label';
 import { Link, useFetcher } from '@remix-run/react';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
@@ -409,6 +410,14 @@ export function MarketingOverviewPage({
           ? 'text-amber-600 dark:text-amber-400'
           : 'text-app-fg',
       title: 'Open abandoned carts not yet recovered',
+    },
+    {
+      // Carry-over only: orders delivered this period but generated in a prior
+      // month. Display-only; excluded from DR.
+      label: carryOverTileLabel(filters?.startDate, filters?.endDate),
+      value: (metrics.deliveredThisMonth ?? 0).toString(),
+      valueClassName: 'text-success-600 dark:text-success-400',
+      title: 'Carry-over delivered: orders delivered this period but generated in a prior month. Does not affect Delivery Rate.',
     },
   ];
 

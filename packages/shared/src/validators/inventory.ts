@@ -4,12 +4,16 @@ import { z } from 'zod';
 // Stock Intake — add a FIFO batch
 // ============================================
 
+// Upper bound on any per-unit cost: a fat-fingered (or hostile) 1e12 factory
+// cost would poison FIFO landed COGS for every downstream profit figure.
+const MAX_UNIT_COST = 100_000_000; // ₦100m per unit
+
 export const stockIntakeSchema = z.object({
   productId: z.string().uuid(),
   locationId: z.string().uuid(),
   quantity: z.number().int().min(1, 'Quantity must be at least 1'),
-  factoryCost: z.coerce.number().min(0).multipleOf(0.01),
-  landingCost: z.coerce.number().min(0).multipleOf(0.01),
+  factoryCost: z.coerce.number().min(0).max(MAX_UNIT_COST).multipleOf(0.01),
+  landingCost: z.coerce.number().min(0).max(MAX_UNIT_COST).multipleOf(0.01),
 });
 
 export type StockIntakeInput = z.infer<typeof stockIntakeSchema>;
@@ -18,12 +22,17 @@ export type StockIntakeInput = z.infer<typeof stockIntakeSchema>;
 // Stock Transfer — warehouse to 3PL
 // ============================================
 
-export const stockTransferSchema = z.object({
-  productId: z.string().uuid(),
-  fromLocationId: z.string().uuid(),
-  toLocationId: z.string().uuid(),
-  quantity: z.number().int().min(1),
-});
+export const stockTransferSchema = z
+  .object({
+    productId: z.string().uuid(),
+    fromLocationId: z.string().uuid(),
+    toLocationId: z.string().uuid(),
+    quantity: z.number().int().min(1),
+  })
+  .refine((v) => v.fromLocationId !== v.toLocationId, {
+    message: 'Source and destination must differ',
+    path: ['toLocationId'],
+  });
 
 export type StockTransferInput = z.infer<typeof stockTransferSchema>;
 
@@ -66,7 +75,7 @@ export type StockTransferBatchInput = z.infer<typeof stockTransferBatchSchema>;
 export const verifyTransferSchema = z.object({
   transferId: z.string().uuid(),
   quantityReceived: z.number().int().min(0),
-  shrinkageReason: z.string().optional(),
+  shrinkageReason: z.string().max(500).optional(),
   /** Optional free-text comment from the receiver (visible in admin + transfers UI). */
   receiverNotes: z.string().max(500).optional(),
 });
@@ -101,7 +110,7 @@ export const stockAdjustmentSchema = z.object({
   productId: z.string().uuid(),
   locationId: z.string().uuid(),
   adjustmentQuantity: z.number().int().min(-10000).max(10000), // positive = add, negative = remove; capped to prevent accidental mass inflation
-  reason: z.string().min(10, 'Reason must be at least 10 characters'),
+  reason: z.string().min(10, 'Reason must be at least 10 characters').max(500),
 });
 
 export type StockAdjustmentInput = z.infer<typeof stockAdjustmentSchema>;
@@ -174,7 +183,7 @@ export const createReconciliationSchema = z.object({
     'COUNTING_ERROR',
     'OTHER',
   ]),
-  notes: z.string().min(10, 'Notes must be at least 10 characters').optional(),
+  notes: z.string().min(10, 'Notes must be at least 10 characters').max(1000).optional(),
 });
 
 export type CreateReconciliationInput = z.infer<typeof createReconciliationSchema>;
@@ -200,13 +209,16 @@ export const shipmentStatusSchema = z.enum([
 ]);
 export type ShipmentStatus = z.infer<typeof shipmentStatusSchema>;
 
-const moneyAmount = z.coerce.number().min(0).multipleOf(0.01);
+// Total-level amounts get a wider cap than per-unit costs (a shipment's total
+// landing can legitimately exceed any single unit cost) but still reject
+// fat-fingered magnitudes that would poison landed COGS.
+const moneyAmount = z.coerce.number().min(0).max(10_000_000_000).multipleOf(0.01);
 
 const createShipmentLineSchema = z.object({
   productId: z.string().uuid(),
   expectedQuantity: z.number().int().min(1, 'Expected quantity must be at least 1'),
   // Optional — defaults to 0 when the factory cost is not yet known at intake.
-  factoryCost: moneyAmount.optional(),
+  factoryCost: moneyAmount.refine((v) => v <= MAX_UNIT_COST, 'Factory cost too large').optional(),
 });
 
 export const createShipmentSchema = z.object({

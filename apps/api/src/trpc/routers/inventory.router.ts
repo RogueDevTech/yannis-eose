@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import {
   stockIntakeSchema,
@@ -68,6 +69,31 @@ function getLogisticsServiceForInventory(): LogisticsService {
   return logisticsServiceInstance;
 }
 
+/**
+ * TPL isolation, enforced server-side. A 3PL manager is scoped to their own
+ * warehouse: every inventory read either forces this locationId into the query
+ * or rejects a mismatching explicit filter. Returns null for all other roles.
+ * (Pre-fix, the ONLY scoping was a frontend loader default — any TPL session
+ * could read every warehouse of every company by calling the API directly.)
+ */
+function tplLocationScope(user: { role: string; logisticsLocationId: string | null }): string | null {
+  if (user.role !== 'TPL_MANAGER') return null;
+  if (!user.logisticsLocationId) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Your account has no assigned warehouse location.',
+    });
+  }
+  return user.logisticsLocationId;
+}
+
+/** Admin-side inventory surfaces a 3PL manager has no business reading. */
+function denyTpl(user: { role: string }): void {
+  if (user.role === 'TPL_MANAGER') {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Not available for 3PL accounts.' });
+  }
+}
+
 export const inventoryRouter = router({
   /**
    * List inventory levels — filtered by product/location.
@@ -75,12 +101,14 @@ export const inventoryRouter = router({
   levels: permissionProcedure('inventory.read')
     .input(listInventorySchema)
     .query(async ({ input, ctx }) => {
-      return getInventoryService().listLevels(input, ctx.activeGroupId, ctx.effectiveBranchIds);
+      const tplLoc = tplLocationScope(ctx.user);
+      const scopedInput = tplLoc ? { ...input, locationId: tplLoc } : input;
+      return getInventoryService().listLevels(scopedInput, ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
   /** Aggregated stock per (product, location) — no batch rows, no pagination. */
   levelsSummary: permissionProcedure('inventory.read').query(async ({ ctx }) => {
-    return getInventoryService().listLevelsSummary(ctx.activeGroupId);
+    return getInventoryService().listLevelsSummary(ctx.activeGroupId, tplLocationScope(ctx.user));
   }),
 
   /**
@@ -106,6 +134,10 @@ export const inventoryRouter = router({
       endDate: z.string().optional(),
     }))
     .query(async ({ input, ctx }) => {
+      const tplLoc = tplLocationScope(ctx.user);
+      if (tplLoc && input.locationId !== tplLoc) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only view your own location.' });
+      }
       return getInventoryService().levelDetail(input.productId, input.locationId, {
         page: input.page,
         limit: input.limit,
@@ -121,6 +153,7 @@ export const inventoryRouter = router({
   providerShipments: permissionProcedure('inventory.read')
     .input(z.object({ providerId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
+      denyTpl(ctx.user);
       return getInventoryService().getProviderShipments(input.providerId, ctx.activeGroupId);
     }),
 
@@ -130,6 +163,7 @@ export const inventoryRouter = router({
       shipmentId: z.string().uuid().optional(),
     }))
     .query(async ({ input, ctx }) => {
+      denyTpl(ctx.user);
       return getInventoryService().getProviderLocationBreakdown(input, ctx.activeGroupId);
     }),
 
@@ -139,6 +173,7 @@ export const inventoryRouter = router({
       shipmentId: z.string().uuid().optional(),
     }))
     .query(async ({ input, ctx }) => {
+      denyTpl(ctx.user);
       return getInventoryService().getProviderProductBreakdown(input, ctx.activeGroupId);
     }),
 
@@ -153,6 +188,7 @@ export const inventoryRouter = router({
       endDate: z.string().optional(),
     }))
     .query(async ({ input, ctx }) => {
+      denyTpl(ctx.user);
       return getInventoryService().getProviderMovements(input, ctx.activeGroupId);
     }),
 
@@ -169,6 +205,7 @@ export const inventoryRouter = router({
       endDate: z.string().optional(),
     }))
     .query(async ({ input, ctx }) => {
+      denyTpl(ctx.user);
       return getInventoryService().getLevelById(input.id, {
         page: input.page,
         limit: input.limit,
@@ -248,7 +285,10 @@ export const inventoryRouter = router({
     .input(
       z.object({
         transferId: z.string().uuid(),
-        reason: z.string().trim().min(10, 'Reason must be at least 10 characters').max(500).optional(),
+        // Required: cancelling reverses inventory, and Pillar 4 demands the
+        // ledger answer "why" (the web form already enforced this; the API
+        // must too).
+        reason: z.string().trim().min(10, 'Reason must be at least 10 characters').max(500),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -270,7 +310,9 @@ export const inventoryRouter = router({
   movements: permissionProcedure('inventory.read')
     .input(listMovementsSchema)
     .query(async ({ input, ctx }) => {
-      return getInventoryService().listMovements(input, ctx.user, ctx.currentBranchId ?? null, ctx.effectiveBranchIds);
+      const tplLoc = tplLocationScope(ctx.user);
+      const scopedInput = tplLoc ? { ...input, locationId: tplLoc } : input;
+      return getInventoryService().listMovements(scopedInput, ctx.user, ctx.currentBranchId ?? null, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -287,7 +329,8 @@ export const inventoryRouter = router({
    */
   lowStockAlerts: permissionProcedure('inventory.lowStockAlerts')
     .query(async ({ ctx }) => {
-      return getInventoryService().getLowStockAlerts(undefined, ctx.effectiveBranchIds);
+      denyTpl(ctx.user);
+      return getInventoryService().getLowStockAlerts(ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
   /**
@@ -296,17 +339,19 @@ export const inventoryRouter = router({
    * too — drives the per-location alert editor on /admin/inventory.
    */
   locationLowStockThresholds: permissionProcedure('inventory.lowStockAlerts')
-    .query(async () => {
-      return getInventoryService().listLocationThresholds();
+    .query(async ({ ctx }) => {
+      denyTpl(ctx.user);
+      return getInventoryService().listLocationThresholds(ctx.activeGroupId, ctx.effectiveBranchIds);
     }),
 
   /**
    * Set (or clear) a location's per-location low-stock alert threshold.
    * Passing `threshold: null` clears the override so the location inherits
-   * the org-wide threshold again. Admin-class only — gated by the
-   * `system_settings` write capability.
+   * the org-wide threshold again. Gated by `settings.write` — this is a
+   * config write, not an alert read (the old `inventory.lowStockAlerts` gate
+   * let any alert viewer rewrite thresholds on any location).
    */
-  setLocationLowStockThreshold: permissionProcedure('inventory.lowStockAlerts')
+  setLocationLowStockThreshold: permissionProcedure('settings.write')
     .input(
       z.object({
         locationId: z.string().uuid(),
@@ -387,18 +432,23 @@ export const inventoryRouter = router({
       const canSeeReturned = perms.includes('inventory.returnedOrders');
       const canSeeReconciliations = perms.includes('inventory.reconciliations');
 
+      // TPL isolation: force the 3PL manager's own warehouse over any
+      // client-supplied filter. listTransfers scopes internally via ctx.user.
+      const tplLoc = tplLocationScope(ctx.user);
+      const effectiveLocationId = tplLoc ?? input.locationId;
+
       // Match `listInventorySchema` defaults (see `inventory.levels` procedure).
       const levelsInput = {
         page: input.levelsPage,
         limit: input.levelsLimit,
         sortBy: 'updatedAt' as const,
         sortOrder: 'desc' as const,
-        ...(input.locationId && { locationId: input.locationId }),
+        ...(effectiveLocationId && { locationId: effectiveLocationId }),
       };
       const movementsInput = {
         page: input.movementsPage,
         limit: input.movementsLimit,
-        ...(input.locationId && { locationId: input.locationId }),
+        ...(effectiveLocationId && { locationId: effectiveLocationId }),
       };
 
       const [
@@ -426,10 +476,10 @@ export const inventoryRouter = router({
         getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId }),
         getInventoryService().listTransfers(undefined, ctx.user, undefined, undefined, ctx.activeGroupId).then((r) => r.transfers),
         canSeeReturned
-          ? getInventoryService().listReturnedOrders(input.locationId, ctx.effectiveBranchIds)
+          ? getInventoryService().listReturnedOrders(effectiveLocationId, ctx.effectiveBranchIds)
           : Promise.resolve([]),
         canSeeReconciliations
-          ? getInventoryService().listReconciliations(input.locationId, ctx.effectiveBranchIds)
+          ? getInventoryService().listReconciliations(effectiveLocationId, ctx.effectiveBranchIds)
           : Promise.resolve([]),
       ]);
 
@@ -475,6 +525,9 @@ export const inventoryRouter = router({
       }),
     )
     .query(async ({ input, ctx }) => {
+      // Admin page loader: low-stock config, supplier shipments, warehouse
+      // list. The 3PL portal has its own bundle (`inventoryPageBundle`).
+      denyTpl(ctx.user);
       const levelsInput = {
         page: input.levelsPage,
         limit: input.levelsLimit,

@@ -1114,6 +1114,8 @@ export const marketingRouter = router({
         campaignsResult,
         abandonedCartCount,
         supplementaryCounts,
+        deliveredThisMonthOrders,
+        deliveredThisMonthCart,
       ] = await Promise.all([
         // Status counts must use the SAME filter as orders.list so the strip
         // matches the table. The list uses orderSource='edge-form-and-import'
@@ -1240,6 +1242,33 @@ export const marketingRouter = router({
           'marketing',
           ctx.effectiveBranchIds,
         ),
+        // "Total Delivered This Month" (carry-over-inclusive, by delivered_at).
+        // SAME scope as statusCounts/cartStatusCounts above so it's comparable.
+        // Display-only — never wired into a rate.
+        getOrdersService().getDeliveredCarryOverCount({
+          mediaBuyerId: ordersScope.mediaBuyerId,
+          startDate: ordersScope.startDate,
+          endDate: ordersScope.endDate,
+          assignedCsId: ordersScope.assignedCsId,
+          branchId,
+          supervisorScope: ordersScope.supervisorScope,
+          branchScope: 'marketing',
+          effectiveBranchIds: ctx.effectiveBranchIds,
+          orderSource: mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import',
+          excludeFollowUps: true,
+          excludeCartGraduated: true,
+        }),
+        getCartOrdersService().getDeliveredCarryOverCount(
+          branchId,
+          ordersScope.assignedCsId,
+          ordersScope.startDate,
+          ordersScope.endDate,
+          ctx.effectiveBranchIds,
+          ordersScope.mediaBuyerId,
+          undefined,
+          'marketing',
+          supervisorBuyerIds,
+        ),
       ]);
 
       // Slim the picklist payloads down to what the page actually uses (id + name)
@@ -1281,6 +1310,9 @@ export const marketingRouter = router({
         statusCounts,
         cartStatusCounts,
         metrics,
+        // Total Delivered This Month (carry-over-inclusive): orders + cart,
+        // both by delivered_at. Display-only card; DR keeps using the cohort.
+        deliveredThisMonth: deliveredThisMonthOrders + deliveredThisMonthCart,
         dailyCounts: timeSeries,
         mediaBuyersForFilter,
         productsForFilter,

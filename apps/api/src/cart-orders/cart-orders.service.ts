@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql, asc } from 'drizzle-orm';
+import { and, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, ne, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type { ListCartOrdersInput, UpdateCartOrderInput, CreateCartOrderRoutingRuleInput, UpdateCartOrderRoutingRuleInput } from '@yannis/shared';
@@ -380,6 +380,66 @@ export class CartOrdersService {
     return counts;
   }
 
+  /**
+   * "Total Delivered This Month" contribution from the cart pipeline — cart
+   * orders DELIVERED within the window by `delivered_at`, regardless of when
+   * created. Used alongside the orders-table count so the Total Delivered tile
+   * includes cart-graduated deliveries. Display-only; never feeds a rate.
+   * Mirrors getStatusCounts scope conditions but filters DELIVERED/REMITTED by
+   * deliveredAt instead of createdAt.
+   */
+  /**
+   * Carry-over delivered count for cart orders: DELIVERED/REMITTED within the
+   * period by delivery date, but generated before the period started. Mirrors
+   * OrdersService.getDeliveredCarryOverCount. Display-only; never feeds a rate.
+   */
+  async getDeliveredCarryOverCount(
+    branchId?: string | null,
+    assignedCsId?: string | null,
+    startDate?: string,
+    endDate?: string,
+    effectiveBranchIds?: string[] | null,
+    mediaBuyerId?: string | null,
+    viewerCloserId?: string | null,
+    branchScope: 'servicing' | 'marketing' = 'servicing',
+    mediaBuyerIds?: string[] | null,
+  ): Promise<number> {
+    const conditions: Parameters<typeof and>[0][] = [
+      isNull(schema.cartOrders.deletedAt),
+      inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
+    ];
+    if (assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
+    if (mediaBuyerIds && mediaBuyerIds.length > 0) {
+      conditions.push(inArray(schema.cartOrders.mediaBuyerId, mediaBuyerIds));
+    } else if (mediaBuyerId) {
+      conditions.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
+    }
+    {
+      const branchCol = branchScope === 'marketing' ? schema.cartOrders.branchId : schema.cartOrders.servicingBranchId;
+      const bCond = branchScopeCondition(branchCol, branchId, effectiveBranchIds);
+      const isSelfQuery = viewerCloserId && assignedCsId === viewerCloserId;
+      if (isSelfQuery && bCond) {
+        conditions.push(or(bCond, eq(schema.cartOrders.assignedCsId, viewerCloserId))!);
+      } else if (bCond) {
+        conditions.push(bCond);
+      }
+    }
+    // Carry-over = delivered within the period (by delivered_at) AND generated
+    // before the period started (created_at < periodStart), which excludes this
+    // period's own cohort and leaves only prior-month cart orders.
+    if (startDate) {
+      conditions.push(gte(schema.cartOrders.deliveredAt, nigeriaDayStart(startDate)));
+      conditions.push(lt(schema.cartOrders.createdAt, nigeriaDayStart(startDate)));
+    }
+    if (endDate) conditions.push(lte(schema.cartOrders.deliveredAt, nigeriaDayEnd(endDate)));
+
+    const [row] = await this.db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(schema.cartOrders)
+      .where(and(...conditions));
+    return row?.count ?? 0;
+  }
+
   // ── Assign to CS ─────────────────────────────────────────────────────
 
   async assignToCS(orderId: string, closerId: string, actor: SessionUser) {
@@ -516,6 +576,31 @@ export class CartOrdersService {
       .where(eq(schema.cartOrders.id, orderId))
       .limit(1);
     if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart order not found' });
+
+    // Minimal lifecycle guards (cart orders have no full state machine):
+    //  - only known statuses are writable;
+    //  - DELIVERED is sticky: graduation already copied the order into the
+    //    orders table and deducted stock, so retracking the cart side alone
+    //    would leave the two tables diverging with stock gone. Delete instead.
+    const CART_STATUSES = [
+      'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED',
+      'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED', 'DELETED',
+    ];
+    if (!CART_STATUSES.includes(newStatus)) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: `Unknown cart order status: ${newStatus}` });
+    }
+    if (order.status === 'DELIVERED' && !['DELIVERED', 'REMITTED', 'DELETED'].includes(newStatus)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Delivered cart orders cannot be retracked: the order already graduated and stock was deducted. Delete it instead.',
+      });
+    }
+    if (order.status === 'REMITTED' && newStatus !== 'DELETED') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Remitted cart orders are settled. Only deletion is allowed.',
+      });
+    }
 
     // Pre-delivery duplicate guard: check BEFORE committing DELIVERED so we
     // never have a delivered cart order that can't graduate. The same check runs
@@ -685,34 +770,62 @@ export class CartOrdersService {
     // soft-deleted so counts stay consistent across both tables.
     // Match on cartId (= sourceCartId) to target the specific graduated order,
     // not all online orders from the same phone.
+    // The whole cascade runs under withActor (audit attribution) and reverses
+    // the graduation stock deduction in the SAME tx — a deleted recovered-cart
+    // order must give its units back, exactly like the dual-approval delete.
     if (newStatus === 'DELETED' && order.sourceCartId) {
+      let cascaded: Array<{ id: string; branchId: string | null }> = [];
       try {
-        const cascaded = await this.db
-          .update(schema.orders)
-          .set({ status: 'DELETED', deletedAt: new Date(), updatedAt: new Date() })
-          .where(
-            and(
-              eq(schema.orders.cartId, order.sourceCartId),
-              isNull(schema.orders.deletedAt),
-            ),
-          )
-          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
-        // Log a detailed deletion comment on each cascaded graduated order so its
-        // activity log explains why it disappeared (the cart order it came from
-        // was deleted), rather than silently vanishing.
-        for (const row of cascaded) {
-          await this.db.insert(schema.orderTimelineEvents).values({
-            orderId: row.id,
-            eventType: 'ORDER_DELETED',
-            actorId: actor.id,
-            actorName: actor.name ?? null,
-            description: `Order deleted because its originating cart order was deleted by ${actor.name ?? 'a user'}.`,
-            metadata: { reason: 'GRADUATION_SUPERSEDED', cartOrderId: orderId },
-            branchId: row.branchId ?? null,
-          }).catch(() => {});
-        }
+        cascaded = await withActor(this.db, actor, async (tx) => {
+          const rows = await tx
+            .update(schema.orders)
+            .set({ status: 'DELETED', deletedAt: new Date(), updatedAt: new Date() })
+            .where(
+              and(
+                eq(schema.orders.cartId, order.sourceCartId!),
+                isNull(schema.orders.deletedAt),
+              ),
+            )
+            .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+          for (const row of rows) {
+            // Netted + idempotent: only reverses DELIVERY movements not
+            // already offset, and restores FIFO batch remaining too.
+            await this.inventoryService.reverseDeliveryForOrderInTx(
+              tx,
+              row.id,
+              actor,
+              'graduated cart order deleted',
+            );
+            // Log a detailed deletion comment so the graduated order's
+            // activity log explains why it disappeared.
+            await tx.insert(schema.orderTimelineEvents).values({
+              orderId: row.id,
+              eventType: 'ORDER_DELETED',
+              actorId: actor.id,
+              actorName: actor.name ?? null,
+              description: `Order deleted because its originating cart order was deleted by ${actor.name ?? 'a user'}.`,
+              metadata: { reason: 'GRADUATION_SUPERSEDED', cartOrderId: orderId },
+              branchId: row.branchId ?? null,
+            });
+          }
+          return rows;
+        });
       } catch (err) {
         this.logger.warn(`Cascade delete to graduated order failed for cart order ${orderId}: ${err instanceof Error ? err.message : err}`);
+      }
+      // GL reversal outside the stock tx — non-fatal by design (same shape as
+      // softDeleteDeliveredOrder): a missing account must not block deletion.
+      for (const row of cascaded) {
+        try {
+          await this.generalLedger.reverseVoucher(
+            'SALES_INVOICE',
+            row.id,
+            actor,
+            'graduated cart order deleted',
+          );
+        } catch (err) {
+          this.logger.warn(`GL reversal for cascaded order ${row.id} failed: ${err instanceof Error ? err.message : err}`);
+        }
       }
     }
 
@@ -796,19 +909,49 @@ export class CartOrdersService {
       LIMIT 200
     `);
 
-    if (orphaned.length === 0) return;
+    if (orphaned.length > 0) {
+      this.logger.log(`Retrying graduation for ${orphaned.length} orphaned cart order(s)`);
+      let succeeded = 0;
+      for (const row of orphaned) {
+        try {
+          await this.graduateToOrders(row.id);
+          succeeded++;
+        } catch (err) {
+          this.logger.error(`Retry graduation failed for cart order ${row.id}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      this.logger.log(`Cart order graduation retry: ${succeeded}/${orphaned.length} succeeded`);
+    }
 
-    this.logger.log(`Retrying graduation for ${orphaned.length} orphaned cart order(s)`);
-    let succeeded = 0;
-    for (const row of orphaned) {
-      try {
-        await this.graduateToOrders(row.id);
-        succeeded++;
-      } catch (err) {
-        this.logger.error(`Retry graduation failed for cart order ${row.id}: ${err instanceof Error ? err.message : err}`);
+    // Second sweep: graduated copies whose STOCK deduction failed. The
+    // graduation marker (`graduated_order_id`) is set before the deduction
+    // runs, so a deduction failure used to be logged once and lost forever —
+    // the first sweep short-circuits on the marker and never retries it.
+    // A graduated delivered order with zero DELIVERY movements is exactly
+    // that failure. Covers cart AND follow-up graduations.
+    // `applyGraduationStockAndLedger` is safe to re-run: postSalesInvoice is
+    // idempotent, and the movement-absence filter guards the deduction.
+    const undeducted = await this.db.execute<{ id: string; logistics_location_id: string | null }>(sql`
+      SELECT o.id, o.logistics_location_id
+      FROM orders o
+      WHERE o.deleted_at IS NULL
+        AND o.status IN ('DELIVERED', 'REMITTED')
+        AND (
+          EXISTS (SELECT 1 FROM cart_orders co WHERE co.graduated_order_id = o.id AND co.deleted_at IS NULL)
+          OR EXISTS (SELECT 1 FROM follow_up_orders fo WHERE fo.graduated_order_id = o.id AND fo.deleted_at IS NULL)
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM stock_movements sm
+          WHERE sm.reference_id = o.id AND sm.movement_type = 'DELIVERY'
+        )
+      LIMIT 200
+    `);
+    if (undeducted.length > 0) {
+      this.logger.warn(`Found ${undeducted.length} graduated order(s) with no stock deduction: retrying.`);
+      for (const row of undeducted) {
+        await this.applyGraduationStockAndLedger(row.id, row.logistics_location_id);
       }
     }
-    this.logger.log(`Cart order graduation retry: ${succeeded}/${orphaned.length} succeeded`);
   }
 
   // ── Graduate to Orders ───────────────────────────────────────────────

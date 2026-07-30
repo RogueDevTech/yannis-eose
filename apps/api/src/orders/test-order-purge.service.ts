@@ -317,13 +317,19 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         .returning({ id: schema.followUpOrders.id });
 
       // Also catch follow-up orders where the customer name itself is a test name
-      // (cart-origin follow-ups have no sourceOrderId but may have test customer names)
+      // (cart-origin follow-ups have no sourceOrderId but may have test customer names).
+      // Same guards as the main target query: pre-delivery statuses only (a
+      // DELIVERED/REMITTED follow-up has a graduated copy that deducted stock —
+      // deleting the pipeline row would silently diverge the two tables) and
+      // the 48h window so old legitimate rows with "test" in the name survive.
       const byName = await tx
         .update(schema.followUpOrders)
         .set({ deletedAt: now, updatedAt: now })
         .where(
           and(
             sql`${schema.followUpOrders.customerName} ~* '\\mtest\\M'`,
+            inArray(schema.followUpOrders.status, [...PRE_DELETE_STATUSES]),
+            gte(schema.followUpOrders.createdAt, new Date(Date.now() - 48 * 60 * 60 * 1000)),
             isNull(schema.followUpOrders.deletedAt),
           ),
         )

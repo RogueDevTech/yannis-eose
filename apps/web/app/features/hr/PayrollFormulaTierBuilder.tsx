@@ -15,6 +15,74 @@ const METRIC_OPTIONS = [
   { value: 'NONE', label: 'None (flat)' },
 ];
 
+/** Metrics offered through the fallback dropdown next to the DR % / CPA quick picks. */
+const OTHER_METRIC_OPTIONS = METRIC_OPTIONS.filter(
+  (o) => o.value !== 'INDIVIDUAL_DR' && o.value !== 'CPA',
+);
+
+type MetricValue = (typeof METRIC_OPTIONS)[number]['value'];
+
+/**
+ * DR % and CPA are the two primary tier metrics, so they sit side by side as
+ * one-tap picks. Everything else stays reachable through the dropdown.
+ */
+function MetricQuickSelect({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled?: boolean;
+  onChange: (metric: MetricValue) => void;
+}) {
+  const isOther = value !== 'INDIVIDUAL_DR' && value !== 'CPA';
+  const pickClass = (active: boolean) =>
+    `text-xs font-medium px-2.5 py-1 rounded transition-colors disabled:opacity-60 ${
+      active
+        ? 'bg-white dark:bg-transparent text-app-fg shadow-sm border border-app-border'
+        : 'text-app-fg-muted hover:text-app-fg'
+    }`;
+  return (
+    <div className="flex items-center gap-1.5">
+      <div
+        className="flex items-center gap-1 rounded-md border border-app-border bg-app-hover p-1 shrink-0"
+        role="group"
+        aria-label="Tier metric"
+      >
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange('INDIVIDUAL_DR')}
+          className={pickClass(value === 'INDIVIDUAL_DR')}
+        >
+          DR %
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange('CPA')}
+          className={pickClass(value === 'CPA')}
+        >
+          CPA
+        </button>
+      </div>
+      <FormSelect
+        aria-label="Other metric"
+        value={isOther ? value : ''}
+        disabled={disabled}
+        onChange={(e) => {
+          if (e.target.value) onChange(e.target.value as MetricValue);
+        }}
+        options={[
+          { value: '', label: isOther ? 'Other' : 'Other…' },
+          ...OTHER_METRIC_OPTIONS,
+        ]}
+        wrapperClassName="min-w-[110px]"
+      />
+    </div>
+  );
+}
+
 const OPERATOR_OPTIONS = [
   { value: 'GTE', label: 'At least (≥)' },
   { value: 'GT', label: 'More than (>)' },
@@ -197,7 +265,7 @@ export function PayrollFormulaTierBuilder({
               <thead>
                 <tr className="text-left">
                   <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted w-8">#</th>
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[140px]">Metric</th>
+                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[230px]">Metric</th>
                   <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[140px]">Operator</th>
                   <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[90px]">Threshold</th>
                   <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[120px]">Amount (NGN)</th>
@@ -209,7 +277,7 @@ export function PayrollFormulaTierBuilder({
                   <tr key={`base-${idx}`} className="align-top">
                     <td className="px-1 py-0.5 text-xs font-semibold text-app-fg-muted tabular-nums">{idx + 1}</td>
                     <td className="px-1 py-0.5">
-                      <FormSelect value={tier.metric} disabled={!canWrite} onChange={(e) => setBaseTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, metric: e.target.value as BaseTier['metric'] } : r)))} options={METRIC_OPTIONS} />
+                      <MetricQuickSelect value={tier.metric} disabled={!canWrite} onChange={(metric) => setBaseTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, metric: metric as BaseTier['metric'] } : r)))} />
                     </td>
                     <td className="px-1 py-0.5">
                       <FormSelect value={tier.operator} disabled={!canWrite} onChange={(e) => setBaseTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, operator: e.target.value as BaseTier['operator'] } : r)))} options={OPERATOR_OPTIONS} />
@@ -253,7 +321,7 @@ export function PayrollFormulaTierBuilder({
               <thead>
                 <tr className="text-left">
                   <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted w-8">#</th>
-                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[140px]">Metric</th>
+                  <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[230px]">Metric</th>
                   <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[140px]">Operator</th>
                   <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[90px]">Threshold</th>
                   <th className="px-1 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[110px]">Kind</th>
@@ -266,7 +334,7 @@ export function PayrollFormulaTierBuilder({
                   <tr key={`bonus-${idx}`} className="align-top">
                     <td className="px-1 py-0.5 text-xs font-semibold text-app-fg-muted tabular-nums">{idx + 1}</td>
                     <td className="px-1 py-0.5">
-                      <FormSelect value={tier.metric} disabled={!canWrite} onChange={(e) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, metric: e.target.value as BonusTier['metric'] } : r)))} options={METRIC_OPTIONS} />
+                      <MetricQuickSelect value={tier.metric} disabled={!canWrite} onChange={(metric) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, metric: metric as BonusTier['metric'] } : r)))} />
                     </td>
                     <td className="px-1 py-0.5">
                       <FormSelect value={tier.operator} disabled={!canWrite} onChange={(e) => setBonusTiers((rows) => rows.map((r, i) => (i === idx ? { ...r, operator: e.target.value as BonusTier['operator'] } : r)))} options={OPERATOR_OPTIONS} />

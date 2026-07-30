@@ -86,9 +86,6 @@ interface UsersListPageProps {
    * `hr.export` — this is just the UI gate. Default false.
    */
   canExport?: boolean;
-  /** Per-page picker — caller supplies the clamped current size + the choices. */
-  pageSize?: number;
-  pageSizeOptions?: number[];
 }
 
 /** Type guard — distinguishes a pre-resolved payload (clientLoader cache hit)
@@ -109,8 +106,6 @@ export function UsersListPage({
   usersBasePath = '/hr/users',
   variant = 'default',
   canExport = false,
-  pageSize,
-  pageSizeOptions,
 }: UsersListPageProps) {
   // Bridge the deferred roster to local state. Page chrome below renders
   // immediately with `null` data + skeleton rows; once the promise resolves
@@ -154,15 +149,12 @@ export function UsersListPage({
       inactiveArchived: users.filter((u) => u.status === 'INACTIVE' || u.status === 'ARCHIVED').length,
       distinctRoles: new Set(users.map((u) => u.role)).size,
     };
-  const page: number = roster?.page ?? 1;
-  const totalPages: number = roster?.totalPages ?? 0;
   const staffAccounts = variant === 'staffAccounts';
   const [searchParams, setSearchParams] = useSearchParams();
   const currentStatusParam = searchParams.has('status') ? (searchParams.get('status') || 'ALL') : 'ALL';
   const currentRoleParam = searchParams.has('role') ? (searchParams.get('role') || 'ALL') : 'ALL';
   const searchFromUrl = searchParams.get('search') ?? '';
   const isFilterLoading = useLoaderRefetchBusy().busy;
-  const safeTotalPages = Math.max(1, totalPages);
   const resendFetcher = useFetcher<{ success?: boolean; error?: string; intent?: string }>();
   useFetcherToast(resendFetcher.data, { successMessage: 'Invite re-sent with new credentials' });
   // Confirmation modal — Resend invite mutates the user's password (a fresh temp password is
@@ -173,7 +165,7 @@ export function UsersListPage({
   const isResending = resendFetcher.state !== 'idle';
   /** Single open-menu id for the page-header split-button (Add user ▾). */
   const [openHeaderMenuId, setOpenHeaderMenuId] = useState<string | null>(null);
-  /** Staff-accounts export modal (client-side CSV/PDF/XLSX of the current page). */
+  /** Staff-accounts export modal (client-side CSV/PDF/XLSX of the full roster). */
   const [showExportModal, setShowExportModal] = useState(false);
   const navigate = useNavigate();
   /** Navigate straight to the create form — the form itself gates branch
@@ -293,18 +285,6 @@ export function UsersListPage({
     );
   };
 
-  const goToPage = (nextPage: number) => {
-    const clamped = Math.min(Math.max(1, nextPage), safeTotalPages);
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('page', String(clamped));
-        return next;
-      },
-      { replace: true },
-    );
-  };
-
   const filtersToolbarBadge = useMemo(() => {
     let n = 0;
     if (currentStatusParam !== 'ALL') n += 1;
@@ -389,7 +369,7 @@ export function UsersListPage({
     [usersBasePath],
   );
 
-  // Staff-accounts export — current page only, payout/bank fields included.
+  // Staff-accounts export — full roster, payout/bank fields included.
   // Server still enforces `hr.export`; this just builds the client-side file.
   const staffExportColumns = useMemo(
     () => [
@@ -687,8 +667,8 @@ export function UsersListPage({
       {staffAccounts && (
         rosterLoading ? (
           <OverviewStatStripSkeleton
-            count={2}
-            labels={['Total matching', 'Page']}
+            count={1}
+            labels={['Total matching']}
             tileClassName="min-w-[6.5rem]"
           />
         ) : (
@@ -697,11 +677,6 @@ export function UsersListPage({
             tileClassName="min-w-[6.5rem]"
             items={[
               { label: 'Total matching', value: total, valueClassName: 'text-app-fg tabular-nums' },
-              {
-                label: 'Page',
-                value: `${page} / ${safeTotalPages}`,
-                valueClassName: 'text-app-fg-muted tabular-nums',
-              },
             ]}
           />
         )
@@ -883,15 +858,16 @@ export function UsersListPage({
                   </div>
                 </button>
               )}
+              // No pagination — the staff roster is bounded, so we list everyone
+              // on one page. Keep the count summary; drop the pager + per-page
+              // picker (single page, no pageSize/pageSizeOptions).
               pagination={{
-                page,
-                totalPages: safeTotalPages,
-                onPageChange: goToPage,
-                pageSize,
-                pageSizeOptions,
+                page: 1,
+                totalPages: 1,
+                showWhenSinglePage: true,
                 summary: (
                   <span>
-                    Showing {users.length} of {total} staff
+                    {total} staff
                   </span>
                 ),
                 wrapperClassName:
@@ -1089,6 +1065,18 @@ export function UsersListPage({
                   </div>
                 </button>
               )}
+              // No pagination — the user roster is bounded, so we list everyone
+              // on one page. Keep the count summary; drop the pager.
+              pagination={{
+                page: 1,
+                totalPages: 1,
+                showWhenSinglePage: true,
+                summary: (
+                  <span>
+                    {total} users
+                  </span>
+                ),
+              }}
             />
           )}
         </>
@@ -1134,7 +1122,7 @@ export function UsersListPage({
           open={showExportModal}
           onClose={() => setShowExportModal(false)}
           title="Export staff accounts"
-          description={`Exports the ${users.length} staff ${users.length === 1 ? 'account' : 'accounts'} on this page, including payout and bank details.`}
+          description={`Exports all ${users.length} staff ${users.length === 1 ? 'account' : 'accounts'}, including payout and bank details.`}
           rows={staffExportRows}
           columns={staffExportColumns}
           defaultColumns={staffExportColumns.map((c) => c.key)}

@@ -4995,6 +4995,7 @@ export class MarketingService {
         otherExpenses: 0,
         totalOrders: 0,
         deliveredOrders: 0,
+        deliveredThisMonth: 0,
         deliveredRevenue: 0,
         confirmedOrders: 0,
         confirmationRate: 0,
@@ -5161,6 +5162,30 @@ export class MarketingService {
     if (periodEnd) deliveredConditions.push(lte(schema.orders.createdAt, periodEnd));
     const deliveredWhere = and(...deliveredConditions);
 
+    // "Carry-over Delivered": same status/scope as the cohort delivered count
+    // above, but counts orders DELIVERED within the period (by delivered_at)
+    // that were GENERATED before the period started (created_at < periodStart).
+    // The created_at bound excludes this period's own cohort, leaving only the
+    // prior-month carry-over. Display-only — NEVER used in deliveryRate/cpa/roas.
+    const deliveredThisMonthConditions: Parameters<typeof and>[0][] = [
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+      ...(isServicingScope ? [] : [
+        eq(schema.orders.isFollowUp, false),
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} IN ('edge-form', 'import'))`,
+      ]),
+      ...(isServicingScope ? [
+        eq(schema.orders.isFollowUp, false),
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} NOT IN ('online', 'delivered_follow_up'))`,
+      ] : []),
+    ];
+    appendMetricsOrderScope(deliveredThisMonthConditions);
+    if (periodStart) {
+      deliveredThisMonthConditions.push(gte(schema.orders.deliveredAt, periodStart));
+      deliveredThisMonthConditions.push(lt(schema.orders.createdAt, periodStart));
+    }
+    if (periodEnd) deliveredThisMonthConditions.push(lte(schema.orders.deliveredAt, periodEnd));
+    const deliveredThisMonthWhere = and(...deliveredThisMonthConditions);
+
     // Orders that CS have scheduled (reached CONFIRMED or beyond)
     const confirmedStatuses = [
       'CONFIRMED',
@@ -5216,6 +5241,30 @@ export class MarketingService {
         })()
       : Promise.resolve([{ deliveredCount: 0, deliveredRevenue: 0 }] as { deliveredCount: number; deliveredRevenue: number }[]);
 
+    // Cart contribution to "Total Delivered This Month" — same scope but by
+    // delivered_at (carry-over-inclusive). Display-only.
+    const cartDeliveredThisMonthQuery = !isServicingScope
+      ? (() => {
+          const cartConds: SQL[] = [
+            isNull(schema.cartOrders.deletedAt),
+            inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
+          ];
+          const bCond = branchScopeCondition(schema.cartOrders.branchId, branchId, effectiveBranchIds);
+          if (bCond) cartConds.push(bCond);
+          if (mediaBuyerId && mediaBuyerId !== '__system__') cartConds.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
+          if (supervisorScope?.mediaBuyerIds && supervisorScope.mediaBuyerIds.length > 0) {
+            cartConds.push(inArray(schema.cartOrders.mediaBuyerId, supervisorScope.mediaBuyerIds));
+          }
+          // Carry-over: delivered in-period, generated before the period started.
+          if (periodStart) {
+            cartConds.push(gte(schema.cartOrders.deliveredAt, periodStart));
+            cartConds.push(lt(schema.cartOrders.createdAt, periodStart));
+          }
+          if (periodEnd) cartConds.push(lte(schema.cartOrders.deliveredAt, periodEnd));
+          return this.db.select({ deliveredCount: count() }).from(schema.cartOrders).where(and(...cartConds));
+        })()
+      : Promise.resolve([{ deliveredCount: 0 }] as { deliveredCount: number }[]);
+
     const [
       totalSpendRows,
       pendingSpendRows,
@@ -5225,6 +5274,8 @@ export class MarketingService {
       deliveredRevenueRows,
       confirmedOrdersRows,
       cartDeliveredRows,
+      deliveredThisMonthRows,
+      cartDeliveredThisMonthRows,
     ] = await Promise.all([
       this.db
         .select({ total: sum(schema.adSpendLogs.spendAmount) })
@@ -5246,6 +5297,8 @@ export class MarketingService {
         .where(deliveredWhere),
       this.db.select({ count: count() }).from(schema.orders).where(confirmedWhere),
       cartQuery,
+      this.db.select({ count: count() }).from(schema.orders).where(deliveredThisMonthWhere),
+      cartDeliveredThisMonthQuery,
     ]);
 
     const approvedSpend = Number(totalSpendRows[0]?.total ?? 0);
@@ -5259,6 +5312,9 @@ export class MarketingService {
     const deliveredRevenue = Number(deliveredRevenueRows[0]?.total ?? 0) + cartRevenue;
     const confirmedOrders = (confirmedOrdersRows[0]?.count ?? 0) + cartDelivered;
     const confirmationRate = totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0;
+    // Carry-over-inclusive delivered count (by delivered_at). Additive/display-only.
+    const deliveredThisMonth =
+      (deliveredThisMonthRows[0]?.count ?? 0) + (cartDeliveredThisMonthRows[0]?.deliveredCount ?? 0);
 
     return {
       totalSpend,
@@ -5267,6 +5323,9 @@ export class MarketingService {
       otherExpenses,
       totalOrders,
       deliveredOrders,
+      // Total Delivered This Month (carry-over-inclusive, by delivered_at).
+      // Display-only — intentionally NOT used in deliveryRate/cpa/roas below.
+      deliveredThisMonth,
       deliveredRevenue,
       confirmedOrders,
       confirmationRate,
@@ -5312,12 +5371,16 @@ export class MarketingService {
     deliveredOrders: number;
     deliveredRevenue: number;
     confirmedOrders: number;
+    deliveredThisMonth?: number;
   }) {
     const { totalSpend, totalOrders, deliveredOrders, deliveredRevenue, confirmedOrders } = raw;
     return {
       totalSpend,
       totalOrders,
       deliveredOrders,
+      // Total Delivered This Month (carry-over-inclusive, by delivered_at).
+      // Pass-through display value — NEVER used in any rate below.
+      deliveredThisMonth: raw.deliveredThisMonth ?? 0,
       deliveredRevenue,
       confirmedOrders,
       confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0,
@@ -5427,7 +5490,24 @@ export class MarketingService {
         ? (and(isDelivered, ...inCreatedPeriod) ?? isDelivered)
         : isDelivered;
 
-    // Cart graduated per-MB: only DELIVERED/REMITTED from cart_orders table
+    // Carry-over Delivered: delivered within the period (by delivered_at) but
+    // generated before the period started (created_at < periodStart), so it
+    // excludes this period's cohort. Display-only — NOT used in DR.
+    const inDeliveredPeriod: SQL[] = [];
+    if (periodStart) {
+      inDeliveredPeriod.push(gte(schema.orders.deliveredAt, periodStart));
+      inDeliveredPeriod.push(lt(schema.orders.createdAt, periodStart));
+    }
+    if (periodEnd) inDeliveredPeriod.push(lte(schema.orders.deliveredAt, periodEnd));
+    const deliveredThisMonthFilter =
+      inDeliveredPeriod.length > 0
+        ? (and(isDelivered, ...inDeliveredPeriod) ?? isDelivered)
+        : isDelivered;
+
+    // Cart graduated per-MB: only DELIVERED/REMITTED from cart_orders table.
+    // Date scope is applied as FILTER clauses (not WHERE) so a single grouped
+    // query can produce BOTH the cohort count (by created_at) and the
+    // carry-over-inclusive Total (by delivered_at) without a second round-trip.
     const cartConditions: SQL[] = [
       isNull(schema.cartOrders.deletedAt),
       inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
@@ -5438,8 +5518,18 @@ export class MarketingService {
       const bCond = branchScopeCondition(schema.cartOrders.branchId, branchId, effectiveBranchIds);
       if (bCond) cartConditions.push(bCond);
     }
-    if (periodStart) cartConditions.push(gte(schema.cartOrders.createdAt, periodStart));
-    if (periodEnd) cartConditions.push(lte(schema.cartOrders.createdAt, periodEnd));
+    const cartInCreated: SQL[] = [];
+    if (periodStart) cartInCreated.push(gte(schema.cartOrders.createdAt, periodStart));
+    if (periodEnd) cartInCreated.push(lte(schema.cartOrders.createdAt, periodEnd));
+    const cartCreatedFilter = cartInCreated.length > 0 ? (and(...cartInCreated) ?? sql`true`) : sql`true`;
+    // Carry-over: cart orders delivered in-period but generated before it started.
+    const cartInDelivered: SQL[] = [];
+    if (periodStart) {
+      cartInDelivered.push(gte(schema.cartOrders.deliveredAt, periodStart));
+      cartInDelivered.push(lt(schema.cartOrders.createdAt, periodStart));
+    }
+    if (periodEnd) cartInDelivered.push(lte(schema.cartOrders.deliveredAt, periodEnd));
+    const cartDeliveredFilter = cartInDelivered.length > 0 ? (and(...cartInDelivered) ?? sql`true`) : sql`true`;
 
     const [spendRows, orderRows, cartRows] = await Promise.all([
       this.db
@@ -5458,6 +5548,7 @@ export class MarketingService {
             Number,
           ),
           deliveredOrders: sql<number>`count(*) FILTER (WHERE ${deliveredFilter})`.mapWith(Number),
+          deliveredThisMonth: sql<number>`count(*) FILTER (WHERE ${deliveredThisMonthFilter})`.mapWith(Number),
           deliveredRevenue:
             sql<number>`coalesce(sum(${schema.orders.totalAmount}) FILTER (WHERE ${deliveredFilter}), 0)`.mapWith(
               Number,
@@ -5479,12 +5570,15 @@ export class MarketingService {
           ),
         )
         .groupBy(schema.orders.mediaBuyerId),
-      // Per-MB cart graduated delivered — attributed to original MB
+      // Per-MB cart graduated delivered — attributed to original MB.
+      // deliveredCount/Revenue = cohort (by created_at); deliveredThisMonth =
+      // carry-over-inclusive (by delivered_at). Both from one grouped query.
       this.db
         .select({
           mediaBuyerId: schema.cartOrders.mediaBuyerId,
-          deliveredCount: count(),
-          deliveredRevenue: sql<number>`coalesce(sum(${schema.cartOrders.totalAmount}), 0)`.mapWith(Number),
+          deliveredCount: sql<number>`count(*) FILTER (WHERE ${cartCreatedFilter})`.mapWith(Number),
+          deliveredRevenue: sql<number>`coalesce(sum(${schema.cartOrders.totalAmount}) FILTER (WHERE ${cartCreatedFilter}), 0)`.mapWith(Number),
+          deliveredThisMonth: sql<number>`count(*) FILTER (WHERE ${cartDeliveredFilter})`.mapWith(Number),
         })
         .from(schema.cartOrders)
         .where(and(...cartConditions))
@@ -5527,6 +5621,9 @@ export class MarketingService {
           deliveredOrders: Number(orderRow?.deliveredOrders ?? 0) + cartDelivered,
           deliveredRevenue: Number(orderRow?.deliveredRevenue ?? 0) + cartRevenue,
           confirmedOrders: Number(orderRow?.confirmedOrders ?? 0) + cartDelivered,
+          // Carry-over-inclusive delivered (by delivered_at), orders + cart.
+          deliveredThisMonth:
+            Number(orderRow?.deliveredThisMonth ?? 0) + Number(cartRow?.deliveredThisMonth ?? 0),
         }),
       );
     }

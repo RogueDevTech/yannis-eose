@@ -45,6 +45,9 @@ export function UserDetailEarningsOutlookCard({
               <StatRow label="Delivery rate" value={`${preview.deliveryRate.toFixed(1)}%`} />
               <StatRow label="Base salary (estimate)" value="" amount={preview.baseSalary} variant="subtotal" />
               <StatRow label="Performance bonus (estimate)" value="" amount={preview.performanceBonus} />
+              {(preview.allowancesTotal ?? 0) > 0 ? (
+                <StatRow label="Allowances" value="" amount={preview.allowancesTotal ?? 0} />
+              ) : null}
               {preview.penalties > 0 ? (
                 <StatRow
                   label="Return penalties (estimate)"

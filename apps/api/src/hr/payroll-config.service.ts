@@ -69,8 +69,30 @@ export class PayrollConfigService {
       )
       .groupBy(schema.users.payRoleId);
 
+    // Contracted roles (Cleaner, Video Editor, ...) have no users rows — their
+    // headcount lives in payroll_contractors via pay_role_id.
+    const contractorCounts = await this.db
+      .select({
+        payRoleId: schema.payrollContractors.payRoleId,
+        count: count(),
+      })
+      .from(schema.payrollContractors)
+      .where(
+        and(
+          isNotNull(schema.payrollContractors.payRoleId),
+          eq(schema.payrollContractors.active, true),
+        ),
+      )
+      .groupBy(schema.payrollContractors.payRoleId);
+
     const countMap = new Map(staffCounts.map((r) => [r.payRoleId, Number(r.count)]));
-    return rows.map((r) => ({ ...r, staffCount: countMap.get(r.id) ?? 0 }));
+    const contractorMap = new Map(contractorCounts.map((r) => [r.payRoleId, Number(r.count)]));
+    return rows.map((r) => ({
+      ...r,
+      staffCount: (countMap.get(r.id) ?? 0) + (contractorMap.get(r.id) ?? 0),
+      employeeCount: countMap.get(r.id) ?? 0,
+      contractorCount: contractorMap.get(r.id) ?? 0,
+    }));
   }
 
   async createPayRole(input: CreatePayRoleInput, actor: SessionUser, groupId?: string | null) {
@@ -171,11 +193,54 @@ export class PayrollConfigService {
       )
       .orderBy(schema.users.name);
 
+    const [{ value: contractorCount } = { value: 0 }] = await this.db
+      .select({ value: count() })
+      .from(schema.payrollContractors)
+      .where(
+        and(
+          eq(schema.payrollContractors.payRoleId, payRoleId),
+          eq(schema.payrollContractors.active, true),
+          eq(schema.payrollContractors.groupId, companyId),
+        ),
+      );
+
+    const contractors = Number(contractorCount ?? 0);
     return {
-      payRole: { ...payRole, staffCount: assignedStaff.length },
+      payRole: {
+        ...payRole,
+        employeeCount: assignedStaff.length,
+        contractorCount: contractors,
+        staffCount: assignedStaff.length + contractors,
+      },
       plan,
       assignedStaff,
     };
+  }
+
+  /**
+   * Point assigned users at the live pay-role formula: FORMULA_BASED + clear
+   * flat_monthly_amount so stale FLAT_RATE test figures cannot override Config.
+   */
+  private async restampUsersToPayRoleFormula(
+    tx: PostgresJsDatabase<typeof schema>,
+    payRoleIds: string[],
+  ): Promise<number> {
+    if (payRoleIds.length === 0) return 0;
+    const rows = await tx
+      .update(schema.users)
+      .set({
+        salaryBasis: 'FORMULA_BASED',
+        flatMonthlyAmount: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          inArray(schema.users.payRoleId, payRoleIds),
+          eq(schema.users.status, 'ACTIVE'),
+        ),
+      )
+      .returning({ id: schema.users.id });
+    return rows.length;
   }
 
   async saveFormulaConfig(
@@ -236,7 +301,36 @@ export class PayrollConfigService {
         .where(eq(schema.payrollPayRoles.id, payRole.id))
         .returning();
 
-      return { plan, payRole: updatedRole };
+      const syncedUsers = await this.restampUsersToPayRoleFormula(tx, [payRole.id]);
+
+      return { plan, payRole: updatedRole, syncedUsers };
+    });
+  }
+
+  /**
+   * Company-wide (or all-companies when groupId omitted by caller): restamp every
+   * active user with a pay role onto FORMULA_BASED so Earnings matches Config.
+   */
+  async syncUsersToPayRoleBases(actor: SessionUser, groupId?: string | null) {
+    const companyId = groupId ? requireCompanyId(groupId) : null;
+    return withActor(this.db, actor, async (tx) => {
+      const roleFilter = companyId
+        ? and(
+            eq(schema.payrollPayRoles.groupId, companyId),
+            eq(schema.payrollPayRoles.active, true),
+            isNull(schema.payrollPayRoles.validTo),
+          )
+        : and(eq(schema.payrollPayRoles.active, true), isNull(schema.payrollPayRoles.validTo));
+
+      const roles = await tx
+        .select({ id: schema.payrollPayRoles.id })
+        .from(schema.payrollPayRoles)
+        .where(roleFilter);
+      const syncedUsers = await this.restampUsersToPayRoleFormula(
+        tx,
+        roles.map((r) => r.id),
+      );
+      return { syncedUsers, payRoleCount: roles.length };
     });
   }
 
@@ -439,6 +533,7 @@ export class PayrollConfigService {
           groupId: companyId,
           name: input.name,
           jobTitle: input.jobTitle ?? null,
+          payRoleId: input.payRoleId ?? null,
           branchId: input.branchId ?? null,
           monthlyFee: sql`${input.monthlyFee}::numeric`,
           bankName: input.bankName ?? null,
@@ -460,6 +555,7 @@ export class PayrollConfigService {
         .set({
           ...(input.name != null ? { name: input.name } : {}),
           ...(input.jobTitle != null ? { jobTitle: input.jobTitle } : {}),
+          ...(input.payRoleId !== undefined ? { payRoleId: input.payRoleId } : {}),
           ...(input.branchId != null ? { branchId: input.branchId } : {}),
           ...(input.monthlyFee != null ? { monthlyFee: sql`${input.monthlyFee}::numeric` } : {}),
           ...(input.bankName != null ? { bankName: input.bankName } : {}),
@@ -541,6 +637,11 @@ export class PayrollConfigService {
     actor: SessionUser,
   ) {
     return withActor(this.db, actor, async (tx) => {
+      const nextBasis = input.salaryBasis;
+      const useFormula =
+        nextBasis === 'FORMULA_BASED' ||
+        (nextBasis == null && input.payRoleId !== undefined && input.payRoleId != null && input.flatMonthlyAmount == null);
+
       const [row] = await tx
         .update(schema.users)
         .set({
@@ -548,7 +649,13 @@ export class PayrollConfigService {
           ...(input.employmentType != null ? { employmentType: input.employmentType as typeof schema.users.$inferInsert.employmentType } : {}),
           ...(input.salaryBasis != null ? { salaryBasis: input.salaryBasis as typeof schema.users.$inferInsert.salaryBasis } : {}),
           ...(input.taxStatus != null ? { taxStatus: input.taxStatus as typeof schema.users.$inferInsert.taxStatus } : {}),
-          ...(input.flatMonthlyAmount != null ? { flatMonthlyAmount: sql`${input.flatMonthlyAmount}::numeric` } : {}),
+          ...(input.crmLinked != null ? { crmLinked: input.crmLinked } : {}),
+          ...(input.reportsToUserId !== undefined ? { reportsToUserId: input.reportsToUserId } : {}),
+          ...(useFormula || nextBasis === 'FORMULA_BASED'
+            ? { flatMonthlyAmount: null }
+            : input.flatMonthlyAmount != null
+              ? { flatMonthlyAmount: sql`${input.flatMonthlyAmount}::numeric` }
+              : {}),
           updatedAt: new Date(),
         })
         .where(eq(schema.users.id, input.userId))
@@ -578,6 +685,7 @@ export class PayrollConfigService {
     if (!payRole) throw new TRPCError({ code: 'NOT_FOUND', message: 'Pay role not found' });
 
     return withActor(this.db, actor, async (tx) => {
+      const clearFlat = input.salaryBasis === 'FORMULA_BASED';
       const rows = await tx
         .update(schema.users)
         .set({
@@ -586,6 +694,7 @@ export class PayrollConfigService {
           salaryBasis: input.salaryBasis as typeof schema.users.$inferInsert.salaryBasis,
           taxStatus: input.taxStatus as typeof schema.users.$inferInsert.taxStatus,
           crmLinked: input.crmLinked,
+          ...(clearFlat ? { flatMonthlyAmount: null } : {}),
           updatedAt: new Date(),
         })
         .where(inArray(schema.users.id, input.userIds))

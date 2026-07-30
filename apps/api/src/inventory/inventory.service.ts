@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, asc, desc, count, sql, inArray, gt, lt, like, isNull, type SQL } from 'drizzle-orm';
+import { eq, and, or, asc, desc, count, sql, inArray, gt, lt, like, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -277,15 +277,21 @@ export class InventoryService {
     return costTotal;
   }
 
-  /** Apply FIFO decrement for delivery — updates `remaining_quantity`. */
+  /**
+   * Apply FIFO decrement for delivery — updates `remaining_quantity`.
+   * Returns the landed cost of the units actually consumed (units × the
+   * consumed batches' totalLandedCost), so delivery-time COGS reflects the
+   * real cost layers rather than a confirm-time simulation.
+   */
   private async consumeFifoRemainingInTx(
     tx: InventoryDbTx,
     productId: string,
     quantityNeeded: number,
     errorInsufficientMessage: string,
-  ): Promise<void> {
-    if (quantityNeeded <= 0) return;
+  ): Promise<number> {
+    if (quantityNeeded <= 0) return 0;
     let remaining = quantityNeeded;
+    let consumedCost = 0;
 
     while (remaining > 0) {
       const page = await this.fifoActiveBatchPage(tx, productId);
@@ -300,6 +306,7 @@ export class InventoryService {
           .update(schema.stockBatches)
           .set({ remainingQuantity: batchRemaining - deduct })
           .where(eq(schema.stockBatches.id, batch.id));
+        consumedCost += deduct * parseFloat(batch.totalLandedCost ?? '0');
         remaining -= deduct;
       }
     }
@@ -307,6 +314,7 @@ export class InventoryService {
     if (remaining > 0) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: errorInsufficientMessage });
     }
+    return consumedCost;
   }
 
   // ============================================
@@ -346,38 +354,11 @@ export class InventoryService {
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create stock batch' });
         }
 
-        // Upsert inventory level at the location
-        const existingLevel = await tx
-          .select()
-          .from(schema.inventoryLevels)
-          .where(
-            and(
-              eq(schema.inventoryLevels.productId, input.productId),
-              eq(schema.inventoryLevels.locationId, input.locationId),
-            ),
-          )
-          .limit(1);
-
-        if (existingLevel[0]) {
-          await tx
-            .update(schema.inventoryLevels)
-            .set({
-              stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.quantity}`,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.inventoryLevels.id, existingLevel[0].id));
-        } else {
-          await tx
-            .insert(schema.inventoryLevels)
-            .values({
-              productId: input.productId,
-              locationId: input.locationId,
-              batchId: createdBatch.id,
-              stockCount: input.quantity,
-              reservedCount: 0,
-              status: 'AVAILABLE',
-            });
-        }
+        // Upsert inventory level at the location. Levels are per
+        // (product, location) totals — batch tracking lives in stock_batches,
+        // so no batchId is stamped here (pre-0276 rows that carried one made
+        // the level lookups mutually inconsistent and split stock across rows).
+        await this.creditShelfStockInTx(tx, input.productId, input.locationId, input.quantity);
 
         // Log the movement
         await tx.insert(schema.stockMovements).values({
@@ -664,7 +645,7 @@ export class InventoryService {
         fromLocationId,
         toLocationId,
         transferStatus: requiresApproval ? 'PENDING' : 'RECEIVED',
-        transferCost: transferCostTotal > 0 ? transferCostTotal.toFixed(2) : null,
+        transferCost: transferCostTotal > 0 ? sql`${transferCostTotal}::numeric` : null,
         verifiedAt: requiresApproval ? null : now,
         initiatedBy: actor.id,
       })
@@ -699,39 +680,8 @@ export class InventoryService {
         actorId: actor.id,
       });
 
-      // Add stock to destination — use FOR UPDATE to prevent concurrent insert race
-      const destLevel = await tx
-        .select()
-        .from(schema.inventoryLevels)
-        .where(
-          and(
-            eq(schema.inventoryLevels.productId, line.productId),
-            eq(schema.inventoryLevels.locationId, toLocationId),
-            isNull(schema.inventoryLevels.batchId),
-          ),
-        )
-        .for('update')
-        .limit(1);
-
-      if (destLevel[0]) {
-        await tx
-          .update(schema.inventoryLevels)
-          .set({
-            stockCount: sql`${schema.inventoryLevels.stockCount} + ${line.quantity}`,
-            updatedAt: now,
-          })
-          .where(eq(schema.inventoryLevels.id, destLevel[0].id));
-      } else {
-        await tx
-          .insert(schema.inventoryLevels)
-          .values({
-            productId: line.productId,
-            locationId: toLocationId,
-            stockCount: line.quantity,
-            reservedCount: 0,
-            status: 'AVAILABLE',
-          });
-      }
+      // Add stock to destination — atomic upsert on (product_id, location_id)
+      await this.creditShelfStockInTx(tx, line.productId, toLocationId, line.quantity);
 
       // Log TRANSFER_IN movement
       await tx.insert(schema.stockMovements).values({
@@ -829,10 +779,14 @@ export class InventoryService {
   async approveTransfer(input: ApproveTransferInput, actor: SessionUser) {
     const now = new Date();
     const result = await withActor(this.db, actor, async (tx) => {
+      // FOR UPDATE: two concurrent approvals both reading PENDING would each
+      // deduct the source and credit the destination. The row lock serialises
+      // them; the loser re-reads a RECEIVED status and rejects.
       const rows = await tx
         .select()
         .from(schema.stockTransfers)
         .where(eq(schema.stockTransfers.id, input.transferId))
+        .for('update')
         .limit(1);
       const transfer = rows[0];
       if (!transfer) {
@@ -902,34 +856,8 @@ export class InventoryService {
         actorId: actor.id,
       });
 
-      // Add stock to destination
-      const destLevel = await tx
-        .select()
-        .from(schema.inventoryLevels)
-        .where(
-          and(
-            eq(schema.inventoryLevels.productId, transfer.productId),
-            eq(schema.inventoryLevels.locationId, transfer.toLocationId),
-          ),
-        )
-        .limit(1);
-      if (destLevel[0]) {
-        await tx
-          .update(schema.inventoryLevels)
-          .set({
-            stockCount: sql`${schema.inventoryLevels.stockCount} + ${transfer.quantitySent}`,
-            updatedAt: now,
-          })
-          .where(eq(schema.inventoryLevels.id, destLevel[0].id));
-      } else {
-        await tx.insert(schema.inventoryLevels).values({
-          productId: transfer.productId,
-          locationId: transfer.toLocationId,
-          stockCount: transfer.quantitySent,
-          reservedCount: 0,
-          status: 'AVAILABLE',
-        });
-      }
+      // Add stock to destination — atomic upsert on (product_id, location_id)
+      await this.creditShelfStockInTx(tx, transfer.productId, transfer.toLocationId, transfer.quantitySent);
 
       // TRANSFER_IN movement
       await tx.insert(schema.stockMovements).values({
@@ -1002,10 +930,12 @@ export class InventoryService {
 
     const now = new Date();
     const result = await withActor(this.db, actor, async (tx) => {
+      // FOR UPDATE: serialise against a concurrent approve of the same row.
       const rows = await tx
         .select()
         .from(schema.stockTransfers)
         .where(eq(schema.stockTransfers.id, input.transferId))
+        .for('update')
         .limit(1);
       const transfer = rows[0];
       if (!transfer) {
@@ -1078,15 +1008,29 @@ export class InventoryService {
    */
   async verifyTransfer(input: VerifyTransferInput, actor: SessionUser) {
    return withActor(this.db, actor, async (tx) => {
+    // FOR UPDATE: two concurrent verifies both reading IN_TRANSIT would each
+    // credit the destination. The lock serialises them; the loser re-reads
+    // RECEIVED/DISPUTED and rejects.
     const transferRows = await tx
       .select()
       .from(schema.stockTransfers)
       .where(eq(schema.stockTransfers.id, input.transferId))
+      .for('update')
       .limit(1);
 
     const transfer = transferRows[0];
     if (!transfer) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+    }
+
+    // Destination authority: a 3PL manager can only verify transfers destined
+    // for their own warehouse. Warehouse-side roles (Stock Manager, HoL,
+    // admin-class) verify on behalf of off-platform 3PLs.
+    if (actor.role === 'TPL_MANAGER' && transfer.toLocationId !== actor.logisticsLocationId) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You can only verify transfers destined for your own location.',
+      });
     }
 
     if (transfer.transferStatus !== 'IN_TRANSIT') {
@@ -1178,38 +1122,9 @@ export class InventoryService {
       });
     }
 
-    // Add stock to destination location
+    // Add stock to destination location — atomic upsert on (product_id, location_id)
     if (approvedQuantity > 0) {
-      const destLevel = await tx
-        .select()
-        .from(schema.inventoryLevels)
-        .where(
-          and(
-            eq(schema.inventoryLevels.productId, transfer.productId),
-            eq(schema.inventoryLevels.locationId, transfer.toLocationId),
-          ),
-        )
-        .limit(1);
-
-      if (destLevel[0]) {
-        await tx
-          .update(schema.inventoryLevels)
-          .set({
-            stockCount: sql`${schema.inventoryLevels.stockCount} + ${approvedQuantity}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.inventoryLevels.id, destLevel[0].id));
-      } else {
-        await tx
-          .insert(schema.inventoryLevels)
-          .values({
-            productId: transfer.productId,
-            locationId: transfer.toLocationId,
-            stockCount: approvedQuantity,
-            reservedCount: 0,
-            status: 'AVAILABLE',
-          });
-      }
+      await this.creditShelfStockInTx(tx, transfer.productId, transfer.toLocationId, approvedQuantity);
 
       // Log movement: IN to destination
       await tx.insert(schema.stockMovements).values({
@@ -1257,10 +1172,13 @@ export class InventoryService {
    */
   async cancelTransfer(input: { transferId: string; reason?: string | null }, actor: SessionUser) {
     return withActorAndBranch(this.db, actor, async (tx) => {
+      // FOR UPDATE: two concurrent cancels both reading RECEIVED would each
+      // restore the source (and deduct the destination twice).
       const rows = await tx
         .select()
         .from(schema.stockTransfers)
         .where(eq(schema.stockTransfers.id, input.transferId))
+        .for('update')
         .limit(1);
       const transfer = rows[0];
       if (!transfer) {
@@ -1293,10 +1211,16 @@ export class InventoryService {
 
       const receivedQty = transfer.quantityReceived ?? 0;
       const sentQty = transfer.quantitySent;
+      // NULL quantityReceived = never verified (destination was never credited,
+      // restore the full sent quantity to source). 0 = VERIFIED as zero received
+      // (total shrinkage): those units are physically lost and must NOT be
+      // recreated at the source on cancel.
+      const wasVerified = transfer.quantityReceived !== null;
 
       // Refuse if destination can't give the units back. We use available
       // (stock - reserved) to avoid yanking units that are already on a CS-
-      // confirmed order.
+      // confirmed order. FOR UPDATE so a concurrent confirm can't reserve the
+      // same units between this check and the deduction below.
       if (receivedQty > 0) {
         const destRows = await tx
           .select()
@@ -1307,6 +1231,7 @@ export class InventoryService {
               eq(schema.inventoryLevels.locationId, transfer.toLocationId),
             ),
           )
+          .for('update')
           .limit(1);
         const dest = destRows[0];
         const destAvailable = (dest?.stockCount ?? 0) - (dest?.reservedCount ?? 0);
@@ -1350,48 +1275,25 @@ export class InventoryService {
 
       // 2. Add back to source. If the transfer had shrinkage (received < sent),
       // only restore receivedQty — the shrinkage units are a real loss and must
-      // not be re-created. For unverified transfers (receivedQty=0), restore
-      // the full sentQty since nothing was credited to destination.
-      const restoreToSource = receivedQty > 0 ? receivedQty : sentQty;
-      const sourceRows = await tx
-        .select()
-        .from(schema.inventoryLevels)
-        .where(
-          and(
-            eq(schema.inventoryLevels.productId, transfer.productId),
-            eq(schema.inventoryLevels.locationId, transfer.fromLocationId),
-          ),
-        )
-        .limit(1);
-      if (sourceRows[0]) {
-        await tx
-          .update(schema.inventoryLevels)
-          .set({
-            stockCount: sql`${schema.inventoryLevels.stockCount} + ${restoreToSource}`,
-            updatedAt: now,
-          })
-          .where(eq(schema.inventoryLevels.id, sourceRows[0].id));
-      } else {
-        await tx.insert(schema.inventoryLevels).values({
+      // not be re-created. For unverified transfers (quantityReceived NULL),
+      // restore the full sentQty since nothing was credited to destination.
+      // A transfer VERIFIED with 0 received (total loss) restores nothing.
+      const restoreToSource = wasVerified ? receivedQty : sentQty;
+      if (restoreToSource > 0) {
+        await this.creditShelfStockInTx(tx, transfer.productId, transfer.fromLocationId, restoreToSource);
+        await tx.insert(schema.stockMovements).values({
           productId: transfer.productId,
-          locationId: transfer.fromLocationId,
-          stockCount: restoreToSource,
-          reservedCount: 0,
-          status: 'AVAILABLE',
+          movementType: 'TRANSFER_IN',
+          quantity: restoreToSource,
+          fromLocationId: transfer.toLocationId,
+          toLocationId: transfer.fromLocationId,
+          referenceId: transfer.id,
+          reason: input.reason
+            ? `Transfer cancelled: ${input.reason}`
+            : 'Transfer cancelled',
+          actorId: actor.id,
         });
       }
-      await tx.insert(schema.stockMovements).values({
-        productId: transfer.productId,
-        movementType: 'TRANSFER_IN',
-        quantity: restoreToSource,
-        fromLocationId: transfer.toLocationId,
-        toLocationId: transfer.fromLocationId,
-        referenceId: transfer.id,
-        reason: input.reason
-          ? `Transfer cancelled: ${input.reason}`
-          : 'Transfer cancelled',
-        actorId: actor.id,
-      });
 
       // 3. Mark the transfer row CANCELLED. We tuck the cancellation reason
       // into shrinkage_reason since stock_transfers doesn't have a dedicated
@@ -1419,37 +1321,47 @@ export class InventoryService {
 
   async adjust(input: StockAdjustmentInput, actor: SessionUser) {
     return withActor(this.db, actor, async (tx) => {
-      const levelRows = await tx
-        .select()
-        .from(schema.inventoryLevels)
+      // Atomic relative update with the floor guard in the WHERE clause. The
+      // old shape (unlocked read, absolute write) silently overwrote any
+      // concurrent delivery/transfer that landed between read and write.
+      const updated = await tx
+        .update(schema.inventoryLevels)
+        .set({
+          stockCount: sql`${schema.inventoryLevels.stockCount} + ${input.adjustmentQuantity}`,
+          updatedAt: new Date(),
+        })
         .where(
           and(
             eq(schema.inventoryLevels.productId, input.productId),
             eq(schema.inventoryLevels.locationId, input.locationId),
+            sql`${schema.inventoryLevels.stockCount} + ${input.adjustmentQuantity} >= 0`,
           ),
         )
-        .limit(1);
+        .returning({ stockCount: schema.inventoryLevels.stockCount });
 
-      const level = levelRows[0];
-      if (!level) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'No inventory record found for this product at this location',
-        });
-      }
-
-      const newCount = level.stockCount + input.adjustmentQuantity;
-      if (newCount < 0) {
+      const newCount = updated[0]?.stockCount;
+      if (newCount === undefined) {
+        const existing = await tx
+          .select({ stockCount: schema.inventoryLevels.stockCount })
+          .from(schema.inventoryLevels)
+          .where(
+            and(
+              eq(schema.inventoryLevels.productId, input.productId),
+              eq(schema.inventoryLevels.locationId, input.locationId),
+            ),
+          )
+          .limit(1);
+        if (!existing[0]) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'No inventory record found for this product at this location',
+          });
+        }
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: `Adjustment would result in negative stock (current: ${level.stockCount})`,
+          message: `Adjustment would result in negative stock (current: ${existing[0].stockCount})`,
         });
       }
-
-      await tx
-        .update(schema.inventoryLevels)
-        .set({ stockCount: newCount, updatedAt: new Date() })
-        .where(eq(schema.inventoryLevels.id, level.id));
 
       await tx.insert(schema.stockMovements).values({
         productId: input.productId,
@@ -1844,7 +1756,7 @@ export class InventoryService {
    * Used by the transfer form to show "X units in stock" per location without
    * being affected by FIFO batch count × page-size limits.
    */
-  async listLevelsSummary(groupId?: string | null): Promise<
+  async listLevelsSummary(groupId?: string | null, locationId?: string | null): Promise<
     Array<{
       productId: string;
       locationId: string;
@@ -1853,6 +1765,9 @@ export class InventoryService {
     }>
   > {
     const conditions: SQL[] = [];
+    if (locationId) {
+      conditions.push(eq(schema.inventoryLevels.locationId, locationId));
+    }
     if (groupId) {
       conditions.push(
         sql`${schema.inventoryLevels.locationId} IN (
@@ -1959,8 +1874,20 @@ export class InventoryService {
     productId: string,
     locationId: string,
     opts: { page?: number; limit?: number; startDate?: string; endDate?: string } | number = {},
-    _groupId?: string | null,
+    groupId?: string | null,
   ) {
+    // Company isolation: when a group is selected, the product must belong to
+    // it — otherwise this endpoint leaks another company's FIFO cost layers.
+    if (groupId) {
+      const [productRow] = await this.db
+        .select({ groupId: schema.products.groupId })
+        .from(schema.products)
+        .where(eq(schema.products.id, productId))
+        .limit(1);
+      if (!productRow || productRow.groupId !== groupId) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Inventory record not found' });
+      }
+    }
     // Back-compat: callers passing a bare `limit` number still work.
     const normalized = typeof opts === 'number' ? { limit: opts } : opts;
     const limit = Math.max(1, Math.min(normalized.limit ?? 20, 200));
@@ -2814,6 +2741,23 @@ export class InventoryService {
    */
   async listTransfers(status?: string, viewer?: SessionUser, page = 1, limit = 1000, groupId?: string | null) {
     const conditions = [];
+    // TPL isolation: a 3PL manager only sees transfers touching their own
+    // warehouse. Enforced server-side — the frontend location filter is
+    // convenience, not security.
+    if (viewer?.role === 'TPL_MANAGER') {
+      if (!viewer.logisticsLocationId) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Your account has no assigned warehouse location.',
+        });
+      }
+      conditions.push(
+        or(
+          eq(schema.stockTransfers.fromLocationId, viewer.logisticsLocationId),
+          eq(schema.stockTransfers.toLocationId, viewer.logisticsLocationId),
+        )!,
+      );
+    }
     if (status) {
       conditions.push(
         eq(
@@ -3151,6 +3095,10 @@ export class InventoryService {
         const safeIds = effectiveBranchIds.filter(id => /^[0-9a-f-]{36}$/i.test(id));
         if (safeIds.length > 0) {
           branchFilter = `AND (ll.branch_id IS NULL OR ll.branch_id IN (${safeIds.map(id => `'${id}'`).join(', ')}))`;
+        } else {
+          // Fail closed: a non-empty scope where every id failed the UUID
+          // check must not silently widen to "all branches".
+          branchFilter = 'AND false';
         }
       }
     }
@@ -3242,7 +3190,10 @@ export class InventoryService {
    * on the inventory page — surfaces locations even when they hold zero
    * inventory so admins can pre-set alerts before stock arrives.
    */
-  async listLocationThresholds(): Promise<{
+  async listLocationThresholds(
+    groupId?: string | null,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<{
     globalThreshold: number;
     locations: Array<{
       id: string;
@@ -3257,6 +3208,29 @@ export class InventoryService {
 
     const hasLocCol = await this.locationThresholdColExists();
 
+    // Same scoping shape as getLowStockAlerts: company via provider group,
+    // branch via effectiveBranchIds (org-wide NULL-branch locations included).
+    const conditions: SQL[] = [eq(schema.logisticsLocations.status, 'ACTIVE')];
+    if (groupId) {
+      conditions.push(
+        sql`${schema.logisticsLocations.providerId} IN (
+          SELECT lp.id FROM logistics_providers lp WHERE lp.group_id = ${groupId}
+        )`,
+      );
+    }
+    if (effectiveBranchIds) {
+      if (effectiveBranchIds.length === 0) {
+        conditions.push(sql`false`);
+      } else {
+        conditions.push(
+          or(
+            sql`${schema.logisticsLocations.branchId} IS NULL`,
+            inArray(schema.logisticsLocations.branchId, effectiveBranchIds),
+          )!,
+        );
+      }
+    }
+
     const rows = await this.db
       .select({
         id: schema.logisticsLocations.id,
@@ -3270,7 +3244,7 @@ export class InventoryService {
         schema.logisticsProviders,
         eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
       )
-      .where(eq(schema.logisticsLocations.status, 'ACTIVE'))
+      .where(and(...conditions))
       .orderBy(asc(schema.logisticsLocations.name));
 
     return {
@@ -3332,6 +3306,15 @@ export class InventoryService {
    * If physical count !== digital count, locks dispatch at that location.
    */
   async createReconciliation(input: CreateReconciliationInput, actor: SessionUser) {
+    // A discrepancy locks dispatch at the target location, and a TPL manager
+    // cannot unlock (no resolve permission) — so a TPL must only be able to
+    // reconcile their own warehouse, not freeze another company's dispatch.
+    if (actor.role === 'TPL_MANAGER' && input.locationId !== actor.logisticsLocationId) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You can only submit reconciliations for your own location.',
+      });
+    }
     const result = await withActor(this.db, actor, async (tx) => {
       // Get the current digital count
       const levelRows = await tx
@@ -3399,10 +3382,12 @@ export class InventoryService {
    */
   async resolveReconciliation(input: ResolveReconciliationInput, actor: SessionUser) {
     return withActor(this.db, actor, async (tx) => {
+      // FOR UPDATE: serialise concurrent resolutions of the same reconciliation.
       const rows = await tx
         .select()
         .from(schema.stockReconciliations)
         .where(eq(schema.stockReconciliations.id, input.reconciliationId))
+        .for('update')
         .limit(1);
 
       const reconciliation = rows[0];
@@ -3414,27 +3399,37 @@ export class InventoryService {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Reconciliation already resolved' });
       }
 
+      // Four-eyes: the submitter cannot approve their own count. Admin-class
+      // may override (single-operator branches).
+      if (reconciliation.submittedBy === actor.id && !isAdminLevel(actor)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You cannot resolve a reconciliation you submitted. Ask another stock authority to review it.',
+        });
+      }
+
       if (input.approved) {
-        // Adjust inventory to match physical count
-        const levelRows = await tx
-          .select()
-          .from(schema.inventoryLevels)
+        // Apply the counted DISCREPANCY as a relative adjustment, never the
+        // absolute physical count: the count was taken at submission time and
+        // deliveries/transfers may have moved stock since. Writing the stale
+        // absolute would resurrect (or vanish) every unit moved in between.
+        const updated = await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`GREATEST(${schema.inventoryLevels.stockCount} + ${reconciliation.discrepancy}, 0)`,
+            updatedAt: new Date(),
+          })
           .where(
             and(
               eq(schema.inventoryLevels.productId, reconciliation.productId),
               eq(schema.inventoryLevels.locationId, reconciliation.locationId),
             ),
           )
-          .limit(1);
-
-        if (levelRows[0]) {
-          await tx
-            .update(schema.inventoryLevels)
-            .set({
-              stockCount: reconciliation.physicalCount,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.inventoryLevels.id, levelRows[0].id));
+          .returning({ stockCount: schema.inventoryLevels.stockCount });
+        if (updated[0]) {
+          this.logger.log(
+            `Reconciliation ${reconciliation.id} approved: applied discrepancy ${reconciliation.discrepancy} at location ${reconciliation.locationId}, stock now ${updated[0].stockCount}.`,
+          );
         }
 
         // Log adjustment movement
@@ -3541,8 +3536,11 @@ export class InventoryService {
    * (assert, reserve, release, deliver, FIFO) calls this, so bundle awareness
    * propagates automatically.
    */
-  private async loadAggregatedOrderLineQuantities(orderId: string): Promise<Map<string, number>> {
-    const rows = await this.db
+  private async loadAggregatedOrderLineQuantities(
+    orderId: string,
+    ex: InventoryDbTx | PostgresJsDatabase<typeof schema> = this.db,
+  ): Promise<Map<string, number>> {
+    const rows = await ex
       .select({
         productId: schema.orderItems.productId,
         quantity: schema.orderItems.quantity,
@@ -3550,22 +3548,24 @@ export class InventoryService {
       .from(schema.orderItems)
       .where(eq(schema.orderItems.orderId, orderId));
 
-    return this.expandLineQuantities(rows);
+    return this.expandLineQuantities(rows, ex);
   }
 
   /**
    * Bundle-expand an arbitrary set of (productId, quantity) lines. Partial
    * delivery attributes a delivered subset of an order's lines, so expansion
-   * must work on any line set, not just a whole order.
+   * must work on any line set, not just a whole order. Accepts the caller's
+   * tx so mid-transaction line edits see their own uncommitted rows.
    */
   private async expandLineQuantities(
     rows: Array<{ productId: string; quantity: number }>,
+    ex: InventoryDbTx | PostgresJsDatabase<typeof schema> = this.db,
   ): Promise<Map<string, number>> {
     if (rows.length === 0) return new Map();
 
     // Check which of these products are bundles (have components)
     const productIds = [...new Set(rows.map((r) => r.productId))];
-    const bundleRows = await this.db
+    const bundleRows = await ex
       .select({
         bundleProductId: schema.productBundleComponents.bundleProductId,
         componentProductId: schema.productBundleComponents.componentProductId,
@@ -3713,10 +3713,26 @@ export class InventoryService {
    * ALLOCATED side effect: bump reserved_count at the 3PL and append ALLOCATION movements in one transaction.
    */
   async reserveForAllocateWithMovements(orderId: string, locationId: string, actor: SessionUser): Promise<void> {
-    const byProduct = await this.loadAggregatedOrderLineQuantities(orderId);
+    await withActor(this.db, actor, async (tx) => {
+      await this.reserveOrderStockInTx(tx, orderId, locationId, actor.id);
+    });
+  }
+
+  /**
+   * Transaction-scoped reservation: reads the order's CURRENT lines through
+   * the caller's tx (so a same-tx item edit reserves the NEW quantities) and
+   * throws on insufficient free stock — the caller's whole tx rolls back.
+   */
+  async reserveOrderStockInTx(
+    tx: InventoryDbTx,
+    orderId: string,
+    locationId: string,
+    actorId: string,
+  ): Promise<void> {
+    const byProduct = await this.loadAggregatedOrderLineQuantities(orderId, tx);
     if (byProduct.size === 0) return;
 
-    await withActor(this.db, actor, async (tx) => {
+    {
       for (const [productId, qty] of byProduct) {
         const rows = await tx
           .select()
@@ -3781,10 +3797,27 @@ export class InventoryService {
           toLocationId: locationId,
           referenceId: orderId,
           reason: `Allocated to logistics company for order ${orderId}`,
-          actorId: actor.id,
+          actorId,
         });
       }
-    });
+    }
+  }
+
+  /**
+   * Release the ENTIRE reservation for an order's current lines within the
+   * caller's tx, clamped to what is actually reserved (legacy orders whose
+   * reservation drifted under the pre-2026-07 edit bug never block). Used by
+   * the item-edit flow: release old lines, replace items, re-reserve new.
+   */
+  async releaseOrderReservationInTx(
+    tx: InventoryDbTx,
+    orderId: string,
+    locationId: string,
+  ): Promise<void> {
+    const byProduct = await this.loadAggregatedOrderLineQuantities(orderId, tx);
+    for (const [productId, qty] of byProduct) {
+      await this.releaseReservedAtLocationInTx(tx, productId, locationId, qty);
+    }
   }
 
   /**
@@ -3796,6 +3829,9 @@ export class InventoryService {
 
     await withActor(this.db, actor, async (tx) => {
       for (const [productId, qty] of byProduct) {
+        // FOR UPDATE: a double-fired release (reallocation racing the delivery
+        // path) reading stale reservedCount would decrement below zero and
+        // trip the 0272 CHECK constraint mid-flow.
         const rows = await tx
           .select()
           .from(schema.inventoryLevels)
@@ -3805,7 +3841,8 @@ export class InventoryService {
               eq(schema.inventoryLevels.locationId, locationId),
             ),
           )
-          .orderBy(desc(schema.inventoryLevels.reservedCount));
+          .orderBy(desc(schema.inventoryLevels.reservedCount))
+          .for('update');
 
         if (rows.length === 0) {
           throw new TRPCError({
@@ -3837,9 +3874,13 @@ export class InventoryService {
           remaining -= take;
         }
 
+        // RESERVATION type, not ADJUSTMENT: releasing a reservation changes no
+        // stock_count, and positive ADJUSTMENTs are summed into stock-in
+        // aggregates — every reallocation would inflate the location's in/out
+        // ledger with no physical movement.
         await tx.insert(schema.stockMovements).values({
           productId,
-          movementType: 'ADJUSTMENT',
+          movementType: 'RESERVATION',
           quantity: qty,
           fromLocationId: locationId,
           referenceId: orderId,
@@ -3858,15 +3899,17 @@ export class InventoryService {
     orderId: string,
     logisticsLocationId: string,
     actor: SessionUser,
-  ): Promise<void> {
+  ): Promise<{ landedCost: number }> {
     const byProduct = await this.loadAggregatedOrderLineQuantities(orderId);
     if (byProduct.size === 0) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items for delivery.' });
     }
 
+    let landedCost = 0;
     await withActor(this.db, actor, async (tx) => {
+      landedCost = 0; // reset on tx retry
       for (const [productId, lineQty] of byProduct) {
-        await this.consumeFifoRemainingInTx(
+        landedCost += await this.consumeFifoRemainingInTx(
           tx,
           productId,
           lineQty,
@@ -3896,6 +3939,37 @@ export class InventoryService {
     for (const productId of byProduct.keys()) {
       this.scheduleLowStockCheck(productId, logisticsLocationId);
     }
+    return { landedCost };
+  }
+
+  /**
+   * Credit `qty` units of shelf stock at a location as a single atomic upsert.
+   * Backed by the unique index on (product_id, location_id) from migration
+   * 0276, so concurrent first-time credits can never create duplicate level
+   * rows and the increment needs no prior read.
+   */
+  async creditShelfStockInTx(
+    tx: InventoryDbTx,
+    productId: string,
+    locationId: string,
+    qty: number,
+  ): Promise<void> {
+    await tx
+      .insert(schema.inventoryLevels)
+      .values({
+        productId,
+        locationId,
+        stockCount: qty,
+        reservedCount: 0,
+        status: 'AVAILABLE',
+      })
+      .onConflictDoUpdate({
+        target: [schema.inventoryLevels.productId, schema.inventoryLevels.locationId],
+        set: {
+          stockCount: sql`${schema.inventoryLevels.stockCount} + ${qty}`,
+          updatedAt: new Date(),
+        },
+      });
   }
 
   /**
@@ -4000,7 +4074,7 @@ export class InventoryService {
     logisticsLocationId: string,
     deliveredUnits: number,
     actor: SessionUser,
-  ): Promise<void> {
+  ): Promise<{ landedCost: number }> {
     const lines = await this.db
       .select({
         productId: schema.orderItems.productId,
@@ -4032,9 +4106,11 @@ export class InventoryService {
     const deliveredByProduct = await this.expandLineQuantities(deliveredLines);
     const fullByProduct = await this.expandLineQuantities(lines);
 
+    let landedCost = 0;
     await withActor(this.db, actor, async (tx) => {
+      landedCost = 0; // reset on tx retry
       for (const [productId, qty] of deliveredByProduct) {
-        await this.consumeFifoRemainingInTx(
+        landedCost += await this.consumeFifoRemainingInTx(
           tx,
           productId,
           qty,
@@ -4069,6 +4145,7 @@ export class InventoryService {
     for (const productId of deliveredByProduct.keys()) {
       this.scheduleLowStockCheck(productId, logisticsLocationId);
     }
+    return { landedCost };
   }
 
   /**

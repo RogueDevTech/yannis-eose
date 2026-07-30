@@ -395,7 +395,7 @@ function TransferActions({
   onReject: (id: string) => void;
 }) {
   const fetcher = useFetcher();
-  useFetcherToast(fetcher);
+  useFetcherToast(fetcher.data);
   const busy = fetcher.state !== 'idle';
 
   if (canApprove && transfer.status === 'PENDING') {
@@ -452,7 +452,7 @@ function CreateTransferModal({
   onClose: () => void;
 }) {
   const fetcher = useFetcher();
-  useFetcherToast(fetcher);
+  useFetcherToast(fetcher.data);
   useCloseOnFetcherSuccess(fetcher, () => onClose());
 
   const [receiverId, setReceiverId] = useState('');
@@ -478,7 +478,7 @@ function CreateTransferModal({
   );
 
   return (
-    <Modal open={open} onClose={onClose}>
+    <Modal open={open} onClose={onClose} maxWidth="max-w-md" contentClassName="p-6">
       <form onSubmit={handleSubmit} className="space-y-4">
         <h3 className="text-lg font-semibold text-app-fg">Send Funds</h3>
         <div>
@@ -535,7 +535,7 @@ function TransferDetailModal({
   onReject: (id: string) => void;
 }) {
   const fetcher = useFetcher();
-  useFetcherToast(fetcher);
+  useFetcherToast(fetcher.data);
   useCloseOnFetcherSuccess(fetcher, () => onClose());
   const busy = fetcher.state !== 'idle';
 
@@ -544,7 +544,7 @@ function TransferDetailModal({
   const s = STATUS_MAP[transfer.status] ?? { label: transfer.status, variant: 'warning' as const };
 
   return (
-    <Modal open={open} onClose={onClose}>
+    <Modal open={open} onClose={onClose} maxWidth="max-w-md" contentClassName="p-6">
       <div className="space-y-3">
         <h3 className="text-lg font-semibold text-app-fg">Transfer Details</h3>
         <div className="flex items-center justify-between">
@@ -646,7 +646,7 @@ function RejectTransferModal({
   onClose: () => void;
 }) {
   const fetcher = useFetcher();
-  useFetcherToast(fetcher);
+  useFetcherToast(fetcher.data);
   useCloseOnFetcherSuccess(fetcher, () => onClose());
   const busy = fetcher.state !== 'idle';
 
@@ -663,7 +663,7 @@ function RejectTransferModal({
   );
 
   return (
-    <Modal open={open} onClose={onClose}>
+    <Modal open={open} onClose={onClose} maxWidth="max-w-md" contentClassName="p-6">
       <form onSubmit={handleSubmit} className="space-y-4">
         <h3 className="text-lg font-semibold text-app-fg">Reject Transfer</h3>
         <div>

@@ -98,6 +98,7 @@ export function MarketingOverviewLoadingShell({
     'True ROAS',
     'Del. Revenue',
     'Cart Abandonment',
+    'Carry-over Delivered',
   ];
 
   return (

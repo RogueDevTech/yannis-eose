@@ -176,7 +176,7 @@ async function _ceoOverviewFetch(params: {
 
   const safeMarketingMetrics = marketingMetrics ?? {
     totalSpend: 0, approvedSpend: 0, pendingSpend: 0, totalOrders: 0,
-    deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0,
+    deliveredOrders: 0, deliveredThisMonth: 0, deliveredRevenue: 0, confirmedOrders: 0,
     confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0,
   };
   const safePayoutSummary = payoutSummary ?? { totalPaid: 0, totalPending: 0, staffCount: 0 };
@@ -251,6 +251,8 @@ async function _ceoOverviewFetch(params: {
       totalOrders: safeMarketingMetrics.totalOrders ?? 0,
       confirmedOrders: safeMarketingMetrics.confirmedOrders ?? 0,
       deliveredOrders: safeMarketingMetrics.deliveredOrders ?? 0,
+      // Carry-over delivered: delivered this period but generated earlier. Display-only.
+      deliveredThisMonth: safeMarketingMetrics.deliveredThisMonth ?? 0,
       cpa: safeMarketingMetrics.cpa ?? 0,
       roas: safeMarketingMetrics.trueRoas ?? 0,
       confirmationRate: safeMarketingMetrics.confirmationRate ?? 0,

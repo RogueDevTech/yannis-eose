@@ -274,11 +274,11 @@ async function seedCompany(sql: Sql, groupId: string, createdBy: string) {
 /**
  * Assign pay_role_id using the pay role for the user's branch company.
  * Never links a user to another company's pay role.
+ * Media Buyer onsite vs remote is HR-configured (assign the correct pay role), not seeded.
  */
 async function backfillUserPayRoles(sql: Sql) {
   const roleMap: Record<string, string> = {
     CS_CLOSER: 'Sales Closer (CS)',
-    MEDIA_BUYER: 'Remote Media Buyer',
     HEAD_OF_CS: 'Head of CS',
     HEAD_OF_MARKETING: 'Manager / Head of Marketing (runs ads)',
   };

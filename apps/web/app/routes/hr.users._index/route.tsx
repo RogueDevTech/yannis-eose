@@ -154,11 +154,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const supervisorOnlyParam = url.searchParams.get('supervisorOnly') === '1';
   const branchIdRaw = url.searchParams.get('branchId')?.trim() ?? '';
   const branchParam = branchIdRaw === '' ? undefined : branchIdRaw;
-  const pageRaw = parseInt(url.searchParams.get('page') || '1', 10);
-  const pageNum = Number.isFinite(pageRaw) && pageRaw >= 1 ? pageRaw : 1;
+  // No pagination on this page — the staff roster is bounded and doesn't grow
+  // exponentially, so we fetch everyone in one request. 1000 is the schema max
+  // (see listUsersSchema) and is far above any realistic staff count.
   const input: Record<string, unknown> = {
-    page: pageNum,
-    limit: 50,
+    page: 1,
+    limit: 1000,
     sortBy: 'createdAt',
     sortOrder: 'desc',
     companyWideUserList: true,

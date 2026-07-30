@@ -3,6 +3,7 @@ import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
 import { clipName } from '~/lib/clip-name';
+import { carryOverTileLabel } from './carry-over-label';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -89,6 +90,8 @@ const TEST_ORDERS_STATUS_VALUE = '__test_orders__';
 export interface MarketingMetrics {
   totalOrders: number;
   deliveredOrders: number;
+  /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
+  deliveredThisMonth?: number;
   deliveredRevenue: number;
   confirmedOrders: number;
   confirmationRate: number;
@@ -119,6 +122,8 @@ export type MarketingOrdersSecondaryPayload = {
   duplicateCount: number;
   /** Status counts for cart-graduated orders (orderSource='online') — separate strip. */
   cartStatusCounts?: Record<string, number>;
+  /** Carry-over delivered: delivered this period but generated in a prior month (orders + cart). Display-only. */
+  deliveredThisMonth?: number;
 };
 
 interface MarketingOrdersPageProps {
@@ -989,6 +994,15 @@ export function MarketingOrdersPage({
                       ...(enableFromCartStatusOption
                         ? { onClick: () => handleStatusChange(FROM_CART_STATUS_VALUE) }
                         : {}),
+                    },
+                    {
+                      // Carry-over only: orders delivered this period but
+                      // generated in a prior month. Display-only (no onClick) —
+                      // NOT a status filter and excluded from the DR calc above.
+                      label: carryOverTileLabel(dateFilters.startDate, dateFilters.endDate),
+                      value: activeSecondary.deliveredThisMonth ?? 0,
+                      valueClassName: 'text-success-600 dark:text-success-400',
+                      title: 'Carry-over delivered: orders delivered this period but generated in a prior month. Does not affect Delivery Rate.',
                     },
                     {
                       label: 'Deleted',

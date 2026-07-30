@@ -189,7 +189,7 @@ function RuleFormModal({
 }) {
   const isEdit = !!rule;
   const fetcher = useFetcher();
-  useFetcherToast(fetcher, { successMessage: isEdit ? 'Rule updated' : 'Rule created' });
+  useFetcherToast(fetcher.data, { successMessage: isEdit ? 'Rule updated' : 'Rule created' });
   useCloseOnFetcherSuccess(fetcher, onClose);
 
   const [name, setName] = useState(rule?.name ?? '');
@@ -319,7 +319,7 @@ function DeleteConfirmModal({
   onClose: () => void;
 }) {
   const fetcher = useFetcher();
-  useFetcherToast(fetcher, { successMessage: 'Rule deleted' });
+  useFetcherToast(fetcher.data, { successMessage: 'Rule deleted' });
   useCloseOnFetcherSuccess(fetcher, onClose);
 
   return (

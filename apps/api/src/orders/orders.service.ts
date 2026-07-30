@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { randomUUID, createHash } from 'crypto';
-import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, inArray, notInArray, exists, isNull, type SQL } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, ilike, or, count, gte, lte, lt, inArray, notInArray, exists, isNull, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
@@ -1419,6 +1419,17 @@ export class OrdersService {
     }
     if (order.status === 'DELETED') {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order is already deleted.' });
+    }
+    // The dual-approval executor can run days after the request was filed. If
+    // the order was retracked out of DELIVERED in between, this delete would
+    // reverse a deduction that has already been reversed (and skip the live
+    // reservation the retrack re-applied). Route those through the normal
+    // delete flow instead.
+    if (order.status !== 'DELIVERED' && order.status !== 'REMITTED') {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Order is no longer delivered (now ${order.status}). Use the standard delete flow.`,
+      });
     }
 
     const note = opts?.approverNote?.trim();
@@ -5346,7 +5357,7 @@ export class OrdersService {
       const addOn = Number(input.metadata.deliveryFeeAddOn);
       if (!Number.isNaN(addOn) && addOn >= 0) {
         const current = parseFloat(String(order.deliveryFee ?? 0)) || 0;
-        updateFields['deliveryFee'] = (current + addOn).toFixed(2);
+        updateFields['deliveryFee'] = sql`${current + addOn}::numeric`;
       }
     }
 
@@ -5359,8 +5370,8 @@ export class OrdersService {
       if (!Number.isNaN(discount) && discount >= 0) {
         const currentTotal = parseFloat(String(order.totalAmount ?? 0)) || 0;
         const newTotal = Math.max(0, currentTotal - discount);
-        updateFields['totalAmount'] = newTotal.toFixed(2);
-        updateFields['deliveryDiscountAmount'] = discount.toFixed(2);
+        updateFields['totalAmount'] = sql`${newTotal}::numeric`;
+        updateFields['deliveryDiscountAmount'] = sql`${discount}::numeric`;
       }
     }
 
@@ -5734,7 +5745,7 @@ export class OrdersService {
       const addOn = Number(workingInput.deliveryFeeAddOn);
       if (!Number.isNaN(addOn) && addOn >= 0) {
         const current = parseFloat(String(order.deliveryFee ?? 0)) || 0;
-        updateFields['deliveryFee'] = (current + addOn).toFixed(2);
+        updateFields['deliveryFee'] = sql`${current + addOn}::numeric`;
       }
     }
     // Delivery discount (Resolve order / TPL) — reduces total and stores amount
@@ -5743,8 +5754,8 @@ export class OrdersService {
       if (!Number.isNaN(discount) && discount >= 0) {
         const currentTotal = parseFloat(String(order.totalAmount ?? 0)) || 0;
         const newTotal = Math.max(0, currentTotal - discount);
-        updateFields['totalAmount'] = newTotal.toFixed(2);
-        updateFields['deliveryDiscountAmount'] = discount.toFixed(2);
+        updateFields['totalAmount'] = sql`${newTotal}::numeric`;
+        updateFields['deliveryDiscountAmount'] = sql`${discount}::numeric`;
       }
     }
     // Resolve order receipt (required when TPL resolves)
@@ -5769,6 +5780,21 @@ export class OrdersService {
       }
 
       if (workingInput.items) {
+        // Post-allocation edits must keep the 3PL reservation in sync with
+        // the lines: release against the OLD lines, replace, re-reserve the
+        // NEW lines. All in this one tx — if the new quantities don't fit in
+        // free stock, the re-reserve throws and the edit rolls back whole.
+        const RESERVED_STATUSES = ['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'];
+        const syncReservation =
+          RESERVED_STATUSES.includes(order.status) && !!order.logisticsLocationId;
+        if (syncReservation) {
+          await this.inventoryService.releaseOrderReservationInTx(
+            tx,
+            input.orderId,
+            order.logisticsLocationId!,
+          );
+        }
+
         const deletedItems = await tx
           .delete(schema.orderItems)
           .where(eq(schema.orderItems.orderId, input.orderId))
@@ -5787,6 +5813,15 @@ export class OrdersService {
           })),
         );
         this.logger.log(`orders.update: inserted ${workingInput.items.length} new items for ${input.orderId}`);
+
+        if (syncReservation) {
+          await this.inventoryService.reserveOrderStockInTx(
+            tx,
+            input.orderId,
+            order.logisticsLocationId!,
+            actor.id,
+          );
+        }
       }
       return row;
     });
@@ -6740,7 +6775,14 @@ export class OrdersService {
    * the two tiles — only the date field (delivered_at) and the status filter
    * (DELIVERED/REMITTED) differ.
    */
-  async getDeliveredThisMonthCount(opts: {
+  /**
+   * Carry-over delivered count: orders DELIVERED/REMITTED within the period by
+   * delivery date, but GENERATED before the period started (created_at <
+   * periodStart). This is the "delivered this period but from a prior month"
+   * slice — NOT the full delivered-by-date total, and NOT the cohort. Purely a
+   * display metric; never feeds any rate.
+   */
+  async getDeliveredCarryOverCount(opts: {
     mediaBuyerId?: string; startDate?: string; endDate?: string;
     assignedCsId?: string; branchId?: string | null;
     supervisorScope?: OrdersAggregateSupervisorScope;
@@ -6776,8 +6818,13 @@ export class OrdersService {
     });
     const bCond = this.orderBranchScopeCondition(opts.branchId, opts.branchScope ?? 'servicing', opts.effectiveBranchIds);
     if (bCond) conditions.push(bCond);
-    // The one difference from the cohort query: filter on delivered_at, not created_at.
-    if (opts.startDate) conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(opts.startDate)));
+    // Carry-over = delivered within the period (by delivered_at) AND generated
+    // before the period started (created_at < periodStart). The created_at bound
+    // is what excludes this period's own cohort, leaving only prior-month orders.
+    if (opts.startDate) {
+      conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(opts.startDate)));
+      conditions.push(lt(schema.orders.createdAt, nigeriaDayStart(opts.startDate)));
+    }
     if (opts.endDate) conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(opts.endDate)));
     const [row] = await this.db
       .select({ count: count() })
@@ -8794,7 +8841,7 @@ export class OrdersService {
         },
         lineItems,
         taxRate: null,
-        totalAmount: totalAmount.toFixed(2),
+        totalAmount: sql`${totalAmount}::numeric`,
         dueDate: null,
         status: 'DRAFT',
       });
@@ -9011,7 +9058,7 @@ export class OrdersService {
 
           await tx
             .update(schema.orders)
-            .set({ landedCost: totalLandedCost.toFixed(2) })
+            .set({ landedCost: sql`${totalLandedCost}::numeric` })
             .where(eq(schema.orders.id, updatedOrder.id));
         });
         break;
@@ -9064,7 +9111,7 @@ export class OrdersService {
                 await withActor(this.db, actor, async (tx) => {
                   await tx
                     .update(schema.orders)
-                    .set({ deliveryFee: deliveryFee.toFixed(2) })
+                    .set({ deliveryFee: sql`${deliveryFee}::numeric` })
                     .where(eq(schema.orders.id, updatedOrder.id));
                 });
               }
@@ -9107,11 +9154,24 @@ export class OrdersService {
             actor,
           );
         }
-        await this.inventoryService.completeDeliveryInventory(
+        const { landedCost: actualLandedCost } = await this.inventoryService.completeDeliveryInventory(
           updatedOrder.id,
           fulfillmentLocationId,
           actor,
         );
+        // Overwrite the CONFIRM-time landed-cost SIMULATION with the cost of
+        // the batches actually consumed. Two orders confirmed together are
+        // both priced off the same cheap head lot, but delivery order decides
+        // who really consumes it — the GL COGS voucher below must carry the
+        // real figure (Pillar 3).
+        if (actualLandedCost > 0) {
+          await withActor(this.db, actor, async (tx) => {
+            await tx
+              .update(schema.orders)
+              .set({ landedCost: sql`${actualLandedCost}::numeric` })
+              .where(eq(schema.orders.id, updatedOrder.id));
+          });
+        }
         // Safety net: ensure an invoice exists by the time the order is DELIVERED.
         // The primary creation point is the CONFIRMED transition, but it can silently
         // fail (logged, not thrown). Without an invoice the order shows "No invoice"
@@ -9205,12 +9265,22 @@ export class OrdersService {
           });
         }
         const deliveredUnits = Number(metadata?.deliveredQuantity);
-        await this.inventoryService.completePartialDeliveryInventory(
+        const { landedCost: partialLandedCost } = await this.inventoryService.completePartialDeliveryInventory(
           updatedOrder.id,
           partialLocationId,
           deliveredUnits,
           actor,
         );
+        // Record the cost of what actually shipped so profit reports don't
+        // carry the full-order simulation for a partial delivery.
+        if (partialLandedCost > 0) {
+          await withActor(this.db, actor, async (tx) => {
+            await tx
+              .update(schema.orders)
+              .set({ landedCost: sql`${partialLandedCost}::numeric` })
+              .where(eq(schema.orders.id, updatedOrder.id));
+          });
+        }
         // No automatic GL sales posting: the order's invoice total does not
         // match the delivered value, so finance records this sale manually.
         this.logger.warn(
@@ -9709,6 +9779,25 @@ export class OrdersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
 
+    // Merging mutates the original's quantities and cancels the duplicate
+    // outside the transition machinery, so both must still be PRE-ALLOCATION:
+    // beyond CONFIRMED the duplicate holds a 3PL reservation that a direct
+    // status write would leak, and the original's new quantities would bypass
+    // the availability gate and the allocated reservation entirely.
+    const MERGEABLE_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED'];
+    if (!MERGEABLE_STATUSES.includes(original.status)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot merge into an order in status ${original.status}. Merge before allocation.`,
+      });
+    }
+    if (!MERGEABLE_STATUSES.includes(duplicate.status)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot merge away an order in status ${duplicate.status}. Merge before allocation.`,
+      });
+    }
+
     // Get items from both orders
     const [dupItems, origItems] = await Promise.all([
       this.db.select().from(schema.orderItems).where(eq(schema.orderItems.orderId, duplicateId)),
@@ -9742,7 +9831,7 @@ export class OrdersService {
       await tx
         .update(schema.orders)
         .set({
-          totalAmount: newTotal.toFixed(2),
+          totalAmount: sql`${newTotal}::numeric`,
           deliveryNotes: [original.deliveryNotes, `[Merged from order ${duplicateId}]`]
             .filter(Boolean)
             .join(' | '),
