@@ -908,7 +908,11 @@ export class CartOrdersService {
    * Retry orphaned cart graduations. Returns a per-id report so ops can see
    * why a specific cart stayed at DELIVERED without a parent order.
    */
-  async retryFailedGraduations(): Promise<Array<{ id: string; ok: boolean; error?: string; graduatedOrderId?: string | null }>> {
+  async retryFailedGraduations(): Promise<{
+    graduations: Array<{ id: string; ok: boolean; error?: string; graduatedOrderId?: string | null }>;
+    stockLedger: Array<{ orderId: string; ok: boolean; skipped?: string; error?: string }>;
+    invoices: Array<{ orderId: string; ok: boolean; created: boolean; error?: string }>;
+  }> {
     // Prefer graduated_order_id / source_cart_order_id as the link of record.
     // Do NOT treat "any online order with same phone" as already-graduated — that
     // incorrectly skipped real orphans when the customer had an unrelated online order.
@@ -929,7 +933,7 @@ export class CartOrdersService {
       LIMIT 200
     `);
 
-    const report: Array<{ id: string; ok: boolean; error?: string; graduatedOrderId?: string | null }> = [];
+    const graduations: Array<{ id: string; ok: boolean; error?: string; graduatedOrderId?: string | null }> = [];
 
     if (orphaned.length > 0) {
       this.logger.log(`Retrying graduation for ${orphaned.length} orphaned cart order(s)`);
@@ -944,10 +948,10 @@ export class CartOrdersService {
             .limit(1);
           if (after?.graduatedOrderId) {
             succeeded++;
-            report.push({ id: row.id, ok: true, graduatedOrderId: after.graduatedOrderId });
+            graduations.push({ id: row.id, ok: true, graduatedOrderId: after.graduatedOrderId });
           } else {
             // Dedup path marks CONVERTED / skips without throwing.
-            report.push({
+            graduations.push({
               id: row.id,
               ok: false,
               error: 'graduateToOrders returned without creating a parent (dedup skip or already linked)',
@@ -957,20 +961,14 @@ export class CartOrdersService {
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           this.logger.error(`Retry graduation failed for cart order ${row.id}: ${message}`);
-          report.push({ id: row.id, ok: false, error: message });
+          graduations.push({ id: row.id, ok: false, error: message });
         }
       }
       this.logger.log(`Cart order graduation retry: ${succeeded}/${orphaned.length} succeeded`);
     }
 
-    return report;
-
-    // Second sweep: graduated copies whose STOCK deduction failed. The
-    // graduation marker (`graduated_order_id`) is set before the deduction
-    // runs, so a deduction failure used to be logged once and lost forever —
-    // the first sweep short-circuits on the marker and never retries it.
-    // A graduated delivered order with zero DELIVERY movements is exactly
-    // that failure. Covers cart AND follow-up graduations.
+    // Second sweep: graduated copies whose STOCK deduction failed / was skipped
+    // (e.g. SQL backfill that created parents without side effects).
     // `applyGraduationStockAndLedger` is safe to re-run: postSalesInvoice is
     // idempotent, and the movement-absence filter guards the deduction.
     const undeducted = await this.db.execute<{ id: string; logistics_location_id: string | null }>(sql`
@@ -988,12 +986,132 @@ export class CartOrdersService {
         )
       LIMIT 200
     `);
+    const stockLedger: Array<{ orderId: string; ok: boolean; skipped?: string; error?: string }> = [];
     if (undeducted.length > 0) {
       this.logger.warn(`Found ${undeducted.length} graduated order(s) with no stock deduction: retrying.`);
       for (const row of undeducted) {
-        await this.applyGraduationStockAndLedger(row.id, row.logistics_location_id);
+        if (!row.logistics_location_id) {
+          stockLedger.push({
+            orderId: row.id,
+            ok: false,
+            skipped: 'no logisticsLocationId — cannot deduct stock without a fulfillment location',
+          });
+          continue;
+        }
+        try {
+          await this.applyGraduationStockAndLedger(row.id, row.logistics_location_id);
+          // applyGraduationStockAndLedger swallows stock/GL errors — verify movement.
+          const [moved] = await this.db
+            .select({ id: schema.stockMovements.id })
+            .from(schema.stockMovements)
+            .where(
+              and(
+                eq(schema.stockMovements.referenceId, row.id),
+                eq(schema.stockMovements.movementType, 'DELIVERY'),
+              ),
+            )
+            .limit(1);
+          if (moved) {
+            stockLedger.push({ orderId: row.id, ok: true });
+          } else {
+            stockLedger.push({
+              orderId: row.id,
+              ok: false,
+              error: 'applyGraduationStockAndLedger finished but no DELIVERY stock movement was written',
+            });
+          }
+        } catch (err) {
+          stockLedger.push({
+            orderId: row.id,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
+
+    // Third sweep: SQL-healed graduates may also lack draft invoices.
+    const missingInvoices = await this.db.execute<{ id: string }>(sql`
+      SELECT o.id
+      FROM orders o
+      WHERE o.deleted_at IS NULL
+        AND o.status IN ('DELIVERED', 'REMITTED')
+        AND (
+          EXISTS (SELECT 1 FROM cart_orders co WHERE co.graduated_order_id = o.id AND co.deleted_at IS NULL)
+          OR EXISTS (SELECT 1 FROM follow_up_orders fo WHERE fo.graduated_order_id = o.id AND fo.deleted_at IS NULL)
+        )
+        AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+      LIMIT 200
+    `);
+    const invoices: Array<{ orderId: string; ok: boolean; created: boolean; error?: string }> = [];
+    for (const row of missingInvoices) {
+      try {
+        const created = await this.ensureDraftInvoiceForGraduatedOrder(row.id);
+        invoices.push({ orderId: row.id, ok: true, created });
+      } catch (err) {
+        invoices.push({
+          orderId: row.id,
+          ok: false,
+          created: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    return { graduations, stockLedger, invoices };
+  }
+
+  /** Create a DRAFT invoice for a graduated order if none exists. Idempotent. */
+  private async ensureDraftInvoiceForGraduatedOrder(orderId: string): Promise<boolean> {
+    const [existing] = await this.db
+      .select({ id: schema.invoices.id })
+      .from(schema.invoices)
+      .where(eq(schema.invoices.orderId, orderId))
+      .limit(1);
+    if (existing) return false;
+
+    const [order] = await this.db
+      .select({
+        customerName: schema.orders.customerName,
+        customerAddress: schema.orders.customerAddress,
+      })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    if (!order) throw new Error(`Order ${orderId} not found`);
+
+    const gradItems = await this.db
+      .select({
+        quantity: schema.orderItems.quantity,
+        unitPrice: schema.orderItems.unitPrice,
+        offerLabel: schema.orderItems.offerLabel,
+        productName: schema.products.name,
+      })
+      .from(schema.orderItems)
+      .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+      .where(eq(schema.orderItems.orderId, orderId));
+    if (gradItems.length === 0) throw new Error(`Order ${orderId} has no line items for invoice`);
+
+    const lineItems = gradItems.map((it) => ({
+      description: `${it.productName ?? 'Product'}${it.offerLabel ? ` (${it.offerLabel})` : ''}`,
+      quantity: it.quantity,
+      unitPrice: String(it.unitPrice),
+    }));
+    const totalAmount = gradItems.reduce((sum, it) => sum + Number(it.unitPrice) * Number(it.quantity ?? 1), 0);
+
+    await this.db.insert(schema.invoices).values({
+      orderId,
+      recipientInfo: {
+        name: order.customerName,
+        address: order.customerAddress ?? undefined,
+      },
+      lineItems,
+      taxRate: null,
+      totalAmount: totalAmount.toFixed(2),
+      dueDate: null,
+      status: 'DRAFT',
+    }).onConflictDoNothing();
+    return true;
   }
 
   // ── Graduate to Orders ───────────────────────────────────────────────
