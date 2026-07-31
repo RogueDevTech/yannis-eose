@@ -267,15 +267,18 @@ export function MarketingFundingLoadingShell({
 
   const receivedTitle = isMediaBuyer ? 'Incoming Funding' : 'Funds Received';
   const sectionParam = searchParams.get('section');
-  const activeSection = isAdminViewer
-    ? 'distributing'
-    : !canDistribute
-      ? 'received'
-      : sectionParam === 'received'
-        ? 'received'
-        : sectionParam === 'balances'
-          ? 'balances'
-          : 'distributing';
+  const activeSection =
+    sectionParam === 'peer'
+      ? 'peer'
+      : isAdminViewer
+        ? 'distributing'
+        : !canDistribute
+          ? 'received'
+          : sectionParam === 'received'
+            ? 'received'
+            : sectionParam === 'balances'
+              ? 'balances'
+              : 'distributing';
 
   const entryType = searchParams.get('entryType') ?? 'all';
   const entryStatus = searchParams.get('entryStatus') ?? '';
@@ -377,30 +380,35 @@ export function MarketingFundingLoadingShell({
       <OverviewStatStrip items={statItems} />
 
       <div className="list-panel scroll-mt-4" id="funding-ledger">
-        {canDistribute && !isAdminViewer ? (
-          <div className="px-4 pt-2">
-            <Tabs
-              variant="underline"
-              value={activeSection}
-              onChange={navigateSection}
-              tabs={[
-                { value: 'distributing', label: 'Funds Distributed' },
-                { value: 'received', label: receivedTitle },
-                ...(activeSection === 'balances' ? [{ value: 'balances' as const, label: 'Recipient balances' }] : []),
-              ]}
-            />
-          </div>
-        ) : null}
+        <div className="px-4 pt-2">
+          <Tabs
+            variant="underline"
+            value={activeSection}
+            onChange={navigateSection}
+            tabs={[
+              ...(canDistribute
+                ? [
+                    {
+                      value: 'distributing',
+                      label: isAdminViewer ? 'Funds Disbursed' : 'Funds Distributed',
+                    },
+                    ...(!isAdminViewer ? [{ value: 'received', label: receivedTitle }] : []),
+                    ...(activeSection === 'balances'
+                      ? [{ value: 'balances', label: 'Recipient balances' }]
+                      : []),
+                  ]
+                : [{ value: 'received', label: receivedTitle }]),
+              { value: 'peer', label: 'Peer transfers' },
+            ]}
+          />
+        </div>
 
-        {isAdminViewer || !canDistribute ? (
-          <div className="border-b border-app-border px-4 py-3">
-            <h2 className="text-base font-semibold text-app-fg">
-              {isAdminViewer ? 'Funds Disbursed' : receivedTitle}
-            </h2>
+        {activeSection === 'peer' ? (
+          <div className="px-4 py-6 space-y-3" aria-hidden>
+            <div className="h-8 w-full max-w-md rounded-lg bg-app-hover animate-pulse" />
+            <div className="h-40 rounded-lg bg-app-hover animate-pulse" />
           </div>
-        ) : null}
-
-        {activeSection === 'balances' ? (
+        ) : activeSection === 'balances' ? (
           <>
             {/* Balances skeleton — PageSearchControl + rows */}
             <div className="px-3 py-2">

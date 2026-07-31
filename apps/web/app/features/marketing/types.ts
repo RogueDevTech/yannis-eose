@@ -294,7 +294,38 @@ export type FundingRequestStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';
  * Funding page section — mirrors the two-tier model so the URL matches the user's
  * mental map: "Funds I've Received" or "Funds I Distribute".
  */
-export type FundingSection = 'received' | 'distributing' | 'balances';
+export type FundingSection = 'received' | 'distributing' | 'balances' | 'peer';
+
+/** Peer MB fund transfers slice embedded on the Funding page (`section=peer`). */
+export interface PeerTransfersSliceData {
+  transfers: Array<{
+    id: string;
+    senderMbId: string;
+    senderName: string | null;
+    receiverMbId: string;
+    receiverName: string | null;
+    amount: string;
+    reason: string | null;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ACCEPTED';
+    branchId: string | null;
+    createdAt: string;
+    approvedBy: string | null;
+    approverName: string | null;
+    approvedAt: string | null;
+    rejectedAt: string | null;
+    rejectionReason: string | null;
+    acceptedAt: string | null;
+  }>;
+  total: number;
+  page: number;
+  totalPages: number;
+  limit: number;
+  direction: string;
+  statusCounts: { PENDING: number; APPROVED: number; REJECTED: number; ACCEPTED: number; ALL: number };
+  mediaBuyers: Array<{ id: string; name: string }>;
+  /** Branch PENDING count for the Peer transfers tab badge (always loaded). */
+  pendingApprovalCount: number;
+}
 
 /** Within a section, which list is showing — Transfers (money) or Requests (asks). */
 export type FundingTab = 'transfers' | 'requests';
@@ -419,6 +450,9 @@ export interface MarketingFundingLoaderData {
     isPreferred: boolean;
     branchId: string | null;
   }>;
+
+  /** Peer MB↔MB / MB→HoM transfers (Funding → Peer transfers tab). */
+  peerTransfers?: PeerTransfersSliceData;
 }
 
 export type AdSpendStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFetcher, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
@@ -8,7 +8,6 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
-import { Tabs } from '~/components/ui/tabs';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { Pagination } from '~/components/ui/pagination';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -19,7 +18,10 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Textarea } from '~/components/ui/textarea';
-import { EmptyState } from '~/components/ui/empty-state';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
+import { PageSearchControl } from '~/components/ui/page-search-control';
+import { FormSelect } from '~/components/ui/form-select';
+import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import type { MarketingDateFilters } from './types';
 
@@ -61,13 +63,6 @@ export interface MbFundTransfersLoaderData {
 
 type TransferTab = 'all' | 'sent' | 'received' | 'pending_approval';
 
-const DIRECTION_TABS: Array<{ value: TransferTab; label: string }> = [
-  { value: 'all', label: 'All' },
-  { value: 'sent', label: 'Sent' },
-  { value: 'received', label: 'Received' },
-  { value: 'pending_approval', label: 'Pending Approval' },
-];
-
 const STATUS_MAP: Record<string, { label: string; variant: 'warning' | 'info' | 'danger' | 'success' }> = {
   PENDING: { label: 'Pending', variant: 'warning' },
   APPROVED: { label: 'Approved', variant: 'info' },
@@ -87,78 +82,140 @@ function formatDate(iso: string): string {
   }
 }
 
-// ── Page Component ──────────────────────────────────────────────────────
+// ── Panel (embedded on Funding page, or standalone route) ───────────────
 
-export function MbFundTransfersPage({
+export function PeerTransfersPanel({
   transfers,
   total,
   page,
   totalPages,
-  limit,
+  limit: _limit,
   currentUserId,
-  currentUserRole,
+  currentUserRole: _currentUserRole,
   canApprove,
   mediaBuyers,
   filters,
   direction,
   statusCounts,
-}: MbFundTransfersLoaderData) {
+  embedded = false,
+  createOpen,
+  onCreateOpenChange,
+}: MbFundTransfersLoaderData & {
+  embedded?: boolean;
+  /** Controlled create modal (Funding header "Send to peer"). */
+  createOpen?: boolean;
+  onCreateOpenChange?: (open: boolean) => void;
+}) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [internalCreateOpen, setInternalCreateOpen] = useState(false);
+  const showCreateModal = createOpen ?? internalCreateOpen;
+  const setShowCreateModal = onCreateOpenChange ?? setInternalCreateOpen;
   const [detailTransfer, setDetailTransfer] = useState<MbFundTransferRecord | null>(null);
   const [rejectTransferId, setRejectTransferId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') ?? '');
   const { busy: isRefreshing } = useLoaderRefetchBusy();
 
-  // ── Tabs (with badge counts) ────────────────────────────────────────
-  const directionTabs = useMemo(() => {
-    const tabs = DIRECTION_TABS.map((t) => {
-      if (t.value === 'pending_approval' && !canApprove) return null;
-      const countMap: Record<TransferTab, number> = {
-        all: statusCounts.ALL,
-        sent: statusCounts.ALL,
-        received: statusCounts.ALL,
-        pending_approval: statusCounts.PENDING,
-      };
-      const count = countMap[t.value];
-      return {
-        ...t,
-        badge: count > 0 ? (
-          <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-app-fg/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums">
-            {count}
-          </span>
-        ) : undefined,
-      };
-    });
-    return tabs.filter(Boolean) as Array<{ value: string; label: string; badge?: ReactNode }>;
-  }, [canApprove, statusCounts]);
+  useEffect(() => {
+    setSearchQuery(searchParams.get('search') ?? '');
+  }, [searchParams]);
 
   const activeTab = direction as TransferTab;
+  const statusFilter = searchParams.get('status') ?? 'ALL';
 
-  const handleTabChange = useCallback(
+  /** Approver inbox status select (maps to direction=pending_approval or direction=all+status). */
+  const approverStatusValue =
+    activeTab === 'pending_approval' || statusFilter === 'PENDING'
+      ? 'PENDING'
+      : statusFilter === 'APPROVED' ||
+          statusFilter === 'ACCEPTED' ||
+          statusFilter === 'REJECTED'
+        ? statusFilter
+        : 'ALL';
+
+  const directionOptions = useMemo(
+    () => [
+      { value: 'all', label: `All (${statusCounts.ALL})` },
+      { value: 'sent', label: 'Sent' },
+      { value: 'received', label: 'Received' },
+    ],
+    [statusCounts.ALL],
+  );
+
+  const mbStatusOptions = useMemo(
+    () => [
+      { value: 'ALL', label: `All Status (${statusCounts.ALL})` },
+      { value: 'PENDING', label: `Pending (${statusCounts.PENDING})` },
+      { value: 'APPROVED', label: `Approved (${statusCounts.APPROVED})` },
+      { value: 'ACCEPTED', label: `Accepted (${statusCounts.ACCEPTED})` },
+      { value: 'REJECTED', label: `Rejected (${statusCounts.REJECTED})` },
+    ],
+    [statusCounts],
+  );
+
+  const approverStatusOptions = useMemo(
+    () => [
+      { value: 'PENDING', label: `Pending approval (${statusCounts.PENDING})` },
+      { value: 'APPROVED', label: `Approved / awaiting accept (${statusCounts.APPROVED})` },
+      { value: 'ACCEPTED', label: `Accepted (${statusCounts.ACCEPTED})` },
+      { value: 'REJECTED', label: `Rejected (${statusCounts.REJECTED})` },
+      { value: 'ALL', label: `All (${statusCounts.ALL})` },
+    ],
+    [statusCounts],
+  );
+
+  const updateParam = useCallback(
+    (key: 'direction' | 'status' | 'search' | 'page', value: string | undefined) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (!value || value === 'ALL') {
+          if (key === 'direction') next.set('direction', 'all');
+          else next.delete(key);
+        } else {
+          next.set(key, value);
+        }
+        if (key !== 'page') next.delete('page');
+        return next;
+      }, { preventScrollReset: true });
+    },
+    [setSearchParams],
+  );
+
+  const setApproverStatus = useCallback(
     (value: string) => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
-        next.set('direction', value);
         next.delete('page');
+        if (value === 'PENDING') {
+          next.set('direction', 'pending_approval');
+          next.delete('status');
+        } else if (value === 'ALL') {
+          next.set('direction', 'all');
+          next.delete('status');
+        } else {
+          next.set('direction', 'all');
+          next.set('status', value);
+        }
         return next;
-      });
+      }, { preventScrollReset: true });
     },
     [setSearchParams],
   );
 
   const handlePageChange = useCallback(
-    (p: number) => {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('page', String(p));
-        return next;
-      });
-    },
-    [setSearchParams],
+    (p: number) => updateParam('page', String(p)),
+    [updateParam],
   );
 
-  // ── Overview Stats ──────────────────────────────────────────────────
+  const filteredTransfers = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return transfers;
+    return transfers.filter((t) => {
+      const hay = `${t.senderName ?? ''} ${t.receiverName ?? ''} ${t.reason ?? ''} ${t.amount}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [transfers, searchQuery]);
+
   const statItems = useMemo(
     (): OverviewStatStripItem[] => [
       { label: 'Total', value: String(statusCounts.ALL) },
@@ -170,14 +227,13 @@ export function MbFundTransfersPage({
     [statusCounts],
   );
 
-  // ── Table Columns ───────────────────────────────────────────────────
   const columns = useMemo(
     (): CompactTableColumn<MbFundTransferRecord>[] => [
       {
         key: 'sender',
         header: 'From',
         render: (t) => (
-          <span className="font-medium text-app-fg">
+          <span className="font-medium text-sm text-app-fg">
             {t.senderMbId === currentUserId ? 'You' : (t.senderName ?? 'Unknown')}
           </span>
         ),
@@ -186,7 +242,7 @@ export function MbFundTransfersPage({
         key: 'receiver',
         header: 'To',
         render: (t) => (
-          <span className="font-medium text-app-fg">
+          <span className="font-medium text-sm text-app-fg">
             {t.receiverMbId === currentUserId ? 'You' : (t.receiverName ?? 'Unknown')}
           </span>
         ),
@@ -195,7 +251,19 @@ export function MbFundTransfersPage({
         key: 'amount',
         header: 'Amount',
         align: 'right',
-        render: (t) => <NairaPrice amount={Number(t.amount)} />,
+        headerClassName: 'text-right',
+        render: (t) => (
+          <span className="text-sm tabular-nums">
+            <NairaPrice amount={Number(t.amount)} />
+          </span>
+        ),
+      },
+      {
+        key: 'reason',
+        header: 'Reason',
+        render: (t) => (
+          <span className="text-sm text-app-fg-muted line-clamp-1">{t.reason?.trim() || '-'}</span>
+        ),
       },
       {
         key: 'status',
@@ -230,38 +298,128 @@ export function MbFundTransfersPage({
     [currentUserId, canApprove],
   );
 
-  // ── Mobile Card ─────────────────────────────────────────────────────
-  const renderMobileCard = useCallback(
-    (t: MbFundTransferRecord) => {
-      const s = STATUS_MAP[t.status] ?? { label: t.status, variant: 'warning' as const };
-      return (
-        <button
-          type="button"
-          className="w-full text-left rounded-xl border border-app-border bg-app-card p-3.5 active:bg-app-hover transition-colors"
-          onClick={() => setDetailTransfer(t)}
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-app-fg truncate">
-                {t.senderMbId === currentUserId ? 'You' : (t.senderName ?? 'Unknown')}
-                {' \u2192 '}
-                {t.receiverMbId === currentUserId ? 'You' : (t.receiverName ?? 'Unknown')}
-              </p>
-              {t.reason && (
-                <p className="mt-0.5 text-xs text-app-fg-muted line-clamp-1">{t.reason}</p>
+  const filterBadge = canApprove
+    ? (approverStatusValue !== 'PENDING' ? 1 : 0) + (searchQuery.trim() ? 1 : 0)
+    : (activeTab !== 'all' ? 1 : 0) +
+      (statusFilter !== 'ALL' ? 1 : 0) +
+      (searchQuery.trim() ? 1 : 0);
+
+  const filterBar = (
+    <ToolbarFiltersCollapsible
+      hideMobileSheet
+      badgeCount={filterBadge}
+      searchRow={
+        <PageSearchControl
+          value={searchQuery}
+          placeholder="Search by sender, recipient, or reason..."
+          title="Search peer transfers"
+          onApply={(q) => {
+            setSearchQuery(q);
+            updateParam('search', q || undefined);
+          }}
+        />
+      }
+      desktopInlineFilters={
+        canApprove ? (
+          <div className="relative">
+            {approverStatusValue !== 'PENDING' && (
+              <FilterDismiss onClear={() => setApproverStatus('PENDING')} />
+            )}
+            <FormSelect
+              value={approverStatusValue}
+              onChange={(e) => setApproverStatus(e.target.value)}
+              options={approverStatusOptions}
+              wrapperClassName="w-auto min-w-[14rem]"
+            />
+          </div>
+        ) : (
+          <>
+            <div className="relative">
+              {activeTab !== 'all' && (
+                <FilterDismiss onClear={() => updateParam('direction', 'all')} />
               )}
+              <FormSelect
+                value={activeTab}
+                onChange={(e) => updateParam('direction', e.target.value)}
+                options={directionOptions}
+                wrapperClassName="w-auto min-w-[12rem]"
+              />
             </div>
-            <StatusBadge status={s.label} variant={s.variant} />
-          </div>
-          <div className="mt-2 flex items-center justify-between">
-            <NairaPrice amount={Number(t.amount)} className="text-sm font-semibold" />
-            <span className="text-[11px] text-app-fg-muted tabular-nums">{formatDate(t.createdAt)}</span>
-          </div>
-        </button>
-      );
-    },
-    [currentUserId],
+            <div className="relative">
+              {statusFilter !== 'ALL' && (
+                <FilterDismiss onClear={() => updateParam('status', 'ALL')} />
+              )}
+              <FormSelect
+                value={statusFilter}
+                onChange={(e) => updateParam('status', e.target.value)}
+                options={mbStatusOptions}
+                wrapperClassName="w-auto min-w-[11rem]"
+              />
+            </div>
+          </>
+        )
+      }
+      sheetFilterBody={null}
+    />
   );
+
+  const tableBlock = (
+    <>
+      <CompactTable
+        columns={columns}
+        rows={filteredTransfers}
+        rowKey={(r) => r.id}
+        loading={isRefreshing}
+        emptyTitle="No transfers"
+        emptyDescription={
+          activeTab === 'pending_approval'
+            ? 'No transfers pending your approval.'
+            : 'No peer fund transfers found for this period.'
+        }
+      />
+      {totalPages > 1 && (
+        <div className="px-4 py-3 border-t border-app-border">
+          <Pagination page={page} totalPages={totalPages} onPageChange={handlePageChange} />
+        </div>
+      )}
+    </>
+  );
+
+  const modals = (
+    <>
+      <CreateTransferModal
+        open={showCreateModal}
+        mediaBuyers={mediaBuyers}
+        currentUserId={currentUserId}
+        onClose={() => setShowCreateModal(false)}
+      />
+      <TransferDetailModal
+        open={!!detailTransfer}
+        transfer={detailTransfer}
+        currentUserId={currentUserId}
+        canApprove={canApprove}
+        onClose={() => setDetailTransfer(null)}
+        onReject={(id) => { setDetailTransfer(null); setRejectTransferId(id); setRejectReason(''); }}
+      />
+      <RejectTransferModal
+        open={!!rejectTransferId}
+        transferId={rejectTransferId ?? ''}
+        reason={rejectReason}
+        onReasonChange={setRejectReason}
+        onClose={() => setRejectTransferId(null)}
+      />
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="space-y-0">
+        {filterBar}
+        {tableBlock}
+        {modals}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-0">
@@ -284,101 +442,40 @@ export function MbFundTransfersPage({
                 />
                 <PageRefreshButton />
                 <Button size="sm" onClick={() => setShowCreateModal(true)}>
-                  Send to MB
+                  Send to peer
                 </Button>
               </>
             }
             sheet={
               <Button className="w-full" onClick={() => setShowCreateModal(true)}>
-                Send to MB
+                Send to peer
               </Button>
             }
           />
         }
       />
 
-      <div className="px-4 md:px-6 space-y-4 pb-8">
-        <MobileDateFilterRow
-          startDate={filters.startDate}
-          endDate={filters.endDate}
-          periodAllTime={filters.periodAllTime}
-        />
-
-        <OverviewStatStrip items={statItems} mobileGrid />
-
-        <Tabs
-          value={activeTab}
-          onChange={handleTabChange}
-          tabs={directionTabs}
-          variant="pill"
-          size="sm"
-        />
-
-        {/* Desktop table */}
-        <div className="hidden md:block">
-          <CompactTable
-            columns={columns}
-            rows={transfers}
-            rowKey={(r) => r.id}
-            loading={isRefreshing}
-            emptyTitle="No transfers"
-            emptyDescription={
-              activeTab === 'pending_approval'
-                ? 'No transfers pending your approval.'
-                : 'No fund transfers found for this period.'
-            }
+      <div className="space-y-4 pb-8">
+        <div className="px-4 md:px-6 space-y-4">
+          <MobileDateFilterRow
+            startDate={filters.startDate}
+            endDate={filters.endDate}
+            periodAllTime={filters.periodAllTime}
           />
+          <OverviewStatStrip items={statItems} mobileGrid />
         </div>
-
-        {/* Mobile cards */}
-        <div className="md:hidden space-y-2">
-          {transfers.length === 0 ? (
-            <EmptyState
-              title="No transfers"
-              description={
-                activeTab === 'pending_approval'
-                  ? 'No transfers pending your approval.'
-                  : 'No fund transfers found.'
-              }
-            />
-          ) : (
-            transfers.map((t) => <div key={t.id}>{renderMobileCard(t)}</div>)
-          )}
+        <div className="list-panel mx-4 md:mx-6">
+          {filterBar}
+          {tableBlock}
         </div>
-
-        {totalPages > 1 && (
-          <Pagination page={page} totalPages={totalPages} onPageChange={handlePageChange} />
-        )}
+        {modals}
       </div>
-
-      {/* ── Create Transfer Modal ──────────────────────────────────── */}
-      <CreateTransferModal
-        open={showCreateModal}
-        mediaBuyers={mediaBuyers}
-        currentUserId={currentUserId}
-        onClose={() => setShowCreateModal(false)}
-      />
-
-      {/* ── Detail Peek Modal ─────────────────────────────────────── */}
-      <TransferDetailModal
-        open={!!detailTransfer}
-        transfer={detailTransfer}
-        currentUserId={currentUserId}
-        canApprove={canApprove}
-        onClose={() => setDetailTransfer(null)}
-        onReject={(id) => { setDetailTransfer(null); setRejectTransferId(id); setRejectReason(''); }}
-      />
-
-      {/* ── Reject Reason Modal ───────────────────────────────────── */}
-      <RejectTransferModal
-        open={!!rejectTransferId}
-        transferId={rejectTransferId ?? ''}
-        reason={rejectReason}
-        onReasonChange={setRejectReason}
-        onClose={() => setRejectTransferId(null)}
-      />
     </div>
   );
+}
+
+export function MbFundTransfersPage(props: MbFundTransfersLoaderData) {
+  return <PeerTransfersPanel {...props} />;
 }
 
 // ── Inline Action Buttons (desktop table) ───────────────────────────────
