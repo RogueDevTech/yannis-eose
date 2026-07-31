@@ -905,17 +905,21 @@ export class CartOrdersService {
    * service's sweep (which delegates here).
    */
   async retryFailedGraduations(): Promise<void> {
+    // Prefer graduated_order_id / source_cart_order_id as the link of record.
+    // Do NOT treat "any online order with same phone" as already-graduated — that
+    // incorrectly skipped real orphans when the customer had an unrelated online order.
     const orphaned = await this.db.execute<{ id: string }>(sql`
       SELECT co.id
       FROM cart_orders co
       WHERE co.status = 'DELIVERED'
         AND co.deleted_at IS NULL
+        AND co.graduated_order_id IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM orders o
-          WHERE o.order_source = 'online'
+          WHERE o.deleted_at IS NULL
             AND (
-              (co.source_cart_id IS NOT NULL AND o.cart_id = co.source_cart_id)
-              OR o.customer_phone_hash = co.customer_phone_hash
+              o.source_cart_order_id = co.id
+              OR (co.source_cart_id IS NOT NULL AND o.cart_id = co.source_cart_id AND o.order_source = 'online')
             )
         )
       LIMIT 200
