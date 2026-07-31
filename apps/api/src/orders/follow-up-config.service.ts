@@ -1810,6 +1810,45 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         metadata: metadata ?? { previousStatus: order.status, newStatus },
         branchId: order.servicingBranchId,
       });
+
+      // After graduation, FU status changes must mirror onto the parent order
+      // in the same tx. graduateToOrders() no-ops when graduatedOrderId is set,
+      // which previously left FU=DELIVERED while a retracked parent drifted.
+      if (order.graduatedOrderId && newStatus !== 'DELETED') {
+        const parentPatch: Record<string, unknown> = {
+          status: newStatus,
+          updatedAt: new Date(),
+        };
+        if (newStatus === 'CONFIRMED') parentPatch.confirmedAt = new Date();
+        if (newStatus === 'AGENT_ASSIGNED') parentPatch.allocatedAt = new Date();
+        if (newStatus === 'DISPATCHED') parentPatch.dispatchedAt = new Date();
+        if (newStatus === 'DELIVERED') parentPatch.deliveredAt = new Date();
+        const mirrored = await tx
+          .update(schema.orders)
+          .set(parentPatch)
+          .where(
+            and(
+              eq(schema.orders.id, order.graduatedOrderId),
+              isNull(schema.orders.deletedAt),
+            ),
+          )
+          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+        if (mirrored[0]) {
+          await tx.insert(schema.orderTimelineEvents).values({
+            orderId: mirrored[0].id,
+            eventType: (eventTypeMap[newStatus] ?? 'ORDER_VIEWED') as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
+            actorId: actor.id,
+            actorName: actor.name ?? null,
+            description: description ?? `Status synced from graduated follow-up order (${newStatus}).`,
+            metadata: { reason: 'FOLLOW_UP_SOURCE_MIRROR', followUpOrderId: orderId, previousStatus: order.status, newStatus },
+            branchId: mirrored[0].branchId ?? null,
+          });
+        } else {
+          this.logger.warn(
+            `Follow-up order ${orderId} status → ${newStatus} but graduated parent ${order.graduatedOrderId} was not updated (missing or deleted)`,
+          );
+        }
+      }
     });
 
     // Auto-generate a draft invoice when a follow-up order is CONFIRMED.
