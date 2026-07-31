@@ -131,6 +131,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       })
       .catch(() => [] as Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>);
 
+  // Shared helper: resolve the dialable phone through the authorized reveal channel.
+  // Cart/follow-up detail APIs seal the raw phone (Lead Fortress), so the Call
+  // Customer modal must fetch it here. Backend applies the VOIP + marketing-role
+  // gate and looks the id up across orders / cart_orders / follow_up_orders.
+  const fetchCallablePhone = (): Promise<{ phone: string; isDialable: boolean } | null> =>
+    apiRequest<unknown>(
+      `/trpc/orders.getCallablePhone?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+      deferredOpt,
+    )
+      .then((phoneRes) => {
+        if (!phoneRes.ok) return null;
+        const phoneData = phoneRes.data as {
+          result?: { data?: { phone: string; isDialable: boolean } | null };
+        };
+        return phoneData?.result?.data ?? null;
+      })
+      .catch(() => null);
+
   const orderDetailPromise = (async (): Promise<OrderDetailLoaderResult> => {
     // When navigating from Cart Orders page, try cart_orders table first
     // to avoid hitting the stale graduated copy in the orders table.
@@ -204,7 +222,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             metadata: (t.metadata as Record<string, unknown>) ?? null,
             createdAt: t.createdAt as string,
           }));
-          const cartProductsForAdjust = await fetchProductsForAdjust();
+          const [cartProductsForAdjust, cartCallablePhone] = await Promise.all([
+            fetchProductsForAdjust(),
+            fetchCallablePhone(),
+          ]);
           return {
             order,
             voipEnabled: false,
@@ -213,7 +234,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             timeline: timelineData as unknown as Promise<typeof timelineData>,
             itemOffers: [],
             productsForAdjust: cartProductsForAdjust,
-            callablePhone: null,
+            callablePhone: cartCallablePhone,
             isFollowUpOrder: false,
             isCartOrder: true,
           };
@@ -315,7 +336,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               })) as unknown as Promise<TimelineEvent[]>,
               itemOffers: [],
               productsForAdjust: await fetchProductsForAdjust(),
-              callablePhone: null,
+              callablePhone: await fetchCallablePhone(),
               isFollowUpOrder: true,
             };
           }
@@ -396,7 +417,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               })) as unknown as Promise<TimelineEvent[]>,
               itemOffers: [],
               productsForAdjust: await fetchProductsForAdjust(),
-              callablePhone: null,
+              callablePhone: await fetchCallablePhone(),
               isFollowUpOrder: false,
               isCartOrder: true,
             };
