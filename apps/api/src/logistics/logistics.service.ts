@@ -47,6 +47,7 @@ import type {
   GetCashLedgerStatementInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
+import { CacheService } from '../common/cache/cache.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
@@ -208,7 +209,16 @@ export class LogisticsService {
     private readonly notifications: NotificationsService,
     @Inject(forwardRef(() => OrdersService)) private readonly ordersService: OrdersService,
     private readonly generalLedger: GeneralLedgerService,
+    private readonly cache: CacheService,
   ) {}
+
+  /** Remittance flips DELIVERED→REMITTED; CEO overview is Redis-cached 300s. */
+  private async invalidateCeoOverviewCache(): Promise<void> {
+    await Promise.all([
+      this.cache.delPattern('cache:ceo:*').catch(() => {}),
+      this.cache.delPattern('cache:orders:aggregates:*').catch(() => {}),
+    ]);
+  }
 
   /**
    * Phase 20 — true if the actor's effective permissions include any of the
@@ -1998,6 +2008,8 @@ export class LogisticsService {
         result.remittance.id,
         () => this.generalLedger.postRemittanceSettlement(result.remittance.id, actor),
       );
+      // Orders just moved DELIVERED→REMITTED — drop stale CEO Remitted tiles.
+      await this.invalidateCeoOverviewCache();
     }
 
     // Note: per-order order:status_changed socket events are intentionally not
@@ -3201,6 +3213,9 @@ export class LogisticsService {
       remittance.id,
       () => this.generalLedger.postRemittanceSettlement(remittance.id, actor),
     );
+
+    // Orders just moved DELIVERED→REMITTED — drop stale CEO Remitted tiles.
+    await this.invalidateCeoOverviewCache();
 
     this.notifications
       .createForLocation(remittance.logisticsLocationId, {
