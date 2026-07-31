@@ -4501,8 +4501,9 @@ export class OrdersService {
         // Offline Orders page: both manually created offline orders AND spreadsheet imports.
         conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
       } else if (input.orderSource === 'delivered_follow_up') {
-        // Delivered Follow-Up page: manual DFU copies + graduated follow-up pipeline copies.
-        conditions.push(inArray(schema.orders.orderSource, ['delivered_follow_up', 'graduated_follow_up']));
+        // Delivered Follow-Up page: manually created DFU copies only.
+        // Pipeline graduations (graduated_follow_up) belong under Follow-Up Orders.
+        conditions.push(eq(schema.orders.orderSource, 'delivered_follow_up'));
       } else {
         conditions.push(eq(schema.orders.orderSource, input.orderSource));
       }
@@ -6757,7 +6758,7 @@ export class OrdersService {
     } else if (opts.orderSource === 'offline_and_import') {
       conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
     } else if (opts.orderSource === 'delivered_follow_up') {
-      conditions.push(inArray(schema.orders.orderSource, ['delivered_follow_up', 'graduated_follow_up']));
+      conditions.push(eq(schema.orders.orderSource, 'delivered_follow_up'));
     } else if (opts.orderSource) {
       conditions.push(eq(schema.orders.orderSource, opts.orderSource));
     }
@@ -6829,7 +6830,7 @@ export class OrdersService {
     } else if (opts.orderSource === 'offline_and_import') {
       conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
     } else if (opts.orderSource === 'delivered_follow_up') {
-      conditions.push(inArray(schema.orders.orderSource, ['delivered_follow_up', 'graduated_follow_up']));
+      conditions.push(eq(schema.orders.orderSource, 'delivered_follow_up'));
     } else if (opts.orderSource) {
       conditions.push(eq(schema.orders.orderSource, opts.orderSource));
     }
@@ -6939,16 +6940,9 @@ export class OrdersService {
     }
     if (onlyOffline) {
       if (typeof onlyOffline === 'string') {
-        // Delivered Follow-Up strip/list: include both manually created copies
-        // (delivered_follow_up) and pipeline graduations (graduated_follow_up).
-        // getDeliveredBySource already buckets both together — keep parity.
-        if (onlyOffline === 'delivered_follow_up') {
-          conditions.push(
-            inArray(schema.orders.orderSource, ['delivered_follow_up', 'graduated_follow_up']),
-          );
-        } else {
-          conditions.push(eq(schema.orders.orderSource, onlyOffline));
-        }
+        // Delivered Follow-Up strip: manual DFU copies only. Pipeline graduations
+        // (graduated_follow_up) are tracked under Follow-Up Orders after remittance.
+        conditions.push(eq(schema.orders.orderSource, onlyOffline));
       } else {
         // true = include both offline and imported orders
         conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
@@ -7495,13 +7489,14 @@ export class OrdersService {
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
 
-    // Classify order sources for delivered breakdown.
-    // graduated_follow_up and delivered_follow_up both map to 'delivered_follow_up' bucket.
+    // Classify order sources for delivered/remitted breakdown.
+    // Pipeline graduations (graduated_follow_up) belong under Follow-Up Orders so the
+    // Remitted modal matches the Follow-Up strip. Manual DFU copies stay separate.
     const rows = await this.db
       .select({
         source: sql<string>`CASE
-          WHEN ${schema.orders.orderSource} IN ('delivered_follow_up', 'graduated_follow_up') THEN 'delivered_follow_up'
-          WHEN ${schema.orders.isFollowUp} = true THEN 'follow-up'
+          WHEN ${schema.orders.orderSource} = 'delivered_follow_up' THEN 'delivered_follow_up'
+          WHEN ${schema.orders.orderSource} = 'graduated_follow_up' OR ${schema.orders.isFollowUp} = true THEN 'follow-up'
           ELSE COALESCE(${schema.orders.orderSource}, 'edge-form')
         END`,
         status: schema.orders.status,
@@ -7511,8 +7506,8 @@ export class OrdersService {
       .where(and(...conditions))
       .groupBy(
         sql`CASE
-          WHEN ${schema.orders.orderSource} IN ('delivered_follow_up', 'graduated_follow_up') THEN 'delivered_follow_up'
-          WHEN ${schema.orders.isFollowUp} = true THEN 'follow-up'
+          WHEN ${schema.orders.orderSource} = 'delivered_follow_up' THEN 'delivered_follow_up'
+          WHEN ${schema.orders.orderSource} = 'graduated_follow_up' OR ${schema.orders.isFollowUp} = true THEN 'follow-up'
           ELSE COALESCE(${schema.orders.orderSource}, 'edge-form')
         END`,
         schema.orders.status,

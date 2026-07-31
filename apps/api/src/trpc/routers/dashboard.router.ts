@@ -317,7 +317,8 @@ export const dashboardRouter = router({
       const eIds = ctx.effectiveBranchIds;
 
       if (cacheService) {
-        const cacheKey = `cache:ceo:${branchId ?? 'global'}:${CacheService.hashInput({ startDate, endDate, eIds, gId: ctx.activeGroupId })}`;
+        // v3: graduated_follow_up remits under Follow-Up in deliveredBySource (not DFU).
+        const cacheKey = `cache:ceo:v3:${branchId ?? 'global'}:${CacheService.hashInput({ startDate, endDate, eIds, gId: ctx.activeGroupId })}`;
         return cacheService.getOrSet(cacheKey, 300, () => _ceoOverviewFetch({ startDate, endDate, branchId, effectiveBranchIds: eIds, activeGroupId: ctx.activeGroupId }));
       }
 
@@ -368,7 +369,7 @@ export const dashboardRouter = router({
       };
 
       if (cacheService) {
-        const cacheKey = `cache:ceo:bundle:${branchId ?? 'global'}:${branchScope}:${CacheService.hashInput({ startDate, endDate, eIds, gId: ctx.activeGroupId })}`;
+        const cacheKey = `cache:ceo:v3:bundle:${branchId ?? 'global'}:${branchScope}:${CacheService.hashInput({ startDate, endDate, eIds, gId: ctx.activeGroupId })}`;
         return cacheService.getOrSet(cacheKey, 300, fetchBundle);
       }
 
