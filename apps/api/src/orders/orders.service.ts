@@ -1459,7 +1459,12 @@ export class OrdersService {
         branchId: order.branchId ?? null,
       });
 
-      // 2. Reverse stock INSIDE the same transaction — if this fails, the
+      // 2. Mirror DELETED onto the graduated source row in the same tx.
+      if (order.sourceCartOrderId || order.sourceFollowUpOrderId) {
+        await this.syncGraduatedStatusToSource(tx, order, 'DELETED');
+      }
+
+      // 3. Reverse stock INSIDE the same transaction — if this fails, the
       //    entire deletion rolls back so we never have a deleted order with
       //    un-reversed stock. The shared implementation nets out reversals
       //    already applied (e.g. a retrack) and restores FIFO batch remaining
@@ -1504,11 +1509,6 @@ export class OrdersService {
       await this.generalLedger.reverseVoucher('SALES_INVOICE', orderId, actor, 'delivered order deleted');
     } catch (err) {
       this.logger.warn(`GL reversal on delivered-order delete for ${orderId} failed: ${err instanceof Error ? err.message : err}`);
-    }
-
-    // Sync DELETED status back to source cart_orders / follow_up_orders row.
-    if (order.sourceCartOrderId || order.sourceFollowUpOrderId) {
-      await this.syncGraduatedStatusToSource(order, 'DELETED');
     }
 
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
@@ -5420,12 +5420,12 @@ export class OrdersService {
       updateFields['riderId'] = input.metadata.riderId;
     }
 
-    // Perform the update — wrapped in withActor so the temporal-audit trigger sees the actor.
+    // Perform the update + source-table mirror in ONE withActor transaction.
     // Optimistic lock: only update if the status is still what we read earlier.
-    // This prevents TOCTOU races (e.g. two concurrent CONFIRMs both passing the
-    // state-machine check before either writes).
-    const updatedRows = await withActor(this.db, actor, async (tx) =>
-      tx
+    // Syncing cart_orders / follow_up_orders in the same tx means a failed mirror
+    // rolls back the parent status too — no permanent parent/child drift.
+    const updated = await withActor(this.db, actor, async (tx) => {
+      const updatedRows = await tx
         .update(schema.orders)
         .set(updateFields)
         .where(
@@ -5434,10 +5434,17 @@ export class OrdersService {
             eq(schema.orders.status, currentStatus),
           ),
         )
-        .returning(),
-    );
+        .returning();
 
-    const updated = updatedRows[0];
+      const row = updatedRows[0];
+      if (!row) return null;
+
+      if (row.sourceCartOrderId || row.sourceFollowUpOrderId) {
+        await this.syncGraduatedStatusToSource(tx, row, newStatus);
+      }
+      return row;
+    });
+
     if (!updated) {
       throw new TRPCError({
         code: 'CONFLICT',
@@ -5446,40 +5453,25 @@ export class OrdersService {
     }
 
     // Execute side effects (stock reservation, deduction, etc.)
-    // If critical side effects fail, revert the status to prevent inconsistency
-    // (e.g. order marked DELIVERED but stock never deducted).
+    // If critical side effects fail, revert the status AND the source mirror so
+    // parent + child stay aligned (e.g. order marked DELIVERED but stock never deducted).
     try {
       await this.executeTransitionSideEffects(newStatus, order, updated, actor, input.metadata);
     } catch (sideEffectErr) {
       this.logger.error(
-        `Side effects failed for order ${updated.id} transition ${currentStatus} → ${newStatus}. Reverting status.`,
+        `Side effects failed for order ${updated.id} transition ${currentStatus} → ${newStatus}. Reverting status + source mirror.`,
         sideEffectErr instanceof Error ? sideEffectErr.stack : sideEffectErr,
       );
-      await withActor(this.db, actor, async (tx) =>
-        tx
+      await withActor(this.db, actor, async (tx) => {
+        await tx
           .update(schema.orders)
           .set({ status: currentStatus, updatedAt: new Date() })
-          .where(eq(schema.orders.id, updated.id)),
-      );
-      throw sideEffectErr;
-    }
-
-    // Sync status back to the source cart_orders / follow_up_orders row so both
-    // tables always reflect the same status after graduation. Non-fatal but retried
-    // once to reduce permanent divergence risk.
-    if (updated.sourceCartOrderId || updated.sourceFollowUpOrderId) {
-      try {
-        await this.syncGraduatedStatusToSource(updated, newStatus);
-      } catch {
-        // Retry once after a short delay to handle transient DB issues.
-        try {
-          await this.syncGraduatedStatusToSource(updated, newStatus);
-        } catch (retryErr) {
-          this.logger.error(
-            `syncGraduatedStatusToSource retry failed for order ${updated.id} → ${newStatus}: ${retryErr instanceof Error ? retryErr.message : retryErr}`,
-          );
+          .where(eq(schema.orders.id, updated.id));
+        if (updated.sourceCartOrderId || updated.sourceFollowUpOrderId) {
+          await this.syncGraduatedStatusToSource(tx, updated, currentStatus);
         }
-      }
+      });
+      throw sideEffectErr;
     }
 
     // Auto-generate a draft invoice the first time an order is CONFIRMED. Idempotent
@@ -8870,52 +8862,61 @@ export class OrdersService {
 
   /**
    * Sync status changes on graduated orders back to their source table
-   * (cart_orders or follow_up_orders). After graduation, the source row
-   * should always mirror the graduated order's status so dashboard counts
-   * stay consistent across tables.
+   * (cart_orders or follow_up_orders). Must run on the same `tx` as the parent
+   * `orders` status write so parent + child commit or roll back together.
    *
-   * Non-fatal: logs warnings on failure so the primary transition is never blocked.
+   * Fatal inside the caller's transaction: do not swallow errors here.
    */
   private async syncGraduatedStatusToSource(
-    order: typeof schema.orders.$inferSelect,
+    tx: PostgresJsDatabase<typeof schema>,
+    order: Pick<
+      typeof schema.orders.$inferSelect,
+      'id' | 'sourceCartOrderId' | 'sourceFollowUpOrderId'
+    >,
     newStatus: string,
   ) {
-    try {
-      const updatePayload = {
-        status: newStatus,
-        updatedAt: new Date(),
-        ...(newStatus === 'DELETED' ? { deletedAt: new Date() } : {}),
-      };
+    const updatePayload = {
+      status: newStatus,
+      updatedAt: new Date(),
+      ...(newStatus === 'DELETED' ? { deletedAt: new Date() } : {}),
+    };
 
-      // Cart-graduated orders: sync via sourceCartOrderId FK
-      if (order.sourceCartOrderId) {
-        await this.db
-          .update(schema.cartOrders)
-          .set(updatePayload)
-          .where(
-            and(
-              eq(schema.cartOrders.id, order.sourceCartOrderId),
-              isNull(schema.cartOrders.deletedAt),
-            ),
-          );
+    // Cart-graduated orders: sync via sourceCartOrderId FK
+    if (order.sourceCartOrderId) {
+      const mirrored = await tx
+        .update(schema.cartOrders)
+        .set(updatePayload)
+        .where(
+          and(
+            eq(schema.cartOrders.id, order.sourceCartOrderId),
+            isNull(schema.cartOrders.deletedAt),
+          ),
+        )
+        .returning({ id: schema.cartOrders.id });
+      if (mirrored.length === 0) {
+        this.logger.warn(
+          `syncGraduatedStatusToSource: cart_orders ${order.sourceCartOrderId} not updated for order ${order.id} → ${newStatus} (missing or already deleted)`,
+        );
       }
+    }
 
-      // Follow-up graduated orders: sync via sourceFollowUpOrderId FK
-      if (order.sourceFollowUpOrderId) {
-        await this.db
-          .update(schema.followUpOrders)
-          .set(updatePayload)
-          .where(
-            and(
-              eq(schema.followUpOrders.id, order.sourceFollowUpOrderId),
-              isNull(schema.followUpOrders.deletedAt),
-            ),
-          );
+    // Follow-up graduated orders: sync via sourceFollowUpOrderId FK
+    if (order.sourceFollowUpOrderId) {
+      const mirrored = await tx
+        .update(schema.followUpOrders)
+        .set(updatePayload)
+        .where(
+          and(
+            eq(schema.followUpOrders.id, order.sourceFollowUpOrderId),
+            isNull(schema.followUpOrders.deletedAt),
+          ),
+        )
+        .returning({ id: schema.followUpOrders.id });
+      if (mirrored.length === 0) {
+        this.logger.warn(
+          `syncGraduatedStatusToSource: follow_up_orders ${order.sourceFollowUpOrderId} not updated for order ${order.id} → ${newStatus} (missing or already deleted)`,
+        );
       }
-    } catch (err) {
-      this.logger.warn(
-        `syncGraduatedStatusToSource for order ${order.id} → ${newStatus} failed: ${err instanceof Error ? err.message : err}`,
-      );
     }
   }
 
