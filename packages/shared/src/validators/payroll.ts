@@ -140,7 +140,15 @@ export const payeBandRowSchema = z.object({
 
 export const payeReliefSchema = z.object({
   name: z.string().min(1),
-  basis: z.enum(['PERCENT_OF_GROSS', 'PERCENT_OF_MONTHLY_GROSS', 'FLAT_ANNUAL']),
+  // PERCENT_OF_ANNUAL_RENT: HR-approved rent relief — `rate`% of the employee's
+  // declared annual rent, subject to `cap` (₦500,000/yr). Not derived from salary,
+  // so employees with no declared rent get zero relief.
+  basis: z.enum([
+    'PERCENT_OF_GROSS',
+    'PERCENT_OF_MONTHLY_GROSS',
+    'FLAT_ANNUAL',
+    'PERCENT_OF_ANNUAL_RENT',
+  ]),
   rate: z.number().min(0).max(100).default(0),
   amount: z.number().min(0).optional(),
   cap: z.number().min(0).nullable().optional(),
@@ -268,6 +276,8 @@ export const previewPayeSchema = z.object({
   monthlyGross: z.coerce.number().min(0),
   taxStatus: z.enum(['STANDARD_PAYE', 'EMPLOYER_SUBSIDIZED_PAYE', 'GROSS_NO_DEDUCTION']).default('STANDARD_PAYE'),
   employerSubsidyPercent: z.coerce.number().min(0).max(100).optional(),
+  /** Declared annual rent (₦) to preview the rent relief. Omitted → no relief. */
+  annualRent: z.coerce.number().min(0).optional(),
 });
 
 export const payrollOnboardingActionSchema = z.object({
@@ -284,6 +294,8 @@ export const updatePayrollProfileSchema = z.object({
   reportsToUserId: z.string().uuid().nullable().optional(),
   crmLinked: z.boolean().optional(),
   flatMonthlyAmount: z.coerce.number().min(0).optional(),
+  /** Declared annual rent (₦) for PERCENT_OF_ANNUAL_RENT relief. */
+  annualRent: z.coerce.number().min(0).nullable().optional(),
 });
 
 export const bulkAssignPayRoleSchema = z.object({

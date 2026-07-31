@@ -10,6 +10,7 @@ import type { PayePreviewResult } from './payroll-prd-types';
 export function PayePreviewCalculator() {
   const previewFetcher = useFetcher<{ preview?: PayePreviewResult; error?: string }>();
   const [previewGross, setPreviewGross] = useState('250000');
+  const [previewAnnualRent, setPreviewAnnualRent] = useState('600000');
   const [previewTaxStatus, setPreviewTaxStatus] = useState('STANDARD_PAYE');
   const [previewSubsidy, setPreviewSubsidy] = useState('');
   const previewResult = previewFetcher.data?.preview ?? null;
@@ -20,8 +21,8 @@ export function PayePreviewCalculator() {
       <div>
         <h3 className="text-sm font-semibold text-app-fg">PAYE preview calculator</h3>
         <p className="text-xs text-app-fg-muted mt-0.5">
-          Uses the default band engine on the server. Confirm thresholds against official FIRS
-          publications before go-live.
+          Uses the company tax-band engine. Rent relief is 20% of declared annual rent (not salary),
+          capped per config. Confirm thresholds against official FIRS publications before go-live.
         </p>
       </div>
       <previewFetcher.Form
@@ -36,6 +37,15 @@ export function PayePreviewCalculator() {
             className="input w-full"
             value={previewGross}
             onChange={setPreviewGross}
+          />
+        </div>
+        <div className="w-full sm:w-44 min-w-0">
+          <label className="block text-sm font-medium text-app-fg-muted mb-1">Annual rent (₦)</label>
+          <AmountInput
+            name="annualRent"
+            className="input w-full"
+            value={previewAnnualRent}
+            onChange={setPreviewAnnualRent}
           />
         </div>
         <div className="w-full sm:w-52 min-w-0">

@@ -3,10 +3,27 @@ import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
 import { ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
-import type { TaxBandConfig } from './payroll-prd-types';
+import type { PayeReliefRow, TaxBandConfig } from './payroll-prd-types';
 
 type BandDraft = { fromAmount: string; toAmount: string; rate: string };
+type ReliefDraft = { name: string; basis: string; rate: string; amount: string; cap: string };
+
+/** HR default: 20% of declared annual rent, capped at ₦500k/yr. */
+const DEFAULT_RENT_RELIEF: PayeReliefRow = {
+  name: 'Annual Rent Relief (20%)',
+  basis: 'PERCENT_OF_ANNUAL_RENT',
+  rate: 20,
+  cap: 500_000,
+};
+
+const RELIEF_BASIS_OPTIONS = [
+  { value: 'PERCENT_OF_ANNUAL_RENT', label: '% of annual rent' },
+  { value: 'PERCENT_OF_GROSS', label: '% of annual gross' },
+  { value: 'PERCENT_OF_MONTHLY_GROSS', label: '% of monthly gross × 12' },
+  { value: 'FLAT_ANNUAL', label: 'Flat annual amount' },
+];
 
 export function TaxBandConfigModal({
   config,
@@ -31,17 +48,13 @@ export function TaxBandConfigModal({
     })),
   );
 
-  const [reliefRows, setReliefRows] = useState<
-    Array<{ name: string; basis: string; rate: string; amount: string }>
-  >(() =>
-    (config?.reliefs?.length
-      ? config.reliefs
-      : [{ name: 'Annual Rent Relief (20%)', basis: 'PERCENT_OF_GROSS', rate: 20 }]
-    ).map((r) => ({
+  const [reliefRows, setReliefRows] = useState<ReliefDraft[]>(() =>
+    (config?.reliefs?.length ? config.reliefs : [DEFAULT_RENT_RELIEF]).map((r) => ({
       name: r.name,
       basis: r.basis,
       rate: String(r.rate ?? 0),
       amount: r.amount != null ? String(r.amount) : '',
+      cap: r.cap != null ? String(r.cap) : '',
     })),
   );
 
@@ -61,6 +74,7 @@ export function TaxBandConfigModal({
         basis: row.basis,
         rate: Math.max(0, Math.min(100, Number(row.rate) || 0)),
         ...(row.amount.trim() !== '' ? { amount: Math.max(0, Number(row.amount) || 0) } : {}),
+        ...(row.cap.trim() !== '' ? { cap: Math.max(0, Number(row.cap) || 0) } : { cap: null }),
       })),
     );
   }, [reliefRows]);
@@ -172,55 +186,84 @@ export function TaxBandConfigModal({
         <div className="space-y-2">
           <p className="text-sm font-medium text-app-fg">Reliefs</p>
           <p className="text-xs text-app-fg-muted">
-            HR rule: only Annual Rent Relief (20%). Do not include NHF or Pension.
+            HR rule: Annual Rent Relief is 20% of declared annual rent (cap ₦500,000/yr). Do not include NHF or Pension.
           </p>
           {reliefRows.map((row, idx) => (
-            <div key={`relief-${idx}`} className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:items-end">
-              <div className="sm:col-span-5">
-                <TextInput
-                  label="Name"
-                  readOnly={readOnly}
-                  value={row.name}
-                  onChange={(e) =>
-                    setReliefRows((rows) => rows.map((r, i) => (i === idx ? { ...r, name: e.target.value } : r)))
-                  }
-                />
+            <div key={`relief-${idx}`} className="space-y-2 rounded-lg border border-app-border p-3">
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:items-end">
+                <div className="sm:col-span-5">
+                  <TextInput
+                    label="Name"
+                    readOnly={readOnly}
+                    value={row.name}
+                    onChange={(e) =>
+                      setReliefRows((rows) => rows.map((r, i) => (i === idx ? { ...r, name: e.target.value } : r)))
+                    }
+                  />
+                </div>
+                <div className="sm:col-span-5">
+                  <FormSelect
+                    label="Basis"
+                    value={row.basis}
+                    disabled={readOnly}
+                    onChange={(e) =>
+                      setReliefRows((rows) => rows.map((r, i) => (i === idx ? { ...r, basis: e.target.value } : r)))
+                    }
+                    options={RELIEF_BASIS_OPTIONS}
+                  />
+                </div>
+                {!readOnly ? (
+                  <div className="sm:col-span-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => setReliefRows((rows) => rows.filter((_, i) => i !== idx))}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ) : null}
               </div>
-              <div className="sm:col-span-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <TextInput
-                  label="Basis"
-                  readOnly={readOnly}
-                  value={row.basis}
-                  onChange={(e) =>
-                    setReliefRows((rows) => rows.map((r, i) => (i === idx ? { ...r, basis: e.target.value } : r)))
-                  }
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <TextInput
-                  label="Rate %"
+                  label={row.basis === 'FLAT_ANNUAL' ? 'Amount (₦)' : 'Rate %'}
                   type="number"
                   min={0}
-                  max={100}
+                  max={row.basis === 'FLAT_ANNUAL' ? undefined : 100}
                   readOnly={readOnly}
-                  value={row.rate}
+                  value={row.basis === 'FLAT_ANNUAL' ? row.amount : row.rate}
                   onChange={(e) =>
-                    setReliefRows((rows) => rows.map((r, i) => (i === idx ? { ...r, rate: e.target.value } : r)))
+                    setReliefRows((rows) =>
+                      rows.map((r, i) =>
+                        i === idx
+                          ? row.basis === 'FLAT_ANNUAL'
+                            ? { ...r, amount: e.target.value }
+                            : { ...r, rate: e.target.value }
+                          : r,
+                      ),
+                    )
                   }
                 />
+                <TextInput
+                  label="Cap (₦, optional)"
+                  type="text"
+                  inputMode="numeric"
+                  readOnly={readOnly}
+                  placeholder="e.g. 500000"
+                  value={row.cap ? Number(row.cap).toLocaleString('en-NG') : ''}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    setReliefRows((rows) => rows.map((r, i) => (i === idx ? { ...r, cap: raw } : r)));
+                  }}
+                />
+                {row.basis === 'PERCENT_OF_ANNUAL_RENT' ? (
+                  <p className="text-xs text-app-fg-muted self-end pb-2">
+                    Uses each staff member&apos;s declared annual rent. ₦0 rent → ₦0 relief.
+                  </p>
+                ) : null}
               </div>
-              {!readOnly ? (
-                <div className="sm:col-span-1">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setReliefRows((rows) => rows.filter((_, i) => i !== idx))}
-                  >
-                    ×
-                  </Button>
-                </div>
-              ) : null}
             </div>
           ))}
           {!readOnly ? (
@@ -231,7 +274,13 @@ export function TaxBandConfigModal({
               onClick={() =>
                 setReliefRows((rows) => [
                   ...rows,
-                  { name: 'Annual Rent Relief (20%)', basis: 'PERCENT_OF_GROSS', rate: '20', amount: '' },
+                  {
+                    name: 'Annual Rent Relief (20%)',
+                    basis: 'PERCENT_OF_ANNUAL_RENT',
+                    rate: '20',
+                    amount: '',
+                    cap: '500000',
+                  },
                 ])
               }
             >

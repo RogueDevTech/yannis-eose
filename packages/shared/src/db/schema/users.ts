@@ -1,4 +1,4 @@
-import { uuid, pgTable, text, integer, serial, boolean, jsonb, timestamp, numeric } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, integer, serial, boolean, jsonb, timestamp, numeric, date } from 'drizzle-orm/pg-core';
 import {
   userRoleEnum,
   recordStatusEnum,
@@ -6,6 +6,7 @@ import {
   payrollSalaryBasisEnum,
   payrollTaxStatusEnum,
   payrollOnboardingStatusEnum,
+  employeeExitReasonEnum,
 } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { products } from './products';
@@ -98,6 +99,17 @@ export const users = pgTable('users', {
   onboardingPayrollStatus: payrollOnboardingStatusEnum('onboarding_payroll_status').default('NOT_APPLICABLE'),
   payrollEmployeeId: text('payroll_employee_id'),
   bankVerificationStatus: text('bank_verification_status').default('UNVERIFIED'),
+  /**
+   * Declared ANNUAL rent (₦). Drives the PAYE "Annual Rent Relief" (20% of this,
+   * capped ₦500k/yr). Null/0 → no rent relief. See paye-calc.ts.
+   */
+  annualRent: numeric('annual_rent', { precision: 14, scale: 2 }),
+  /** Employment lifecycle — first official working day. */
+  dateOfJoining: date('date_of_joining'),
+  /** Employment lifecycle — last working day (set on exit). */
+  exitDate: date('exit_date'),
+  /** Standardized reason recorded when an employee exits. */
+  exitReason: employeeExitReasonEnum('exit_reason'),
   ...temporalColumns,
   ...timestampColumns,
 });
