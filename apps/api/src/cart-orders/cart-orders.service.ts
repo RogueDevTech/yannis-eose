@@ -904,7 +904,11 @@ export class CartOrdersService {
    * no matching row in the orders table. Called on boot by the follow-up
    * service's sweep (which delegates here).
    */
-  async retryFailedGraduations(): Promise<void> {
+  /**
+   * Retry orphaned cart graduations. Returns a per-id report so ops can see
+   * why a specific cart stayed at DELIVERED without a parent order.
+   */
+  async retryFailedGraduations(): Promise<Array<{ id: string; ok: boolean; error?: string; graduatedOrderId?: string | null }>> {
     // Prefer graduated_order_id / source_cart_order_id as the link of record.
     // Do NOT treat "any online order with same phone" as already-graduated — that
     // incorrectly skipped real orphans when the customer had an unrelated online order.
@@ -925,19 +929,41 @@ export class CartOrdersService {
       LIMIT 200
     `);
 
+    const report: Array<{ id: string; ok: boolean; error?: string; graduatedOrderId?: string | null }> = [];
+
     if (orphaned.length > 0) {
       this.logger.log(`Retrying graduation for ${orphaned.length} orphaned cart order(s)`);
       let succeeded = 0;
       for (const row of orphaned) {
         try {
           await this.graduateToOrders(row.id);
-          succeeded++;
+          const [after] = await this.db
+            .select({ graduatedOrderId: schema.cartOrders.graduatedOrderId })
+            .from(schema.cartOrders)
+            .where(eq(schema.cartOrders.id, row.id))
+            .limit(1);
+          if (after?.graduatedOrderId) {
+            succeeded++;
+            report.push({ id: row.id, ok: true, graduatedOrderId: after.graduatedOrderId });
+          } else {
+            // Dedup path marks CONVERTED / skips without throwing.
+            report.push({
+              id: row.id,
+              ok: false,
+              error: 'graduateToOrders returned without creating a parent (dedup skip or already linked)',
+              graduatedOrderId: null,
+            });
+          }
         } catch (err) {
-          this.logger.error(`Retry graduation failed for cart order ${row.id}: ${err instanceof Error ? err.message : err}`);
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.error(`Retry graduation failed for cart order ${row.id}: ${message}`);
+          report.push({ id: row.id, ok: false, error: message });
         }
       }
       this.logger.log(`Cart order graduation retry: ${succeeded}/${orphaned.length} succeeded`);
     }
+
+    return report;
 
     // Second sweep: graduated copies whose STOCK deduction failed. The
     // graduation marker (`graduated_order_id`) is set before the deduction
@@ -1085,15 +1111,40 @@ export class CartOrdersService {
     }
 
     const graduatedOrderId = await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      // Drop stale FKs so a deleted campaign/user/location cannot abort graduation.
+      // Orphan DELIVERED carts on prod failed here with FK violations while the
+      // cart row stayed DELIVERED and graduated_order_id stayed NULL.
+      const [safeCampaign] = co.campaignId
+        ? await tx.select({ id: schema.campaigns.id }).from(schema.campaigns).where(eq(schema.campaigns.id, co.campaignId)).limit(1)
+        : [undefined];
+      const [safeMb] = co.mediaBuyerId
+        ? await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, co.mediaBuyerId)).limit(1)
+        : [undefined];
+      const [safeCs] = co.assignedCsId
+        ? await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, co.assignedCsId)).limit(1)
+        : [undefined];
+      const [safeProvider] = co.logisticsProviderId
+        ? await tx.select({ id: schema.logisticsProviders.id }).from(schema.logisticsProviders).where(eq(schema.logisticsProviders.id, co.logisticsProviderId)).limit(1)
+        : [undefined];
+      const [safeLocation] = co.logisticsLocationId
+        ? await tx.select({ id: schema.logisticsLocations.id }).from(schema.logisticsLocations).where(eq(schema.logisticsLocations.id, co.logisticsLocationId)).limit(1)
+        : [undefined];
+      const [safeRider] = co.riderId
+        ? await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, co.riderId)).limit(1)
+        : [undefined];
+      const [safeCart] = co.sourceCartId
+        ? await tx.select({ id: schema.cartAbandonments.id }).from(schema.cartAbandonments).where(eq(schema.cartAbandonments.id, co.sourceCartId)).limit(1)
+        : [undefined];
+
       const [graduated] = await tx
         .insert(schema.orders)
         .values({
-          campaignId: co.campaignId,
-          mediaBuyerId: co.mediaBuyerId,
-          assignedCsId: co.assignedCsId,
-          logisticsProviderId: co.logisticsProviderId,
-          logisticsLocationId: co.logisticsLocationId,
-          riderId: co.riderId,
+          campaignId: safeCampaign?.id ?? null,
+          mediaBuyerId: safeMb?.id ?? null,
+          assignedCsId: safeCs?.id ?? null,
+          logisticsProviderId: safeProvider?.id ?? null,
+          logisticsLocationId: safeLocation?.id ?? null,
+          riderId: safeRider?.id ?? null,
           status: 'DELIVERED',
           items: co.items,
           customerName: co.customerName,
@@ -1117,7 +1168,8 @@ export class CartOrdersService {
           customFields: co.customFields,
           branchId: co.branchId,
           servicingBranchId: co.servicingBranchId,
-          cartId: co.sourceCartId,
+          // Only link cart_id when the abandonment row still exists (FK-safe).
+          cartId: safeCart?.id ?? null,
           deliveryProofUrl: co.deliveryProofUrl,
           deliveryDiscountAmount: co.deliveryDiscountAmount,
           deliveryOtp: co.deliveryOtp,
@@ -1142,8 +1194,22 @@ export class CartOrdersService {
       }
 
       if (graduated && coItems.length > 0) {
+        const productIds = [...new Set(coItems.map((i) => i.productId).filter(Boolean))] as string[];
+        const liveProducts = productIds.length
+          ? await tx
+              .select({ id: schema.products.id })
+              .from(schema.products)
+              .where(inArray(schema.products.id, productIds))
+          : [];
+        const liveProductSet = new Set(liveProducts.map((p) => p.id));
+        const safeItems = coItems.filter((item) => item.productId && liveProductSet.has(item.productId));
+        if (safeItems.length === 0) {
+          throw new Error(
+            `Cart order ${cartOrderId} has no live product line items (stale product_id); cannot graduate`,
+          );
+        }
         await tx.insert(schema.orderItems).values(
-          coItems.map((item) => ({
+          safeItems.map((item) => ({
             orderId: graduated.id,
             productId: item.productId,
             quantity: item.quantity,
@@ -1169,11 +1235,21 @@ export class CartOrdersService {
         // Filter to only event types the orders timeline enum accepts
         const validTimeline = coTimeline.filter((t) => VALID_TIMELINE_EVENT_TYPES.has(t.eventType));
         if (validTimeline.length > 0) {
+          // actor_id is FK → users. Deleted staff on old timeline rows must not
+          // abort graduation; keep the name snapshot and drop the stale FK.
+          const actorIds = [...new Set(validTimeline.map((t) => t.actorId).filter(Boolean))] as string[];
+          const liveActors = actorIds.length
+            ? await tx
+                .select({ id: schema.users.id })
+                .from(schema.users)
+                .where(inArray(schema.users.id, actorIds))
+            : [];
+          const liveActorSet = new Set(liveActors.map((a) => a.id));
           await tx.insert(schema.orderTimelineEvents).values(
             validTimeline.map((t) => ({
               orderId: graduated.id,
               eventType: t.eventType as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
-              actorId: t.actorId,
+              actorId: t.actorId && liveActorSet.has(t.actorId) ? t.actorId : null,
               actorName: t.actorName,
               description: t.description,
               metadata: t.metadata,
@@ -1194,11 +1270,13 @@ export class CartOrdersService {
           branchId: co.servicingBranchId,
         });
 
-        // Mark original cart as CONVERTED
-        await tx
-          .update(schema.cartAbandonments)
-          .set({ status: 'CONVERTED', convertedOrderId: graduated.id })
-          .where(eq(schema.cartAbandonments.id, co.sourceCartId));
+        // Mark original cart as CONVERTED only when the abandonment row exists.
+        if (safeCart?.id) {
+          await tx
+            .update(schema.cartAbandonments)
+            .set({ status: 'CONVERTED', convertedOrderId: graduated.id })
+            .where(eq(schema.cartAbandonments.id, safeCart.id));
+        }
 
         // Auto-generate invoice inside the same transaction so a graduated
         // order can never land in the orders table without an invoice.
