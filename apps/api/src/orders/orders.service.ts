@@ -4123,26 +4123,48 @@ export class OrdersService {
     const voipSetting = await this.settingsService.get('VOIP_ENABLED');
     if (voipSetting?.['enabled'] === true) return null;
 
-    const rows = await this.db
-      .select()
-      .from(schema.orders)
-      .where(eq(schema.orders.id, orderId))
-      .limit(1);
-    const order = rows[0];
-    if (!order) return null;
-
-    // Phone is always visible once loaded — no status restriction.
-    // VOIP gate + role/assignment gate above are sufficient.
-
     // Phone is visible to all roles except marketing (MEDIA_BUYER, HEAD_OF_MARKETING)
     // who shouldn't have direct customer contact info.
     const MARKETING_ROLES = new Set(['MEDIA_BUYER', 'HEAD_OF_MARKETING']);
     if (MARKETING_ROLES.has(actor.role)) return null;
 
-    const rawPhone = order.customerPhone?.trim();
+    // The id may belong to a regular order, a cart order (cart_orders), or a
+    // follow-up order (follow_up_orders) — all three flow through the same CS
+    // detail page. Detail APIs seal the raw phone (Lead Fortress), so this
+    // authorized channel is the only place the assigned CS can reveal/dial it.
+    const [regular] = await this.db
+      .select({ customerPhone: schema.orders.customerPhone, customerPhoneHash: schema.orders.customerPhoneHash })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    let phoneRow: { customerPhone: string | null; customerPhoneHash: string | null } | undefined = regular;
+
+    if (!phoneRow) {
+      const [cart] = await this.db
+        .select({ customerPhone: schema.cartOrders.customerPhone, customerPhoneHash: schema.cartOrders.customerPhoneHash })
+        .from(schema.cartOrders)
+        .where(eq(schema.cartOrders.id, orderId))
+        .limit(1);
+      phoneRow = cart;
+    }
+
+    if (!phoneRow) {
+      const [followUp] = await this.db
+        .select({ customerPhone: schema.followUpOrders.customerPhone, customerPhoneHash: schema.followUpOrders.customerPhoneHash })
+        .from(schema.followUpOrders)
+        .where(eq(schema.followUpOrders.id, orderId))
+        .limit(1);
+      phoneRow = followUp;
+    }
+
+    if (!phoneRow) return null;
+
+    // Phone is always visible once loaded — no status restriction.
+    // VOIP gate + marketing-role gate above are sufficient.
+    const rawPhone = phoneRow.customerPhone?.trim();
     if (rawPhone) return { phone: rawPhone, isDialable: true };
 
-    const value = order.customerPhoneHash;
+    const value = phoneRow.customerPhoneHash;
     const isDialable = !/^[a-f0-9]{64}$/i.test(value ?? '');
     return { phone: value ?? '', isDialable };
   }
