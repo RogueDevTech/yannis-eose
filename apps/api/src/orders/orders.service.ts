@@ -4500,6 +4500,9 @@ export class OrdersService {
       } else if (input.orderSource === 'offline_and_import') {
         // Offline Orders page: both manually created offline orders AND spreadsheet imports.
         conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
+      } else if (input.orderSource === 'delivered_follow_up') {
+        // Delivered Follow-Up page: manual DFU copies + graduated follow-up pipeline copies.
+        conditions.push(inArray(schema.orders.orderSource, ['delivered_follow_up', 'graduated_follow_up']));
       } else {
         conditions.push(eq(schema.orders.orderSource, input.orderSource));
       }
@@ -6753,6 +6756,8 @@ export class OrdersService {
       conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.orderSource} = 'import')`);
     } else if (opts.orderSource === 'offline_and_import') {
       conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
+    } else if (opts.orderSource === 'delivered_follow_up') {
+      conditions.push(inArray(schema.orders.orderSource, ['delivered_follow_up', 'graduated_follow_up']));
     } else if (opts.orderSource) {
       conditions.push(eq(schema.orders.orderSource, opts.orderSource));
     }
@@ -6823,6 +6828,8 @@ export class OrdersService {
       conditions.push(sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'online' OR ${schema.orders.orderSource} = 'import')`);
     } else if (opts.orderSource === 'offline_and_import') {
       conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
+    } else if (opts.orderSource === 'delivered_follow_up') {
+      conditions.push(inArray(schema.orders.orderSource, ['delivered_follow_up', 'graduated_follow_up']));
     } else if (opts.orderSource) {
       conditions.push(eq(schema.orders.orderSource, opts.orderSource));
     }
@@ -6932,7 +6939,16 @@ export class OrdersService {
     }
     if (onlyOffline) {
       if (typeof onlyOffline === 'string') {
-        conditions.push(eq(schema.orders.orderSource, onlyOffline));
+        // Delivered Follow-Up strip/list: include both manually created copies
+        // (delivered_follow_up) and pipeline graduations (graduated_follow_up).
+        // getDeliveredBySource already buckets both together — keep parity.
+        if (onlyOffline === 'delivered_follow_up') {
+          conditions.push(
+            inArray(schema.orders.orderSource, ['delivered_follow_up', 'graduated_follow_up']),
+          );
+        } else {
+          conditions.push(eq(schema.orders.orderSource, onlyOffline));
+        }
       } else {
         // true = include both offline and imported orders
         conditions.push(inArray(schema.orders.orderSource, ['offline', 'import']));
