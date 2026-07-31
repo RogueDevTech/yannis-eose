@@ -713,6 +713,14 @@ export class PayrollBatchService {
           name: schema.users.name,
           role: schema.users.role,
           commissionPlanId: schema.users.commissionPlanId,
+          // Payroll-profile fields so preview matches the actual generate path
+          // (pay-role/formula selection, tax status, flat rate, and rent relief).
+          payRoleId: schema.users.payRoleId,
+          salaryBasis: schema.users.salaryBasis,
+          taxStatus: schema.users.taxStatus,
+          flatMonthlyAmount: schema.users.flatMonthlyAmount,
+          onboardingPayrollStatus: schema.users.onboardingPayrollStatus,
+          annualRent: schema.users.annualRent,
         })
         .from(schema.users)
         .where(
@@ -769,6 +777,8 @@ export class PayrollBatchService {
       salaryBasis?: string | null;
       taxStatus?: string | null;
       onboardingPayrollStatus?: string | null;
+      flatMonthlyAmount?: string | number | null;
+      annualRent?: string | number | null;
     },
     periodStart: Date,
     periodEnd: Date,

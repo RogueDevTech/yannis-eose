@@ -517,7 +517,7 @@ export class PayrollConfigService {
   }
 
   async previewPaye(
-    input: { monthlyGross: number; taxStatus: string; employerSubsidyPercent?: number },
+    input: { monthlyGross: number; taxStatus: string; employerSubsidyPercent?: number; annualRent?: number },
     groupId?: string | null,
   ) {
     const config = await this.loadActiveTaxBandConfig(groupId);
@@ -526,6 +526,7 @@ export class PayrollConfigService {
         monthlyGross: input.monthlyGross,
         taxStatus: input.taxStatus as 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION',
         employerSubsidyPercent: input.employerSubsidyPercent,
+        annualRent: input.annualRent,
       },
       config,
     );
@@ -789,6 +790,7 @@ export class PayrollConfigService {
       reportsToUserId?: string | null;
       crmLinked?: boolean;
       flatMonthlyAmount?: number;
+      annualRent?: number | null;
     },
     actor: SessionUser,
   ) {
@@ -812,6 +814,12 @@ export class PayrollConfigService {
             : input.flatMonthlyAmount != null
               ? { flatMonthlyAmount: sql`${input.flatMonthlyAmount}::numeric` }
               : {}),
+          ...(input.annualRent !== undefined
+            ? {
+                annualRent:
+                  input.annualRent == null ? null : sql`${input.annualRent}::numeric`,
+              }
+            : {}),
           updatedAt: new Date(),
         })
         .where(eq(schema.users.id, input.userId))

@@ -39,7 +39,7 @@ export type PayeBandRow = {
 
 export type PayeReliefRow = {
   name: string;
-  basis: 'PERCENT_OF_GROSS' | 'PERCENT_OF_MONTHLY_GROSS' | 'FLAT_ANNUAL';
+  basis: 'PERCENT_OF_GROSS' | 'PERCENT_OF_MONTHLY_GROSS' | 'FLAT_ANNUAL' | 'PERCENT_OF_ANNUAL_RENT';
   rate: number;
   amount?: number;
   cap?: number | null;

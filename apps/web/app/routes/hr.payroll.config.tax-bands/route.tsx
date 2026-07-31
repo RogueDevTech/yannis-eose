@@ -54,8 +54,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const monthlyGross = Number(formData.get('monthlyGross')?.toString() ?? '0');
     const taxStatus = formData.get('taxStatus')?.toString() ?? 'STANDARD_PAYE';
     const subsidyRaw = formData.get('employerSubsidyPercent')?.toString()?.trim();
+    const annualRentRaw = formData.get('annualRent')?.toString()?.trim();
     const body: Record<string, unknown> = { monthlyGross, taxStatus };
     if (subsidyRaw) body.employerSubsidyPercent = Number(subsidyRaw);
+    if (annualRentRaw) body.annualRent = Number(annualRentRaw);
 
     const inputEnc = encodeURIComponent(JSON.stringify(body));
     const res = await apiRequest<unknown>(`/trpc/hr.previewPaye?input=${inputEnc}`, { method: 'GET', cookie });

@@ -143,6 +143,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       salaryBasis: user.salaryBasis ?? 'FORMULA_BASED',
       taxStatus: user.taxStatus ?? 'STANDARD_PAYE',
       flatMonthlyAmount: user.flatMonthlyAmount ? String(Number(user.flatMonthlyAmount)) : '',
+      annualRent: user.annualRent != null ? String(Number(user.annualRent)) : '',
     };
     return { kind: 'ok', editingUser };
   })();
@@ -282,6 +283,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
         salaryBasis: formData.get('salaryBasis')?.toString() ?? 'FORMULA_BASED',
         taxStatus: formData.get('taxStatus')?.toString() ?? 'STANDARD_PAYE',
         flatMonthlyAmount: formData.get('flatMonthlyAmount')?.toString() ? Number(formData.get('flatMonthlyAmount')) : undefined,
+        annualRent: formData.get('annualRent')?.toString()?.trim()
+          ? Number(formData.get('annualRent'))
+          : formData.has('annualRent')
+            ? null
+            : undefined,
       },
     });
     if (!res.ok) {
@@ -541,6 +547,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
         salaryBasis: formData.get('salaryBasis')?.toString() ?? 'FORMULA_BASED',
         taxStatus: formData.get('taxStatus')?.toString() ?? 'STANDARD_PAYE',
         flatMonthlyAmount: formData.get('flatMonthlyAmount')?.toString() ? Number(formData.get('flatMonthlyAmount')) : undefined,
+        annualRent: formData.get('annualRent')?.toString()?.trim()
+          ? Number(formData.get('annualRent'))
+          : formData.has('annualRent')
+            ? null
+            : undefined,
       },
     });
   }

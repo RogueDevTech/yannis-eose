@@ -11,6 +11,8 @@ export interface PayrollProfileValues {
   salaryBasis: string;
   taxStatus: string;
   flatMonthlyAmount: string;
+  /** Declared annual rent (₦) for PAYE rent relief. */
+  annualRent: string;
   reportsToUserId?: string | null;
   crmLinked?: boolean;
 }
@@ -189,6 +191,19 @@ export function PayrollUserProfileSection({
               { value: 'GROSS_NO_DEDUCTION', label: 'Gross (no deduction)' },
             ]}
           />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-app-fg-muted mb-1">Annual rent (₦)</label>
+          <AmountInput
+            name="annualRent"
+            className="input"
+            disabled={disabled}
+            value={values.annualRent}
+            onChange={(raw) => onChange({ annualRent: raw })}
+          />
+          <p className="text-xs text-app-fg-muted mt-1">
+            Used for rent relief (typically 20% of this amount, capped). Leave blank if none.
+          </p>
         </div>
       </div>
 

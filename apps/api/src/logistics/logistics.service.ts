@@ -14,6 +14,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  ne,
   not,
   notExists,
   or,
@@ -60,8 +61,12 @@ import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 /**
  * After remitting graduated orders, sync REMITTED status back to their source
  * tables (cart_orders, follow_up_orders) so dashboard breakdowns are accurate.
+ *
+ * Exact mirror of the graduated parent: the child row follows the parent to
+ * REMITTED from ANY live state, not only DELIVERED. Exported for integration
+ * testing of that drift-prevention invariant.
  */
-async function syncRemittedToSourceTables(
+export async function syncRemittedToSourceTables(
   tx: PostgresJsDatabase<typeof schema>,
   remittedRows: Array<{
     id: string;
@@ -99,7 +104,11 @@ async function syncRemittedToSourceTables(
         .where(
           and(
             inArray(schema.cartOrders.id, cartOrderIds),
-            eq(schema.cartOrders.status, 'DELIVERED'),
+            // Exact mirror of the graduated parent: sync REMITTED from any live
+            // child state, not only DELIVERED. A DELIVERED-only guard silently
+            // skipped children lagging at CS_ENGAGED/AGENT_ASSIGNED and let them
+            // drift permanently. Only deleted rows are left untouched.
+            ne(schema.cartOrders.status, 'REMITTED'),
             isNull(schema.cartOrders.deletedAt),
           ),
         );
@@ -126,7 +135,8 @@ async function syncRemittedToSourceTables(
           .where(
             and(
               inArray(schema.cartOrders.sourceCartId, cartIds),
-              eq(schema.cartOrders.status, 'DELIVERED'),
+              // Exact mirror: sync from any live child state (see note above).
+              ne(schema.cartOrders.status, 'REMITTED'),
               isNull(schema.cartOrders.deletedAt),
             ),
           );
@@ -159,7 +169,8 @@ async function syncRemittedToSourceTables(
         .where(
           and(
             inArray(schema.followUpOrders.id, followUpOrderIds),
-            eq(schema.followUpOrders.status, 'DELIVERED'),
+            // Exact mirror: sync from any live child state (see cart note above).
+            ne(schema.followUpOrders.status, 'REMITTED'),
             isNull(schema.followUpOrders.deletedAt),
           ),
         );
@@ -173,7 +184,8 @@ async function syncRemittedToSourceTables(
       // matching by phone hash alone (pre-0263 orders lack a direct FK).
       const conditions = [
         eq(schema.followUpOrders.customerPhoneHash, row.customerPhoneHash!),
-        eq(schema.followUpOrders.status, 'DELIVERED'),
+        // Exact mirror: sync from any live child state (see cart note above).
+        ne(schema.followUpOrders.status, 'REMITTED'),
         isNull(schema.followUpOrders.deletedAt),
       ];
       if (row.servicingBranchId) {

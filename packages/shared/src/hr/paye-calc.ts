@@ -9,6 +9,11 @@ export interface PayeCalcInput {
   monthlyGross: number;
   taxStatus: 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION';
   employerSubsidyPercent?: number;
+  /**
+   * Employee's declared ANNUAL rent. Drives the PERCENT_OF_ANNUAL_RENT relief
+   * (HR policy: 20% of rent, capped at ₦500k/yr). Undefined/0 → zero rent relief.
+   */
+  annualRent?: number;
 }
 
 export interface PayeCalcResult {
@@ -26,6 +31,7 @@ function applyReliefs(
   annualGross: number,
   monthlyGross: number,
   reliefs: PayeReliefConfig[],
+  annualRent: number,
 ): { chargeable: number; breakdown: Array<{ name: string; amount: number }> } {
   let totalRelief = 0;
   const breakdown: Array<{ name: string; amount: number }> = [];
@@ -41,6 +47,11 @@ function applyReliefs(
         break;
       case 'FLAT_ANNUAL':
         amount = relief.amount ?? 0;
+        break;
+      case 'PERCENT_OF_ANNUAL_RENT':
+        // HR rent relief: rate% of the employee's declared annual rent.
+        // No declared rent → zero relief (not a salary-derived proxy).
+        amount = annualRent * (relief.rate / 100);
         break;
       default:
         amount = 0;
@@ -95,7 +106,12 @@ export function computePaye(
   }
 
   const annualGross = input.monthlyGross * 12;
-  const { chargeable, breakdown } = applyReliefs(annualGross, input.monthlyGross, config.reliefs);
+  const { chargeable, breakdown } = applyReliefs(
+    annualGross,
+    input.monthlyGross,
+    config.reliefs,
+    Math.max(0, input.annualRent ?? 0),
+  );
   const annualTax = progressiveTax(chargeable, config.bands, Number(config.taxFreeThreshold));
   const monthlyPaye = annualTax / 12;
 
@@ -131,7 +147,8 @@ export function defaultPayeBandConfig(): PayeBandConfig {
       { fromAmount: 49_200_000, toAmount: null, rate: 25 },
     ],
     reliefs: [
-      { name: 'Annual Rent Relief (20%)', basis: 'PERCENT_OF_GROSS', rate: 20 },
+      // HR policy: 20% of the employee's declared annual rent, capped at ₦500k/yr.
+      { name: 'Annual Rent Relief (20%)', basis: 'PERCENT_OF_ANNUAL_RENT', rate: 20, cap: 500_000 },
     ],
   };
 }

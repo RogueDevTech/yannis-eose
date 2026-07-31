@@ -284,6 +284,18 @@ export const payrollOnboardingStatusEnum = pgEnum('payroll_onboarding_status', [
   'ACTIVE',
 ]);
 
+/** Standardized exit reasons for the employment-lifecycle exit dropdown. */
+export const employeeExitReasonEnum = pgEnum('employee_exit_reason', [
+  'RESIGNATION',
+  'THEFT',
+  'ABANDONMENT',
+  'FRAUD',
+  'UNDERPERFORMANCE',
+  'INSUBORDINATION',
+  'ADMIN_DISMISSAL',
+  'OTHER',
+]);
+
 export const payrollBatchScopeTypeEnum = pgEnum('payroll_batch_scope_type', [
   'ALL_BRANCHES',
   'BRANCHES',

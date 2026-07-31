@@ -48,7 +48,10 @@ export class PayrollComputeService {
       payRoleId?: string | null;
       salaryBasis?: string | null;
       taxStatus?: string | null;
-      flatMonthlyAmount?: number | null;
+      // Numeric columns arrive as strings from Drizzle, so accept both.
+      flatMonthlyAmount?: string | number | null;
+      /** Declared annual rent (₦) — drives the PAYE rent relief. Null → no relief. */
+      annualRent?: string | number | null;
     },
     periodStart: Date,
     periodEnd: Date,
@@ -104,8 +107,10 @@ export class PayrollComputeService {
       member.salaryBasis === 'FLAT_RATE' &&
       member.flatMonthlyAmount != null;
 
+    const annualRent = member.annualRent != null ? Number(member.annualRent) : 0;
+
     if (useFlatRate) {
-      return this.buildFlatLine(Number(member.flatMonthlyAmount), metrics, member.taxStatus ?? 'STANDARD_PAYE', tx, groupId);
+      return this.buildFlatLine(Number(member.flatMonthlyAmount), metrics, member.taxStatus ?? 'STANDARD_PAYE', tx, groupId, annualRent);
     }
 
     const plan = await this.resolvePlanForMember(tx, member, periodStart, periodEnd);
@@ -143,6 +148,7 @@ export class PayrollComputeService {
         monthlyGross: grossBeforeAdj,
         taxStatus,
         employerSubsidyPercent: formulaResult.employerPayeSubsidyPercent,
+        annualRent,
       },
       taxConfig,
     );
@@ -176,10 +182,11 @@ export class PayrollComputeService {
     taxStatus: string,
     tx: TxLike,
     groupId?: string | null,
+    annualRent = 0,
   ): Promise<ComputedPayslipLine> {
     const taxConfig = await this.loadTaxConfig(tx, groupId);
     const paye = computePaye(
-      { monthlyGross: amount, taxStatus: taxStatus as 'STANDARD_PAYE' | 'GROSS_NO_DEDUCTION' },
+      { monthlyGross: amount, taxStatus: taxStatus as 'STANDARD_PAYE' | 'GROSS_NO_DEDUCTION', annualRent },
       taxConfig,
     );
     const netPay = amount - paye.employeePaye;
