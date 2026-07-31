@@ -680,6 +680,8 @@ export class CartOrdersService {
     if (metadata?.deliveryNote) logisticsUpdates.deliveryNotes = metadata.deliveryNote;
     if (metadata?.deliveryProofUrl) logisticsUpdates.deliveryProofUrl = metadata.deliveryProofUrl;
 
+    let cascadedGraduated: Array<{ id: string; branchId: string | null }> = [];
+
     await withActor(this.db, actor, async (tx) => {
       await tx
         .update(schema.cartOrders)
@@ -763,6 +765,46 @@ export class CartOrdersService {
         metadata: metadata ?? { previousStatus: order.status, newStatus },
         branchId: order.servicingBranchId,
       });
+
+      // Cascade delete to graduated order in the SAME transaction as the cart
+      // DELETED flip. If stock reverse fails, the cart status rolls back too —
+      // never leave cart DELETED with a live graduated parent (or the reverse).
+      // Prefer sourceCartOrderId FK; fall back to cartId = sourceCartId for
+      // pre-0263 graduates that lack the FK.
+      if (newStatus === 'DELETED') {
+        const link =
+          order.graduatedOrderId != null
+            ? eq(schema.orders.id, order.graduatedOrderId)
+            : or(
+                eq(schema.orders.sourceCartOrderId, orderId),
+                order.sourceCartId
+                  ? eq(schema.orders.cartId, order.sourceCartId)
+                  : sql`false`,
+              );
+        const rows = await tx
+          .update(schema.orders)
+          .set({ status: 'DELETED', deletedAt: new Date(), updatedAt: new Date() })
+          .where(and(link, isNull(schema.orders.deletedAt)))
+          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+        for (const row of rows) {
+          await this.inventoryService.reverseDeliveryForOrderInTx(
+            tx,
+            row.id,
+            actor,
+            'graduated cart order deleted',
+          );
+          await tx.insert(schema.orderTimelineEvents).values({
+            orderId: row.id,
+            eventType: 'ORDER_DELETED',
+            actorId: actor.id,
+            actorName: actor.name ?? null,
+            description: `Order deleted because its originating cart order was deleted by ${actor.name ?? 'a user'}.`,
+            metadata: { reason: 'GRADUATION_SUPERSEDED', cartOrderId: orderId },
+            branchId: row.branchId ?? null,
+          });
+        }
+        cascadedGraduated = rows;
+      }
     });
 
     // Auto-generate a draft invoice when a cart order is CONFIRMED.
@@ -784,67 +826,18 @@ export class CartOrdersService {
       await this.graduateToOrders(orderId);
     }
 
-    // Cascade delete to graduated order — if a cart order is deleted after
-    // graduation, the graduated order in the orders table must also be
-    // soft-deleted so counts stay consistent across both tables.
-    // Match on cartId (= sourceCartId) to target the specific graduated order,
-    // not all online orders from the same phone.
-    // The whole cascade runs under withActor (audit attribution) and reverses
-    // the graduation stock deduction in the SAME tx — a deleted recovered-cart
-    // order must give its units back, exactly like the dual-approval delete.
-    if (newStatus === 'DELETED' && order.sourceCartId) {
-      let cascaded: Array<{ id: string; branchId: string | null }> = [];
+    // GL reversal outside the stock tx — non-fatal by design (same shape as
+    // softDeleteDeliveredOrder): a missing account must not block deletion.
+    for (const row of cascadedGraduated) {
       try {
-        cascaded = await withActor(this.db, actor, async (tx) => {
-          const rows = await tx
-            .update(schema.orders)
-            .set({ status: 'DELETED', deletedAt: new Date(), updatedAt: new Date() })
-            .where(
-              and(
-                eq(schema.orders.cartId, order.sourceCartId!),
-                isNull(schema.orders.deletedAt),
-              ),
-            )
-            .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
-          for (const row of rows) {
-            // Netted + idempotent: only reverses DELIVERY movements not
-            // already offset, and restores FIFO batch remaining too.
-            await this.inventoryService.reverseDeliveryForOrderInTx(
-              tx,
-              row.id,
-              actor,
-              'graduated cart order deleted',
-            );
-            // Log a detailed deletion comment so the graduated order's
-            // activity log explains why it disappeared.
-            await tx.insert(schema.orderTimelineEvents).values({
-              orderId: row.id,
-              eventType: 'ORDER_DELETED',
-              actorId: actor.id,
-              actorName: actor.name ?? null,
-              description: `Order deleted because its originating cart order was deleted by ${actor.name ?? 'a user'}.`,
-              metadata: { reason: 'GRADUATION_SUPERSEDED', cartOrderId: orderId },
-              branchId: row.branchId ?? null,
-            });
-          }
-          return rows;
-        });
+        await this.generalLedger.reverseVoucher(
+          'SALES_INVOICE',
+          row.id,
+          actor,
+          'graduated cart order deleted',
+        );
       } catch (err) {
-        this.logger.warn(`Cascade delete to graduated order failed for cart order ${orderId}: ${err instanceof Error ? err.message : err}`);
-      }
-      // GL reversal outside the stock tx — non-fatal by design (same shape as
-      // softDeleteDeliveredOrder): a missing account must not block deletion.
-      for (const row of cascaded) {
-        try {
-          await this.generalLedger.reverseVoucher(
-            'SALES_INVOICE',
-            row.id,
-            actor,
-            'graduated cart order deleted',
-          );
-        } catch (err) {
-          this.logger.warn(`GL reversal for cascaded order ${row.id} failed: ${err instanceof Error ? err.message : err}`);
-        }
+        this.logger.warn(`GL reversal for cascaded order ${row.id} failed: ${err instanceof Error ? err.message : err}`);
       }
     }
 
