@@ -1233,24 +1233,24 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'gross'}
           onClose={() => setInfoModal(null)}
           title="Gross Order Value"
-          description="Gross value of orders on received remittance batches. Before deductions."
+          description="Gross value of orders on received remittance batches, before any deductions."
           lines={[
             { label: 'Orders on received batches', amount: grossVal, type: 'value', count: Number(s.grossOrderCount ?? 0) },
-            { label: 'Delivery fees', amount: deliveryFees, type: 'deduction', count: Number(summary.deliveryFeeCount ?? 0) },
-            { label: 'Expected Net', amount: netRemittable, type: 'result' },
           ]}
         />
         <FormulaBreakdownModal
           open={infoModal === 'net'}
           onClose={() => setInfoModal(null)}
           title="Expected Net"
-          description="Computed amount the company should receive after all deductions. Compare this to the Actual Received to spot variances."
+          description="Gross order value minus every deduction on received batches. Compare this to Actual Received to spot variances."
           lines={[
-            { label: 'Gross Order Value', amount: grossVal, type: 'value' },
+            { label: 'Gross Order Value', amount: grossVal, type: 'value', count: Number(s.grossOrderCount ?? 0) },
             { label: 'Delivery Fees', amount: deliveryFees, type: 'deduction', count: Number(summary.deliveryFeeCount ?? 0) },
             { label: 'Commitment Fees', amount: commitmentFees, type: 'deduction', count: Number(summary.commitmentFeeCount ?? 0) },
             { label: 'POS Fees', amount: posFees, type: 'deduction', count: Number(summary.posFeeCount ?? 0) },
             { label: 'Failed Delivery', amount: failedDelivery, type: 'deduction', count: Number(summary.failedDeliveryCount ?? 0) },
+            { label: 'Discount', amount: discounts, type: 'deduction', count: Number((summary as unknown as Record<string, string>).discountCount ?? 0) },
+            { label: 'Waybill', amount: waybillCosts, type: 'deduction', count: Number((summary as unknown as Record<string, string>).waybillCostCount ?? 0) },
             { label: 'Expected Net', amount: netRemittable, type: 'result' },
           ]}
         />
