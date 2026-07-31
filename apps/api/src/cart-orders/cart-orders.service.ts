@@ -766,6 +766,45 @@ export class CartOrdersService {
         branchId: order.servicingBranchId,
       });
 
+      // After graduation, cart status changes must mirror onto the parent order
+      // in the same tx. graduateToOrders() no-ops when graduatedOrderId is set,
+      // which previously left cart=DELIVERED and parent=CONFIRMED (dashboard drift).
+      if (order.graduatedOrderId && newStatus !== 'DELETED') {
+        const parentPatch: Record<string, unknown> = {
+          status: newStatus,
+          updatedAt: new Date(),
+        };
+        if (newStatus === 'CONFIRMED') parentPatch.confirmedAt = new Date();
+        if (newStatus === 'AGENT_ASSIGNED') parentPatch.allocatedAt = new Date();
+        if (newStatus === 'DISPATCHED') parentPatch.dispatchedAt = new Date();
+        if (newStatus === 'DELIVERED') parentPatch.deliveredAt = new Date();
+        const mirrored = await tx
+          .update(schema.orders)
+          .set(parentPatch)
+          .where(
+            and(
+              eq(schema.orders.id, order.graduatedOrderId),
+              isNull(schema.orders.deletedAt),
+            ),
+          )
+          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+        if (mirrored[0]) {
+          await tx.insert(schema.orderTimelineEvents).values({
+            orderId: mirrored[0].id,
+            eventType: (eventTypeMap[newStatus] ?? 'ORDER_VIEWED') as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
+            actorId: actor.id,
+            actorName: actor.name ?? null,
+            description: description ?? `Status synced from graduated cart order (${newStatus}).`,
+            metadata: { reason: 'CART_SOURCE_MIRROR', cartOrderId: orderId, previousStatus: order.status, newStatus },
+            branchId: mirrored[0].branchId ?? null,
+          });
+        } else {
+          this.logger.warn(
+            `Cart order ${orderId} status → ${newStatus} but graduated parent ${order.graduatedOrderId} was not updated (missing or deleted)`,
+          );
+        }
+      }
+
       // Cascade delete to graduated order in the SAME transaction as the cart
       // DELETED flip. If stock reverse fails, the cart status rolls back too —
       // never leave cart DELETED with a live graduated parent (or the reverse).
