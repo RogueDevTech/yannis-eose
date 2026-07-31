@@ -1036,7 +1036,11 @@ export function DeliveryRemittancesPage({
       />
 
       {(() => {
-        const grossVal = Number(summary.grossOrderValue ?? 0);
+        const s = summary as unknown as Record<string, unknown>;
+        // Remitted tile and Gross Order Value share one source: orders.status = REMITTED.
+        const remittedGross = Number(s.remittedOnlyAmount ?? summary.grossOrderValue ?? 0);
+        const remittedCount = Number(s.remittedOnlyCount ?? s.grossOrderCount ?? summary.receivedCount ?? 0);
+        const grossVal = remittedGross;
         const deliveryFees = Number(summary.totalDeliveryFees ?? 0);
         const commitmentFees = Number(summary.totalCommitmentFees ?? 0);
         const posFees = Number(summary.totalPosFees ?? 0);
@@ -1060,9 +1064,6 @@ export function DeliveryRemittancesPage({
         {(() => {
           const pendingGross = Number((summary as unknown as Record<string, unknown>).pendingGrossAmount ?? 0);
           const disputedGross = Number((summary as unknown as Record<string, unknown>).disputedGrossAmount ?? 0);
-          const s = summary as unknown as Record<string, unknown>;
-          const remittedGross = Number(s.remittedOnlyAmount ?? summary.grossOrderValue ?? 0);
-          const remittedCount = Number(s.remittedOnlyCount ?? s.grossOrderCount ?? summary.receivedCount ?? 0);
           const awaitingPeriodCount = Number(s.deliveredOnlyCount ?? s.awaitingPeriodCount ?? 0);
           return (
             <OverviewStatStrip
@@ -1123,8 +1124,8 @@ export function DeliveryRemittancesPage({
             tileClassName="!py-2"
             items={[
               {
-                label: <span className="flex items-center">Gross Order Value ({Number((summary as unknown as Record<string, unknown>).grossOrderCount ?? summary.receivedCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('gross')} /></span>,
-                value: <NairaPrice amount={summary.grossOrderValue ?? '0'} />,
+                label: <span className="flex items-center">Gross Order Value ({remittedCount})<RemittanceInfoIcon onClick={() => setInfoModal('gross')} /></span>,
+                value: <NairaPrice amount={grossVal} />,
                 valueClassName: 'text-app-fg tabular-nums',
                 onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('view', 'orders'); n.delete('deduction'); n.set('page', '1'); return n; }, { replace: true }); },
                 active: viewTab === 'remittances' && pendingStatus === 'RECEIVED' && !new URLSearchParams(location.search).get('deduction'),
@@ -1184,7 +1185,7 @@ export function DeliveryRemittancesPage({
           description="Total gross value of all delivered orders. Equals Awaiting + Remitted + Pending + Disputed."
           lines={[
             { label: 'Awaiting', amount: Number(summary.awaitingGrossAmount ?? summary.awaitingAmount ?? 0), type: 'value', count: Number(summary.awaitingCount ?? 0) },
-            { label: 'Remitted (received)', amount: Number(summary.grossOrderValue ?? 0), type: 'value', count: Number((summary as unknown as Record<string, unknown>).grossOrderCount ?? 0) },
+            { label: 'Remitted (received)', amount: remittedGross, type: 'value', count: remittedCount },
             { label: 'Pending confirmation', amount: Number((summary as unknown as Record<string, unknown>).pendingGrossAmount ?? 0), type: 'value', count: Number(summary.pendingCount ?? 0) },
             ...(Number(summary.disputedCount ?? 0) > 0 ? [{ label: 'Disputed', amount: Number((summary as unknown as Record<string, unknown>).disputedGrossAmount ?? 0), type: 'value' as const, count: Number(summary.disputedCount ?? 0) }] : []),
             { label: 'Delivered', amount: Number(summary.deliveredAmount ?? 0), type: 'result', count: Number(summary.deliveredCount ?? 0) },
@@ -1194,9 +1195,9 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'remitted'}
           onClose={() => setInfoModal(null)}
           title="Remitted"
-          description="Orders on batches confirmed as received by Finance. Gross value before deductions."
+          description="Orders with status REMITTED (cash confirmed). Same total as Gross Order Value. Gross before deductions."
           lines={[
-            { label: 'Gross order value', amount: Number(summary.grossOrderValue ?? 0), type: 'value', count: Number((summary as unknown as Record<string, unknown>).grossOrderCount ?? 0) },
+            { label: 'Gross order value', amount: remittedGross, type: 'value', count: remittedCount },
             { label: 'After deductions (Expected Net)', amount: netRemittable, type: 'result' },
           ]}
         />
@@ -1233,18 +1234,18 @@ export function DeliveryRemittancesPage({
           open={infoModal === 'gross'}
           onClose={() => setInfoModal(null)}
           title="Gross Order Value"
-          description="Gross value of orders on received remittance batches, before any deductions."
+          description="Same as Remitted: gross value of orders with status REMITTED, before any deductions."
           lines={[
-            { label: 'Orders on received batches', amount: grossVal, type: 'value', count: Number(s.grossOrderCount ?? 0) },
+            { label: 'Remitted orders', amount: grossVal, type: 'value', count: remittedCount },
           ]}
         />
         <FormulaBreakdownModal
           open={infoModal === 'net'}
           onClose={() => setInfoModal(null)}
           title="Expected Net"
-          description="Gross order value minus every deduction on received batches. Compare this to Actual Received to spot variances."
+          description="Remitted gross minus every deduction on received batches. Compare this to Actual Received to spot variances."
           lines={[
-            { label: 'Gross Order Value', amount: grossVal, type: 'value', count: Number(s.grossOrderCount ?? 0) },
+            { label: 'Gross Order Value', amount: grossVal, type: 'value', count: remittedCount },
             { label: 'Delivery Fees', amount: deliveryFees, type: 'deduction', count: Number(summary.deliveryFeeCount ?? 0) },
             { label: 'Commitment Fees', amount: commitmentFees, type: 'deduction', count: Number(summary.commitmentFeeCount ?? 0) },
             { label: 'POS Fees', amount: posFees, type: 'deduction', count: Number(summary.posFeeCount ?? 0) },

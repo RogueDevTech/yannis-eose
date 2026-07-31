@@ -549,6 +549,71 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
     return json({ success: true });
   }
 
+  // Peer MB fund transfers (Funding → Peer transfers tab)
+  if (intent === 'create' || intent === 'createMbFundTransfer') {
+    const amount = Number(formData.get('amount')?.toString() ?? '0');
+    const receiverMbId = formData.get('receiverMbId')?.toString() ?? '';
+    const reason = formData.get('reason')?.toString() || undefined;
+    if (!receiverMbId || !amount || amount <= 0) {
+      return json({ error: 'Recipient and a positive amount are required.' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/marketing.createMbFundTransfer', {
+      method: 'POST',
+      cookie,
+      body: { receiverMbId, amount, ...(reason ? { reason } : {}), ...(branchId ? { branchId } : {}) },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to create transfer') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'approve' || intent === 'approveMbFundTransfer') {
+    const transferId = formData.get('transferId')?.toString() ?? '';
+    if (!transferId) return json({ error: 'Transfer ID is required' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/marketing.approveMbFundTransfer', {
+      method: 'POST',
+      cookie,
+      body: { transferId, ...(branchId ? { branchId } : {}) },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to approve transfer') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'reject' || intent === 'rejectMbFundTransfer') {
+    const transferId = formData.get('transferId')?.toString() ?? '';
+    const rejectionReason = formData.get('rejectionReason')?.toString() ?? '';
+    if (!transferId) return json({ error: 'Transfer ID is required' }, { status: 400 });
+    if (!rejectionReason.trim()) {
+      return json({ error: 'Rejection reason is required.' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/marketing.rejectMbFundTransfer', {
+      method: 'POST',
+      cookie,
+      body: { transferId, rejectionReason: rejectionReason.trim() },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to reject transfer') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'accept' || intent === 'acceptMbFundTransfer') {
+    const transferId = formData.get('transferId')?.toString() ?? '';
+    if (!transferId) return json({ error: 'Transfer ID is required' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/marketing.acceptMbFundTransfer', {
+      method: 'POST',
+      cookie,
+      body: { transferId, ...(branchId ? { branchId } : {}) },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to accept transfer') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
   return null;
 }
 

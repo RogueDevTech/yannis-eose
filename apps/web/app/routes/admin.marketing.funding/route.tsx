@@ -67,15 +67,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // of the URL (the `received` tab is hidden for them in the UI).
   const isAdminViewer = isAdminLevel(user);
   const sectionParam = url.searchParams.get('section');
-  const activeSection: FundingSection = isAdminViewer
-    ? 'distributing'
-    : sectionParam === 'received'
-      ? 'received'
-      : sectionParam === 'balances' && canDistribute
-        ? 'balances'
-        : canDistribute
-          ? 'distributing'
-          : 'received';
+  // Peer transfers tab is available to HoM/Admin/MB — not pinned away for admin viewers.
+  const activeSection: FundingSection =
+    sectionParam === 'peer'
+      ? 'peer'
+      : isAdminViewer
+        ? 'distributing'
+        : sectionParam === 'received'
+          ? 'received'
+          : sectionParam === 'balances' && canDistribute
+            ? 'balances'
+            : canDistribute
+              ? 'distributing'
+              : 'received';
 
   const tabParam = url.searchParams.get('tab');
   const activeTab: FundingTab = tabParam === 'requests' ? 'requests' : 'transfers';
@@ -109,14 +113,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const searchRaw = url.searchParams.get('search')?.trim();
   const searchFilter = searchRaw && searchRaw.length > 0 ? searchRaw : undefined;
 
+  const peerDirectionParam = url.searchParams.get('direction');
+  const peerDirection =
+    peerDirectionParam === 'sent' ||
+    peerDirectionParam === 'received' ||
+    peerDirectionParam === 'pending_approval' ||
+    peerDirectionParam === 'all'
+      ? peerDirectionParam
+      : isFundingAdmin
+        ? 'pending_approval'
+        : 'all';
+  const peerPageLimit = 20;
+
   // ── Single bundled call — replaces 14 parallel HTTP round-trips ────
   // The `marketing.fundingPageBundle` procedure runs the same conditional
   // fetch logic (per section, entry type, status) server-side via Promise.all.
+  // Peer transfers use a separate list endpoint (different table/status model).
+  const bundleSection =
+    activeSection === 'peer' || activeSection === 'balances'
+      ? canDistribute
+        ? 'distributing'
+        : 'received'
+      : activeSection;
   const bundleInput = encodeURIComponent(
     JSON.stringify({
-      section: activeSection === 'balances' ? 'distributing' : activeSection,
+      section: bundleSection,
       entryType: entryTypeFilter,
-      page,
+      page: activeSection === 'peer' ? 1 : page,
       limit: PER_PAGE,
       mergedFetchLimit: MERGED_FETCH_LIMIT,
       ...(startDate && { startDate }),
@@ -130,6 +153,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
     `/trpc/marketing.fundingPageBundle?input=${bundleInput}`,
     { method: 'GET', cookie },
   );
+
+  const pendingPeerInput = encodeURIComponent(
+    JSON.stringify({ direction: 'pending_approval', page: 1, limit: 1 }),
+  );
+  const pendingPeerP = isFundingAdmin
+    ? apiRequest<unknown>(
+        `/trpc/marketing.listMbFundTransfers?input=${pendingPeerInput}`,
+        { method: 'GET', cookie },
+      )
+    : Promise.resolve({ ok: false as const, data: null, status: 0 });
+
+  const peerStatusParam = url.searchParams.get('status');
+  const peerStatusFilter =
+    peerStatusParam === 'PENDING' ||
+    peerStatusParam === 'APPROVED' ||
+    peerStatusParam === 'REJECTED' ||
+    peerStatusParam === 'ACCEPTED'
+      ? peerStatusParam
+      : undefined;
+  const peerListInput: Record<string, unknown> = {
+    direction: peerDirection,
+    page: activeSection === 'peer' ? page : 1,
+    limit: peerPageLimit,
+  };
+  if (peerStatusFilter && peerDirection !== 'pending_approval') {
+    peerListInput.status = peerStatusFilter;
+  }
+  if (!periodAllTime) {
+    if (startDate) peerListInput.startDate = startDate;
+    if (endDate) peerListInput.endDate = endDate;
+  }
+  const peerListP =
+    activeSection === 'peer'
+      ? apiRequest<unknown>(
+          `/trpc/marketing.listMbFundTransfers?input=${encodeURIComponent(JSON.stringify(peerListInput))}`,
+          { method: 'GET', cookie },
+        )
+      : Promise.resolve({ ok: false as const, data: null, status: 0 });
+  const peerMembersP =
+    activeSection === 'peer'
+      ? apiRequest<unknown>('/trpc/marketing.listBranchMembersForTransfer', { method: 'GET', cookie })
+      : Promise.resolve({ ok: false as const, data: null, status: 0 });
 
   const pageData = (async (): Promise<MarketingFundingLoaderData> => {
   type BundleData = {
@@ -157,10 +222,64 @@ export async function loader({ request }: LoaderFunctionArgs) {
     distributingTransfers: { records: unknown[]; pagination: { total: number; page: number; limit: number } } | null;
     distributingRequests: { records: unknown[]; pagination: { total: number; page: number; limit: number } } | null;
   };
-  const bundleRes = await bundleP;
+  const [bundleRes, pendingPeerRes, peerListRes, peerMembersRes] = await Promise.all([
+    bundleP,
+    pendingPeerP,
+    peerListP,
+    peerMembersP,
+  ]);
   const bundle = bundleRes.ok
     ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
     : null;
+
+  type PeerListResponse = {
+    transfers: NonNullable<MarketingFundingLoaderData['peerTransfers']>['transfers'];
+    pagination: { page: number; limit: number; total: number; totalPages: number };
+  };
+  const pendingPeerTotal = pendingPeerRes.ok
+    ? Number(
+        ((pendingPeerRes.data as { result?: { data?: PeerListResponse } })?.result?.data?.pagination
+          ?.total ?? 0),
+      )
+    : 0;
+  const peerListData: PeerListResponse | null = peerListRes.ok
+    ? ((peerListRes.data as { result?: { data?: PeerListResponse } })?.result?.data ?? null)
+    : null;
+  const peerMembers: Array<{ id: string; name: string }> = [];
+  if (peerMembersRes.ok) {
+    const rows =
+      (peerMembersRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result
+        ?.data ?? [];
+    for (const r of rows) {
+      if (r.id !== user.id) peerMembers.push({ id: r.id, name: r.name });
+    }
+  }
+  const peerStatusCounts = {
+    PENDING: pendingPeerTotal,
+    APPROVED: 0,
+    REJECTED: 0,
+    ACCEPTED: 0,
+    ALL: peerListData?.pagination.total ?? pendingPeerTotal,
+  };
+  if (peerListData) {
+    for (const t of peerListData.transfers) {
+      if (t.status === 'APPROVED') peerStatusCounts.APPROVED += 1;
+      else if (t.status === 'REJECTED') peerStatusCounts.REJECTED += 1;
+      else if (t.status === 'ACCEPTED') peerStatusCounts.ACCEPTED += 1;
+      else if (t.status === 'PENDING' && !isFundingAdmin) peerStatusCounts.PENDING += 1;
+    }
+  }
+  const peerTransfers: MarketingFundingLoaderData['peerTransfers'] = {
+    transfers: peerListData?.transfers ?? [],
+    total: peerListData?.pagination.total ?? 0,
+    page: peerListData?.pagination.page ?? 1,
+    totalPages: peerListData?.pagination.totalPages ?? 1,
+    limit: peerListData?.pagination.limit ?? peerPageLimit,
+    direction: peerDirection,
+    statusCounts: peerStatusCounts,
+    mediaBuyers: peerMembers,
+    pendingApprovalCount: pendingPeerTotal,
+  };
 
   // Synthesize the response shapes the existing parsers expect so the rest
   // of this loader stays unchanged. Each parser accepts `{ ok, data }` and
@@ -359,6 +478,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     balancesList,
     activeBranchName,
     fundingRequestRecipients,
+    peerTransfers,
   };
 
   return data;

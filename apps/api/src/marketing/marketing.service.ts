@@ -3673,8 +3673,16 @@ export class MarketingService {
   ) {
     const conditions: Parameters<typeof and>[0][] = [];
 
-    // Role-based scoping
-    if (actorRole === 'MEDIA_BUYER') {
+    // Role-based scoping. pending_approval is an approver inbox (branch PENDING
+    // rows) — must not fall through MEDIA_BUYER self-scope or supervisors miss
+    // team transfers awaiting approval.
+    if (input.direction === 'pending_approval') {
+      conditions.push(eq(schema.mbFundTransfers.status, 'PENDING'));
+      if (branchId) conditions.push(eq(schema.mbFundTransfers.branchId, branchId));
+      if (effectiveBranchIds?.length) {
+        conditions.push(inArray(schema.mbFundTransfers.branchId, effectiveBranchIds));
+      }
+    } else if (actorRole === 'MEDIA_BUYER') {
       if (input.direction === 'sent') {
         conditions.push(eq(schema.mbFundTransfers.senderMbId, actorId));
       } else if (input.direction === 'received') {
@@ -3688,21 +3696,17 @@ export class MarketingService {
           )!,
         );
       }
-    } else if (actorRole === 'HEAD_OF_MARKETING' || input.direction === 'pending_approval') {
-      // HoM sees all transfers in their branch
-      if (branchId) conditions.push(eq(schema.mbFundTransfers.branchId, branchId));
-      if (effectiveBranchIds?.length) {
-        conditions.push(inArray(schema.mbFundTransfers.branchId, effectiveBranchIds));
-      }
     } else {
-      // Admin — all transfers, optionally filtered by branch
+      // HoM / Admin / supervisor-as-approver — all transfers in branch scope
       if (branchId) conditions.push(eq(schema.mbFundTransfers.branchId, branchId));
       if (effectiveBranchIds?.length) {
         conditions.push(inArray(schema.mbFundTransfers.branchId, effectiveBranchIds));
       }
     }
 
-    if (input.status) conditions.push(eq(schema.mbFundTransfers.status, input.status as 'PENDING' | 'APPROVED' | 'REJECTED' | 'ACCEPTED'));
+    if (input.status && input.direction !== 'pending_approval') {
+      conditions.push(eq(schema.mbFundTransfers.status, input.status as 'PENDING' | 'APPROVED' | 'REJECTED' | 'ACCEPTED'));
+    }
     if (input.startDate) conditions.push(gte(schema.mbFundTransfers.createdAt, nigeriaDayStart(input.startDate)));
     if (input.endDate) conditions.push(lte(schema.mbFundTransfers.createdAt, nigeriaDayEnd(input.endDate)));
 

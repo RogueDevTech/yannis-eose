@@ -1,10 +1,11 @@
-import { Injectable, Inject, forwardRef, Logger } from '@nestjs/common';
+import { Injectable, Inject, forwardRef, Logger, OnModuleInit } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import {
   eq,
   and,
   asc,
   desc,
+  exists,
   ilike,
   count,
   countDistinct,
@@ -23,7 +24,7 @@ import {
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema, canonicalPermissionCode } from '@yannis/shared';
+import { db as schema, canonicalPermissionCode, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type {
   CreateProviderInput,
   UpdateProviderInput,
@@ -201,7 +202,7 @@ export async function syncRemittedToSourceTables(
 }
 
 @Injectable()
-export class LogisticsService {
+export class LogisticsService implements OnModuleInit {
   private readonly logger = new Logger(LogisticsService.name);
 
   constructor(
@@ -212,7 +213,85 @@ export class LogisticsService {
     private readonly cache: CacheService,
   ) {}
 
-  /** Remittance flips DELIVERED→REMITTED; CEO overview is Redis-cached 300s. */
+  onModuleInit() {
+    // Heal historical RECEIVED-batch orders stuck at non-REMITTED (DELIVERED-only
+    // cascade left Gross Order Value above the Remitted tile).
+    setTimeout(() => {
+      this.healReceivedBatchRemittedDrift().catch((err) =>
+        this.logger.error(
+          `Received-batch REMITTED heal failed: ${err instanceof Error ? err.message : err}`,
+        ),
+      );
+    }, 90_000);
+  }
+
+  /**
+   * Flip live orders on RECEIVED delivery remittances to REMITTED when they
+   * were left behind by the old DELIVERED-only status guard.
+   */
+  async healReceivedBatchRemittedDrift(): Promise<{ healed: number }> {
+    const actor = { id: SYSTEM_ACTOR_ID } as SessionUser;
+    const result = await withActor(this.db, actor, async (tx) => {
+      const remittedRows = await tx
+        .update(schema.orders)
+        .set({ status: 'REMITTED', updatedAt: new Date() })
+        .where(
+          and(
+            ne(schema.orders.status, 'REMITTED'),
+            ne(schema.orders.status, 'DELETED'),
+            isNull(schema.orders.deletedAt),
+            exists(
+              this.db
+                .select({ one: sql`1` })
+                .from(schema.deliveryRemittanceOrders)
+                .innerJoin(
+                  schema.deliveryRemittances,
+                  eq(schema.deliveryRemittances.id, schema.deliveryRemittanceOrders.deliveryRemittanceId),
+                )
+                .where(
+                  and(
+                    eq(schema.deliveryRemittanceOrders.orderId, schema.orders.id),
+                    eq(schema.deliveryRemittances.status, 'RECEIVED'),
+                  ),
+                ),
+            ),
+          ),
+        )
+        .returning({
+          id: schema.orders.id,
+          branchId: schema.orders.branchId,
+          servicingBranchId: schema.orders.servicingBranchId,
+          orderSource: schema.orders.orderSource,
+          isFollowUp: schema.orders.isFollowUp,
+          customerPhoneHash: schema.orders.customerPhoneHash,
+        });
+
+      if (remittedRows.length > 0) {
+        await tx.insert(schema.orderTimelineEvents).values(
+          remittedRows.map((r) => ({
+            orderId: r.id,
+            eventType: 'ORDER_REMITTED' as const,
+            actorId: null,
+            actorName: 'System',
+            description: 'Healed: order on RECEIVED remittance batch marked REMITTED.',
+            metadata: { heal: 'received_batch_remitted_drift' },
+            branchId: r.branchId ?? null,
+          })),
+        );
+        await syncRemittedToSourceTables(tx, remittedRows);
+      }
+
+      return { healed: remittedRows.length };
+    });
+
+    if (result.healed > 0) {
+      this.logger.log(`Healed ${result.healed} order(s) on RECEIVED batches to REMITTED`);
+      await this.invalidateCeoOverviewCache();
+    }
+    return result;
+  }
+
+  /** Remittance flips → REMITTED; CEO overview is Redis-cached 300s. */
   private async invalidateCeoOverviewCache(): Promise<void> {
     await Promise.all([
       this.cache.delPattern('cache:ceo:*').catch(() => {}),
@@ -1927,11 +2006,13 @@ export class LogisticsService {
         }
       }
 
-      // Cascade DELIVERED → REMITTED in the same transaction when the
-      // accountant is marking received now. This is the canonical "remittance
-      // received and reconciled" signal that CLAUDE.md → Order Lifecycle ties
-      // to REMITTED. We bulk-update with status guard ('DELIVERED') so we
-      // never accidentally bump a CANCELLED order.
+      // Cascade → REMITTED in the same transaction when the accountant is
+      // marking received now. Finance confirming cash on the batch is the
+      // canonical REMITTED signal. Do NOT require status=DELIVERED: healed /
+      // mirrored graduates can sit on a SENT batch at other live statuses, and
+      // a DELIVERED-only guard leaves them on RECEIVED batches forever (Gross
+      // Order Value drifts above the Remitted tile). Skip only REMITTED and
+      // soft-deleted / DELETED rows.
       let completedAmountTotal = 0;
       if (markReceivedNow) {
         for (const orderRow of orderRows) {
@@ -1951,7 +2032,9 @@ export class LogisticsService {
           .where(
             and(
               inArray(schema.orders.id, input.orderIds),
-              eq(schema.orders.status, 'DELIVERED'),
+              ne(schema.orders.status, 'REMITTED'),
+              ne(schema.orders.status, 'DELETED'),
+              isNull(schema.orders.deletedAt),
             ),
           )
           .returning({
@@ -2370,11 +2453,14 @@ export class LogisticsService {
         disputedOrderCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
         pendingGrossAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
         disputedGrossAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
-        // Deduction breakdown — RECEIVED batches only (confirmed remittances)
-        grossOrderValue: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
-        grossOrderCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
-        totalDeliveryFees: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN COALESCE(${schema.orders.deliveryFee}, 0) ELSE 0 END), 0)::text`,
-        deliveryFeeCount: sql<string>`COUNT(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.orders.deliveryFee}, 0) > 0 THEN 1 END)::text`,
+        // Deduction breakdown — RECEIVED batches only. Gross count/value are
+        // overridden below with remittedOnly* so Remitted and Gross Order Value
+        // always tally (same orders.status = REMITTED source). Delivery fees
+        // only count REMITTED, non-deleted orders on RECEIVED batches.
+        grossOrderValue: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND ${schema.orders.status} = 'REMITTED' AND ${schema.orders.deletedAt} IS NULL THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        grossOrderCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND ${schema.orders.status} = 'REMITTED' AND ${schema.orders.deletedAt} IS NULL THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
+        totalDeliveryFees: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND ${schema.orders.status} = 'REMITTED' AND ${schema.orders.deletedAt} IS NULL THEN COALESCE(${schema.orders.deliveryFee}, 0) ELSE 0 END), 0)::text`,
+        deliveryFeeCount: sql<string>`COUNT(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND ${schema.orders.status} = 'REMITTED' AND ${schema.orders.deletedAt} IS NULL AND COALESCE(${schema.orders.deliveryFee}, 0) > 0 THEN 1 END)::text`,
         totalCommitmentFees: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0 THEN ${schema.deliveryRemittances.commitmentFee} ELSE 0 END), 0)::text`,
         commitmentFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
         totalPosFees: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0 THEN ${schema.deliveryRemittances.posFee} ELSE 0 END), 0)::text`,
@@ -2604,9 +2690,11 @@ export class LogisticsService {
       deliveredOnlyAmount: deliveredSummary?.deliveredOnlyAmount ?? '0',
       remittedOnlyCount: deliveredSummary?.remittedOnlyCount ?? '0',
       remittedOnlyAmount: deliveredSummary?.remittedOnlyAmount ?? '0',
-      // Deduction breakdown for remitted orders
-      grossOrderValue: baseSummary?.grossOrderValue ?? '0',
-      grossOrderCount: baseSummary?.grossOrderCount ?? '0',
+      // Gross Order Value MUST match Remitted (orders.status = REMITTED).
+      // Batch-join gross can drift when RECEIVED batches still hold non-REMITTED
+      // rows or when REMITTED orders were never linked to a RECEIVED batch.
+      grossOrderValue: deliveredSummary?.remittedOnlyAmount ?? '0',
+      grossOrderCount: deliveredSummary?.remittedOnlyCount ?? '0',
       totalDeliveryFees: baseSummary?.totalDeliveryFees ?? '0',
       deliveryFeeCount: baseSummary?.deliveryFeeCount ?? '0',
       totalCommitmentFees: baseSummary?.totalCommitmentFees ?? '0',
@@ -3152,9 +3240,10 @@ export class LogisticsService {
         recordedBy: actor.id,
       });
 
-      // Cascade DELIVERED → REMITTED on every linked order. Bulk-update with
-      // the status guard so we never accidentally bump an order that drifted
-      // (e.g. a manual revert before remittance was confirmed).
+      // Cascade → REMITTED on every linked live order. Same rule as
+      // createDeliveryRemittance(markReceivedNow): cash confirmed on the batch
+      // means REMITTED, regardless of whether the row is still DELIVERED or
+      // lagged at another live status.
       const linkedOrderIds = (
         await tx
           .select({ orderId: schema.deliveryRemittanceOrders.orderId })
@@ -3169,7 +3258,9 @@ export class LogisticsService {
           .where(
             and(
               inArray(schema.orders.id, linkedOrderIds),
-              eq(schema.orders.status, 'DELIVERED'),
+              ne(schema.orders.status, 'REMITTED'),
+              ne(schema.orders.status, 'DELETED'),
+              isNull(schema.orders.deletedAt),
             ),
           )
           .returning({

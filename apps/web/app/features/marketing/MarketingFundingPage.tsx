@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useFetcher, useNavigation, useSearchParams, useLocation } from '@remix-run/react';
+import { useFetcher, useNavigation, useSearchParams, useLocation } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
@@ -49,6 +49,7 @@ import {
   postRejectFundingRequest,
 } from '~/lib/trpc-browser';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
+import { PeerTransfersPanel } from '~/features/marketing/MbFundTransfersPage';
 import type {
   DistributingFundingEntry,
   DistributingFundingRequestEntry,
@@ -109,16 +110,18 @@ function parseSectionTab(
   const sectionParam = u.get('section');
   // Default section is `distributing` for users who can distribute (HoM / Admin)
   // — that's their primary working surface. MBs (no canDistribute) still
-  // default to `received`. Explicit `?section=received` always wins.
+  // default to `received`. Explicit `?section=received` / `peer` always wins.
   const section: FundingSection =
-    sectionParam === 'received'
-      ? 'received'
-      : sectionParam === 'balances' && canDistribute
-        ? 'balances'
-        : canDistribute
-          ? 'distributing'
-          : 'received';
-  if (section === 'distributing' || section === 'balances') {
+    sectionParam === 'peer'
+      ? 'peer'
+      : sectionParam === 'received'
+        ? 'received'
+        : sectionParam === 'balances' && canDistribute
+          ? 'balances'
+          : canDistribute
+            ? 'distributing'
+            : 'received';
+  if (section === 'distributing' || section === 'balances' || section === 'peer') {
     return { section, tab: 'transfers' };
   }
   const tabParam = u.get('tab');
@@ -161,12 +164,13 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     users,
     activeBranchName,
     fundingRequestRecipients = [],
+    peerTransfers,
   } = props;
 
   const isMediaBuyer = viewMode === 'media_buyer';
   // Admin-level viewers sit at the top of the funding chain — they only
   // disburse, never receive — so the "received" tab is hidden for them and
-  // their distribute section reads "Funds Disbursed".
+  // their distribute section reads "Funds Disbursed". Peer transfers stay available.
   const isAdminViewer = isAdminLevel({ role: currentUserRole });
   const fetcher = useFetcher();
   const { toast } = useToast();
@@ -174,6 +178,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   const navigation = useNavigation();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [showPeerSendForm, setShowPeerSendForm] = useState(false);
   /** Loader revalidation for this route (date range, section/tab, filters, pagination). */
   const isFundingRouteLoading = useLoaderRefetchBusy().busy;
 
@@ -183,9 +188,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     const search = (pending && navigation.location ? navigation.location.search : location.search) || '';
     return parseSectionTab(search, canDistribute);
   }, [navigation.state, navigation.location, location.search, canDistribute]);
-  // Admin-level viewers are pinned to the distribute section — they have no
-  // `received` tab to switch to (matches the loader's `activeSection` pin).
-  const displaySection: FundingSection = isAdminViewer ? 'distributing' : rawDisplaySection;
+  // Admin-level viewers are pinned to distribute except Peer transfers.
+  const displaySection: FundingSection =
+    isAdminViewer && rawDisplaySection !== 'peer' ? 'distributing' : rawDisplaySection;
 
   // ── Modal state ─────────────────────────────────────────
   const [showSendForm, setShowSendForm] = useState(false);
@@ -423,6 +428,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     params.delete('entryType');
     params.delete('entryStatus');
     params.delete('mediaBuyerId');
+    params.delete('direction');
+    if (nextSection === 'peer' && canSendFunding) {
+      params.set('direction', 'pending_approval');
+    }
     setSearchParams(params, { preventScrollReset: true });
   };
 
@@ -860,16 +869,22 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             Send Funding
           </Button>
         )}
+        {/* Peer send is MB-only; HoM/Admin already use Send Funding. */}
         {isMediaBuyer && (
-          <Link to="/admin/marketing/funding/mb-transfers" onClick={() => closeMobileSheet()}>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-12 md:h-auto md:inline-flex w-full justify-center md:w-auto"
-            >
-              Send Fund
-            </Button>
-          </Link>
+          <Button
+            variant={displaySection === 'peer' ? 'primary' : 'secondary'}
+            size="sm"
+            className="h-12 md:h-auto md:inline-flex w-full justify-center md:w-auto"
+            onClick={() => {
+              closeMobileSheet();
+              if (displaySection !== 'peer') {
+                navigateToSlice('peer', 'transfers');
+              }
+              setShowPeerSendForm(true);
+            }}
+          >
+            Send to peer
+          </Button>
         )}
       </>
     );
@@ -983,36 +998,65 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         }}
       />
 
-      {/* ─── Ledger: primary tabs (received | distribute) ─ */}
+      {/* ─── Ledger: primary tabs (received | distribute | peer) ─ */}
       <div className="list-panel" id="funding-ledger">
-        {canDistribute && !isAdminViewer && (
-          <div className="px-4 pt-2">
-            <Tabs
-              variant="underline"
-              value={displaySection}
-              onChange={(v) => navigateToSlice(v as FundingSection, 'transfers')}
-              tabs={[
-                { value: 'distributing', label: 'Funds Distributed' },
-                { value: 'received', label: receivedTitle },
-                ...(balancesList && balancesList.length > 0
-                  ? [{ value: 'balances' as const, label: `Recipient balances`, badge: balancesList.filter((b) => b.role === 'MEDIA_BUYER').length }]
-                  : []),
-              ]}
-            />
-          </div>
-        )}
+        <div className="px-4 pt-2">
+          <Tabs
+            variant="underline"
+            value={displaySection}
+            onChange={(v) => navigateToSlice(v as FundingSection, 'transfers')}
+            tabs={[
+              ...(canDistribute
+                ? [
+                    {
+                      value: 'distributing' as const,
+                      label: isAdminViewer ? 'Funds Disbursed' : 'Funds Distributed',
+                    },
+                    ...(!isAdminViewer
+                      ? [{ value: 'received' as const, label: receivedTitle }]
+                      : []),
+                    ...(balancesList && balancesList.length > 0
+                      ? [
+                          {
+                            value: 'balances' as const,
+                            label: 'Recipient balances',
+                            badge: balancesList.filter((b) => b.role === 'MEDIA_BUYER').length,
+                          },
+                        ]
+                      : []),
+                  ]
+                : [{ value: 'received' as const, label: receivedTitle }]),
+              {
+                value: 'peer' as const,
+                label: 'Peer transfers',
+                badge:
+                  (peerTransfers?.pendingApprovalCount ?? 0) > 0
+                    ? peerTransfers!.pendingApprovalCount
+                    : undefined,
+              },
+            ]}
+          />
+        </div>
 
-        {/* Admin-level: only disburse — single "Funds Disbursed" section, no tabs.
-            Media Buyer: only receive — single "Incoming Funding" section. */}
-        {(isAdminViewer || !canDistribute) && (
-          <div className="border-b border-app-border px-4 py-3">
-            <h2 className="text-base font-semibold text-app-fg">
-              {isAdminViewer ? 'Funds Disbursed' : receivedTitle}
-            </h2>
-          </div>
-        )}
-
-        {displaySection === 'balances' && balancesList ? (
+        {displaySection === 'peer' && peerTransfers ? (
+          <PeerTransfersPanel
+            embedded
+            transfers={peerTransfers.transfers}
+            total={peerTransfers.total}
+            page={peerTransfers.page}
+            totalPages={peerTransfers.totalPages}
+            limit={peerTransfers.limit}
+            currentUserId={currentUserId}
+            currentUserRole={currentUserRole}
+            canApprove={canSendFunding}
+            mediaBuyers={peerTransfers.mediaBuyers}
+            filters={filters}
+            direction={peerTransfers.direction}
+            statusCounts={peerTransfers.statusCounts}
+            createOpen={showPeerSendForm}
+            onCreateOpenChange={setShowPeerSendForm}
+          />
+        ) : displaySection === 'balances' && balancesList ? (
           <RecipientBalancesPanel balancesList={balancesList} filters={filters} canSendFunding={canSendFunding} onSendFunding={() => setShowSendForm(true)} />
         ) : displaySection === 'distributing' && unifiedDistributingSlice ? (
           <>
