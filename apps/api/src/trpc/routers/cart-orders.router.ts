@@ -234,4 +234,12 @@ export const cartOrdersRouter = router({
     .query(async ({ ctx }) => {
       return getCartOrdersService().listActiveCsBranches(ctx.effectiveBranchIds);
     }),
+
+  /**
+   * Ops: retry DELIVERED cart_orders that never got a graduated parent.
+   * Returns per-id ok/error so failures are visible without digging API logs.
+   */
+  retryFailedGraduations: permissionProcedure('orders.detail.manage').mutation(async () => {
+    return getCartOrdersService().retryFailedGraduations();
+  }),
 });
