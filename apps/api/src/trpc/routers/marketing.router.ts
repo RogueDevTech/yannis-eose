@@ -2154,7 +2154,7 @@ export const marketingRouter = router({
   approveMbFundTransfer: authedProcedure
     .input(approveMbFundTransferSchema)
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().approveMbFundTransfer(input.transferId, ctx.user, ctx.currentBranchId);
+      return getMarketingService().approveMbFundTransfer(input.transferId, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   rejectMbFundTransfer: authedProcedure

@@ -3510,22 +3510,73 @@ export class MarketingService {
         })
         .returning();
 
-      // Notify HoM + supervisors for approval
-      if (this.notifications && branchId && transfer) {
-        this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', {
-          type: 'mb_fund_transfer:pending' as const,
-          title: 'MB fund transfer pending',
-          body: `${sender[0].name} wants to send ₦${input.amount.toLocaleString()} to ${receiver[0].name}`,
-          data: { transferId: transfer.id },
-        });
-      }
+      return {
+        transfer: transfer!,
+        senderName: sender[0].name,
+        receiverName: receiver[0].name,
+      };
+    }).then(async ({ transfer, senderName, receiverName }) => {
+      // MB→MB: notify all three parties (sender, receiver, HoM). HoM must approve.
+      if (this.notifications && transfer) {
+        const amountLabel = `₦${input.amount.toLocaleString()}`;
+        const pendingData = {
+          transferId: transfer.id,
+          branchId: branchId ?? null,
+          link: '/admin/marketing/funding?section=peer&direction=pending_approval',
+        };
+        const pendingBody = `${senderName} wants to send ${amountLabel} to ${receiverName}`;
 
-      return transfer!;
+        this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', {
+          type: 'mb_fund_transfer:pending',
+          title: 'Peer fund transfer needs approval',
+          body: `${pendingBody}. Open Peer transfers to approve.`,
+          data: pendingData,
+        });
+        this.notifications.enqueueCreate({
+          userId: input.receiverMbId,
+          type: 'mb_fund_transfer:pending',
+          title: 'Incoming peer fund transfer',
+          body: `${senderName} is sending you ${amountLabel}. Waiting for HoM approval.`,
+          data: pendingData,
+        });
+        this.notifications.enqueueCreate({
+          userId: actor.id,
+          type: 'mb_fund_transfer:pending',
+          title: 'Peer fund transfer submitted',
+          body: `Your ${amountLabel} transfer to ${receiverName} is pending HoM approval.`,
+          data: pendingData,
+        });
+
+        // Branch marketing supervisors can also approve — notify them too.
+        if (branchId) {
+          const supervisorIds = new Set<string>();
+          for (const uid of [actor.id, input.receiverMbId]) {
+            const ids = await this.branchTeams.listSupervisorIdsForUser(uid, branchId, 'MARKETING');
+            for (const id of ids) supervisorIds.add(id);
+          }
+          for (const supervisorId of supervisorIds) {
+            if (supervisorId === actor.id || supervisorId === input.receiverMbId) continue;
+            this.notifications.enqueueCreate({
+              userId: supervisorId,
+              type: 'mb_fund_transfer:pending',
+              title: 'Peer fund transfer needs approval',
+              body: `${pendingBody}. Open Peer transfers to approve.`,
+              data: pendingData,
+            });
+          }
+        }
+      }
+      return transfer;
     });
   }
 
-  async approveMbFundTransfer(transferId: string, actor: SessionUser, _branchId: string | null) {
-    return withActor(this.db, actor, async (tx) => {
+  async approveMbFundTransfer(
+    transferId: string,
+    actor: SessionUser,
+    branchId: string | null,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    const result = await withActor(this.db, actor, async (tx) => {
       const [transfer] = await tx
         .select()
         .from(schema.mbFundTransfers)
@@ -3534,6 +3585,53 @@ export class MarketingService {
 
       if (!transfer) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
       if (transfer.status !== 'PENDING') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer is not pending' });
+
+      // When the approver IS the receiver (e.g. an MB sends funds up to the HoM
+      // who then approves), there is no distinct third party left to "accept".
+      // Collapse approve + accept into one step: move the money now.
+      const approverIsReceiver = actor.id === transfer.receiverMbId;
+
+      if (approverIsReceiver) {
+        // Re-check sender balance inside the transaction, same as acceptMbFundTransfer.
+        const senderBalance = await this.computeMbBalanceInTx(tx, transfer.senderMbId, branchId, effectiveBranchIds);
+        this.assertSufficientMbBalance(senderBalance, Number(transfer.amount));
+
+        const now = new Date();
+
+        // Ledger entry: sender→receiver, COMPLETED (approver-receiver agreed by approving).
+        const [ledgerEntry] = await tx
+          .insert(schema.marketingFunding)
+          .values({
+            senderId: transfer.senderMbId,
+            receiverId: transfer.receiverMbId,
+            amount: transfer.amount,
+            status: 'COMPLETED',
+            sentAt: now,
+            verifiedAt: now,
+          })
+          .returning();
+
+        const [updated] = await tx
+          .update(schema.mbFundTransfers)
+          .set({
+            status: 'ACCEPTED',
+            approvedBy: actor.id,
+            approvedAt: now,
+            acceptedAt: now,
+            ledgerEntryId: ledgerEntry?.id ?? null,
+            updatedAt: now,
+          })
+          .where(eq(schema.mbFundTransfers.id, transferId))
+          .returning();
+
+        const [sender] = await tx
+          .select({ name: schema.users.name })
+          .from(schema.users)
+          .where(eq(schema.users.id, transfer.senderMbId))
+          .limit(1);
+
+        return { updated, transfer, senderName: sender?.name ?? 'A media buyer', autoAccepted: true };
+      }
 
       const [updated] = await tx
         .update(schema.mbFundTransfers)
@@ -3546,31 +3644,58 @@ export class MarketingService {
         .where(eq(schema.mbFundTransfers.id, transferId))
         .returning();
 
-      // Notify receiver to accept
-      if (this.notifications) {
-        const [sender] = await tx.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, transfer.senderMbId)).limit(1);
-        this.notifications.enqueueCreate({
-          userId: transfer.receiverMbId,
-          type: 'mb_fund_transfer:approved' as const,
-          title: 'Fund transfer received',
-          body: `${sender?.name ?? 'A media buyer'} sent you ₦${Number(transfer.amount).toLocaleString()}. Tap to accept.`,
-          data: { transferId },
-        });
-        this.notifications.enqueueCreate({
-          userId: transfer.senderMbId,
-          type: 'mb_fund_transfer:approved' as const,
-          title: 'Transfer approved',
-          body: `Your fund transfer of ₦${Number(transfer.amount).toLocaleString()} has been approved`,
-          data: { transferId },
-        });
-      }
+      const [sender] = await tx
+        .select({ name: schema.users.name })
+        .from(schema.users)
+        .where(eq(schema.users.id, transfer.senderMbId))
+        .limit(1);
 
-      return updated;
+      return { updated, transfer, senderName: sender?.name ?? 'A media buyer', autoAccepted: false };
     });
+
+    if (this.notifications && result.updated && result.autoAccepted) {
+      const amountLabel = `₦${Number(result.transfer.amount).toLocaleString()}`;
+      const data = {
+        transferId,
+        link: '/admin/marketing/funding?section=peer&direction=all&status=ACCEPTED',
+      };
+      // Sender: their money has now moved.
+      this.notifications.enqueueCreate({
+        userId: result.transfer.senderMbId,
+        type: 'mb_fund_transfer:accepted',
+        title: 'Peer fund transfer completed',
+        body: `Your ${amountLabel} transfer was approved and received.`,
+        data,
+      });
+    }
+
+    if (this.notifications && result.updated && !result.autoAccepted) {
+      const amountLabel = `₦${Number(result.transfer.amount).toLocaleString()}`;
+      const data = {
+        transferId,
+        link: '/admin/marketing/funding?section=peer&direction=all&status=APPROVED',
+      };
+      this.notifications.enqueueCreate({
+        userId: result.transfer.receiverMbId,
+        type: 'mb_fund_transfer:approved',
+        title: 'Peer fund transfer ready to accept',
+        body: `${result.senderName} sent you ${amountLabel}. Tap to accept.`,
+        data,
+      });
+      this.notifications.enqueueCreate({
+        userId: result.transfer.senderMbId,
+        type: 'mb_fund_transfer:approved',
+        title: 'Peer fund transfer approved',
+        body: `Your ${amountLabel} transfer was approved. Waiting for the recipient to accept.`,
+        data,
+      });
+    }
+
+    return result.updated;
   }
 
   async rejectMbFundTransfer(transferId: string, rejectionReason: string, actor: SessionUser) {
-    return withActor(this.db, actor, async (tx) => {
+    const result = await withActor(this.db, actor, async (tx) => {
       const [transfer] = await tx
         .select()
         .from(schema.mbFundTransfers)
@@ -3592,23 +3717,36 @@ export class MarketingService {
         .where(eq(schema.mbFundTransfers.id, transferId))
         .returning();
 
-      // Notify sender of rejection
-      if (this.notifications) {
-        this.notifications.enqueueCreate({
-          userId: transfer.senderMbId,
-          type: 'mb_fund_transfer:rejected' as const,
-          title: 'Transfer rejected',
-          body: `Your fund transfer of ₦${Number(transfer.amount).toLocaleString()} was rejected: ${rejectionReason}`,
-          data: { transferId },
-        });
-      }
-
-      return updated;
+      return { updated, transfer };
     });
+
+    if (this.notifications && result.updated) {
+      const amountLabel = `₦${Number(result.transfer.amount).toLocaleString()}`;
+      const data = {
+        transferId,
+        link: '/admin/marketing/funding?section=peer&direction=all&status=REJECTED',
+      };
+      this.notifications.enqueueCreate({
+        userId: result.transfer.senderMbId,
+        type: 'mb_fund_transfer:rejected',
+        title: 'Peer fund transfer rejected',
+        body: `Your ${amountLabel} transfer was rejected: ${rejectionReason}`,
+        data,
+      });
+      this.notifications.enqueueCreate({
+        userId: result.transfer.receiverMbId,
+        type: 'mb_fund_transfer:rejected',
+        title: 'Peer fund transfer rejected',
+        body: `An incoming ${amountLabel} transfer to you was rejected: ${rejectionReason}`,
+        data,
+      });
+    }
+
+    return result.updated;
   }
 
   async acceptMbFundTransfer(transferId: string, actor: SessionUser, branchId: string | null, effectiveBranchIds?: string[] | null) {
-    return withActor(this.db, actor, async (tx) => {
+    const result = await withActor(this.db, actor, async (tx) => {
       const [transfer] = await tx
         .select()
         .from(schema.mbFundTransfers)
@@ -3648,20 +3786,52 @@ export class MarketingService {
         .where(eq(schema.mbFundTransfers.id, transferId))
         .returning();
 
-      // Notify sender
-      if (this.notifications) {
-        const [receiver] = await tx.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, actor.id)).limit(1);
+      const [receiver] = await tx
+        .select({ name: schema.users.name })
+        .from(schema.users)
+        .where(eq(schema.users.id, actor.id))
+        .limit(1);
+
+      return { updated, transfer, receiverName: receiver?.name ?? 'Recipient' };
+    });
+
+    if (this.notifications && result.updated) {
+      const amountLabel = `₦${Number(result.transfer.amount).toLocaleString()}`;
+      const data = {
+        transferId,
+        link: '/admin/marketing/funding?section=peer&direction=all&status=ACCEPTED',
+      };
+      this.notifications.enqueueCreate({
+        userId: result.transfer.senderMbId,
+        type: 'mb_fund_transfer:accepted',
+        title: 'Peer fund transfer accepted',
+        body: `${result.receiverName} accepted your ${amountLabel} transfer.`,
+        data,
+      });
+      // HoM FYI that the peer transfer completed (third party in MB→MB).
+      this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', {
+        type: 'mb_fund_transfer:accepted',
+        title: 'Peer fund transfer completed',
+        body: `${result.receiverName} accepted a ${amountLabel} peer transfer.`,
+        data,
+      });
+      // Supervisor approver (not HoM) also gets the completion ping.
+      if (
+        result.transfer.approvedBy &&
+        result.transfer.approvedBy !== result.transfer.senderMbId &&
+        result.transfer.approvedBy !== result.transfer.receiverMbId
+      ) {
         this.notifications.enqueueCreate({
-          userId: transfer.senderMbId,
-          type: 'mb_fund_transfer:accepted' as const,
-          title: 'Transfer accepted',
-          body: `${receiver?.name ?? 'Recipient'} accepted your fund transfer of ₦${Number(transfer.amount).toLocaleString()}`,
-          data: { transferId },
+          userId: result.transfer.approvedBy,
+          type: 'mb_fund_transfer:accepted',
+          title: 'Peer fund transfer completed',
+          body: `${result.receiverName} accepted a ${amountLabel} peer transfer you approved.`,
+          data,
         });
       }
+    }
 
-      return updated;
-    });
+    return result.updated;
   }
 
   async listMbFundTransfers(
