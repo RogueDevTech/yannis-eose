@@ -30,6 +30,7 @@ import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { formatRole } from '~/features/users/types';
 import type { PayrollBatch, ViewerInfo } from './types';
 import { formatOrderTimestampShort } from '~/lib/format-date';
+import { formatNaira } from '~/lib/format-amount';
 import { ADMIN_ROLES, DEPT_LABEL } from './payroll-constants';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -127,7 +128,7 @@ function buildBatchPayoutColumns(args: {
   adjustmentsByPayout: Map<string, BatchDetail['adjustments']>;
   viewer: ViewerInfo;
   onView: (payout: BatchPayoutLine) => void;
-  onAdjust: (payoutId: string, staffName: string) => void;
+  onAdjust: (payoutId: string, staffName: string, currentTotal: number) => void;
 }): CompactTableColumn<BatchPayoutLine>[] {
   const { batch, adjustmentsByPayout, viewer, onView, onAdjust } = args;
   const canAdjust = batch.status === 'PENDING_HR' && canReview(viewer);
@@ -249,7 +250,7 @@ function buildBatchPayoutColumns(args: {
         <div className="flex items-center justify-end gap-1.5">
           <CompactTableActionButton onClick={() => onView(p)}>View</CompactTableActionButton>
           {canAdjust ? (
-            <CompactTableActionButton onClick={() => onAdjust(p.id, p.staffName)}>
+            <CompactTableActionButton onClick={() => onAdjust(p.id, p.staffName, Number(p.totalPayout ?? p.netPay ?? 0))}>
               + Adjust
             </CompactTableActionButton>
           ) : null}
@@ -528,7 +529,10 @@ export function PayrollBatchDetailPage({
 }) {
   const fetcher = useFetcher();
   const payrollSurface = useFetcherActionSurface(fetcher);
-  const [showAdjust, setShowAdjust] = useState<{ payoutId: string; staffName: string } | null>(null);
+  const [showAdjust, setShowAdjust] = useState<{ payoutId: string; staffName: string; currentTotal: number } | null>(null);
+  // Live amount for the batch-adjustment before/after preview.
+  const [adjustAmount, setAdjustAmount] = useState('');
+  const [adjustCategory, setAdjustCategory] = useState('BONUS');
   const [viewingPayout, setViewingPayout] = useState<BatchPayoutLine | null>(null);
   const [showReject, setShowReject] = useState(false);
   const [showMarkPaid, setShowMarkPaid] = useState(false);
@@ -580,7 +584,11 @@ export function PayrollBatchDetailPage({
     adjustmentsByPayout,
     viewer,
     onView: (payout) => setViewingPayout(payout),
-    onAdjust: (payoutId, staffName) => setShowAdjust({ payoutId, staffName }),
+    onAdjust: (payoutId, staffName, currentTotal) => {
+      setAdjustAmount('');
+      setAdjustCategory('BONUS');
+      setShowAdjust({ payoutId, staffName, currentTotal });
+    },
   });
 
   const totalPaye = useMemo(
@@ -849,7 +857,14 @@ export function PayrollBatchDetailPage({
         />
       ) : null}
 
-      {showAdjust && (
+      {showAdjust && (() => {
+        const isDeduct = adjustCategory === 'DEDUCTION' || adjustCategory === 'CLAWBACK';
+        const magnitude = Math.abs(Number(adjustAmount) || 0);
+        // Sign follows the category so the preview and the stored value agree
+        // with recomputePayoutTotals (which subtracts DEDUCTION/CLAWBACK).
+        const signed = isDeduct ? -magnitude : magnitude;
+        const newTotal = Math.max(0, showAdjust.currentTotal + signed);
+        return (
         <Modal open onClose={() => setShowAdjust(null)} maxWidth="max-w-sm" backdropBlur contentClassName="p-5 space-y-3">
           <h4 className="text-base font-semibold text-app-fg">Adjust {showAdjust.staffName}</h4>
           <ModalFetcherInlineError message={payrollSurface.errorMatchingIntent('addBatchAdjustment')} />
@@ -857,33 +872,63 @@ export function PayrollBatchDetailPage({
             <input type="hidden" name="intent" value="addBatchAdjustment" />
             <input type="hidden" name="batchId" value={batch.id} />
             <input type="hidden" name="payoutId" value={showAdjust.payoutId} />
+            {/* Submit the signed value so a deduction actually subtracts. */}
+            <input type="hidden" name="amount" value={String(signed)} />
             <FormSelect
               label="Category"
               name="category"
               required
+              value={adjustCategory}
+              onChange={(e) => setAdjustCategory(e.target.value)}
               options={[
-                { value: 'BONUS', label: 'Bonus' },
-                { value: 'EXTRA_SHIFT', label: 'Extra shift' },
-                { value: 'PERFORMANCE', label: 'Performance' },
-                { value: 'DEDUCTION', label: 'Deduction' },
-                { value: 'OTHER', label: 'Other' },
+                { value: 'BONUS', label: 'Bonus (add-on)' },
+                { value: 'EXTRA_SHIFT', label: 'Extra shift (add-on)' },
+                { value: 'PERFORMANCE', label: 'Performance (add-on)' },
+                { value: 'OTHER', label: 'Other (add-on)' },
+                { value: 'DEDUCTION', label: 'Deduction (subtract)' },
+                { value: 'CLAWBACK', label: 'Clawback (subtract)' },
               ]}
             />
-            <AmountInput
-              name="amount"
-              required
-              placeholder="e.g. 5,000.00 or -500"
-              className="input"
-              allowNegative
-            />
+            <div>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Amount (&#8358;)</label>
+              <AmountInput
+                required
+                placeholder="e.g. 5,000.00"
+                className="input"
+                value={adjustAmount}
+                onChange={setAdjustAmount}
+              />
+            </div>
             <TextInput label="Reason" name="reason" required minLength={5} placeholder="Why this adjustment?" />
+            <div className="rounded-md border border-app-border bg-app-muted/40 px-3 py-2 text-sm space-y-1">
+              <div className="flex items-center justify-between text-app-fg-muted">
+                <span>Current total</span>
+                <NairaPrice amount={showAdjust.currentTotal} />
+              </div>
+              <div className={`flex items-center justify-between ${isDeduct ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+                <span>{isDeduct ? 'Deduction' : 'Add-on'}</span>
+                <span className="tabular-nums">{isDeduct ? '-' : '+'}{formatNaira(magnitude)}</span>
+              </div>
+              <div className="flex items-center justify-between border-t border-app-border pt-1 font-semibold text-app-fg">
+                <span>New total</span>
+                <NairaPrice amount={newTotal} />
+              </div>
+            </div>
             <div className="flex gap-2">
-              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'}>Add</Button>
+              <Button
+                type="submit"
+                variant={isDeduct ? 'danger' : 'primary'}
+                size="sm"
+                loading={fetcher.state === 'submitting'}
+              >
+                {isDeduct ? 'Apply deduction' : 'Apply add-on'}
+              </Button>
               <Button type="button" variant="secondary" size="sm" onClick={() => setShowAdjust(null)}>Cancel</Button>
             </div>
           </fetcher.Form>
         </Modal>
-      )}
+        );
+      })()}
 
       {showApprove && (
         <Modal open onClose={() => setShowApprove(false)} maxWidth="max-w-sm" backdropBlur contentClassName="p-5 space-y-3">

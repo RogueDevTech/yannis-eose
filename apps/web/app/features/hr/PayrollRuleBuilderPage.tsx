@@ -59,12 +59,10 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
 
   // Role metadata state
   const [reportsToRequired, setReportsToRequired] = useState(payRole?.reportsToRequired ?? false);
-  const [perProductBonus, setPerProductBonus] = useState(payRole?.perProductBonus ?? false);
   const [category, setCategory] = useState(payRole?.category ?? '');
   const [defaultTaxStatus, setDefaultTaxStatus] = useState(
     payRole?.defaultTaxStatus ?? 'STANDARD_PAYE',
   );
-  const showPerProductBonus = category === 'CS';
 
   useFetcherToast(fetcher.data, {
     successMessage: isCreate ? 'Pay role created' : 'Formula saved',
@@ -138,7 +136,8 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
         <input type="hidden" name="planName" value={plan?.planName ?? (payRole ? `${payRole.name} Formula` : 'Formula')} />
         <input type="hidden" name="effectiveFrom" value={new Date().toISOString().slice(0, 10)} />
         <input type="hidden" name="reportsToRequired" value={String(reportsToRequired)} />
-        <input type="hidden" name="perProductBonus" value={String(perProductBonus)} />
+        {/* Per-product bonus removed — bonuses are role-level only. */}
+        <input type="hidden" name="perProductBonus" value="false" />
 
         {/* ── Role metadata ────────────────────────────────── */}
         {canWrite ? (
@@ -176,33 +175,10 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
                 hint="Applies to all staff and contractors on this pay role. Choose None to skip PAYE."
               />
             </div>
-            {showPerProductBonus && (
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={perProductBonus}
-                  onChange={(e) => setPerProductBonus(e.target.checked)}
-                  className="mt-0.5 rounded border-app-border text-brand-600 focus:ring-brand-500"
-                />
-                <div>
-                  <span className="text-sm text-app-fg">Per-product bonus</span>
-                  <p className="text-xs text-app-fg-muted mt-0.5">
-                    Bonus tiers evaluated per product instead of total deliveries.
-                  </p>
-                </div>
-              </label>
-            )}
           </div>
         ) : (
           <div className="card p-4 space-y-2">
             <h3 className="text-sm font-semibold text-app-fg">{payRole?.name}</h3>
-            {showPerProductBonus && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-app-fg-muted">
-                <span className={perProductBonus ? 'text-success-600 dark:text-success-400' : ''}>
-                  {perProductBonus ? '\u2713' : '\u2717'} Per-product bonus
-                </span>
-              </div>
-            )}
           </div>
         )}
 

@@ -32,12 +32,14 @@ import { TextInput } from '~/components/ui/text-input';
 import { DateTimeText } from '~/components/ui/date-time-text';
 import type { Adjustment, HRUser, HRStreamData } from './types';
 import { humanizeZodIssuesString } from '~/lib/api-error';
+import { formatNaira } from '~/lib/format-amount';
 import { MonthlyPayrolls } from './MonthlyPayrolls';
 import { PayrollBankPayExportModal } from './PayrollBankPayExportModal';
 import { ADMIN_ROLES, DEPT_OWNER_ROLE, ALL_DEPARTMENTS } from './payroll-constants';
 import { hasFinanceAccess, isAdminLevel } from '~/lib/rbac';
 
-const ADJ_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
+const ADJ_ADDON_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
+const ADJ_DEDUCT_CATEGORIES = ['DEDUCTION', 'CLAWBACK'];
 
 /**
  * HR & Payroll landing page.
@@ -66,8 +68,13 @@ export function HRPage({
   const hrSurface = useFetcherActionSurface(fetcher);
   const [activeTab, setActiveTab] = useState<'monthly' | 'adjustments'>('monthly');
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
+  // Which kind of adjustment the modal is creating. Deciding this up front (via
+  // two distinct buttons) removes the old ambiguity where a positive amount in a
+  // DEDUCTION-less form silently behaved like an add-on.
+  const [adjustmentMode, setAdjustmentMode] = useState<'ADDON' | 'DEDUCT'>('ADDON');
   const [showBankPayExport, setShowBankPayExport] = useState(false);
   const [adjustmentStaffId, setAdjustmentStaffId] = useState('');
+  const [adjustmentAmount, setAdjustmentAmount] = useState('');
   const [approveAdjustmentTarget, setApproveAdjustmentTarget] = useState<Adjustment | null>(null);
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
@@ -86,6 +93,7 @@ export function HRPage({
   const handleHrFetcherSuccess = useCallback(() => {
     setShowAddAdjustment(false);
     setApproveAdjustmentTarget(null);
+    setAdjustmentAmount('');
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleHrFetcherSuccess);
 
@@ -156,13 +164,28 @@ export function HRPage({
                   </Button>
                 ) : null}
                 {isHrOrFinance ? (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => setShowAddAdjustment(true)}
-                  >
-                    Add-on
-                  </Button>
+                  <>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => {
+                        setAdjustmentMode('ADDON');
+                        setShowAddAdjustment(true);
+                      }}
+                    >
+                      Add-on
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => {
+                        setAdjustmentMode('DEDUCT');
+                        setShowAddAdjustment(true);
+                      }}
+                    >
+                      Deduct Salary
+                    </Button>
+                  </>
                 ) : null}
                 {showGenerateButton ? (
                   <Button variant="primary" size="sm" onClick={() => navigate('/hr/payroll/generate')}>
@@ -188,18 +211,34 @@ export function HRPage({
                   </Button>
                 ) : null}
                 {isHrOrFinance ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="h-12 w-full justify-center"
-                    onClick={() => {
-                      closeSheet();
-                      setShowAddAdjustment(true);
-                    }}
-                  >
-                    Add-on
-                  </Button>
+                  <>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-12 w-full justify-center"
+                      onClick={() => {
+                        closeSheet();
+                        setAdjustmentMode('ADDON');
+                        setShowAddAdjustment(true);
+                      }}
+                    >
+                      Add-on
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      className="h-12 w-full justify-center"
+                      onClick={() => {
+                        closeSheet();
+                        setAdjustmentMode('DEDUCT');
+                        setShowAddAdjustment(true);
+                      }}
+                    >
+                      Deduct Salary
+                    </Button>
+                  </>
                 ) : null}
                 {showGenerateButton ? (
                   <Button
@@ -279,8 +318,16 @@ export function HRPage({
           backdropBlur
           contentClassName="p-5 space-y-4"
         >
+          {(() => {
+            const isDeduct = adjustmentMode === 'DEDUCT';
+            const categories = isDeduct ? ADJ_DEDUCT_CATEGORIES : ADJ_ADDON_CATEGORIES;
+            const magnitude = Math.abs(Number(adjustmentAmount) || 0);
+            return (
+          <>
           <div className="flex items-start justify-between gap-3">
-            <h3 className="text-lg font-semibold text-app-fg">Add Earning Adjustment</h3>
+            <h3 className="text-lg font-semibold text-app-fg">
+              {isDeduct ? 'Deduct Salary' : 'Add Earning Add-on'}
+            </h3>
             <button
               type="button"
               onClick={() => setShowAddAdjustment(false)}
@@ -320,12 +367,30 @@ export function HRPage({
                   name="category"
                   required
                   placeholder="Select category..."
-                  options={ADJ_CATEGORIES.map((c) => ({ value: c, label: c.replace(/_/g, ' ') }))}
+                  options={categories.map((c) => ({ value: c, label: c.replace(/_/g, ' ') }))}
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-app-fg-muted mb-1">Amount (&#8358;)</label>
-                <AmountInput name="amount" required placeholder="e.g. 5,000.00 or -500 for deduction" className="input" allowNegative />
+                {/* Sign is derived server-side from the category, so HR only ever
+                    types a positive magnitude here — no confusing minus signs. */}
+                <AmountInput
+                  name="amount"
+                  required
+                  placeholder="e.g. 5,000.00"
+                  className="input"
+                  value={adjustmentAmount}
+                  onChange={setAdjustmentAmount}
+                />
+                <p className={`mt-1 text-xs font-medium ${isDeduct ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+                  {magnitude > 0
+                    ? isDeduct
+                      ? `This will reduce the next payout by ${formatNaira(magnitude)}.`
+                      : `This will add ${formatNaira(magnitude)} to the next payout.`
+                    : isDeduct
+                      ? 'This amount will be subtracted from the next payout.'
+                      : 'This amount will be added to the next payout.'}
+                </p>
               </div>
               <div>
                 <TextInput
@@ -334,13 +399,19 @@ export function HRPage({
                   type="text"
                   required
                   minLength={5}
-                  placeholder="Reason for adjustment (min 5 chars)"
+                  placeholder={isDeduct ? 'Reason for deduction (min 5 chars)' : 'Reason for add-on (min 5 chars)'}
                 />
               </div>
             </div>
             <div className="flex gap-2 pt-1">
-              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
-                Create Adjustment
+              <Button
+                type="submit"
+                variant={isDeduct ? 'danger' : 'primary'}
+                size="sm"
+                loading={fetcher.state === 'submitting'}
+                loadingText="Saving..."
+              >
+                {isDeduct ? 'Deduct Salary' : 'Add Add-on'}
               </Button>
               <Button
                 type="button"
@@ -353,6 +424,9 @@ export function HRPage({
               </Button>
             </div>
           </fetcher.Form>
+          </>
+            );
+          })()}
         </Modal>
       )}
 

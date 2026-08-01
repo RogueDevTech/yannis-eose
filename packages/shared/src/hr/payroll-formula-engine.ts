@@ -39,6 +39,8 @@ function metricValue(_formula: PayrollFormula, metrics: PayrollMetrics, metric: 
       return metrics.teamDr ?? metrics.individualDr;
     case 'CPA':
       return metrics.cpa ?? 0;
+    case 'DELIVERED_COUNT':
+      return metrics.deliveredCount ?? 0;
     case 'TARGET_MET':
       return metrics.targetMet ? 1 : 0;
     case 'NONE':
@@ -171,37 +173,6 @@ function resolveBonusFromTiers(
   return { bonus: flatBonus, lines };
 }
 
-function resolvePerProductBonus(
-  _formula: PayrollFormula,
-  metrics: PayrollMetrics,
-  productTiers: Array<{ productId: string; productName: string; tiers: Array<{ fromPct: number; toPct: number | null; ratePerOrder: number }> }>,
-): { bonus: number; lines: BonusBreakdownLine[] } {
-  let total = 0;
-  const lines: BonusBreakdownLine[] = [];
-
-  for (const product of productTiers) {
-    const count = metrics.deliveredByProduct?.[product.productId] ?? 0;
-    if (count <= 0) continue;
-
-    const dr = metrics.drByProduct?.[product.productId] ?? metrics.individualDr;
-    let rate = 0;
-    for (const tier of product.tiers) {
-      const inRange = dr >= tier.fromPct && (tier.toPct == null || dr <= tier.toPct);
-      if (inRange) rate = tier.ratePerOrder;
-    }
-    const amount = count * rate;
-    total += amount;
-    lines.push({
-      label: `${product.productName} bonus`,
-      amount,
-      productId: product.productId,
-      productName: product.productName,
-    });
-  }
-
-  return { bonus: total, lines };
-}
-
 function sumAllowances(allowances: PayrollFormulaAllowance[] | undefined): {
   total: number;
   lines: Array<{ name: string; amount: number; taxable: boolean }>;
@@ -210,27 +181,24 @@ function sumAllowances(allowances: PayrollFormulaAllowance[] | undefined): {
   return { total: lines.reduce((s, l) => s + l.amount, 0), lines };
 }
 
-/** Evaluate PRD formula config against payroll metrics. */
+/**
+ * Evaluate PRD formula config against payroll metrics.
+ *
+ * Bonuses are always resolved from role-level `bonusTiers`. The former
+ * per-product bonus path (keyed on individual product delivery counts) was
+ * removed — bonus configuration is role/department level only.
+ */
 export function computePayrollFormula(
   formula: PayrollFormula,
   metrics: PayrollMetrics,
-  productTiers: Array<{ productId: string; productName: string; tiers: Array<{ fromPct: number; toPct: number | null; ratePerOrder: number }> }> = [],
 ): PayrollFormulaResult {
   const baseSalary = resolveBaseSalary(formula, metrics);
   const deliveredCount = metrics.deliveredCount;
 
-  let performanceBonus = 0;
   const bonusBreakdown: BonusBreakdownLine[] = [];
-
-  if (formula.perProductBonus && productTiers.length > 0) {
-    const pp = resolvePerProductBonus(formula, metrics, productTiers);
-    performanceBonus += pp.bonus;
-    bonusBreakdown.push(...pp.lines);
-  } else {
-    const bb = resolveBonusFromTiers(formula.bonusTiers, metrics, formula, deliveredCount, 'Bonus');
-    performanceBonus += bb.bonus;
-    bonusBreakdown.push(...bb.lines);
-  }
+  const bb = resolveBonusFromTiers(formula.bonusTiers, metrics, formula, deliveredCount, 'Bonus');
+  const performanceBonus = bb.bonus;
+  bonusBreakdown.push(...bb.lines);
 
   const penalties = (formula.penaltyPerReturn ?? 0) * (metrics.returnedCount ?? 0);
   const { total: allowancesTotal, lines: allowanceLines } = sumAllowances(formula.allowances);

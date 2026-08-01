@@ -149,11 +149,31 @@ describe('createAdjustmentSchema', () => {
     ).not.toThrow();
   });
 
-  it('rejects negative amount', () => {
+  it('coerces a negative add-on amount to positive by category', () => {
+    const result = createAdjustmentSchema.parse({
+      staffId: VALID_UUID,
+      amount: -500,
+      category: 'BONUS',
+      reason: 'Performance bonus',
+    });
+    expect(result.amount).toBe(500);
+  });
+
+  it('stores deduction categories as negative regardless of input sign', () => {
+    const result = createAdjustmentSchema.parse({
+      staffId: VALID_UUID,
+      amount: 500,
+      category: 'DEDUCTION',
+      reason: 'Uniform cost recovery',
+    });
+    expect(result.amount).toBe(-500);
+  });
+
+  it('rejects a zero amount', () => {
     expect(() =>
       createAdjustmentSchema.parse({
         staffId: VALID_UUID,
-        amount: -500,
+        amount: 0,
         category: 'BONUS',
         reason: 'Performance bonus',
       }),

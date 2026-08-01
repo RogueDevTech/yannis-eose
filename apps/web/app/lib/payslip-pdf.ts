@@ -330,6 +330,12 @@ export async function generatePayslipPdf(input: PayslipPdfInput): Promise<Blob> 
   return doc.output('blob');
 }
 
+/** Raw PDF bytes for bundling many payslips into a single ZIP (see PayrollPayslipsPage). */
+export async function generatePayslipPdfBytes(input: PayslipPdfInput): Promise<Uint8Array> {
+  const doc = await buildPayslipPdf(input);
+  return new Uint8Array(doc.output('arraybuffer'));
+}
+
 export function downloadPayslipPdf(input: PayslipPdfInput, filename: string): Promise<void> {
   return generatePayslipPdf(input).then((blob) => {
     const url = URL.createObjectURL(blob);

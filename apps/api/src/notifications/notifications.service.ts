@@ -440,6 +440,11 @@ export class NotificationsService {
     }
     if (data['fundingId'] || (data['requesterId'] && type === 'funding:request')) return '/admin/marketing/funding';
     if (data['requestId'] && (type === 'funding:approved' || type === 'funding:rejected')) return '/admin/marketing/funding';
+    if (type.startsWith('mb_fund_transfer:')) {
+      return type === 'mb_fund_transfer:pending'
+        ? '/admin/marketing/funding?section=peer&direction=pending_approval'
+        : '/admin/marketing/funding?section=peer';
+    }
     if (data['transferId']) {
       // Approval-flow types (pending / approved / rejected) live on the dedicated
       // transfers page where the action buttons render. Legacy / verify / shrinkage

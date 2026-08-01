@@ -810,7 +810,7 @@ export class PayrollBatchService {
       .where(
         and(
           eq(schema.earningsAdjustments.staffId, member.id),
-          eq(schema.earningsAdjustments.category, 'CLAWBACK'),
+          inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
           isNull(schema.earningsAdjustments.payoutId),
         ),
       );
@@ -942,7 +942,7 @@ export class PayrollBatchService {
       .where(
         and(
           eq(schema.earningsAdjustments.staffId, member.id),
-          eq(schema.earningsAdjustments.category, 'CLAWBACK'),
+          inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
           isNull(schema.earningsAdjustments.payoutId),
         ),
       );

@@ -51,10 +51,8 @@ function tierPhrase(tier: {
 
 export function PayrollFormulaRulesExplanation({
   formula,
-  perProductBonus,
 }: {
   formula: PayrollFormula | null | undefined;
-  perProductBonus?: boolean;
 }) {
   if (!formula) {
     return (
@@ -74,7 +72,6 @@ export function PayrollFormulaRulesExplanation({
   const floor = formula.minimumFloor;
   const scaling = formula.scalingRule;
   const subsidy = formula.employerPayeSubsidy;
-  const productBonus = perProductBonus || formula.perProductBonus;
 
   return (
     <div className="space-y-4">
@@ -107,11 +104,6 @@ export function PayrollFormulaRulesExplanation({
 
       <div className="card p-4 space-y-3">
         <h3 className="text-sm font-semibold text-app-fg">Performance bonus</h3>
-        {productBonus ? (
-          <p className="text-xs text-app-fg-muted">
-            Per-product bonus is on: tiers use product delivery mix, not only totals.
-          </p>
-        ) : null}
         {bonusTiers.length === 0 ? (
           <p className="text-sm text-app-fg-muted">No bonus tiers configured.</p>
         ) : (

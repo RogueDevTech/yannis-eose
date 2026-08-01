@@ -35,6 +35,18 @@ export function getNotificationAction(notif: NotificationForLink): { link: strin
       if (notif.type === 'funding:rejected') return { link: '/admin/marketing/funding', label: 'View funding' };
     }
     if (data.orderId) return { link: `/admin/orders/${data.orderId}`, label: 'View order' };
+    // Peer MB fund transfers use transferId too — must not fall through to inventory.
+    if (notif.type?.startsWith('mb_fund_transfer:')) {
+      const direction =
+        notif.type === 'mb_fund_transfer:pending' ? 'pending_approval' : 'all';
+      return {
+        link: `/admin/marketing/funding?section=peer&direction=${direction}`,
+        label:
+          notif.type === 'mb_fund_transfer:pending'
+            ? 'Review peer transfer'
+            : 'View peer transfers',
+      };
+    }
     if (data.transferId) return { link: '/admin/inventory', label: 'View transfer' };
     if (data.productId) return { link: `/admin/products/${data.productId}`, label: 'View product' };
     if (data.fundingId) return { link: '/admin/marketing/funding', label: 'View funding' };
@@ -50,7 +62,17 @@ export function getNotificationAction(notif: NotificationForLink): { link: strin
   const type = notif.type;
   if (type?.startsWith('order:')) return { link: '/admin/orders', label: 'View orders' };
   if (type === 'marketing:high_cpa') return { link: '/admin/marketing/expenses', label: 'View ad spend' };
-  if (type?.startsWith('funding:')) return { link: '/admin/marketing/funding', label: 'View funding' };
+  if (type?.startsWith('funding:') || type?.startsWith('mb_fund_transfer:')) {
+    return {
+      link:
+        type === 'mb_fund_transfer:pending'
+          ? '/admin/marketing/funding?section=peer&direction=pending_approval'
+          : type?.startsWith('mb_fund_transfer:')
+            ? '/admin/marketing/funding?section=peer'
+            : '/admin/marketing/funding',
+      label: type?.startsWith('mb_fund_transfer:') ? 'View peer transfers' : 'View funding',
+    };
+  }
   if (type?.startsWith('transfer:') || type?.startsWith('logistics:') || type?.startsWith('stock:')) return { link: '/admin/inventory', label: 'View inventory' };
   if (type?.startsWith('finance:')) return { link: '/admin/finance/overview', label: 'View finance' };
   if (type?.startsWith('payout:')) return { link: '/hr/payroll', label: 'View payroll' };

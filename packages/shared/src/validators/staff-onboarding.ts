@@ -79,7 +79,13 @@ export const updateOnboardingProfileSchema = z.object({
     .regex(/^[0-9]*$/u, 'Account number must be digits only')
     .nullish()
     .or(z.literal('')),
-  payoutBankCode: z.string().max(20).nullish(),
+  // NIBSS NIP institution codes are exactly 6 digits (leading zeros significant,
+  // e.g. "000014"). Allow empty/absent for drafts, but reject malformed codes.
+  payoutBankCode: z
+    .string()
+    .regex(/^\d{6}$/u, 'Bank code must be exactly 6 digits')
+    .nullish()
+    .or(z.literal('')),
 });
 
 export type UpdateOnboardingProfileInput = z.infer<typeof updateOnboardingProfileSchema>;

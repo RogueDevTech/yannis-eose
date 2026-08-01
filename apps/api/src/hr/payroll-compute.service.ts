@@ -117,8 +117,7 @@ export class PayrollComputeService {
     if (!plan) return null;
 
     const formula = resolveFormulaFromRules(plan.rules as PayrollFormula);
-    const productTiers = await this.loadProductTiers(tx, groupId);
-    const formulaResult = computePayrollFormula(formula, metrics, productTiers);
+    const formulaResult = computePayrollFormula(formula, metrics);
 
     let payRoleName: string | null = plan.planName;
     let taxStatus: 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION' =
@@ -262,33 +261,6 @@ export class PayrollComputeService {
       rangeStart: periodStart,
       rangeEnd: periodEnd,
     });
-  }
-
-  async loadProductTiers(
-    tx: TxLike,
-    groupId?: string | null,
-  ): Promise<Array<{ productId: string; productName: string; tiers: Array<{ fromPct: number; toPct: number | null; ratePerOrder: number }> }>> {
-    const rows = await tx
-      .select()
-      .from(schema.payrollProductTierConfigs)
-      .where(
-        and(
-          eq(schema.payrollProductTierConfigs.active, true),
-          or(isNull(schema.payrollProductTierConfigs.effectiveTo), gte(schema.payrollProductTierConfigs.effectiveTo, new Date())),
-          // Exact company only — never fall back to null/global shared tiers.
-          groupId ? eq(schema.payrollProductTierConfigs.groupId, groupId) : sql`false`,
-        ),
-      );
-
-    return rows.map((r) => ({
-      productId: r.productId ?? r.id,
-      productName: r.productName,
-      tiers: (r.tierRows as Array<{ fromPct: number; toPct?: number | null; ratePerOrder: number }>).map((t) => ({
-        fromPct: t.fromPct,
-        toPct: t.toPct ?? null,
-        ratePerOrder: t.ratePerOrder,
-      })),
-    }));
   }
 
   async loadTaxConfig(tx: TxLike, groupId?: string | null): Promise<PayeBandConfig> {
