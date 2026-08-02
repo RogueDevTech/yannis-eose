@@ -333,14 +333,15 @@ export class HrService {
         deliveredCohortCount,
       });
 
-      // Get pending deductions (clawbacks from previous returns)
+      // Get pending deductions (clawbacks from previous returns + manual deductions/fines).
+      // Deduction-category amounts are stored negative, so abs() gives the amount owed.
       const deductionRows = await tx
         .select({ total: sum(schema.earningsAdjustments.amount) })
         .from(schema.earningsAdjustments)
         .where(
           and(
             eq(schema.earningsAdjustments.staffId, member.id),
-            eq(schema.earningsAdjustments.category, 'CLAWBACK'),
+            inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
             isNull(schema.earningsAdjustments.payoutId),
           ),
         );
@@ -749,7 +750,7 @@ export class HrService {
         .where(
           and(
             eq(schema.earningsAdjustments.staffId, staffId),
-            eq(schema.earningsAdjustments.category, 'CLAWBACK'),
+            inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
             isNull(schema.earningsAdjustments.payoutId),
           ),
         ),

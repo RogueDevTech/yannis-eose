@@ -10,6 +10,7 @@ import type { PayrollFormula } from '@yannis/shared';
 const METRIC_OPTIONS = [
   { value: 'INDIVIDUAL_DR', label: 'Individual DR %' },
   { value: 'TEAM_DR', label: 'Team DR %' },
+  { value: 'DELIVERED_COUNT', label: 'Delivered orders (count)' },
   { value: 'CPA', label: 'CPA' },
   { value: 'TARGET_MET', label: 'Target met' },
   { value: 'NONE', label: 'None (flat)' },
@@ -212,7 +213,6 @@ function parseFormula(raw: Record<string, unknown>): PayrollFormula {
     baseSalaryTiers: Array.isArray(raw.baseSalaryTiers) ? (raw.baseSalaryTiers as BaseTier[]) : [],
     bonusTiers: Array.isArray(raw.bonusTiers) ? (raw.bonusTiers as BonusTier[]) : [],
     penaltyPerReturn: asNumber(raw.penaltyPerReturn),
-    perProductBonus: raw.perProductBonus === true,
   };
 }
 
@@ -265,7 +265,9 @@ export function PayrollFormulaTierBuilder({
       teamDr: usedMetrics.has('TEAM_DR'),
       cpa: usedMetrics.has('CPA'),
       targetMet: usedMetrics.has('TARGET_MET'),
-      delivered: bonusTiers.some((t) => t.kind === 'PER_ORDER'),
+      // Delivered-order count input is relevant both for PER_ORDER bonus math
+      // and for any tier gated on the DELIVERED_COUNT metric.
+      delivered: bonusTiers.some((t) => t.kind === 'PER_ORDER') || usedMetrics.has('DELIVERED_COUNT'),
       returned: Number(penaltyPerReturn) > 0,
     };
   }, [baseTiers, bonusTiers, penaltyPerReturn]);

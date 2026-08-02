@@ -400,9 +400,9 @@ export class OnboardingService {
         .where(eq(schema.users.id, targetUserId))
         .limit(1);
 
-      // Submission checklist — only payout bank details are required so Finance
-      // can pay. Personal details and document uploads are optional at submit;
-      // HR can request them later if needed.
+      // Submission checklist — payout bank details plus core personal details are
+      // required so HR gets a complete profile and Finance can pay. Document
+      // uploads remain optional at submit; HR can request them later if needed.
       const missing: string[] = [];
       if (
         !bankRow?.payoutBankName?.trim() ||
@@ -413,6 +413,18 @@ export class OnboardingService {
         missing.push(
           'payout bank details (bank name, bank code, account name, account number)',
         );
+      }
+      if (!existing.gender) {
+        missing.push('gender');
+      }
+      if (!existing.dateOfBirth) {
+        missing.push('date of birth');
+      }
+      if (!existing.residentialAddress?.trim()) {
+        missing.push('residential address');
+      }
+      if (!existing.currentStateOfResidence?.trim()) {
+        missing.push('current state of residence');
       }
       if (missing.length > 0) {
         throw new TRPCError({

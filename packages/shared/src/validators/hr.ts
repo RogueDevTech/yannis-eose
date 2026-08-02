@@ -126,14 +126,31 @@ export type ListPayoutsInput = z.infer<typeof listPayoutsSchema>;
 // Earnings Adjustment Validators
 // ============================================
 
-export const createAdjustmentSchema = z.object({
-  staffId: z.string().uuid(),
-  amount: z.coerce.number().min(0).multipleOf(0.01),
-  category: z.enum(['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'DEDUCTION', 'CLAWBACK', 'OTHER']),
-  reason: z.string().min(5).max(500),
-  periodStart: z.string().date().optional(),
-  periodEnd: z.string().date().optional(),
-});
+/** Categories that reduce earnings. Everything else adds to earnings. */
+export const DEDUCTION_ADJUSTMENT_CATEGORIES = ['DEDUCTION', 'CLAWBACK'] as const;
+
+export const createAdjustmentSchema = z
+  .object({
+    staffId: z.string().uuid(),
+    // Deductions may be entered as a negative amount; add-ons as positive.
+    // The refine below reconciles the sign with the chosen category.
+    amount: z.coerce.number().multipleOf(0.01),
+    category: z.enum(['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'DEDUCTION', 'CLAWBACK', 'OTHER']),
+    reason: z.string().min(5).max(500),
+    periodStart: z.string().date().optional(),
+    periodEnd: z.string().date().optional(),
+  })
+  .transform((data) => {
+    // Canonicalise the sign so storage/payroll math is unambiguous:
+    // deduction categories are stored negative, add-on categories positive.
+    const isDeduction = (DEDUCTION_ADJUSTMENT_CATEGORIES as readonly string[]).includes(data.category);
+    const magnitude = Math.abs(data.amount);
+    return { ...data, amount: isDeduction ? -magnitude : magnitude };
+  })
+  .refine((data) => data.amount !== 0, {
+    message: 'Amount must not be zero',
+    path: ['amount'],
+  });
 export type CreateAdjustmentInput = z.infer<typeof createAdjustmentSchema>;
 
 export const approveAdjustmentSchema = z.object({

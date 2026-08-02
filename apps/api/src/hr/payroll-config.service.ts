@@ -109,7 +109,9 @@ export class PayrollConfigService {
           name: input.name,
           category: input.category,
           reportsToRequired: input.reportsToRequired,
-          perProductBonus: input.perProductBonus,
+          // Per-product bonus path removed — always role-level. Column retained
+          // for schema compatibility but forced off on new roles.
+          perProductBonus: false,
           defaultTaxStatus: input.defaultTaxStatus ?? 'STANDARD_PAYE',
           commissionPlanId: input.commissionPlanId ?? null,
         })
@@ -387,7 +389,7 @@ export class PayrollConfigService {
   }
 
   previewPayrollFormula(input: { formula: PayrollFormula; metrics: PayrollMetrics }) {
-    const result = computePayrollFormula(input.formula, input.metrics, []);
+    const result = computePayrollFormula(input.formula, input.metrics);
     const paye = computePaye(
       {
         monthlyGross: result.grossBeforeAdjustments,

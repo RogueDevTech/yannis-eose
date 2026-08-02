@@ -214,9 +214,9 @@ function PayrollConfigTabbedPage({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const tab =
-    tabParam === 'products' || tabParam === 'tax' || tabParam === 'roles' ? tabParam : 'roles';
-  const [createTarget, setCreateTarget] = useState<'products' | 'tax' | null>(null);
+  // 'products' tab removed with per-product bonus; legacy links fall back to roles.
+  const tab = tabParam === 'tax' || tabParam === 'roles' ? tabParam : 'roles';
+  const [createTarget, setCreateTarget] = useState<'tax' | null>(null);
 
   const setTab = (next: string) => {
     const params = new URLSearchParams(searchParams);
@@ -231,18 +231,13 @@ function PayrollConfigTabbedPage({
       onChange={setTab}
       tabs={[
         { value: 'roles', label: `Pay roles (${roles.length})` },
-        { value: 'products', label: `Product tiers (${productTierConfigs.length})` },
         { value: 'tax', label: `Tax bands (${taxBandConfigs.length})` },
       ]}
     />
   );
 
   const headerAction = canWrite ? (
-    tab === 'products' ? (
-      <Button variant="primary" size="sm" onClick={() => setCreateTarget('products')}>
-        + Product tier
-      </Button>
-    ) : tab === 'tax' ? (
+    tab === 'tax' ? (
       <Button variant="primary" size="sm" onClick={() => setCreateTarget('tax')}>
         + Tax band
       </Button>
@@ -258,7 +253,6 @@ function PayrollConfigTabbedPage({
       tabsSlot={
         <>
           {tabsBar}
-          {tab === 'products' && <PayrollConfigProductsPage configs={productTierConfigs} products={products} canWrite={canWrite} createOpen={createTarget === 'products'} onCreateClose={() => setCreateTarget(null)} />}
           {tab === 'tax' && <PayrollConfigTaxBandsPage configs={taxBandConfigs} canWrite={canWrite} createOpen={createTarget === 'tax'} onCreateClose={() => setCreateTarget(null)} />}
         </>
       }

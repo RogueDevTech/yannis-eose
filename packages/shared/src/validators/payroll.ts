@@ -9,6 +9,9 @@ export const payrollMetricTypeSchema = z.enum([
   'INDIVIDUAL_DR',
   'TEAM_DR',
   'CPA',
+  // Raw count of delivered orders in the period. Use with a threshold to gate
+  // bonus qualification on volume (e.g. DELIVERED_COUNT >= 60) rather than DR%.
+  'DELIVERED_COUNT',
   'TARGET_MET',
   'NONE',
 ]);
@@ -84,6 +87,9 @@ export const payrollFormulaSchema = z.object({
   allowances: z.array(payrollAllowanceSchema).max(10).optional(),
   penaltyPerReturn: z.number().min(0).optional(),
   employerPayeSubsidy: payrollEmployerPayeSubsidySchema.optional(),
+  // Retained as an accepted-but-ignored field for backward compatibility with
+  // any stored rules JSON. The per-product bonus path has been removed; bonuses
+  // are always role-level. New configs should not set this.
   perProductBonus: z.boolean().optional(),
   flatMonthlyAmount: z.number().min(0).optional(),
 });
@@ -235,7 +241,12 @@ export const createContractorSchema = z.object({
     .enum(['STANDARD_PAYE', 'EMPLOYER_SUBSIDIZED_PAYE', 'GROSS_NO_DEDUCTION'])
     .default('GROSS_NO_DEDUCTION'),
   bankName: z.string().optional(),
-  bankCode: z.string().optional(),
+  // NIBSS NIP institution code: exactly 6 digits, leading zeros preserved.
+  bankCode: z
+    .string()
+    .regex(/^\d{6}$/u, 'Bank code must be exactly 6 digits')
+    .optional()
+    .or(z.literal('')),
   accountNumber: z.string().length(10).optional(),
   accountName: z.string().optional(),
   notes: z.string().max(1000).optional(),

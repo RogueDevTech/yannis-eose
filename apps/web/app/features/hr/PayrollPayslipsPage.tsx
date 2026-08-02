@@ -18,7 +18,10 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { PayslipPreviewModal } from '~/components/ui/payslip-preview-modal';
-import { downloadPayslipPdf } from '~/lib/payslip-pdf';
+import { downloadPayslipPdf, generatePayslipPdfBytes } from '~/lib/payslip-pdf';
+import { createZipStoreBlob } from '~/lib/zip-store';
+import { Button } from '~/components/ui/button';
+import { useToast } from '~/components/ui/toast';
 import type { PayslipListItem } from './payroll-prd-types';
 import type { BranchOption } from './types';
 import { formatRole } from '~/features/users/types';
@@ -57,6 +60,8 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
   const [searchParams, setSearchParams] = useSearchParams();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [viewingPayslip, setViewingPayslip] = useState<PayslipListItem | null>(null);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
+  const { toast } = useToast();
 
   const branchOptions = useMemo(
     () => [{ value: '', label: 'All branches' }, ...branches.map((b) => ({ value: b.id, label: b.name }))],
@@ -91,6 +96,56 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
       setDownloadingId(null);
     }
   }, []);
+
+  /**
+   * Bulk-download every payslip matching the current filters (department /
+   * branch / period / search) as a single ZIP of individual PDFs. Fetches the
+   * full filtered set from the loader's export mode, then builds + zips client
+   * side (same jsPDF builder as the per-row download).
+   */
+  const handleBulkDownload = useCallback(async () => {
+    setBulkDownloading(true);
+    try {
+      const params = new URLSearchParams(searchParams);
+      params.set('export', '1');
+      params.delete('page');
+      const res = await fetch(`?${params.toString()}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error('Failed to load payslips');
+      const data = (await res.json()) as { items: PayslipListItem[]; total: number };
+      if (!data.items.length) {
+        toast.info('No payslips', 'Nothing matches the current filters.');
+        return;
+      }
+
+      const seen = new Map<string, number>();
+      const files: Array<{ name: string; data: Uint8Array }> = [];
+      for (const row of data.items) {
+        const bytes = await generatePayslipPdfBytes(toPayslipPdfInput(row));
+        // Guard against duplicate filenames within the zip.
+        let name = payslipFilename(row);
+        const count = seen.get(name) ?? 0;
+        seen.set(name, count + 1);
+        if (count > 0) name = name.replace(/\.pdf$/i, `-${count + 1}.pdf`);
+        files.push({ name, data: bytes });
+      }
+
+      const zip = createZipStoreBlob(files);
+      const url = URL.createObjectURL(zip);
+      const a = document.createElement('a');
+      const scope = filters.department || (filters.branchId ? 'branch' : 'all');
+      a.href = url;
+      a.download = `payslips-${scope}-${filters.startDate}_to_${filters.endDate}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Payslips downloaded', `${files.length} payslip${files.length === 1 ? '' : 's'} zipped.`);
+    } catch (err) {
+      toast.error('Download failed', err instanceof Error ? err.message : 'Please try again.');
+    } finally {
+      setBulkDownloading(false);
+    }
+  }, [searchParams, filters.department, filters.branchId, filters.startDate, filters.endDate, toast]);
 
   const columns: CompactTableColumn<PayslipListItem>[] = useMemo(
     () => [
@@ -229,6 +284,16 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
                   periodAllTime={filters.periodAllTime}
                   chrome="pill"
                 />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={bulkDownloading}
+                  loadingText="Zipping…"
+                  disabled={total === 0}
+                  onClick={() => void handleBulkDownload()}
+                >
+                  Download all ({total})
+                </Button>
               </div>
             }
             filters={
@@ -249,6 +314,17 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
                     onChange={(e) => setFilter('branchId', e.target.value)}
                   />
                 )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  loading={bulkDownloading}
+                  loadingText="Zipping…"
+                  disabled={total === 0}
+                  onClick={() => void handleBulkDownload()}
+                >
+                  Download all ({total})
+                </Button>
               </div>
             }
           />

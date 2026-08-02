@@ -583,6 +583,31 @@ export function StaffOnboardingPage({
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [requestChangesReason, setRequestChangesReason] = useState('');
 
+  // Required-at-submit checklist, mirroring the server guard in
+  // onboarding.service.submit(). Personal fields read from the saved record
+  // (they only persist on draft-save); bank fields use the live picker state.
+  // Save your draft first, then these clear. Documents stay optional.
+  const missingRequiredFields = useMemo(() => {
+    const missing: string[] = [];
+    if (!bankName.trim() || !bankCode.trim() || !accountName.trim() || !accountNumber.trim()) {
+      missing.push('Bank details');
+    }
+    if (!record.gender) missing.push('Gender');
+    if (!record.dateOfBirth) missing.push('Date of birth');
+    if (!record.residentialAddress?.trim()) missing.push('Residential address');
+    if (!record.currentStateOfResidence?.trim()) missing.push('Current state of residence');
+    return missing;
+  }, [
+    bankName,
+    bankCode,
+    accountName,
+    accountNumber,
+    record.gender,
+    record.dateOfBirth,
+    record.residentialAddress,
+    record.currentStateOfResidence,
+  ]);
+
   const handleBankChange = (next: { bankName: string; bankCode: string }) => {
     setBankName(next.bankName);
     setBankCode(next.bankCode);
@@ -1126,6 +1151,14 @@ export function StaffOnboardingPage({
             </CardBody>
           </Card>
 
+          {mode === 'self' &&
+          (record.status === 'IN_PROGRESS' || record.status === 'NOT_STARTED') &&
+          missingRequiredFields.length > 0 ? (
+            <p className="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800 dark:border-warning-800 dark:bg-warning-900/30 dark:text-warning-200">
+              Complete and save these before you can submit: {missingRequiredFields.join(', ')}.
+            </p>
+          ) : null}
+
           <div className="flex flex-wrap items-center justify-end gap-2">
             {mode === 'hr' ? (
               <Button
@@ -1153,6 +1186,12 @@ export function StaffOnboardingPage({
                 type="button"
                 variant="primary"
                 loading={isSubmitting}
+                disabled={missingRequiredFields.length > 0}
+                title={
+                  missingRequiredFields.length > 0
+                    ? `Complete and save: ${missingRequiredFields.join(', ')}`
+                    : undefined
+                }
                 onClick={() => setConfirmSubmit(true)}
               >
                 Submit for HR review

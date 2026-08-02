@@ -96,7 +96,6 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
           <span className="text-xs text-app-fg-muted">
             {[
               null,
-              row.perProductBonus ? 'Per-product bonus' : null,
               row.commissionPlanId ? 'Formula linked' : 'No formula',
             ]
               .filter(Boolean)
@@ -301,7 +300,6 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
               </div>
               <p className="text-xs text-app-fg-muted">
                 {row.commissionPlanId ? 'Formula linked' : 'No formula'}
-                {row.perProductBonus ? ' · Per-product bonus' : ''}
                 {' · '}
                 <span className={`tabular-nums ${(row.staffCount ?? 0) > 0 ? 'font-medium text-app-fg' : ''}`}>
                   {row.staffCount ?? 0}

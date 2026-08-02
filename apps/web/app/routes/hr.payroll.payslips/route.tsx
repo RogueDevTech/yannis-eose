@@ -1,4 +1,4 @@
-import { defer, redirect } from '@remix-run/node';
+import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
@@ -66,6 +66,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const fromMonth = periodAllTime ? '' : (periodMonthFromYmd(startDate) ?? '');
   const toMonth = periodAllTime ? '' : (periodMonthFromYmd(endDate) ?? '');
 
+  // Bulk-export mode: return ALL payslips matching the current filters (not just
+  // one page) as JSON so the client can build + zip the PDFs. Powers the
+  // "Download all" button on PayrollPayslipsPage (department/branch export).
+  if (url.searchParams.get('export') === '1') {
+    const input: Record<string, unknown> = { page: 1, limit: 1000 };
+    if (department) input.department = department;
+    if (branchId) input.branchId = branchId;
+    if (fromMonth) input.fromMonth = fromMonth;
+    if (toMonth) input.toMonth = toMonth;
+    if (search) input.search = search;
+
+    const res = await apiRequest<unknown>(
+      `/trpc/hr.listPayslips?input=${encodeURIComponent(JSON.stringify(input))}`,
+      { method: 'GET', cookie },
+    );
+    const payload = res.ok
+      ? (res.data as { result?: { data?: { items: PayslipListItem[]; total: number } } })?.result?.data
+      : null;
+    return json({ items: payload?.items ?? [], total: payload?.total ?? 0 });
+  }
+
   const pageData = (async () => {
     const input: Record<string, unknown> = { page, limit: PAGE_SIZE };
     if (department) input.department = department;
@@ -108,7 +129,11 @@ export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
 export default function PayrollPayslipsRoute() {
-  const { pageData } = useLoaderData<typeof loader>();
+  // The `export=1` branch returns JSON and never renders (it's fetched raw), so
+  // the component path always has `pageData`.
+  const data = useLoaderData<typeof loader>();
+  if (!('pageData' in data)) return null;
+  const { pageData } = data;
   return (
     <CachedAwait resolve={pageData} fallback={<PayrollPayslipsLoadingShell />} loaderShell={{}} deferredKey="pageData">
       {(data) => (

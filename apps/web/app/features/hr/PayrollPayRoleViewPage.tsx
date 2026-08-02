@@ -260,10 +260,6 @@ export function PayrollPayRoleViewPage({
             </dd>
           </div>
           <div className="flex justify-between gap-3 sm:block sm:space-y-0.5">
-            <dt className="text-app-fg-muted">Per-product bonus</dt>
-            <dd className="text-app-fg font-medium">{payRole.perProductBonus ? 'Yes' : 'No'}</dd>
-          </div>
-          <div className="flex justify-between gap-3 sm:block sm:space-y-0.5">
             <dt className="text-app-fg-muted">Tax</dt>
             <dd className="text-app-fg font-medium">
               {payRole.defaultTaxStatus === 'GROSS_NO_DEDUCTION'
@@ -362,7 +358,7 @@ export function PayrollPayRoleViewPage({
         )}
       </div>
 
-      <PayrollFormulaRulesExplanation formula={formula} perProductBonus={payRole.perProductBonus} />
+      <PayrollFormulaRulesExplanation formula={formula} />
 
       {showArchive && (
         <ConfirmActionModal

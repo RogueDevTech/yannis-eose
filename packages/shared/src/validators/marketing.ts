@@ -45,6 +45,11 @@ export const listFundingSchema = z.object({
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
   search: z.string().trim().max(200).optional(),
+  /** Exclude rows that are peer transfers (backed by an mb_fund_transfers row).
+   * The Finance Disbursements page sets this: disbursements there are Finance→HoM
+   * only, so MB↔MB / MB→HoM peer transfers must not appear even when the receiver
+   * is a Head of Marketing. Peer transfers still show on the Marketing Funding page. */
+  excludePeerTransfers: z.boolean().optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(1000).default(20),
 });
