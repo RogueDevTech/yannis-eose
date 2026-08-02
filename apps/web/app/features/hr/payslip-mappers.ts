@@ -17,6 +17,7 @@ export type PayslipApiRow = {
     totalPayout?: string | number | null;
     payRoleName?: string | null;
     bonusBreakdown?: unknown;
+    metricsSnapshot?: unknown;
     createdAt?: string | null;
   };
   batch: {
@@ -67,6 +68,14 @@ function parseBonusLines(breakdown: unknown): Array<{ label: string; amount: num
     .filter((x): x is { label: string; amount: number } => x != null);
 }
 
+/** Extract the "N of M days worked" note from a payout's metrics snapshot. */
+function resolveProrationNote(metricsSnapshot: unknown): string | undefined {
+  if (!metricsSnapshot || typeof metricsSnapshot !== 'object') return undefined;
+  const p = (metricsSnapshot as { proration?: { activeDays?: number; periodDays?: number } }).proration;
+  if (!p || !p.periodDays || p.activeDays == null || p.activeDays >= p.periodDays) return undefined;
+  return `Prorated: ${p.activeDays} of ${p.periodDays} days worked`;
+}
+
 /** Map API payslip / listPayslips row into PDF + preview input. */
 export function toPayslipPdfInput(row: PayslipApiRow): PayslipPdfInput {
   const periodLabel = formatPeriod(row.batch.periodMonth);
@@ -95,6 +104,7 @@ export function toPayslipPdfInput(row: PayslipApiRow): PayslipPdfInput {
     // Cash to bank (after clawbacks); falls back to netPay when totalPayout unset.
     netPay: Number(row.payout.totalPayout ?? row.payout.netPay),
     bonusLines: parseBonusLines(row.payout.bonusBreakdown),
+    prorationNote: resolveProrationNote(row.payout.metricsSnapshot),
   };
 }
 

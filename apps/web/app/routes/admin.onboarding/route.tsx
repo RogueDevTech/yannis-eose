@@ -8,6 +8,7 @@ import {
   StaffOnboardingPage,
   type OnboardingRecord,
 } from '~/features/onboarding/StaffOnboardingPage';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 
 export const meta: MetaFunction = () => [{ title: 'Your Onboarding — Yannis EOSE' }];
 
@@ -30,10 +31,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   // Include the user's role so StaffOnboardingPage can pick the right reviewer copy
   // (HR / Admin / SuperAdmin onboardings are reviewed by SuperAdmin, not HR).
+  // Whether this user may approve their OWN onboarding (SoD exception). Mirrors
+  // the backend gate in onboarding.service.canApproveOwnOnboarding.
+  const perms = ((user as { permissions?: string[] }).permissions ?? []).map((p) =>
+    canonicalPermissionCode(p),
+  );
+  const canApproveSelf =
+    user.role === 'SUPER_ADMIN' || perms.includes(canonicalPermissionCode('hr.onboarding.approveSelf'));
+
   return {
     record,
     subject: { id: user.id, name: user.name, role: user.role },
     isMirroring: !!user.mirroredBy,
+    canApproveSelf,
   };
 }
 
@@ -147,7 +157,7 @@ function emptyToNull(v: FormDataEntryValue | null): string | null {
 }
 
 export default function AdminSelfOnboardingRoute() {
-  const { record, subject, isMirroring } = useLoaderData<typeof loader>();
+  const { record, subject, isMirroring, canApproveSelf } = useLoaderData<typeof loader>();
   return (
     <StaffOnboardingPage
       mode="self"
@@ -155,6 +165,7 @@ export default function AdminSelfOnboardingRoute() {
       record={record as OnboardingRecord}
       actionUrl="/admin/onboarding"
       isMirroring={isMirroring}
+      canApproveSelf={canApproveSelf}
     />
   );
 }
