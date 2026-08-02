@@ -20,6 +20,20 @@ export interface TabsProps {
   className?: string;
 }
 
+/** Render a tab badge. A raw number is wrapped in a count chip so it never fuses
+ * to the label (e.g. "Recipient balances58"); any ReactNode badge is passed through. */
+function renderBadge(badge: ReactNode): ReactNode {
+  if (badge === undefined || badge === null || badge === false) return null;
+  if (typeof badge === 'number') {
+    return (
+      <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-app-hover px-1.5 text-micro font-semibold tabular-nums text-app-fg-muted">
+        {badge}
+      </span>
+    );
+  }
+  return badge;
+}
+
 export function Tabs({ value, onChange, tabs, variant = 'underline', size = 'md', className = '' }: TabsProps) {
   if (tabs.length <= 1) {
     return null;
@@ -35,7 +49,7 @@ export function Tabs({ value, onChange, tabs, variant = 'underline', size = 'md'
               const content = (
                 <>
                   {tab.label}
-                  {tab.badge}
+                  {renderBadge(tab.badge)}
                 </>
               );
               return tab.to ? (
@@ -89,7 +103,7 @@ export function Tabs({ value, onChange, tabs, variant = 'underline', size = 'md'
           const content = (
             <>
               {tab.label}
-              {tab.badge}
+              {renderBadge(tab.badge)}
             </>
           );
           return (
