@@ -1135,6 +1135,18 @@ export class MarketingService {
     if (input.endDate) {
       conditions.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(input.endDate)));
     }
+    if (input.excludePeerTransfers) {
+      // Peer transfers write a marketing_funding ledger row referenced by
+      // mb_fund_transfers.ledger_entry_id. The Finance Disbursements page
+      // (Finance→HoM only) excludes these; they remain visible on the Marketing
+      // Funding page, which shows HoM→MB disbursements and peer transfers.
+      conditions.push(
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${schema.mbFundTransfers} mft
+          WHERE mft.ledger_entry_id = ${schema.marketingFunding.id}
+        )`,
+      );
+    }
     // Branch-scope: restrict to transfers where at least one party (sender or receiver)
     // is a member of the active branch. This prevents HoM from seeing cross-branch funding.
     const branchUserIdsForFunding = await this.getBranchUserIds(branchId, effectiveBranchIds);
@@ -1398,7 +1410,7 @@ export class MarketingService {
 
   async getFundingSummary(
     branchId?: string | null,
-    opts?: { restrictToReceiverIds?: string[]; restrictToReceiverRole?: string; startDate?: string; endDate?: string },
+    opts?: { restrictToReceiverIds?: string[]; restrictToReceiverRole?: string; startDate?: string; endDate?: string; excludePeerTransfers?: boolean },
     effectiveBranchIds?: string[] | null,
   ) {
     const emptyFundingSummary = {
@@ -1444,6 +1456,15 @@ export class MarketingService {
     }
     if (opts?.endDate) {
       dateConditions.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(opts.endDate)));
+    }
+    if (opts?.excludePeerTransfers) {
+      // Match listFunding: keep peer transfers off the Finance Disbursements strip.
+      dateConditions.push(
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${schema.mbFundTransfers} mft
+          WHERE mft.ledger_entry_id = ${schema.marketingFunding.id}
+        )`,
+      );
     }
 
     const rows = await this.db

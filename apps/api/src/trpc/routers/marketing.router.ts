@@ -1715,6 +1715,10 @@ export const marketingRouter = router({
         page: input.page,
         limit: input.limit,
         receiverRole: 'HEAD_OF_MARKETING' as const,
+        // Finance Disbursements = Finance→HoM only. Peer transfers (MB↔MB, MB→HoM)
+        // write a marketing_funding row too, but they belong on the Marketing Funding
+        // page, not here — exclude them even when the receiver is a Head of Marketing.
+        excludePeerTransfers: true,
         ...(input.startDate && { startDate: input.startDate }),
         ...(input.endDate && { endDate: input.endDate }),
         ...(input.status && { status: input.status }),
@@ -1765,6 +1769,7 @@ export const marketingRouter = router({
           getMarketingService().listFunding(listFundingInput, branchId, ctx.effectiveBranchIds),
           getMarketingService().getFundingSummary(branchId, {
             restrictToReceiverIds: homUserIds,
+            excludePeerTransfers: true,
             ...(input.startDate && { startDate: input.startDate }),
             ...(input.endDate && { endDate: input.endDate }),
           }, ctx.effectiveBranchIds),
