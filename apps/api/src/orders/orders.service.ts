@@ -7609,6 +7609,65 @@ export class OrdersService {
     return { delivered, remitted };
   }
 
+  /**
+   * Revenue per order-source bucket for the CEO dashboard "with revenue" toggle.
+   *
+   * Mirrors {@link getDeliveredBySource} EXACTLY (same status set, same createdAt
+   * date basis, same servicing-branch scope, same source CASE) so the per-source
+   * revenue reconciles with the per-source COUNTS shown in the dashboard's
+   * Delivered / Remitted breakdown modals. Do not change the WHERE/CASE here
+   * without changing it there — the two must stay in lockstep.
+   *
+   * Two figures per bucket:
+   *   - gross = SUM(total_amount)                    → ties to Gross Order Value
+   *   - net   = SUM(total_amount - delivery_fee)     → ties to Remitted (net of delivery fee)
+   *
+   * Additive and read-only. NOT wired into ROAS — ROAS keeps its own basis.
+   */
+  async getRevenueBySource(
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<{
+    delivered: Record<string, { gross: number; net: number }>;
+    remitted: Record<string, { gross: number; net: number }>;
+  }> {
+    const conditions: SQL[] = [
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+      isNull(schema.orders.deletedAt),
+    ];
+    if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+
+    const sourceCase = sql<string>`CASE
+      WHEN ${schema.orders.orderSource} = 'delivered_follow_up' THEN 'delivered_follow_up'
+      WHEN ${schema.orders.orderSource} = 'graduated_follow_up' OR ${schema.orders.isFollowUp} = true THEN 'follow-up'
+      ELSE COALESCE(${schema.orders.orderSource}, 'edge-form')
+    END`;
+
+    const rows = await this.db
+      .select({
+        source: sourceCase,
+        status: schema.orders.status,
+        gross: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        net: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+      })
+      .from(schema.orders)
+      .where(and(...conditions))
+      .groupBy(sourceCase, schema.orders.status);
+
+    const delivered: Record<string, { gross: number; net: number }> = {};
+    const remitted: Record<string, { gross: number; net: number }> = {};
+    for (const row of rows) {
+      const target = row.status === 'DELIVERED' ? delivered : remitted;
+      target[row.source] = { gross: Number(row.gross), net: Number(row.net) };
+    }
+    return { delivered, remitted };
+  }
+
   async getDeliveriesByProduct(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<
     Array<{
       productId: string;

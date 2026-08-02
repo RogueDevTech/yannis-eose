@@ -470,6 +470,33 @@ export const dashboardRouter = router({
     }),
 
   /**
+   * Revenue per order-source bucket — powers the dashboard "with revenue" toggle
+   * on the Delivered / Remitted breakdown. Lazy: only called when the toggle is on,
+   * so the default dashboard load is unaffected. Same scope/permission as ceoOverview.
+   *
+   * Mirrors `getDeliveredBySource` exactly, so per-source revenue reconciles with the
+   * per-source counts already shown in those breakdowns. Not part of ROAS.
+   */
+  revenueBySource: permissionProcedure('ceo.overview')
+    .input(
+      z.object({
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }).optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      if (!ordersService) {
+        throw new Error('Dashboard services not initialized');
+      }
+      return ordersService.getRevenueBySource(
+        input?.startDate,
+        input?.endDate,
+        ctx.currentBranchId,
+        ctx.effectiveBranchIds,
+      );
+    }),
+
+  /**
    * Order pipeline chart — Volume, Unconfirmed, Confirmed, Logistics distributed, Delivered.
    * For the CEO Executive Overview order funnel/bar chart. SuperAdmin only.
    */
