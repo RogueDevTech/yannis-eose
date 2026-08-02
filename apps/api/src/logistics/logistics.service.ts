@@ -5101,6 +5101,91 @@ export class LogisticsService implements OnModuleInit {
       };
     });
 
+    // ── Unallocated bucket: delivered orders that never got a logistics location ──
+    // Offline / front-end / direct-deliver orders (and any that skipped the
+    // AGENT_ASSIGNED allocation) carry NO logistics_location_id, so they are absent
+    // from the provider join above — which made the dashboard's delivered totals and
+    // delivery rate read low. Surface them as a synthetic "Unallocated" provider so
+    // managers see the complete delivered picture. (Fixes item #6.)
+    const unallocConditions: SQL[] = [isNull(schema.orders.logisticsLocationId)];
+    if (effectiveStart) unallocConditions.push(sql`${logisticsDateCol} >= ${effectiveStart.toISOString()}::timestamptz`);
+    if (effectiveEnd) unallocConditions.push(sql`${logisticsDateCol} <= ${effectiveEnd.toISOString()}::timestamptz`);
+    const bCondUnalloc = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCondUnalloc) unallocConditions.push(bCondUnalloc);
+    // Only count real fulfilment states; ignore early-funnel + deleted rows so the
+    // bucket reflects deliveries, not the whole order table.
+    unallocConditions.push(isNull(schema.orders.deletedAt));
+    unallocConditions.push(
+      inArray(schema.orders.status, [
+        'DELIVERED',
+        'REMITTED',
+        'PARTIALLY_DELIVERED',
+        'RETURNED',
+        'WRITTEN_OFF',
+        'IN_TRANSIT',
+        'DISPATCHED',
+      ]),
+    );
+
+    const unallocRows = await this.db
+      .select({ status: schema.orders.status, count: count() })
+      .from(schema.orders)
+      .where(and(...unallocConditions))
+      .groupBy(schema.orders.status);
+
+    const unallocCounts = new Map<string, number>();
+    for (const r of unallocRows) unallocCounts.set(r.status, Number(r.count) || 0);
+    const uGet = (s: string) => unallocCounts.get(s) ?? 0;
+    const uDelivered = uGet('DELIVERED');
+    const uCompleted = uGet('REMITTED');
+    const uPartial = uGet('PARTIALLY_DELIVERED');
+    const uReturned = uGet('RETURNED');
+    const uWrittenOff = uGet('WRITTEN_OFF');
+    const uInTransit = uGet('IN_TRANSIT');
+    const uDispatched = uGet('DISPATCHED');
+    const uTotalAssigned =
+      uDelivered + uCompleted + uPartial + uReturned + uWrittenOff + uInTransit + uDispatched;
+
+    const unallocatedRow =
+      uTotalAssigned > 0
+        ? {
+            providerId: 'unallocated',
+            providerName: 'Unallocated (offline / direct)',
+            contactInfo: '',
+            coverageArea: '',
+            status: 'ACTIVE' as const,
+            locationCount: 0,
+            totalAssigned: uTotalAssigned,
+            delivered: uDelivered + uCompleted,
+            partiallyDelivered: uPartial,
+            returned: uReturned,
+            writtenOff: uWrittenOff,
+            cancelled: 0,
+            inTransit: uInTransit,
+            dispatched: uDispatched,
+            allocated: 0,
+            deliveryRate: uTotalAssigned > 0 ? ((uDelivered + uCompleted) / uTotalAssigned) * 100 : 0,
+            delinquencyRate:
+              uTotalAssigned > 0 ? ((uReturned + uPartial + uWrittenOff) / uTotalAssigned) * 100 : 0,
+            statusBreakdown: [] as { status: string; count: number; pct: number }[],
+            remittedAmount: '0',
+            remittedOrderCount: 0,
+            pendingRemittanceAmount: '0',
+            disputedRemittanceAmount: '0',
+            owingAmount: '0',
+            owingCount: 0,
+            unitsDelivered: 0,
+            availableStock: 0,
+            reservedStock: 0,
+            stockReceived: 0,
+            stockSold: 0,
+            stockTransferredOut: 0,
+            stockAdjusted: 0,
+            stockWrittenOff: 0,
+            stockDispatched: 0,
+          }
+        : null;
+
     // When group-scoped (and not exporting all), hide providers with zero ORDER
     // activity in the selected group. Stock alone should not cause a provider from
     // another company group to appear — stock is location-level, not branch-scoped.
@@ -5114,6 +5199,10 @@ export class LogisticsService implements OnModuleInit {
       if (b.deliveryRate !== a.deliveryRate) return b.deliveryRate - a.deliveryRate;
       return b.totalAssigned - a.totalAssigned;
     });
+
+    // Append the offline/unallocated bucket at the end so it never displaces a
+    // real 3PL in the ranking but is still visible in totals.
+    if (unallocatedRow) filtered.push(unallocatedRow);
 
     return filtered;
   }

@@ -171,6 +171,37 @@ export const importOrderSchema = z.object({
 export type ImportOrderInput = z.infer<typeof importOrderSchema>;
 
 /**
+ * Import of an OFFLINE contractor delivery record. Contractors / delivery
+ * managers who are not CRM users have no order pipeline, so their delivered
+ * volumes never reach payroll or the logistics dashboard. This creates a
+ * DELIVERED offline order attributed to a logistics provider/location (so it
+ * shows up on the logistics performance dashboard) with the contractor's name
+ * captured for the record. One row = one delivered order.
+ */
+export const importContractorDeliverySchema = z.object({
+  /** Name of the contractor / delivery manager credited with the delivery. */
+  contractorName: z.string().min(2, 'Contractor name is required').max(200),
+  customerName: z.string().min(2, 'Customer name is required').max(200),
+  customerPhone: z.string().min(1, 'Customer phone is required').max(50),
+  deliveryAddress: z.string().optional(),
+  deliveryState: z.string().max(100).optional(),
+  items: z.array(orderItemSchema).min(1, 'At least one item is required'),
+  totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
+  /** Delivered date (ISO / YYYY-MM-DD) — preserves the real delivery date. */
+  deliveredAtOverride: z.string().optional(),
+  /** Branch the delivery belongs to (servicing + marketing). */
+  branchId: z.string().uuid(),
+  /** Logistics provider (3PL company) credited — makes it appear on the dashboard. */
+  logisticsProviderId: z.string().uuid().optional(),
+  /** Logistics location — the canonical link the dashboard groups by. */
+  logisticsLocationId: z.string().uuid().optional(),
+  /** Whether this delivery has already been remitted (else stays DELIVERED). */
+  remitted: z.boolean().optional(),
+});
+
+export type ImportContractorDeliveryInput = z.infer<typeof importContractorDeliverySchema>;
+
+/**
  * Transition order — move order to a new status.
  * Metadata varies by transition (e.g. cancel reason, delivery qty).
  */

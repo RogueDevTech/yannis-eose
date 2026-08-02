@@ -144,6 +144,12 @@ interface PayoutRow {
   bonusBreakdown?: unknown;
   lineStatus?: 'OK' | 'NEEDS_ATTENTION' | 'MANUALLY_OVERRIDDEN';
   payRoleName?: string | null;
+  proration?: {
+    activeDays: number;
+    periodDays: number;
+    fraction: number;
+    reason: string;
+  } | null;
 }
 
 /** Legacy rows may have total_payout populated while gross/net defaulted to 0. */
@@ -511,14 +517,24 @@ export class PayrollBatchService {
         (opts.scopeBranchIds?.length ? opts.scopeBranchIds : [branchId]).filter(Boolean),
       ),
     ];
+    // Include ACTIVE staff, plus mid-period leavers (now INACTIVE) whose exit
+    // date falls inside this period — they're owed a final prorated payout.
+    const periodEndYmd = periodEnd.toISOString().slice(0, 10);
+    const periodStartYmd = periodStart.toISOString().slice(0, 10);
     let staff = await tx
       .select()
       .from(schema.users)
       .where(
         and(
-          eq(schema.users.status, 'ACTIVE'),
           inArray(schema.users.primaryBranchId, staffBranchIds),
           inArray(schema.users.role, departmentRoles as unknown as typeof schema.users.$inferSelect['role'][]),
+          or(
+            eq(schema.users.status, 'ACTIVE'),
+            and(
+              gte(schema.users.exitDate, periodStartYmd),
+              lte(schema.users.exitDate, periodEndYmd),
+            ),
+          ),
         ),
       );
 
@@ -526,6 +542,9 @@ export class PayrollBatchService {
       const allowed = new Set(opts.scopeEmployeeIds);
       staff = staff.filter((s) => allowed.has(s.id));
     }
+
+    // Drop staff who joined after the period ended (no active days → no pay).
+    staff = staff.filter((s) => !s.dateOfJoining || s.dateOfJoining <= periodEndYmd);
 
     const generatedPayouts: PayoutRow[] = [];
 
@@ -551,7 +570,13 @@ export class PayrollBatchService {
           payeTax: sql`${(computed.payeTax ?? 0).toFixed(2)}::numeric`,
           employerPayeSubsidy: sql`${(computed.employerPayeSubsidy ?? 0).toFixed(2)}::numeric`,
           netPay: sql`${(computed.netPay ?? computed.totalPayout).toFixed(2)}::numeric`,
-          metricsSnapshot: computed.metricsSnapshot ?? null,
+          // Fold proration detail into the metrics snapshot jsonb (no schema
+          // change) so payslips can show "N of M days worked" for partial months.
+          metricsSnapshot: computed.metricsSnapshot
+            ? { ...computed.metricsSnapshot, proration: computed.proration ?? null }
+            : computed.proration
+              ? { proration: computed.proration }
+              : null,
           bonusBreakdown: computed.bonusBreakdown ?? null,
           lineStatus: computed.lineStatus ?? 'OK',
           payRoleName: computed.payRoleName ?? null,
@@ -721,14 +746,27 @@ export class PayrollBatchService {
           flatMonthlyAmount: schema.users.flatMonthlyAmount,
           onboardingPayrollStatus: schema.users.onboardingPayrollStatus,
           annualRent: schema.users.annualRent,
+          dateOfJoining: schema.users.dateOfJoining,
+          exitDate: schema.users.exitDate,
         })
         .from(schema.users)
         .where(
           and(
-            eq(schema.users.status, 'ACTIVE'),
             inArray(schema.users.primaryBranchId, scopeBranchIds),
             inArray(schema.users.role, departmentRoles as unknown as typeof schema.users.$inferSelect['role'][]),
+            // Match generation: ACTIVE staff + mid-period leavers owed final pay.
+            or(
+              eq(schema.users.status, 'ACTIVE'),
+              and(
+                gte(schema.users.exitDate, periodStart.toISOString().slice(0, 10)),
+                lte(schema.users.exitDate, periodEnd.toISOString().slice(0, 10)),
+              ),
+            ),
           ),
+        )
+        .then((rows) =>
+          // Drop staff who joined after the period ended (no active days).
+          rows.filter((s) => !s.dateOfJoining || s.dateOfJoining <= periodEnd.toISOString().slice(0, 10)),
         );
 
       const rows = [] as Array<{
@@ -779,6 +817,8 @@ export class PayrollBatchService {
       onboardingPayrollStatus?: string | null;
       flatMonthlyAmount?: string | number | null;
       annualRent?: string | number | null;
+      dateOfJoining?: string | Date | null;
+      exitDate?: string | Date | null;
     },
     periodStart: Date,
     periodEnd: Date,
@@ -849,6 +889,7 @@ export class PayrollBatchService {
       bonusBreakdown: computed.bonusBreakdown,
       lineStatus: computed.lineStatus,
       payRoleName: computed.payRoleName,
+      proration: computed.proration ?? null,
     };
   }
 

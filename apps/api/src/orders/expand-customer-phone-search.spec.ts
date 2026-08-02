@@ -19,4 +19,12 @@ describe('expandCustomerPhoneSearchDigitRuns', () => {
       ['08031234567', '2348031234567', '8031234567'].sort(),
     );
   });
+
+  it('expands a stored 0-prefixed phone so global search matches it (regression: 08127768540)', () => {
+    // A 0-prefixed 11-digit phone typed into global search must yield an ILIKE
+    // run that matches the value stored in customer_phone (`08127768540`).
+    const runs = expandCustomerPhoneSearchDigitRuns('08127768540');
+    expect(runs).toContain('08127768540');
+    expect(runs).toContain('2348127768540');
+  });
 });

@@ -11,6 +11,7 @@ import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isTransitionAllowed } from '../orders/order-state-machine';
+import { expandCustomerPhoneSearchDigitRuns } from '../orders/orders.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
 // Raw SQL pull/backfill calls PostgreSQL uuidv7().
@@ -182,6 +183,7 @@ export class CartOrdersService {
     /** The logged-in closer's ID — enables (branch OR assigned=me) expansion
      *  ONLY when the closer is viewing their own queue. */
     viewerCloserId?: string | null,
+    listOpts?: { searchIncludeCustomerPhone?: boolean },
   ) {
     const conditions: Parameters<typeof and>[0][] = input.showDeleted
       ? [sql`${schema.cartOrders.deletedAt} IS NOT NULL`]
@@ -196,16 +198,31 @@ export class CartOrdersService {
     if (input.search) {
       const trimmed = input.search.trim();
       if (trimmed.length > 0) {
+        // Phone-number matching is Pillar-2 gated — only enabled when the caller
+        // has orders-view capability (mirrors OrdersService.list).
+        const digitRun = trimmed.replace(/\D/g, '');
+        const phoneOr =
+          listOpts?.searchIncludeCustomerPhone === true && digitRun.length >= 7 && digitRun.length <= 24
+            ? (() => {
+                const parts = expandCustomerPhoneSearchDigitRuns(digitRun).map((r) =>
+                  ilike(schema.cartOrders.customerPhone, `%${r}%`),
+                );
+                return parts.length > 1 ? or(...parts) : parts[0];
+              })()
+            : undefined;
         const orderNumMatch = trimmed.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
         const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
         if (!Number.isNaN(parsedOrderNum) && parsedOrderNum > 0) {
           const combined = or(
             eq(schema.cartOrders.orderNumber, parsedOrderNum),
             ilike(schema.cartOrders.customerName, `%${trimmed}%`),
+            ...(phoneOr ? [phoneOr] : []),
           );
           if (combined) conditions.push(combined);
         } else {
-          conditions.push(ilike(schema.cartOrders.customerName, `%${trimmed}%`));
+          const nameMatch = ilike(schema.cartOrders.customerName, `%${trimmed}%`);
+          const combined = phoneOr ? or(nameMatch, phoneOr) : nameMatch;
+          if (combined) conditions.push(combined);
         }
       }
     }

@@ -76,6 +76,16 @@ export class OnboardingService {
   }
 
   /**
+   * Whether the actor may approve their OWN onboarding. This is a deliberate
+   * separation-of-duties exception gated on a dedicated permission, so it must
+   * be granted explicitly (HR_MANAGER holds it by default). SuperAdmin always
+   * may, since they can self-approve anything.
+   */
+  private canApproveOwnOnboarding(actor: SessionUser): boolean {
+    return actor.role === 'SUPER_ADMIN' || this.actorHasPermission(actor, 'hr.onboarding.approveSelf');
+  }
+
+  /**
    * Read the onboarding row for a target user. Self-read is always allowed;
    * cross-user read requires `hr.onboarding.read` or admin-class. If no row
    * exists yet, returns a synthetic NOT_STARTED placeholder so the UI can
@@ -481,7 +491,7 @@ export class OnboardingService {
         message: 'Only HR or an admin can approve onboarding records.',
       });
     }
-    if (targetUserId === actor.id) {
+    if (targetUserId === actor.id && !this.canApproveOwnOnboarding(actor)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'You cannot approve your own onboarding.',

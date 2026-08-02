@@ -109,6 +109,8 @@ export interface PayslipPdfInput {
   bonusLines?: Array<{ label: string; amount: number }>;
   /** Period month ISO date used for the "Period:" line. */
   periodMonth?: string;
+  /** Partial-month note, e.g. "Prorated: 15 of 31 days worked". Shown under base salary. */
+  prorationNote?: string;
 }
 
 export function formatPayslipDate(iso: string): string {
@@ -134,7 +136,12 @@ export function buildPayslipLines(input: PayslipPdfInput): {
   earningLines: PayslipPdfLine[];
   deductionLines: PayslipPdfLine[];
 } {
-  const earningLines: PayslipPdfLine[] = [{ label: 'Base salary', amount: input.baseSalary }];
+  const earningLines: PayslipPdfLine[] = [
+    {
+      label: input.prorationNote ? `Base salary (${input.prorationNote})` : 'Base salary',
+      amount: input.baseSalary,
+    },
+  ];
   if (input.performanceBonus > 0) {
     earningLines.push({ label: 'Performance bonus', amount: input.performanceBonus });
   }

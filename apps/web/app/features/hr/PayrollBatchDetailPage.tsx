@@ -271,6 +271,12 @@ function PayoutDetailModal({
   onClose: () => void;
 }) {
   const bonusLines = parseBonusLines(payout.bonusBreakdown);
+  const proration = (() => {
+    const snap = payout.metricsSnapshot as { proration?: { activeDays: number; periodDays: number } } | null;
+    const p = snap?.proration;
+    if (!p || !p.periodDays || p.activeDays >= p.periodDays) return null;
+    return p;
+  })();
   const hasBank =
     !!payout.payoutBankName ||
     !!payout.payoutBankCode ||
@@ -293,6 +299,18 @@ function PayoutDetailModal({
 
   const payItems: DescriptionItem[] = [
     { label: 'Base salary', value: <NairaPrice amount={Number(payout.baseSalary)} /> },
+    ...(proration
+      ? [
+          {
+            label: 'Prorated',
+            value: (
+              <span className="text-warning-700 dark:text-warning-300">
+                {proration.activeDays} of {proration.periodDays} days worked
+              </span>
+            ),
+          } as DescriptionItem,
+        ]
+      : []),
     { label: 'Performance bonus', value: moneyOrDash(Number(payout.performanceBonus)) },
     { label: 'Allowances', value: moneyOrDash(Number(payout.allowancesTotal ?? 0)) },
     { label: 'Add-ons', value: moneyOrDash(Number(payout.addOnsTotal)) },

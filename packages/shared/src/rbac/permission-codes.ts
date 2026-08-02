@@ -94,6 +94,9 @@ export const LEGACY_PERMISSION_CODE_MAP: Record<string, string> = {
   'hr.onboarding.read': 'hr.onboarding.read',
   'hr.onboarding.write': 'hr.onboarding.write',
   'hr.onboarding.approve': 'hr.onboarding.approve',
+  // Allows an approver to approve THEIR OWN onboarding (separation-of-duties
+  // exception). Granted deliberately per role policy, not by default.
+  'hr.onboarding.approveSelf': 'hr.onboarding.approveSelf',
   // Accounting split from Finance: the GL/double-entry trio moved to its own
   // `accounting.*` namespace. Old grants resolve forward automatically.
   'finance.ledger.read': 'accounting.read',
