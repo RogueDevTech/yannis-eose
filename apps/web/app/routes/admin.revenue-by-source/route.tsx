@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, defaultThisMonthRange } from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
 
 /** Per-source revenue for the dashboard "with revenue" toggle. Lazy resource route:
  *  fetched only when the toggle is switched on, so the default dashboard load is
@@ -15,8 +16,11 @@ export type RevenueBySourcePayload = {
 const EMPTY: RevenueBySourcePayload = { delivered: {}, remitted: {} };
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  // Admin-class gate mirrors the CEO dashboard: SUPER_ADMIN / ADMIN / SUPPORT.
+  // Use isAdminLevel (not raw role checks) so SUPPORT isn't locked out. The tRPC
+  // procedure's permissionProcedure('ceo.overview') remains the real authority.
   const user = await getCurrentUser(request);
-  if (!user || (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN')) {
+  if (!isAdminLevel(user)) {
     return json({ ...EMPTY, error: 'Forbidden' } satisfies RevenueBySourcePayload, { status: 403 });
   }
 

@@ -1,11 +1,13 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, defaultThisMonthRange } from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
 import type { ChartDataPayload } from '~/features/ceo/types';
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  // Use isAdminLevel so SUPPORT (admin-class) isn't locked out; never raw role checks.
   const user = await getCurrentUser(request);
-  if (!user || (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN')) {
+  if (!isAdminLevel(user)) {
     return json({ error: 'Forbidden' } satisfies ChartDataPayload, { status: 403 });
   }
 
