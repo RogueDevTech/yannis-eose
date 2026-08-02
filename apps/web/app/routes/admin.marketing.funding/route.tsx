@@ -120,9 +120,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     peerDirectionParam === 'pending_approval' ||
     peerDirectionParam === 'all'
       ? peerDirectionParam
-      : isFundingAdmin
-        ? 'pending_approval'
-        : 'all';
+      : 'all';
   const peerPageLimit = 20;
 
   // ── Single bundled call — replaces 14 parallel HTTP round-trips ────

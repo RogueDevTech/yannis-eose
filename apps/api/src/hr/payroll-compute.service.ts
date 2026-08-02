@@ -5,11 +5,13 @@ import {
   db as schema,
   computePaye,
   computePayrollFormula,
+  computeProration,
   defaultPayeBandConfig,
   resolveFormulaFromRules,
   type PayeBandConfig,
   type PayrollFormula,
   type PayrollMetrics,
+  type ProrationResult,
 } from '@yannis/shared';
 import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
 import { PayrollMetricsService } from './payroll-metrics.service';
@@ -31,6 +33,13 @@ export interface ComputedPayslipLine {
   bonusBreakdown: Array<{ label: string; amount: number; productId?: string; productName?: string }>;
   lineStatus: 'OK' | 'NEEDS_ATTENTION' | 'MANUALLY_OVERRIDDEN';
   payRoleName: string | null;
+  /** Active-days proration applied to fixed pay (base + allowances). null when full month. */
+  proration?: {
+    activeDays: number;
+    periodDays: number;
+    fraction: number;
+    reason: ProrationResult['reason'];
+  } | null;
 }
 
 @Injectable()
@@ -52,6 +61,10 @@ export class PayrollComputeService {
       flatMonthlyAmount?: string | number | null;
       /** Declared annual rent (₦) — drives the PAYE rent relief. Null → no relief. */
       annualRent?: string | number | null;
+      /** Employment start — prorates fixed pay for mid-month joiners. */
+      dateOfJoining?: string | Date | null;
+      /** Exit date (last active day) — prorates fixed pay for mid-month leavers. */
+      exitDate?: string | Date | null;
     },
     periodStart: Date,
     periodEnd: Date,
@@ -109,8 +122,18 @@ export class PayrollComputeService {
 
     const annualRent = member.annualRent != null ? Number(member.annualRent) : 0;
 
+    // Active-days proration for mid-month joiners/leavers. Scales the FIXED pay
+    // (base salary + allowances) only; performance bonus and return penalties
+    // reflect actual work in the window and are never prorated.
+    const proration = computeProration({
+      periodStart,
+      periodEnd,
+      dateOfJoining: member.dateOfJoining ?? null,
+      exitDate: member.exitDate ?? null,
+    });
+
     if (useFlatRate) {
-      return this.buildFlatLine(Number(member.flatMonthlyAmount), metrics, member.taxStatus ?? 'STANDARD_PAYE', tx, groupId, annualRent);
+      return this.buildFlatLine(Number(member.flatMonthlyAmount), metrics, member.taxStatus ?? 'STANDARD_PAYE', tx, groupId, annualRent, proration);
     }
 
     const plan = await this.resolvePlanForMember(tx, member, periodStart, periodEnd);
@@ -140,7 +163,12 @@ export class PayrollComputeService {
       }
     }
 
-    const grossBeforeAdj = formulaResult.grossBeforeAdjustments;
+    // Prorate fixed pay by active-days fraction; bonus/penalty stay as-earned.
+    const proratedBase = formulaResult.baseSalary * proration.fraction;
+    const proratedAllowances = formulaResult.allowancesTotal * proration.fraction;
+    const grossBeforeAdj =
+      proratedBase + formulaResult.performanceBonus + proratedAllowances - formulaResult.penalties;
+
     const taxConfig = await this.loadTaxConfig(tx, groupId);
     const paye = computePaye(
       {
@@ -155,14 +183,14 @@ export class PayrollComputeService {
     const netPay = grossBeforeAdj - paye.employeePaye;
     const lineStatus = metrics.missingData ? 'NEEDS_ATTENTION' : 'OK';
 
-    if (netPay <= 0 && formulaResult.penalties <= 0 && formulaResult.baseSalary <= 0) return null;
+    if (netPay <= 0 && formulaResult.penalties <= 0 && proratedBase <= 0) return null;
 
     return {
-      baseSalary: formulaResult.baseSalary,
+      baseSalary: proratedBase,
       performanceBonus: formulaResult.performanceBonus,
       addOnsTotal: 0,
       deductionsTotal: formulaResult.penalties,
-      allowancesTotal: formulaResult.allowancesTotal,
+      allowancesTotal: proratedAllowances,
       grossPay: grossBeforeAdj,
       payeTax: paye.employeePaye,
       employerPayeSubsidy: paye.employerSubsidy,
@@ -172,6 +200,14 @@ export class PayrollComputeService {
       bonusBreakdown: formulaResult.bonusBreakdown,
       lineStatus,
       payRoleName,
+      proration: proration.isProrated
+        ? {
+            activeDays: proration.activeDays,
+            periodDays: proration.periodDays,
+            fraction: proration.fraction,
+            reason: proration.reason,
+          }
+        : null,
     };
   }
 
@@ -182,20 +218,23 @@ export class PayrollComputeService {
     tx: TxLike,
     groupId?: string | null,
     annualRent = 0,
+    proration?: ProrationResult,
   ): Promise<ComputedPayslipLine> {
+    const fraction = proration?.fraction ?? 1;
+    const proratedAmount = amount * fraction;
     const taxConfig = await this.loadTaxConfig(tx, groupId);
     const paye = computePaye(
-      { monthlyGross: amount, taxStatus: taxStatus as 'STANDARD_PAYE' | 'GROSS_NO_DEDUCTION', annualRent },
+      { monthlyGross: proratedAmount, taxStatus: taxStatus as 'STANDARD_PAYE' | 'GROSS_NO_DEDUCTION', annualRent },
       taxConfig,
     );
-    const netPay = amount - paye.employeePaye;
+    const netPay = proratedAmount - paye.employeePaye;
     return {
-      baseSalary: amount,
+      baseSalary: proratedAmount,
       performanceBonus: 0,
       addOnsTotal: 0,
       deductionsTotal: 0,
       allowancesTotal: 0,
-      grossPay: amount,
+      grossPay: proratedAmount,
       payeTax: paye.employeePaye,
       employerPayeSubsidy: 0,
       netPay,
@@ -204,6 +243,14 @@ export class PayrollComputeService {
       bonusBreakdown: [],
       lineStatus: metrics.missingData ? 'NEEDS_ATTENTION' : 'OK',
       payRoleName: 'Flat rate',
+      proration: proration?.isProrated
+        ? {
+            activeDays: proration.activeDays,
+            periodDays: proration.periodDays,
+            fraction: proration.fraction,
+            reason: proration.reason,
+          }
+        : null,
     };
   }
 

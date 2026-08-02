@@ -429,9 +429,9 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     params.delete('entryStatus');
     params.delete('mediaBuyerId');
     params.delete('direction');
-    if (nextSection === 'peer' && canSendFunding) {
-      params.set('direction', 'pending_approval');
-    }
+    // Peer transfers defaults to "All" so the tab isn't empty when nothing is
+    // pending approval. Approvers can still filter to Pending approval via the
+    // status dropdown.
     setSearchParams(params, { preventScrollReset: true });
   };
 

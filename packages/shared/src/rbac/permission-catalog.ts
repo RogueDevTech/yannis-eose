@@ -160,6 +160,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'hr.onboarding.read', resource: 'hr.onboarding', action: 'read', description: 'View any staff member\'s onboarding profile' },
   { code: 'hr.onboarding.write', resource: 'hr.onboarding', action: 'write', description: 'Edit any staff member\'s onboarding profile' },
   { code: 'hr.onboarding.approve', resource: 'hr.onboarding', action: 'approve', description: 'Approve a submitted staff onboarding profile (locks edits for staff)' },
+  { code: 'hr.onboarding.approveSelf', resource: 'hr.onboarding', action: 'approveSelf', description: 'Approve your OWN onboarding profile (separation-of-duties exception)' },
 
   // Capability codes that replace hardcoded role checks throughout the services.
   // Permission-first lock (CEO directive): SUPER_ADMIN is the only unconditional
@@ -577,6 +578,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'hr.onboarding.read',
     'hr.onboarding.write',
     'hr.onboarding.approve',
+    'hr.onboarding.approveSelf',
     // HR approves user-management requests (admin-level invites, role changes,
     // permission grants — but NOT product archive, which stays SuperAdmin-only).
     'permission_requests.user_creation.approve',

@@ -107,6 +107,8 @@ export interface StaffOnboardingPageProps {
   isMirroring?: boolean;
   /** HR mode: allow field edits (requires hr.onboarding.write). Approve can still show without this. */
   canHrEdit?: boolean;
+  /** Self mode: viewer holds hr.onboarding.approveSelf, so they may approve their own submitted record. */
+  canApproveSelf?: boolean;
 }
 
 /**
@@ -535,6 +537,7 @@ export function StaffOnboardingPage({
   approverName,
   isMirroring = false,
   canHrEdit = false,
+  canApproveSelf = false,
 }: StaffOnboardingPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const navigation = useNavigation();
@@ -818,9 +821,28 @@ export function StaffOnboardingPage({
       ) : null}
 
       {mode === 'self' && !isMirroring && record.status === 'SUBMITTED' ? (
-        <div className="rounded-lg border border-app-border bg-app-hover/50 p-3 text-sm text-app-fg-muted">
-          Your onboarding is waiting for review by {reviewerLabel(subject.role)}. You can still
-          update your details until it is approved.
+        <div className="rounded-lg border border-app-border bg-app-hover/50 p-3 text-sm text-app-fg-muted space-y-2">
+          {canApproveSelf ? (
+            <>
+              <p>
+                Your onboarding is submitted. You are authorized to approve your own onboarding.
+              </p>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                loading={isApproving}
+                onClick={() => setConfirmApprove(true)}
+              >
+                Approve my onboarding
+              </Button>
+            </>
+          ) : (
+            <>
+              Your onboarding is waiting for review by {reviewerLabel(subject.role)}. You can still
+              update your details until it is approved.
+            </>
+          )}
         </div>
       ) : null}
 

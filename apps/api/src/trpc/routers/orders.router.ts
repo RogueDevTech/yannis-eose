@@ -3,6 +3,7 @@ import {
   createOfflineOrderSchema,
   createDeliveredFollowUpOrderSchema,
   importOrderSchema,
+  importContractorDeliverySchema,
   orderItemSchema,
   EDGE_FORM_ACTOR_ID,
   transitionOrderSchema,
@@ -532,6 +533,20 @@ export const ordersRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Super Admin and Support can import orders' });
       }
       const res = await getOrdersService().importOrder(input, ctx.user.id);
+      await invalidateOrdersAggregatesCache();
+      return res;
+    }),
+
+  /**
+   * Import an offline contractor delivery record (HR / authorized supervisors).
+   * Creates a DELIVERED offline order attributed to a logistics provider so the
+   * delivery reaches payroll + the logistics dashboard, even for contractors
+   * with no CRM account. Gated on the offline-order-creation permission.
+   */
+  importContractorDelivery: permissionProcedure('orders.createOffline')
+    .input(importContractorDeliverySchema)
+    .mutation(async ({ input, ctx }) => {
+      const res = await getOrdersService().importContractorDelivery(input, ctx.user.id);
       await invalidateOrdersAggregatesCache();
       return res;
     }),
@@ -2928,12 +2943,19 @@ export const ordersRouter = router({
 
       const listInput = { search, limit: 5 };
 
+      // Phone-number search is Pillar-2 gated: only callers with orders-view
+      // capability may match on stored `customer_phone`. `buildOrdersListOpts`
+      // resolves that from the session; global search must honour the same gate
+      // rather than falling back to name-only matching.
+      const searchIncludeCustomerPhone =
+        buildOrdersListOpts(ctx.user)?.searchIncludeCustomerPhone === true;
+
       const [ordersRes, fuRes, cartRes, productsRes, usersRes] = await Promise.all([
         getOrdersService()
           .list(
             { ...listInput, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const },
             null, // branchId — null bypasses branch scoping
-            { effectiveBranchIds: null },
+            { effectiveBranchIds: null, searchIncludeCustomerPhone },
           )
           .catch(() => ({ orders: [], total: 0, totalPages: 0 })),
         getFollowUpConfigService()
@@ -2941,6 +2963,8 @@ export const ordersRouter = router({
             { search, limit: 5, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const },
             null,
             null,
+            null,
+            { searchIncludeCustomerPhone },
           )
           .catch(() => ({ orders: [], total: 0, totalPages: 0 })),
         getCartOrdersService()
@@ -2948,6 +2972,8 @@ export const ordersRouter = router({
             { search, limit: 5, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const },
             null,
             null,
+            null,
+            { searchIncludeCustomerPhone },
           )
           .catch(() => ({ orders: [], total: 0, totalPages: 0 })),
         getProductsService()

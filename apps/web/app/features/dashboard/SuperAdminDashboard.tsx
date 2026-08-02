@@ -1,8 +1,10 @@
-import { useState } from 'react';
-import { Link } from '@remix-run/react';
+import { useEffect, useState } from 'react';
+import { Link, useFetcher } from '@remix-run/react';
+import type { RevenueBySourcePayload } from '~/routes/admin.revenue-by-source/route';
 import { useResolveFilterHref } from '~/hooks/useFilterPreferences';
 import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { FormSelect } from '~/components/ui/form-select';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -47,6 +49,94 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     | 'csDelivered'
     | null
   >(null);
+
+  // Revenue-on-strips control. One dropdown: 'off' (default) / 'net' / 'gross'.
+  // Default OFF — the strips render exactly as before. Revenue is lazy-loaded
+  // via a resource route only when a revenue mode is picked, so the default
+  // dashboard load is unaffected.
+  const [revenueMode, setRevenueMode] = useState<'off' | 'net' | 'gross'>('off');
+  const withRevenue = revenueMode !== 'off';
+  const revenueBasis: 'net' | 'gross' = revenueMode === 'gross' ? 'gross' : 'net';
+  const revenueFetcher = useFetcher<RevenueBySourcePayload>();
+
+  useEffect(() => {
+    if (!withRevenue || revenueFetcher.data || revenueFetcher.state !== 'idle') return;
+    const params = new URLSearchParams();
+    if (filters?.periodAllTime) {
+      params.set('period', 'all_time');
+    } else {
+      if (filters?.startDate) params.set('startDate', filters.startDate);
+      if (filters?.endDate) params.set('endDate', filters.endDate);
+    }
+    revenueFetcher.load(`/admin/revenue-by-source?${params.toString()}`);
+  }, [withRevenue, revenueFetcher, filters]);
+
+  const revenueBySource = revenueFetcher.data ?? null;
+  const revenueLoading = withRevenue && revenueFetcher.state === 'loading';
+
+  /** Revenue amount (current basis) for one source bucket. delivered+remitted are
+   *  the two scopes classified by getDeliveredBySource/getRevenueBySource. */
+  function revAmount(scope: 'delivered' | 'remitted', sourceKey: string): number {
+    const entry = revenueBySource?.[scope]?.[sourceKey];
+    return entry ? entry[revenueBasis] : 0;
+  }
+  /** Sum of a basis across all buckets in a scope — for the combined Total strip. */
+  function revScopeTotal(scope: 'delivered' | 'remitted'): number {
+    const buckets = revenueBySource?.[scope] ?? {};
+    return Object.values(buckets).reduce((s, e) => s + (e?.[revenueBasis] ?? 0), 0);
+  }
+
+  /** Build a stat-tile value node: the order count, plus a revenue subline when the
+   *  "With revenue" toggle is on. `amount` is the revenue for this exact tile. */
+  function tileValue(count: number, amount: number): React.ReactNode {
+    if (!withRevenue) return count;
+    return (
+      <span className="flex flex-col items-end leading-tight">
+        <span>{count.toLocaleString()}</span>
+        <span className="text-micro font-normal text-app-fg-muted tabular-nums">
+          {revenueLoading && !revenueBySource ? '…' : fmt(amount)}
+        </span>
+      </span>
+    );
+  }
+
+  const REVENUE_OPTIONS: Array<{ value: 'off' | 'net' | 'gross'; label: string }> = [
+    { value: 'off', label: 'Count only' },
+    { value: 'net', label: 'Revenue (Net)' },
+    { value: 'gross', label: 'Revenue (Gross)' },
+  ];
+
+  /** Revenue control — a single dropdown (Counts default / Revenue Net / Revenue
+   *  Gross). The `sheet` variant matches the Marketing Orders mobile Actions-sheet
+   *  filter dropdowns exactly (elevated bg, centered text, inline chevron, opens as
+   *  modal); the header variant is the compact toolbar select. */
+  const renderRevenueSelect = (variant: 'header' | 'sheet') =>
+    variant === 'sheet' ? (
+      <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+        <FormSelect
+          aria-label="Show revenue on order strips"
+          value={revenueMode}
+          onChange={(e) => setRevenueMode(e.target.value as 'off' | 'net' | 'gross')}
+          options={REVENUE_OPTIONS}
+          controlSize="sm"
+          className="!bg-transparent !border-transparent !text-center"
+          inlineChevron
+          openAs="modal"
+          wrapperClassName="w-full"
+        />
+      </div>
+    ) : (
+      <FormSelect
+        aria-label="Show revenue on order strips"
+        controlSize="md"
+        value={revenueMode}
+        onChange={(e) => setRevenueMode(e.target.value as 'off' | 'net' | 'gross')}
+        wrapperClassName="w-auto"
+        className="!bg-app-hover"
+        options={REVENUE_OPTIONS}
+      />
+    );
+  const revenueToggle = renderRevenueSelect('header');
 
   /** Build a link with current date filter context. */
   function buildLink(base: string, extra?: Record<string, string>): string {
@@ -144,6 +234,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             saveFilterKey
             desktop={
               <>
+                {revenueToggle}
                 <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters?.startDate ?? ''}
@@ -152,9 +243,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               </>
             }
             sheet={
-              <p className="text-sm text-app-fg-muted text-center py-1">
-                Date range and refresh are on the toolbar. Use Save filters below to remember this view.
-              </p>
+              <div className="py-1">
+                {renderRevenueSelect('sheet')}
+              </div>
             }
           />
         }
@@ -303,12 +394,12 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 { label: 'Confirmed', value: tConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
                 {
                   label: <span className="flex items-center">Delivered<FunnelInfoIcon onClick={() => setBreakdownModal('totalDelivered')} /></span>,
-                  value: tDeliveredOnly,
+                  value: tileValue(tDeliveredOnly, revScopeTotal('delivered')),
                   valueClassName: 'text-success-600 dark:text-success-400',
                 },
                 {
                   label: <span className="flex items-center">Remitted<FunnelInfoIcon onClick={() => setBreakdownModal('totalRemitted')} /></span>,
-                  value: tRemitted,
+                  value: tileValue(tRemitted, revScopeTotal('remitted')),
                   valueClassName: 'text-green-600 dark:text-green-400',
                 },
                 { label: 'CR', value: `${computedCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(computedCR) },
@@ -443,13 +534,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   },
                   {
                     label: 'Delivered',
-                    value: deliveredOnly,
+                    value: tileValue(deliveredOnly, revAmount('delivered', 'edge-form')),
                     valueClassName: 'text-success-600 dark:text-success-400',
                     to: marketingLink({ status: 'DELIVERED' }),
                   },
                   {
                     label: 'Remitted',
-                    value: remitted,
+                    value: tileValue(remitted, revAmount('remitted', 'edge-form')),
                     valueClassName: 'text-green-600 dark:text-green-400',
                   },
                   {
@@ -512,8 +603,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                       { label: 'Assigned', value: cartAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: cartOrdersLink({ status: 'CS_ASSIGNED' }) },
                       { label: 'Unconfirmed', value: cartEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: cartOrdersLink({ status: 'CS_ENGAGED' }) },
                       { label: 'Confirmed', value: cartConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: cartOrdersLink({ status: 'CONFIRMED' }) },
-                      { label: 'Delivered', value: (cartSc['DELIVERED'] ?? 0), valueClassName: 'text-success-600 dark:text-success-400', to: cartOrdersLink({ status: 'DELIVERED' }) },
-                      { label: 'Remitted', value: (cartSc['REMITTED'] ?? 0), valueClassName: 'text-green-600 dark:text-green-400' },
+                      { label: 'Delivered', value: tileValue(cartSc['DELIVERED'] ?? 0, revAmount('delivered', 'online')), valueClassName: 'text-success-600 dark:text-success-400', to: cartOrdersLink({ status: 'DELIVERED' }) },
+                      { label: 'Remitted', value: tileValue(cartSc['REMITTED'] ?? 0, revAmount('remitted', 'online')), valueClassName: 'text-green-600 dark:text-green-400' },
                       { label: 'CR', value: pct(cartCR), valueClassName: confirmationRateColorClass(cartCR) },
                       { label: 'DR', value: pct(cartDR), valueClassName: deliveryRateColorClass(cartDR) },
                       { label: 'Deleted', value: cartSc['DELETED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400', to: cartOrdersLink({ status: 'DELETED' }) },
@@ -588,13 +679,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                       },
                       {
                         label: 'Delivered',
-                        value: offDeliveredOnly,
+                        value: tileValue(offDeliveredOnly, revAmount('delivered', 'offline')),
                         valueClassName: 'text-success-600 dark:text-success-400',
                         to: offlineLink({ status: 'DELIVERED' }),
                       },
                       {
                         label: 'Remitted',
-                        value: offRemitted,
+                        value: tileValue(offRemitted, revAmount('remitted', 'offline')),
                         valueClassName: 'text-green-600 dark:text-green-400',
                       },
                       {
@@ -680,13 +771,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 },
                 {
                   label: 'Delivered',
-                  value: deliveredOnly,
+                  value: tileValue(deliveredOnly, revAmount('delivered', 'follow-up')),
                   valueClassName: 'text-success-600 dark:text-success-400',
                   to: followUpLink({ status: 'DELIVERED' }),
                 },
                 {
                   label: 'Remitted',
-                  value: remitted,
+                  value: tileValue(remitted, revAmount('remitted', 'follow-up')),
                   valueClassName: 'text-green-600 dark:text-green-400',
                 },
                 {
@@ -743,8 +834,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 { label: 'Assigned', value: dfuAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: dfuLink({ status: 'CS_ASSIGNED' }) },
                 { label: 'Unconfirmed', value: dfuEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: dfuLink({ status: 'CS_ENGAGED' }) },
                 { label: 'Confirmed', value: dfuConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: dfuLink({ status: 'CONFIRMED' }) },
-                { label: 'Delivered', value: dfuDeliveredOnly, valueClassName: 'text-success-600 dark:text-success-400', to: dfuLink({ status: 'DELIVERED' }) },
-                { label: 'Remitted', value: dfuRemitted, valueClassName: 'text-green-600 dark:text-green-400' },
+                { label: 'Delivered', value: tileValue(dfuDeliveredOnly, revAmount('delivered', 'delivered_follow_up')), valueClassName: 'text-success-600 dark:text-success-400', to: dfuLink({ status: 'DELIVERED' }) },
+                { label: 'Remitted', value: tileValue(dfuRemitted, revAmount('remitted', 'delivered_follow_up')), valueClassName: 'text-green-600 dark:text-green-400' },
                 { label: 'CR', value: pct(dfuCR), valueClassName: confirmationRateColorClass(dfuCR) },
                 { label: 'DR', value: pct(dfuDR), valueClassName: deliveryRateColorClass(dfuDR) },
                 { label: 'Deleted', value: sc['DELETED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400', to: dfuLink({ status: 'DELETED' }) },

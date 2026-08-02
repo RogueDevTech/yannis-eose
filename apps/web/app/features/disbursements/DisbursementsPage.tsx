@@ -546,12 +546,7 @@ export function DisbursementsPage({
         header: 'Reference',
         hideable: false,
         render: (f) => (
-          <div>
-            <span className="text-xs font-mono font-medium text-app-fg">DSB-{f.id.slice(0, 8).toUpperCase()}</span>
-            <span className="block text-xs text-app-fg-muted">
-              {getName(f.receiverId)} · {new Date(f.sentAt).toLocaleString('en-NG', DATE_TIME_FMT)}
-            </span>
-          </div>
+          <span className="text-xs font-mono font-medium text-app-fg">DSB-{f.id.slice(0, 8).toUpperCase()}</span>
         ),
       },
       {
@@ -559,7 +554,7 @@ export function DisbursementsPage({
         header: 'Sender',
         render: (f) => (
           <Link
-            to={`/admin/finance/staff-accounts/${f.senderId}`}
+            to={`/hr/users/${f.senderId}`}
             className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
           >
             {getName(f.senderId)}
@@ -571,7 +566,7 @@ export function DisbursementsPage({
         header: 'Receiver',
         render: (f) => (
           <Link
-            to={`/admin/finance/staff-accounts/${f.receiverId}`}
+            to={`/hr/users/${f.receiverId}`}
             className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
           >
             {getName(f.receiverId)}
@@ -635,7 +630,7 @@ export function DisbursementsPage({
         hideable: false,
         render: (r) => (
           <Link
-            to={`/admin/finance/staff-accounts/${r.requesterId}`}
+            to={`/hr/users/${r.requesterId}`}
             className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400"
           >
             {r.requesterName ?? getRequesterName(r.requesterId)}
@@ -726,7 +721,7 @@ export function DisbursementsPage({
         header: 'Recipient',
         render: (b) => (
           <Link
-            to={`/admin/finance/staff-accounts/${b.userId}`}
+            to={`/hr/users/${b.userId}`}
             className="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400"
           >
             {b.name}
@@ -1230,7 +1225,7 @@ export function DisbursementsPage({
                     renderMobileCard={(r) => (
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <Link to={`/admin/finance/staff-accounts/${r.requesterId}`} className="text-sm font-medium text-app-fg">
+                          <Link to={`/hr/users/${r.requesterId}`} className="text-sm font-medium text-app-fg">
                             {r.requesterName ?? getRequesterName(r.requesterId)}
                           </Link>
                           <StatusBadge status={r.status} />
@@ -1386,7 +1381,7 @@ export function DisbursementsPage({
                     <div className="space-y-3">
                       <div className="mb-2 flex items-start justify-between gap-2">
                         <Link
-                          to={`/admin/finance/staff-accounts/${b.userId}`}
+                          to={`/hr/users/${b.userId}`}
                           className="font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400"
                         >
                           {b.name}

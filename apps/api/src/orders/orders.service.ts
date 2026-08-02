@@ -10,6 +10,7 @@ import {
   type CreateOrderInput,
   type CreateOfflineOrderInput,
   type ImportOrderInput,
+  type ImportContractorDeliveryInput,
   type TransitionOrderInput,
   type UpdateOrderInput,
   type RequestOrderLinePriceChangeInput,
@@ -2729,6 +2730,89 @@ export class OrdersService {
       actorId,
       actorName,
       description: `Imported from external CRM (status: ${input.targetStatus})`,
+      branchId: input.branchId,
+    });
+
+    return { id: order.id };
+  }
+
+  /**
+   * Import an OFFLINE contractor delivery. Creates a DELIVERED (or REMITTED)
+   * offline order attributed to a logistics provider/location so the delivery
+   * feeds both the logistics performance dashboard and payroll metrics, even
+   * though the contractor has no CRM user account. One row = one delivery.
+   */
+  async importContractorDelivery(
+    input: ImportContractorDeliveryInput,
+    actorId: string,
+  ): Promise<{ id: string }> {
+    const customerPhoneHash = this.hashPhone(input.customerPhone);
+
+    let deliveredAt: Date = new Date();
+    if (input.deliveredAtOverride) {
+      const parsed = new Date(input.deliveredAtOverride);
+      if (!isNaN(parsed.getTime())) deliveredAt = parsed;
+    }
+
+    const status = input.remitted ? 'REMITTED' : 'DELIVERED';
+
+    const order = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.orders)
+        .values({
+          branchId: input.branchId,
+          servicingBranchId: input.branchId,
+          customerName: input.customerName,
+          customerPhoneHash,
+          customerPhone: input.customerPhone,
+          deliveryAddress: input.deliveryAddress ?? null,
+          deliveryState: input.deliveryState ?? null,
+          paymentMethod: 'PAY_ON_DELIVERY',
+          items: input.items,
+          totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
+          status,
+          orderSource: 'offline',
+          logisticsProviderId: input.logisticsProviderId ?? null,
+          logisticsLocationId: input.logisticsLocationId ?? null,
+          // Capture the contractor's identity — they have no user row to link to.
+          customFields: { contractorName: input.contractorName },
+          createdAt: deliveredAt,
+          confirmedAt: deliveredAt,
+          allocatedAt: deliveredAt,
+          dispatchedAt: deliveredAt,
+          deliveredAt,
+        })
+        .returning();
+
+      const created = rows[0];
+      if (!created) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to import contractor delivery' });
+      }
+
+      await tx.insert(schema.orderItems).values(
+        input.items.map((item) => ({
+          orderId: created.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: sql`${item.unitPrice}::numeric`,
+          offerLabel: item.offerLabel ?? null,
+        })),
+      );
+      return created;
+    });
+
+    const actorRow = await this.db
+      .select({ name: schema.users.name })
+      .from(schema.users)
+      .where(eq(schema.users.id, actorId))
+      .limit(1);
+
+    void this.writeTimelineEvent({
+      orderId: order.id,
+      eventType: 'ORDER_RECEIVED',
+      actorId,
+      actorName: actorRow[0]?.name ?? null,
+      description: `Imported contractor delivery (${input.contractorName}, status: ${status})`,
       branchId: input.branchId,
     });
 
@@ -7521,6 +7605,65 @@ export class OrdersService {
       } else {
         remitted[row.source] = row.count;
       }
+    }
+    return { delivered, remitted };
+  }
+
+  /**
+   * Revenue per order-source bucket for the CEO dashboard "with revenue" toggle.
+   *
+   * Mirrors {@link getDeliveredBySource} EXACTLY (same status set, same createdAt
+   * date basis, same servicing-branch scope, same source CASE) so the per-source
+   * revenue reconciles with the per-source COUNTS shown in the dashboard's
+   * Delivered / Remitted breakdown modals. Do not change the WHERE/CASE here
+   * without changing it there — the two must stay in lockstep.
+   *
+   * Two figures per bucket:
+   *   - gross = SUM(total_amount)                    → ties to Gross Order Value
+   *   - net   = SUM(total_amount - delivery_fee)     → ties to Remitted (net of delivery fee)
+   *
+   * Additive and read-only. NOT wired into ROAS — ROAS keeps its own basis.
+   */
+  async getRevenueBySource(
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<{
+    delivered: Record<string, { gross: number; net: number }>;
+    remitted: Record<string, { gross: number; net: number }>;
+  }> {
+    const conditions: SQL[] = [
+      inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+      isNull(schema.orders.deletedAt),
+    ];
+    if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+
+    const sourceCase = sql<string>`CASE
+      WHEN ${schema.orders.orderSource} = 'delivered_follow_up' THEN 'delivered_follow_up'
+      WHEN ${schema.orders.orderSource} = 'graduated_follow_up' OR ${schema.orders.isFollowUp} = true THEN 'follow-up'
+      ELSE COALESCE(${schema.orders.orderSource}, 'edge-form')
+    END`;
+
+    const rows = await this.db
+      .select({
+        source: sourceCase,
+        status: schema.orders.status,
+        gross: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        net: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+      })
+      .from(schema.orders)
+      .where(and(...conditions))
+      .groupBy(sourceCase, schema.orders.status);
+
+    const delivered: Record<string, { gross: number; net: number }> = {};
+    const remitted: Record<string, { gross: number; net: number }> = {};
+    for (const row of rows) {
+      const target = row.status === 'DELIVERED' ? delivered : remitted;
+      target[row.source] = { gross: Number(row.gross), net: Number(row.net) };
     }
     return { delivered, remitted };
   }
