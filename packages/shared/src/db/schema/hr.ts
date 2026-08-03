@@ -211,12 +211,13 @@ export const payoutRecords = pgTable('payout_records', {
   ...temporalColumns,
 });
 
-// Table 19: earnings_adjustments — manual bonuses/deductions
+// Table 19: earnings_adjustments — manual bonuses/deductions.
+// Applies to either a staff user (staff_id) OR an external contractor
+// (contractor_id) — exactly one is set (enforced by a DB CHECK).
 export const earningsAdjustments = pgTable('earnings_adjustments', {
   id: uuidv7Pk(),
-  staffId: uuid('staff_id')
-    .notNull()
-    .references(() => users.id),
+  staffId: uuid('staff_id').references(() => users.id),
+  contractorId: uuid('contractor_id').references(() => payrollContractors.id),
   payoutId: uuid('payout_id').references(() => payoutRecords.id),
   amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
   category: adjustmentCategoryEnum('category').notNull(),

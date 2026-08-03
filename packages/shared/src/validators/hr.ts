@@ -131,7 +131,9 @@ export const DEDUCTION_ADJUSTMENT_CATEGORIES = ['DEDUCTION', 'CLAWBACK'] as cons
 
 export const createAdjustmentSchema = z
   .object({
-    staffId: z.string().uuid(),
+    // Target is either a staff user OR an external contractor — exactly one.
+    staffId: z.string().uuid().optional(),
+    contractorId: z.string().uuid().optional(),
     // Deductions may be entered as a negative amount; add-ons as positive.
     // The refine below reconciles the sign with the chosen category.
     amount: z.coerce.number().multipleOf(0.01),
@@ -139,6 +141,10 @@ export const createAdjustmentSchema = z
     reason: z.string().min(5).max(500),
     periodStart: z.string().date().optional(),
     periodEnd: z.string().date().optional(),
+  })
+  .refine((data) => (data.staffId ? 1 : 0) + (data.contractorId ? 1 : 0) === 1, {
+    message: 'Select exactly one staff member or contractor',
+    path: ['staffId'],
   })
   .transform((data) => {
     // Canonicalise the sign so storage/payroll math is unambiguous:

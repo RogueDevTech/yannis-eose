@@ -149,6 +149,39 @@ describe('createAdjustmentSchema', () => {
     ).not.toThrow();
   });
 
+  it('accepts a contractor-targeted adjustment', () => {
+    expect(() =>
+      createAdjustmentSchema.parse({
+        contractorId: VALID_UUID,
+        amount: 3000,
+        category: 'DEDUCTION',
+        reason: 'Damaged equipment recovery',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects when neither staffId nor contractorId is set', () => {
+    expect(() =>
+      createAdjustmentSchema.parse({
+        amount: 3000,
+        category: 'BONUS',
+        reason: 'Missing target party',
+      }),
+    ).toThrow();
+  });
+
+  it('rejects when BOTH staffId and contractorId are set', () => {
+    expect(() =>
+      createAdjustmentSchema.parse({
+        staffId: VALID_UUID,
+        contractorId: 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22',
+        amount: 3000,
+        category: 'BONUS',
+        reason: 'Ambiguous target party',
+      }),
+    ).toThrow();
+  });
+
   it('coerces a negative add-on amount to positive by category', () => {
     const result = createAdjustmentSchema.parse({
       staffId: VALID_UUID,

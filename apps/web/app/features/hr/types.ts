@@ -23,7 +23,8 @@ export interface Payout {
 
 export interface Adjustment {
   id: string;
-  staffId: string;
+  staffId: string | null;
+  contractorId: string | null;
   amount: string;
   category: string;
   reason: string;
@@ -36,6 +37,12 @@ export interface HRUser {
   name: string;
   email: string;
   role: string;
+}
+
+/** External contractor selectable for payroll adjustments (separate from users). */
+export interface PayrollContractorOption {
+  id: string;
+  name: string;
 }
 
 export interface SettlementConfig {
@@ -127,6 +134,7 @@ export interface HRPageProps {
 export interface HRStreamData {
   adjustments: Adjustment[];
   users: HRUser[];
+  contractors: PayrollContractorOption[];
   monthlyPayrolls: MonthlyPayrollGroup[];
   branches: BranchOption[];
   viewer: ViewerInfo;

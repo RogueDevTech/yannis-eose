@@ -273,6 +273,10 @@ export function UserDetailPage({
     'HEAD_OF_CS',
     'CS_CLOSER',
     'HR_MANAGER',
+    'HEAD_OF_LOGISTICS',
+    'TPL_MANAGER',
+    'STOCK_MANAGER',
+    'BRANCH_ADMIN',
   ].includes(user.role);
   // Finance activity tab is visible to Finance Officer and other finance-access roles.
   const showFinanceTab = hasFinanceAccess(user);

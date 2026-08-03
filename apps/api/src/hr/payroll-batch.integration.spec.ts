@@ -55,7 +55,9 @@ describe.skipIf(SKIP_IF_NO_DB)('PayrollBatchService — org-wide department head
     const svc = new PayrollBatchService(db as any, {} as any, {} as any, {} as any);
     const out = await svc.listMonthlyPayrolls(
       {},
-      { id: headUser.id, role: 'HEAD_OF_CS', currentBranchId: null } as any,
+      // scopeOrgWideHead marks this Head as org-wide (see isOrgWideDepartmentHead);
+      // without it a null-session Head is gated to zero batches.
+      { id: headUser.id, role: 'HEAD_OF_CS', currentBranchId: null, scopeOrgWideHead: true } as any,
     );
 
     expect(out.batches.length).toBeGreaterThanOrEqual(2);
@@ -96,7 +98,7 @@ describe.skipIf(SKIP_IF_NO_DB)('PayrollBatchService — org-wide department head
     const svc = new PayrollBatchService(db as any, {} as any, {} as any, {} as any);
     const out = await svc.listMonthlyPayrolls(
       { branchId: b1.id },
-      { id: headUser.id, role: 'HEAD_OF_CS', currentBranchId: null } as any,
+      { id: headUser.id, role: 'HEAD_OF_CS', currentBranchId: null, scopeOrgWideHead: true } as any,
     );
 
     expect(out.batches.every((b) => b.branchId === b1.id)).toBe(true);
