@@ -110,7 +110,8 @@ function formatAccount(accountNumber: string | null | undefined): string {
   return accountNumber;
 }
 
-function deptLabel(department: string): string {
+function deptLabel(department: string | null): string {
+  if (!department) return 'Contractors';
   return DEPT_LABEL[department as PayrollDepartment] ?? department;
 }
 

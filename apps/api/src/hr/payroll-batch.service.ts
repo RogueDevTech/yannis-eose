@@ -7,6 +7,7 @@ import { computePaye, db as schema } from '@yannis/shared';
 import type {
   GenerateBatchInput,
   GenerateBatchesBulkInput,
+  PreviewSelectionInput,
   SubmitBatchInput,
   ApproveBatchInput,
   RejectBatchInput,
@@ -28,7 +29,40 @@ import { isBranchTeamsSchemaMissingError } from '../common/db/branch-teams-schem
 import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
 import { computeEarningsFromPlanRules } from './commission-rules-math';
 import { PayrollComputeService } from './payroll-compute.service';
-import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
+import { PayrollMetricsService } from './payroll-metrics.service';
+import { nigeriaMonthWindow } from '../common/utils/date-range';
+import type { PayrollMetrics } from '@yannis/shared';
+
+/**
+ * Predicate: an adjustment is eligible to attach to a batch for `periodMonth`
+ * (a YYYY-MM-01 string) when it is not yet linked to a payout AND it is either
+ * un-earmarked (period_month IS NULL, legacy "next batch, any month") or
+ * earmarked for exactly this month. Used by every sweep + compute read so the
+ * link, compute, and preview paths stay in lockstep.
+ */
+function pendingAdjustmentForMonth(periodMonth: string) {
+  return and(
+    isNull(schema.earningsAdjustments.payoutId),
+    or(
+      isNull(schema.earningsAdjustments.periodMonth),
+      eq(schema.earningsAdjustments.periodMonth, periodMonth),
+    ),
+  );
+}
+
+/**
+ * A "null-scope" batch groups contractors (CONTRACTORS) or everyone company-wide
+ * (ALL) and carries no department (and usually no branch). scope_type is the
+ * authoritative discriminator — see the payroll_batches table doc (migration 0287).
+ * Every branch/department guard downstream branches on this predicate.
+ */
+function isNullScopeType(scopeType: string | null | undefined): boolean {
+  return scopeType === 'CONTRACTORS' || scopeType === 'ALL';
+}
+
+function isNullScopeBatch(batch: { scopeType?: string | null }): boolean {
+  return isNullScopeType(batch.scopeType);
+}
 
 /**
  * Maps the four payroll departments to the staff roles each contains.
@@ -106,11 +140,23 @@ function canProcessBatch(user: SessionUser): boolean {
 }
 
 function assertBatchInScope(
-  batch: { branchId: string },
+  batch: { branchId: string | null; scopeType?: string | null },
   viewer: SessionUser,
   effectiveBranchIds?: string[] | null,
 ) {
   if (viewer.role === 'SUPER_ADMIN' || viewer.role === 'SUPPORT') return;
+
+  // Null-scope batch with no branch (contractors org-wide / ALL): only holders of
+  // hr.write may act. A CONTRACTORS batch that DOES carry a branch (a Head running
+  // their own branch's contractors) falls through to the normal branch check below.
+  if (!batch.branchId) {
+    if (isNullScopeBatch(batch) && (viewer.permissions ?? []).includes('hr.write')) return;
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Only HR or an admin can act on an org-wide payroll batch.',
+    });
+  }
+
   if (effectiveBranchIds?.length) {
     if (!effectiveBranchIds.includes(batch.branchId)) {
       throw new TRPCError({
@@ -152,6 +198,27 @@ interface PayoutRow {
   } | null;
 }
 
+/**
+ * A single staff/contractor line in a preview roster. Shared by the single-slot
+ * preview (`previewBatch`) and the multi-scope selection preview so the UI can
+ * render the same table for a one-branch run or a full org-wide fan-out.
+ */
+export interface PreviewLineRow {
+  staffId: string;
+  staffName: string;
+  staffRole: string;
+  baseSalary: number;
+  performanceBonus: number;
+  addOnsTotal: number;
+  deductionsTotal: number;
+  grossPay: number;
+  payeTax: number;
+  totalPayout: number;
+  /** Which branch/department slot this line belongs to (fan-out context). */
+  branchName?: string | null;
+  department?: PayrollDepartment | null;
+}
+
 /** Legacy rows may have total_payout populated while gross/net defaulted to 0. */
 function effectivePayoutAmounts(p: {
   grossPay?: string | number | null;
@@ -187,6 +254,7 @@ export class PayrollBatchService {
     private readonly notifications: NotificationsService,
     private readonly generalLedger: GeneralLedgerService,
     private readonly payrollCompute: PayrollComputeService,
+    private readonly payrollMetrics: PayrollMetricsService,
   ) {}
 
   private async isBranchTeamSupervisorForDept(
@@ -217,7 +285,20 @@ export class PayrollBatchService {
     }
   }
 
-  private async canPrepareDept(user: SessionUser, branchId: string, dept: PayrollDepartment): Promise<boolean> {
+  private async canPrepareDept(
+    user: SessionUser,
+    branchId: string | null,
+    dept: PayrollDepartment | null,
+  ): Promise<boolean> {
+    // Null-scope batch (no department): only HR/admin (hr.write) may prepare, except
+    // a branch-pinned contractor batch which a Head of that branch may also prepare.
+    if (!dept) {
+      if (user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('hr.write')) return true;
+      return !!branchId && user.currentBranchId === branchId;
+    }
+    if (!branchId) {
+      return user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('hr.write');
+    }
     if (canPrepareDeptByRole(user, branchId, dept)) return true;
     // HR Manager is an org-wide role (CEO directive 2026-05-10) — they
     // can prepare any department on any branch. `canPrepareDeptByRole` above
@@ -239,32 +320,39 @@ export class PayrollBatchService {
    * from the latest commission plans + delivered orders.
    */
   async generateBatch(input: GenerateBatchInput, actor: SessionUser) {
+    // Null-scope batches (CONTRACTORS / ALL) have their own, simpler path — no
+    // department slot, no per-branch staff fan-out.
+    if (isNullScopeType(input.scopeType)) {
+      return this.generateNullScopeBatch(input, actor);
+    }
+
+    // From here on branchId + department are guaranteed present (validator refine).
+    const branchId = input.branchId as string;
+    const department = input.department as PayrollDepartment;
     const scopeBranchIds = [
       ...new Set(
-        (input.scopeBranchIds?.length ? input.scopeBranchIds : [input.branchId]).filter(Boolean),
+        (input.scopeBranchIds?.length ? input.scopeBranchIds : [branchId]).filter(Boolean),
       ),
     ];
-    if (!scopeBranchIds.includes(input.branchId)) {
-      scopeBranchIds.unshift(input.branchId);
+    if (!scopeBranchIds.includes(branchId)) {
+      scopeBranchIds.unshift(branchId);
     }
     const scopeType =
       input.scopeType ?? (scopeBranchIds.length > 1 ? 'BRANCHES' : 'DEPARTMENT');
 
     for (const bid of scopeBranchIds) {
-      if (!(await this.canPrepareDept(actor, bid, input.department))) {
+      if (!(await this.canPrepareDept(actor, bid, department))) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: `You cannot prepare a payroll batch for ${input.department} on one of the selected branches.`,
+          message: `You cannot prepare a payroll batch for ${department} on one of the selected branches.`,
         });
       }
     }
 
     // periodMonth is validated as YYYY-MM-01 — do not append another `-01`.
-    const periodStart = nigeriaDayStart(input.periodMonth);
-    const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
-    const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
+    const { periodStart, periodEnd } = nigeriaMonthWindow(input.periodMonth);
 
-    return withActorAndBranch(this.db, { id: actor.id, currentBranchId: input.branchId }, async (tx) => {
+    return withActorAndBranch(this.db, { id: actor.id, currentBranchId: branchId }, async (tx) => {
       // Look up existing batch in this slot
       const existing = (
         await tx
@@ -272,9 +360,9 @@ export class PayrollBatchService {
           .from(schema.payrollBatches)
           .where(
             and(
-              eq(schema.payrollBatches.branchId, input.branchId),
+              eq(schema.payrollBatches.branchId, branchId),
               eq(schema.payrollBatches.periodMonth, input.periodMonth),
-              eq(schema.payrollBatches.department, input.department),
+              eq(schema.payrollBatches.department, department),
             ),
           )
           .limit(1)
@@ -321,9 +409,9 @@ export class PayrollBatchService {
         const inserted = await tx
           .insert(schema.payrollBatches)
           .values({
-            branchId: input.branchId,
+            branchId,
             periodMonth: input.periodMonth,
-            department: input.department,
+            department,
             status: 'DRAFT',
             preparedBy: actor.id,
             preparedAt: new Date(),
@@ -342,13 +430,139 @@ export class PayrollBatchService {
       const { generated, totalAmount } = await this.synthesizeDraftBatchContent(
         tx,
         batchId,
-        input.branchId,
-        input.department,
+        branchId,
+        department,
         periodStart,
         periodEnd,
+        input.periodMonth,
         {
           includeContractors: input.includeContractors ?? false,
           scopeEmployeeIds: input.scopeEmployeeIds ?? null,
+          scopeBranchIds,
+          includeNullBranch: input.includeNullBranch ?? false,
+        },
+      );
+      return { batchId, generated, totalAmount };
+    });
+  }
+
+  /**
+   * Generate a null-scope batch (CONTRACTORS or ALL) — no department slot.
+   *
+   * - CONTRACTORS: contractor payouts only. branchId optional (a Head may run their
+   *   own branch's contractors; admin/HR run org-wide with branchId null).
+   * - ALL: every staff role across every branch + contractors, company-wide.
+   *   branchId/department always null.
+   *
+   * Deduped by the partial index uq_payroll_batch_null_scope on
+   * (scope_type, period_month, branch, run_label).
+   */
+  private async generateNullScopeBatch(input: GenerateBatchInput, actor: SessionUser) {
+    const scopeType = input.scopeType as 'CONTRACTORS' | 'ALL';
+    // ALL is org-wide by definition; CONTRACTORS may be branch-pinned by a Head.
+    const branchId = scopeType === 'ALL' ? null : (input.branchId ?? null);
+
+    // Authz: org-wide (no branch) requires hr.write; a branch-pinned CONTRACTORS
+    // batch is allowed to that branch's preparers (Heads) too.
+    const hasHrWrite =
+      actor.role === 'SUPER_ADMIN' || (actor.permissions ?? []).includes('hr.write');
+    if (!branchId) {
+      if (!hasHrWrite) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only HR or an admin can generate an org-wide payroll batch.',
+        });
+      }
+    } else if (!hasHrWrite && actor.currentBranchId !== branchId) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You can only generate a contractor batch for your own branch.',
+      });
+    }
+
+    const { periodStart, periodEnd } = nigeriaMonthWindow(input.periodMonth);
+    const scopeBranchIds = branchId ? [branchId] : null;
+
+    return withActorAndBranch(this.db, { id: actor.id, currentBranchId: branchId }, async (tx) => {
+      // Dedup on (scope_type, month, branch, run_label) — mirrors the partial index.
+      const existing = (
+        await tx
+          .select()
+          .from(schema.payrollBatches)
+          .where(
+            and(
+              eq(schema.payrollBatches.scopeType, scopeType),
+              eq(schema.payrollBatches.periodMonth, input.periodMonth),
+              branchId
+                ? eq(schema.payrollBatches.branchId, branchId)
+                : isNull(schema.payrollBatches.branchId),
+              input.runLabel
+                ? eq(schema.payrollBatches.runLabel, input.runLabel)
+                : isNull(schema.payrollBatches.runLabel),
+            ),
+          )
+          .limit(1)
+      )[0];
+
+      if (existing && existing.status !== 'DRAFT') {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `Batch is already ${existing.status} — generate is only allowed for DRAFT batches. Reject the batch first to edit.`,
+        });
+      }
+
+      let batchId: string;
+      if (existing) {
+        const oldPayouts = await tx
+          .select({ id: schema.payoutRecords.id })
+          .from(schema.payoutRecords)
+          .where(eq(schema.payoutRecords.batchId, existing.id));
+        const oldPayoutIds = oldPayouts.map((p) => p.id);
+        if (oldPayoutIds.length) {
+          await tx
+            .update(schema.earningsAdjustments)
+            .set({ payoutId: null })
+            .where(inArray(schema.earningsAdjustments.payoutId, oldPayoutIds));
+          await tx.delete(schema.payoutRecords).where(eq(schema.payoutRecords.batchId, existing.id));
+        }
+        batchId = existing.id;
+        await tx
+          .update(schema.payrollBatches)
+          .set({ preparedBy: actor.id, preparedAt: new Date(), runLabel: input.runLabel ?? null, updatedAt: new Date() })
+          .where(eq(schema.payrollBatches.id, batchId));
+      } else {
+        const inserted = await tx
+          .insert(schema.payrollBatches)
+          .values({
+            branchId,
+            periodMonth: input.periodMonth,
+            department: null,
+            status: 'DRAFT',
+            preparedBy: actor.id,
+            preparedAt: new Date(),
+            // CONTRACTORS = contractors only (no staff). ALL = staff + contractors.
+            includeContractors: true,
+            scopeType,
+            scopeBranchIds,
+            runLabel: input.runLabel ?? null,
+          })
+          .returning();
+        const row = inserted[0];
+        if (!row) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create batch' });
+        batchId = row.id;
+      }
+
+      const { generated, totalAmount } = await this.synthesizeDraftBatchContent(
+        tx,
+        batchId,
+        branchId,
+        null,
+        periodStart,
+        periodEnd,
+        input.periodMonth,
+        {
+          includeContractors: true,
+          staffMode: scopeType === 'ALL' ? 'all' : 'none',
           scopeBranchIds,
         },
       );
@@ -364,6 +578,25 @@ export class PayrollBatchService {
    * selected branches (home branch = first id) instead of a cartesian fan-out.
    */
   async generateBatchesBulk(input: GenerateBatchesBulkInput, actor: SessionUser) {
+    // Null-scope (CONTRACTORS / ALL) is a single batch, not a fan-out. Delegate to
+    // the single-batch path and return a bulk-shaped summary.
+    if (isNullScopeType(input.scopeType)) {
+      const out = await this.generateNullScopeBatch(
+        {
+          periodMonth: input.periodMonth,
+          scopeType: input.scopeType,
+          // A CONTRACTORS run may still be branch-pinned (single selected branch).
+          branchId: input.scopeType === 'CONTRACTORS' ? input.branchIds[0] : undefined,
+          runLabel: input.runLabel,
+        },
+        actor,
+      );
+      return {
+        created: [{ batchId: out.batchId, branchId: input.branchIds[0] ?? null, department: null }],
+        skipped: [],
+        summaryMessage: 'Created 1 batch · skipped 0',
+      };
+    }
     if (input.combineBranches) {
       const homeBranchId = input.branchIds[0];
       if (!homeBranchId) {
@@ -387,6 +620,9 @@ export class PayrollBatchService {
               scopeType: input.branchIds.length > 1 ? 'BRANCHES' : 'DEPARTMENT',
               scopeBranchIds: input.branchIds,
               includeContractors: input.includeContractors ?? false,
+              // Combined batch spans all branches → the single per-department batch
+              // is the only place no-branch staff can ride along.
+              includeNullBranch: input.includeNullBranch ?? false,
               runLabel: input.runLabel,
             },
             actor,
@@ -409,9 +645,7 @@ export class PayrollBatchService {
       return { created, skipped, summaryMessage };
     }
 
-    const periodStart = nigeriaDayStart(input.periodMonth);
-    const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
-    const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
+    const { periodStart, periodEnd } = nigeriaMonthWindow(input.periodMonth);
 
     const created: Array<{ batchId: string; branchId: string; department: PayrollDepartment }> =
       [];
@@ -475,6 +709,12 @@ export class PayrollBatchService {
               department,
               periodStart,
               periodEnd,
+              input.periodMonth,
+              {
+                // No-branch staff ride along on the HOME branch's batch only, so a
+                // fan-out across branches never pays them more than once per dept.
+                includeNullBranch: (input.includeNullBranch ?? false) && branchId === input.branchIds[0],
+              },
             );
             return { skipped: false as const, batchId: row.id };
           },
@@ -501,42 +741,78 @@ export class PayrollBatchService {
   private async synthesizeDraftBatchContent(
     tx: TxLike,
     batchId: string,
-    branchId: string,
-    department: PayrollDepartment,
+    // NULL for null-scope batches (contractors org-wide / ALL). When null and
+    // staffMode is 'all', staff span every branch.
+    branchId: string | null,
+    // NULL for null-scope batches — no department slot; staff selection then uses
+    // staffMode instead of DEPARTMENT_ROLES.
+    department: PayrollDepartment | null,
     periodStart: Date,
     periodEnd: Date,
+    // YYYY-MM-01 for this batch. Passed explicitly (not derived from periodStart,
+    // which is a UTC+1 instant whose UTC month can be the previous calendar month)
+    // so period-earmarked adjustments attach to the correct month.
+    periodMonth: string,
     opts: {
       includeContractors?: boolean;
       scopeEmployeeIds?: string[] | null;
       scopeBranchIds?: string[] | null;
+      // 'department' (default): staff in DEPARTMENT_ROLES[department] on the scoped
+      // branches. 'none': no staff (contractors-only batch). 'all': every payroll
+      // role across every branch (ALL scope).
+      staffMode?: 'department' | 'none' | 'all';
+      // Also include matching-role staff with no primary branch (they ride along
+      // on this batch). Ignored for staffMode 'all' (already spans all staff).
+      includeNullBranch?: boolean;
     } = {},
   ): Promise<{ generated: number; totalAmount: number }> {
-    const departmentRoles = DEPARTMENT_ROLES[department];
-    const staffBranchIds = [
-      ...new Set(
-        (opts.scopeBranchIds?.length ? opts.scopeBranchIds : [branchId]).filter(Boolean),
-      ),
-    ];
+    const staffMode = opts.staffMode ?? 'department';
+    // Roles this batch pays: a specific department's roles, or every payroll role
+    // for an ALL-scope batch.
+    const targetRoles =
+      staffMode === 'all'
+        ? [...new Set(Object.values(DEPARTMENT_ROLES).flat())]
+        : department
+          ? [...DEPARTMENT_ROLES[department]]
+          : [];
+    const scopeBranchIds = opts.scopeBranchIds?.length
+      ? [...new Set(opts.scopeBranchIds.filter(Boolean))]
+      : branchId
+        ? [branchId]
+        : [];
     // Include ACTIVE staff, plus mid-period leavers (now INACTIVE) whose exit
     // date falls inside this period — they're owed a final prorated payout.
     const periodEndYmd = periodEnd.toISOString().slice(0, 10);
     const periodStartYmd = periodStart.toISOString().slice(0, 10);
-    let staff = await tx
-      .select()
-      .from(schema.users)
-      .where(
-        and(
-          inArray(schema.users.primaryBranchId, staffBranchIds),
-          inArray(schema.users.role, departmentRoles as unknown as typeof schema.users.$inferSelect['role'][]),
-          or(
-            eq(schema.users.status, 'ACTIVE'),
-            and(
-              gte(schema.users.exitDate, periodStartYmd),
-              lte(schema.users.exitDate, periodEndYmd),
-            ),
-          ),
-        ),
-      );
+    // Branch predicate: ALL scope spans every branch (no filter). Otherwise scope
+    // to the selected branches, optionally OR-ing in no-branch staff who ride along.
+    const branchPredicate = scopeBranchIds.length
+      ? opts.includeNullBranch
+        ? or(
+            inArray(schema.users.primaryBranchId, scopeBranchIds),
+            isNull(schema.users.primaryBranchId),
+          )
+        : inArray(schema.users.primaryBranchId, scopeBranchIds)
+      : sql`true`;
+    let staff =
+      staffMode === 'none' || targetRoles.length === 0
+        ? []
+        : await tx
+            .select()
+            .from(schema.users)
+            .where(
+              and(
+                branchPredicate,
+                inArray(schema.users.role, targetRoles as unknown as typeof schema.users.$inferSelect['role'][]),
+                or(
+                  eq(schema.users.status, 'ACTIVE'),
+                  and(
+                    gte(schema.users.exitDate, periodStartYmd),
+                    lte(schema.users.exitDate, periodEndYmd),
+                  ),
+                ),
+              ),
+            );
 
     if (opts.scopeEmployeeIds?.length) {
       const allowed = new Set(opts.scopeEmployeeIds);
@@ -548,14 +824,25 @@ export class PayrollBatchService {
 
     const generatedPayouts: PayoutRow[] = [];
 
-    for (const member of staff) {
-      if (member.onboardingPayrollStatus === 'PENDING_APPROVAL') continue;
+    // Compute every member's payout in ONE batched pass (a handful of aggregate
+    // queries) instead of ~10 queries per member, then bulk-insert. Produces rows
+    // identical to the per-member computePayoutForMember (same formula/PAYE math).
+    const payableStaff = staff.filter((m) => m.onboardingPayrollStatus !== 'PENDING_APPROVAL');
+    if (payableStaff.length > 0) {
+      const computedByStaff = await this.computeStaffPayoutsBatched(
+        tx,
+        payableStaff,
+        periodStart,
+        periodEnd,
+        periodMonth,
+      );
 
-      const computed = (await this.computePayoutForMember(tx, member, periodStart, periodEnd))
-        ?? { baseSalary: 0, performanceBonus: 0, addOnsTotal: 0, deductionsTotal: 0, totalPayout: 0 };
-      const inserted = await tx
-        .insert(schema.payoutRecords)
-        .values({
+      const insertValues = payableStaff.map((member) => {
+        const computed =
+          computedByStaff.get(member.id) ??
+          { baseSalary: 0, performanceBonus: 0, addOnsTotal: 0, deductionsTotal: 0, totalPayout: 0 };
+        generatedPayouts.push({ staffId: member.id, ...computed });
+        return {
           batchId,
           staffId: member.id,
           periodStart,
@@ -580,32 +867,45 @@ export class PayrollBatchService {
           bonusBreakdown: computed.bonusBreakdown ?? null,
           lineStatus: computed.lineStatus ?? 'OK',
           payRoleName: computed.payRoleName ?? null,
-          status: 'DRAFT',
-        })
-        .returning({ id: schema.payoutRecords.id });
-      const payoutId = inserted[0]?.id;
-      if (!payoutId) continue;
-      generatedPayouts.push({ staffId: member.id, ...computed });
+          status: 'DRAFT' as const,
+        };
+      });
 
-      await tx
-        .update(schema.earningsAdjustments)
-        .set({ payoutId })
-        .where(
-          and(
-            eq(schema.earningsAdjustments.staffId, member.id),
-            isNull(schema.earningsAdjustments.payoutId),
-          ),
-        );
+      // Bulk insert all staff payouts, returning the new id per staff so we can
+      // link their pending adjustments.
+      const insertedRows = await tx
+        .insert(schema.payoutRecords)
+        .values(insertValues)
+        .returning({ id: schema.payoutRecords.id, staffId: schema.payoutRecords.staffId });
+
+      // Link each member's pending, month-eligible adjustments to their new payout.
+      for (const row of insertedRows) {
+        if (!row.staffId) continue;
+        await tx
+          .update(schema.earningsAdjustments)
+          .set({ payoutId: row.id })
+          .where(
+            and(
+              eq(schema.earningsAdjustments.staffId, row.staffId),
+              pendingAdjustmentForMonth(periodMonth),
+            ),
+          );
+      }
     }
 
     if (opts.includeContractors) {
-      const branchRow = (
-        await tx
-          .select({ groupId: schema.branches.groupId })
-          .from(schema.branches)
-          .where(eq(schema.branches.id, branchId))
-          .limit(1)
-      )[0];
+      // Org-wide null-scope batch (branchId null): every active contractor across
+      // all companies. Branch-scoped batch: contractors on the scoped branch(es)
+      // (plus branch-null shared) within that branch's company.
+      const branchRow = branchId
+        ? (
+            await tx
+              .select({ groupId: schema.branches.groupId })
+              .from(schema.branches)
+              .where(eq(schema.branches.id, branchId))
+              .limit(1)
+          )[0]
+        : undefined;
 
       const contractors = await tx
         .select()
@@ -613,18 +913,25 @@ export class PayrollBatchService {
         .where(
           and(
             eq(schema.payrollContractors.active, true),
-            or(
-              inArray(schema.payrollContractors.branchId, staffBranchIds),
-              isNull(schema.payrollContractors.branchId),
-            ),
-            // Exact company only — never include null-scoped shared contractors.
-            branchRow?.groupId
-              ? eq(schema.payrollContractors.groupId, branchRow.groupId)
-              : sql`false`,
+            branchId
+              ? and(
+                  or(
+                    scopeBranchIds.length
+                      ? inArray(schema.payrollContractors.branchId, scopeBranchIds)
+                      : sql`false`,
+                    isNull(schema.payrollContractors.branchId),
+                  ),
+                  // Exact company only — never include null-scoped shared contractors.
+                  branchRow?.groupId
+                    ? eq(schema.payrollContractors.groupId, branchRow.groupId)
+                    : sql`false`,
+                )
+              : sql`true`, // org-wide: all active contractors, any company
           ),
         );
 
-      // Company PAYE bands for contractor fee tax (same config as staff lines).
+      // Company PAYE bands for contractor fee tax. For a single-company batch use
+      // that company's config; org-wide falls back to the global/default config.
       const taxConfig = await this.payrollCompute.loadTaxConfig(tx, branchRow?.groupId ?? null);
 
       const contractorRoleIds = [
@@ -667,7 +974,7 @@ export class PayrollBatchService {
               and(
                 eq(schema.earningsAdjustments.contractorId, contractor.id),
                 inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
-                isNull(schema.earningsAdjustments.payoutId),
+                pendingAdjustmentForMonth(periodMonth),
               ),
             ),
           tx
@@ -677,7 +984,7 @@ export class PayrollBatchService {
               and(
                 eq(schema.earningsAdjustments.contractorId, contractor.id),
                 inArray(schema.earningsAdjustments.category, ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER']),
-                isNull(schema.earningsAdjustments.payoutId),
+                pendingAdjustmentForMonth(periodMonth),
               ),
             ),
         ]);
@@ -720,7 +1027,7 @@ export class PayrollBatchService {
             .where(
               and(
                 eq(schema.earningsAdjustments.contractorId, contractor.id),
-                isNull(schema.earningsAdjustments.payoutId),
+                pendingAdjustmentForMonth(periodMonth),
               ),
             );
         }
@@ -759,28 +1066,752 @@ export class PayrollBatchService {
     return { generated: generatedPayouts.length, totalAmount };
   }
 
-  async previewBatch(input: GenerateBatchInput, actor: SessionUser) {
+  /**
+   * BATCHED per-staff compute for the PREVIEW path only. Given the already-selected
+   * staff, it does all the per-member DB work as a handful of AGGREGATE queries
+   * (order metrics, team-DR, CPA, plan/pay-role/tax-config resolution, adjustment
+   * sums) and then computes each member's line IN MEMORY via
+   * `payrollCompute.computeForMemberInMemory` — reusing the exact same formula /
+   * proration / PAYE math `computeForMember` runs. Produces payout rows identical
+   * to the per-member `computePayoutForMember` for the same staff/period.
+   *
+   * Used by BOTH the selection preview and generation (which then bulk-inserts the
+   * returned rows), so a batch's previewed total equals its generated total.
+   */
+  private async computeStaffPayoutsBatched(
+    tx: DbOrTx,
+    staff: Array<{
+      id: string;
+      name: string;
+      role: string;
+      commissionPlanId?: string | null;
+      payRoleId?: string | null;
+      salaryBasis?: string | null;
+      taxStatus?: string | null;
+      flatMonthlyAmount?: string | number | null;
+      annualRent?: string | number | null;
+      dateOfJoining?: string | Date | null;
+      exitDate?: string | Date | null;
+      primaryBranchId?: string | null;
+    }>,
+    periodStart: Date,
+    periodEnd: Date,
+    periodMonth: string,
+  ): Promise<Map<string, Omit<PayoutRow, 'staffId'> | null>> {
+    const out = new Map<string, Omit<PayoutRow, 'staffId'> | null>();
+    if (staff.length === 0) return out;
+    const staffIds = staff.map((s) => s.id);
+
+    // --- 1) Branch + company (group) info for every member, in one query. -------
+    // computeForMember reads each member's primary branch groupId (tax config +
+    // effectiveBranchIds for team DR). Resolve all members' branches at once.
+    const memberBranchRows = await tx
+      .select({
+        userId: schema.users.id,
+        groupId: schema.branches.groupId,
+        branchId: schema.branches.id,
+      })
+      .from(schema.users)
+      .innerJoin(schema.branches, eq(schema.branches.id, schema.users.primaryBranchId))
+      .where(inArray(schema.users.id, staffIds));
+    const memberBranchByUser = new Map(
+      memberBranchRows.map((r) => [r.userId, { groupId: r.groupId, branchId: r.branchId }]),
+    );
+
+    // All branches per group → effectiveBranchIds for each member's team-DR scope.
+    const groupIds = [...new Set(memberBranchRows.map((r) => r.groupId).filter(Boolean))] as string[];
+    const groupBranches = new Map<string, string[]>();
+    if (groupIds.length) {
+      const gbRows = await tx
+        .select({ id: schema.branches.id, groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(inArray(schema.branches.groupId, groupIds));
+      for (const r of gbRows) {
+        if (!r.groupId) continue;
+        const list = groupBranches.get(r.groupId) ?? [];
+        list.push(r.id);
+        groupBranches.set(r.groupId, list);
+      }
+    }
+
+    // --- 2) Reportee resolution for Heads (for team-DR), batched. ---------------
+    // Mirror computeForMember's subordinate-role map + effective-branch scoping.
+    const subordinateRoles: Record<string, string[]> = {
+      HEAD_OF_CS: ['CS_CLOSER'],
+      HEAD_OF_MARKETING: ['MEDIA_BUYER'],
+      HEAD_OF_LOGISTICS: ['TPL_MANAGER', 'STOCK_MANAGER'],
+    };
+    const heads = staff.filter((s) => subordinateRoles[s.role]?.length);
+    // Union of every role/branch pair we need reportees for → one query.
+    const reporteeBranchScope = new Map<string, string[]>(); // headId → teamBranchIds
+    const allSubRoles = new Set<string>();
+    const allTeamBranchIds = new Set<string>();
+    for (const head of heads) {
+      const branchInfo = memberBranchByUser.get(head.id);
+      const effective = branchInfo?.groupId ? groupBranches.get(branchInfo.groupId) ?? [] : [];
+      const teamBranchIds = [
+        ...new Set(
+          (effective.length ? effective : branchInfo?.branchId ? [branchInfo.branchId] : []).filter(Boolean),
+        ),
+      ] as string[];
+      reporteeBranchScope.set(head.id, teamBranchIds);
+      for (const r of subordinateRoles[head.role] ?? []) allSubRoles.add(r);
+      for (const b of teamBranchIds) allTeamBranchIds.add(b);
+    }
+
+    let reporteeRows: Array<{ id: string; role: string; primaryBranchId: string | null }> = [];
+    if (allSubRoles.size && allTeamBranchIds.size) {
+      reporteeRows = await tx
+        .select({
+          id: schema.users.id,
+          role: schema.users.role,
+          primaryBranchId: schema.users.primaryBranchId,
+        })
+        .from(schema.users)
+        .where(
+          and(
+            inArray(schema.users.role, [...allSubRoles] as typeof schema.users.role.enumValues),
+            eq(schema.users.status, 'ACTIVE'),
+            inArray(schema.users.primaryBranchId, [...allTeamBranchIds]),
+          ),
+        );
+    }
+    // Resolve each head's reportee set in memory: role ∈ its subRoles AND branch ∈ its scope.
+    const reporteesByHead = new Map<string, string[]>();
+    for (const head of heads) {
+      const subRoles = new Set(subordinateRoles[head.role]);
+      const scope = new Set(reporteeBranchScope.get(head.id) ?? []);
+      reporteesByHead.set(
+        head.id,
+        reporteeRows
+          .filter((r) => subRoles.has(r.role) && r.primaryBranchId && scope.has(r.primaryBranchId))
+          .map((r) => r.id),
+      );
+    }
+
+    // --- 3) Order metrics (delivered/total/cohort/returned) for all staff. ------
+    const metricsById = await this.payrollMetrics.getStaffMetricsBatched(
+      staffIds,
+      periodStart,
+      periodEnd,
+      tx,
+    );
+
+    // --- 4) Team-DR per Head + CPA for MB/HoM, batched. ------------------------
+    const teamDrByHead = await this.payrollMetrics.computeTeamDrBatched(
+      tx,
+      reporteesByHead,
+      periodStart,
+      periodEnd,
+    );
+    const cpaStaffIds = staff
+      .filter((s) => s.role === 'MEDIA_BUYER' || s.role === 'HEAD_OF_MARKETING')
+      .map((s) => s.id);
+    const totalOrdersByStaff = new Map<string, number>();
+    for (const id of staffIds) totalOrdersByStaff.set(id, metricsById.get(id)?.totalOrders ?? 0);
+    const cpaById = await this.payrollMetrics.computeCpaBatched(
+      tx,
+      cpaStaffIds,
+      periodStart,
+      periodEnd,
+      totalOrdersByStaff,
+    );
+
+    // --- 5) Pending adjustment sums (clawback + add-on) for all staff. ---------
+    const [clawbackRows, addOnRows] = await Promise.all([
+      tx
+        .select({
+          staffId: schema.earningsAdjustments.staffId,
+          total: sum(schema.earningsAdjustments.amount),
+        })
+        .from(schema.earningsAdjustments)
+        .where(
+          and(
+            inArray(schema.earningsAdjustments.staffId, staffIds),
+            inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
+            pendingAdjustmentForMonth(periodMonth),
+          ),
+        )
+        .groupBy(schema.earningsAdjustments.staffId),
+      tx
+        .select({
+          staffId: schema.earningsAdjustments.staffId,
+          total: sum(schema.earningsAdjustments.amount),
+        })
+        .from(schema.earningsAdjustments)
+        .where(
+          and(
+            inArray(schema.earningsAdjustments.staffId, staffIds),
+            inArray(schema.earningsAdjustments.category, ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER']),
+            pendingAdjustmentForMonth(periodMonth),
+          ),
+        )
+        .groupBy(schema.earningsAdjustments.staffId),
+    ]);
+    const clawbackByStaff = new Map(
+      clawbackRows.map((r) => [r.staffId as string, Math.abs(Number(r.total ?? 0))]),
+    );
+    const addOnByStaff = new Map(addOnRows.map((r) => [r.staffId as string, Number(r.total ?? 0)]));
+
+    // --- 6) Tax config (memoized per groupId) + plan/pay-role resolution. ------
+    const taxConfigCache = new Map<string, Awaited<ReturnType<PayrollComputeService['loadTaxConfig']>>>();
+    const loadTaxConfigCached = async (groupId: string | null) => {
+      const key = groupId ?? '__null__';
+      const hit = taxConfigCache.get(key);
+      if (hit) return hit;
+      const cfg = await this.payrollCompute.loadTaxConfig(tx, groupId);
+      taxConfigCache.set(key, cfg);
+      return cfg;
+    };
+    const payRoleCache = new Map<string, Awaited<ReturnType<PayrollComputeService['loadPayRole']>>>();
+    const loadPayRoleCached = async (payRoleId: string) => {
+      if (payRoleCache.has(payRoleId)) return payRoleCache.get(payRoleId) ?? null;
+      const row = await this.payrollCompute.loadPayRole(tx, payRoleId);
+      payRoleCache.set(payRoleId, row);
+      return row;
+    };
+    // Plan resolution memo: keyed by payRoleId (payRole path) or role+commissionPlanId
+    // (legacy path). Mirrors resolvePlanForMember's own branching exactly.
+    const planCache = new Map<string, Awaited<ReturnType<PayrollComputeService['resolvePlanForMemberPublic']>>>();
+    const resolvePlanCached = async (member: {
+      id: string;
+      role: string;
+      commissionPlanId?: string | null;
+      payRoleId?: string | null;
+    }) => {
+      const key = member.payRoleId
+        ? `pr:${member.payRoleId}`
+        : `role:${member.role}:${member.commissionPlanId ?? ''}`;
+      if (planCache.has(key)) return planCache.get(key) ?? null;
+      const plan = await this.payrollCompute.resolvePlanForMemberPublic(tx, member, periodStart, periodEnd);
+      planCache.set(key, plan);
+      return plan;
+    };
+
+    // --- 7) Compute each member's line IN MEMORY, folding in adjustments. ------
+    for (const member of staff) {
+      const branchInfo = memberBranchByUser.get(member.id);
+      const groupId = branchInfo?.groupId ?? null;
+      const base = metricsById.get(member.id) ?? PayrollMetricsService.PAY_METRIC_ZERO;
+
+      // Rebuild the full PayrollMetrics object computeForMember would have — but
+      // only the pay-relevant fields (display-only per-product/carry-over omitted).
+      const individualDr = base.totalOrders > 0 ? (base.deliveredCohortCount / base.totalOrders) * 100 : 0;
+      const teamDr = subordinateRoles[member.role]?.length ? teamDrByHead.get(member.id) : undefined;
+      const cpa =
+        member.role === 'MEDIA_BUYER' || member.role === 'HEAD_OF_MARKETING'
+          ? cpaById.get(member.id) ?? null
+          : null;
+      const missingData =
+        member.role !== 'HR_MANAGER' &&
+        base.totalOrders === 0 &&
+        base.deliveredCount === 0 &&
+        !['FINANCE_OFFICER', 'BRANCH_ADMIN', 'STOCK_MANAGER'].includes(member.role);
+      let metrics: PayrollMetrics = {
+        individualDr,
+        teamDr,
+        cpa,
+        deliveredCount: base.deliveredCount,
+        deliveredCohortCount: base.deliveredCohortCount,
+        totalOrders: base.totalOrders,
+        returnedCount: base.returnedCount,
+        missingData,
+      };
+
+      const [plan, payRole, taxConfig] = await Promise.all([
+        resolvePlanCached(member),
+        member.payRoleId ? loadPayRoleCached(member.payRoleId) : Promise.resolve(null),
+        loadTaxConfigCached(groupId),
+      ]);
+
+      // Recovery categories count delivered orders across cart + delivered-follow-up
+      // pipelines, which the funnel-only batched metrics query does not capture.
+      // Recompute this small subset per-member so the preview matches generation.
+      if (payRole?.deliveredMetricSource === 'RECOVERY_COMBINED') {
+        metrics = await this.payrollMetrics.getStaffMetrics(
+          {
+            staffId: member.id,
+            staffRole: member.role,
+            periodStart,
+            periodEnd,
+            crmLinked: true,
+            deliveredMetricSource: 'RECOVERY_COMBINED',
+          },
+          tx,
+        );
+      }
+
+      const computed = this.payrollCompute.computeForMemberInMemory(
+        member,
+        periodStart,
+        periodEnd,
+        metrics,
+        { plan: plan ? { planName: plan.planName, rules: plan.rules } : null, payRole, taxConfig },
+      );
+
+      if (!computed) {
+        // computeForMember returns null → per-member path falls back to legacy
+        // commission math. That path is rare (no PRD formula); run it per-member
+        // so we never diverge from the authoritative compute for these staff.
+        out.set(
+          member.id,
+          await this.computePayoutForMemberLegacy(tx, member, periodStart, periodEnd, periodMonth),
+        );
+        continue;
+      }
+
+      const clawbackTotal = clawbackByStaff.get(member.id) ?? 0;
+      const addOnsTotal = addOnByStaff.get(member.id) ?? 0;
+      const deductionsTotal = computed.deductionsTotal + clawbackTotal;
+      const grossPay = computed.grossPay + addOnsTotal;
+      const netPay = Math.max(0, grossPay - computed.payeTax - clawbackTotal);
+      const totalPayout = netPay;
+
+      if (totalPayout <= 0 && deductionsTotal <= 0 && computed.baseSalary <= 0) {
+        out.set(member.id, null);
+        continue;
+      }
+
+      out.set(member.id, {
+        baseSalary: computed.baseSalary,
+        performanceBonus: computed.performanceBonus,
+        addOnsTotal,
+        deductionsTotal,
+        totalPayout,
+        allowancesTotal: computed.allowancesTotal,
+        grossPay,
+        payeTax: computed.payeTax,
+        employerPayeSubsidy: computed.employerPayeSubsidy,
+        netPay,
+        metricsSnapshot: computed.metricsSnapshot,
+        bonusBreakdown: computed.bonusBreakdown,
+        lineStatus: computed.lineStatus,
+        payRoleName: computed.payRoleName,
+        proration: computed.proration ?? null,
+      });
+    }
+
+    return out;
+  }
+
+  /**
+   * Read-only twin of `synthesizeDraftBatchContent` — same staff/contractor
+   * SELECTION, but performs NO inserts (no payout_records, no earnings_adjustments
+   * link, no batch rollup). Returns just the grand-total tallies for a single
+   * batch slot. Staff lines are computed by the BATCHED fast path
+   * (`computeStaffPayoutsBatched`): a handful of aggregate queries + the SAME
+   * in-memory formula/proration/PAYE math `computeForMember` runs — so the total
+   * equals the per-member compute while avoiding ~10 queries per person.
+   *
+   * INVARIANT (payroll correctness is paramount): the numbers this returns MUST
+   * equal what `synthesizeDraftBatchContent` would insert for the SAME arguments.
+   * Keep the selection predicates (branch/role/status filters) here in LOCKSTEP
+   * with `synthesizeDraftBatchContent` above whenever either changes; the compute
+   * math is shared via `payrollCompute.*` so it cannot drift.
+   */
+  private async computeSelectionTotals(
+    tx: DbOrTx,
+    opts: {
+      branchId: string | null;
+      department: PayrollDepartment | null;
+      periodStart: Date;
+      periodEnd: Date;
+      periodMonth: string;
+      includeContractors?: boolean;
+      staffMode?: 'department' | 'none' | 'all';
+      scopeEmployeeIds?: string[] | null;
+      scopeBranchIds?: string[] | null;
+      includeNullBranch?: boolean;
+      /** When set, resolve staff/contractor branch names for the roster rows. */
+      branchNameById?: Map<string, string> | null;
+    },
+  ): Promise<{ staffCount: number; contractorCount: number; totalAmount: number; rows: PreviewLineRow[] }> {
+    const { branchId, department, periodStart, periodEnd, periodMonth } = opts;
+    const staffMode = opts.staffMode ?? 'department';
+    const targetRoles =
+      staffMode === 'all'
+        ? [...new Set(Object.values(DEPARTMENT_ROLES).flat())]
+        : department
+          ? [...DEPARTMENT_ROLES[department]]
+          : [];
+    const scopeBranchIds = opts.scopeBranchIds?.length
+      ? [...new Set(opts.scopeBranchIds.filter(Boolean))]
+      : branchId
+        ? [branchId]
+        : [];
+    const periodEndYmd = periodEnd.toISOString().slice(0, 10);
+    const periodStartYmd = periodStart.toISOString().slice(0, 10);
+    const branchPredicate = scopeBranchIds.length
+      ? opts.includeNullBranch
+        ? or(
+            inArray(schema.users.primaryBranchId, scopeBranchIds),
+            isNull(schema.users.primaryBranchId),
+          )
+        : inArray(schema.users.primaryBranchId, scopeBranchIds)
+      : sql`true`;
+    let staff =
+      staffMode === 'none' || targetRoles.length === 0
+        ? []
+        : await tx
+            .select()
+            .from(schema.users)
+            .where(
+              and(
+                branchPredicate,
+                inArray(schema.users.role, targetRoles as unknown as typeof schema.users.$inferSelect['role'][]),
+                or(
+                  eq(schema.users.status, 'ACTIVE'),
+                  and(
+                    gte(schema.users.exitDate, periodStartYmd),
+                    lte(schema.users.exitDate, periodEndYmd),
+                  ),
+                ),
+              ),
+            );
+
+    if (opts.scopeEmployeeIds?.length) {
+      const allowed = new Set(opts.scopeEmployeeIds);
+      staff = staff.filter((s) => allowed.has(s.id));
+    }
+    staff = staff.filter((s) => !s.dateOfJoining || s.dateOfJoining <= periodEndYmd);
+
+    // Preview is read-only: compute all staff lines via the BATCHED fast path
+    // (aggregate queries + in-memory formula), which is identical to the
+    // per-member `computePayoutForMember` but avoids ~10 queries per person.
+    const payableStaff = staff.filter((s) => s.onboardingPayrollStatus !== 'PENDING_APPROVAL');
+    const rows: PreviewLineRow[] = [];
+    const payoutById = await this.computeStaffPayoutsBatched(
+      tx,
+      payableStaff,
+      periodStart,
+      periodEnd,
+      periodMonth,
+    );
+    let totalAmount = 0;
+    for (const member of payableStaff) {
+      const computed =
+        payoutById.get(member.id) ??
+        { baseSalary: 0, performanceBonus: 0, addOnsTotal: 0, deductionsTotal: 0, totalPayout: 0 };
+      rows.push({
+        staffId: member.id,
+        staffName: member.name,
+        staffRole: member.role,
+        baseSalary: computed.baseSalary,
+        performanceBonus: computed.performanceBonus,
+        addOnsTotal: computed.addOnsTotal,
+        deductionsTotal: computed.deductionsTotal,
+        grossPay: computed.grossPay ?? computed.totalPayout,
+        payeTax: computed.payeTax ?? 0,
+        totalPayout: computed.totalPayout,
+        branchName: member.primaryBranchId
+          ? opts.branchNameById?.get(member.primaryBranchId) ?? null
+          : null,
+        department,
+      });
+      totalAmount += computed.totalPayout;
+    }
+    const staffCount = payableStaff.length;
+
+    let contractorCount = 0;
+    if (opts.includeContractors) {
+      const branchRow = branchId
+        ? (
+            await tx
+              .select({ groupId: schema.branches.groupId })
+              .from(schema.branches)
+              .where(eq(schema.branches.id, branchId))
+              .limit(1)
+          )[0]
+        : undefined;
+
+      const contractors = await tx
+        .select()
+        .from(schema.payrollContractors)
+        .where(
+          and(
+            eq(schema.payrollContractors.active, true),
+            branchId
+              ? and(
+                  or(
+                    scopeBranchIds.length
+                      ? inArray(schema.payrollContractors.branchId, scopeBranchIds)
+                      : sql`false`,
+                    isNull(schema.payrollContractors.branchId),
+                  ),
+                  branchRow?.groupId
+                    ? eq(schema.payrollContractors.groupId, branchRow.groupId)
+                    : sql`false`,
+                )
+              : sql`true`,
+          ),
+        );
+
+      const taxConfig = await this.payrollCompute.loadTaxConfig(tx, branchRow?.groupId ?? null);
+
+      const contractorRoleIds = [
+        ...new Set(
+          contractors
+            .map((c) => c.payRoleId)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      ];
+      const roleTaxRows =
+        contractorRoleIds.length > 0
+          ? await tx
+              .select({
+                id: schema.payrollPayRoles.id,
+                defaultTaxStatus: schema.payrollPayRoles.defaultTaxStatus,
+              })
+              .from(schema.payrollPayRoles)
+              .where(inArray(schema.payrollPayRoles.id, contractorRoleIds))
+          : [];
+      const roleTaxById = new Map(roleTaxRows.map((r) => [r.id, r.defaultTaxStatus]));
+
+      const payableContractors = contractors.filter((c) => Number(c.monthlyFee) > 0);
+      const contractorIds = payableContractors.map((c) => c.id);
+
+      // Batch the contractor adjustment sums: one grouped query per category over
+      // ALL contractor ids, instead of two queries per contractor.
+      const clawbackByContractor = new Map<string, number>();
+      const addOnByContractor = new Map<string, number>();
+      if (contractorIds.length) {
+        const [claw, add] = await Promise.all([
+          tx
+            .select({
+              contractorId: schema.earningsAdjustments.contractorId,
+              total: sum(schema.earningsAdjustments.amount),
+            })
+            .from(schema.earningsAdjustments)
+            .where(
+              and(
+                inArray(schema.earningsAdjustments.contractorId, contractorIds),
+                inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
+                pendingAdjustmentForMonth(periodMonth),
+              ),
+            )
+            .groupBy(schema.earningsAdjustments.contractorId),
+          tx
+            .select({
+              contractorId: schema.earningsAdjustments.contractorId,
+              total: sum(schema.earningsAdjustments.amount),
+            })
+            .from(schema.earningsAdjustments)
+            .where(
+              and(
+                inArray(schema.earningsAdjustments.contractorId, contractorIds),
+                inArray(schema.earningsAdjustments.category, ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER']),
+                pendingAdjustmentForMonth(periodMonth),
+              ),
+            )
+            .groupBy(schema.earningsAdjustments.contractorId),
+        ]);
+        for (const r of claw) clawbackByContractor.set(r.contractorId as string, Math.abs(Number(r.total ?? 0)));
+        for (const r of add) addOnByContractor.set(r.contractorId as string, Number(r.total ?? 0));
+      }
+
+      for (const contractor of payableContractors) {
+        const fee = Number(contractor.monthlyFee);
+        const roleTax = contractor.payRoleId ? roleTaxById.get(contractor.payRoleId) : undefined;
+        const taxStatus =
+          (roleTax as 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION' | undefined) ??
+          (contractor.taxStatus as 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION') ??
+          'GROSS_NO_DEDUCTION';
+        const paye = computePaye({ monthlyGross: fee, taxStatus }, taxConfig);
+
+        const clawbackTotal = clawbackByContractor.get(contractor.id) ?? 0;
+        const addOnsTotal = addOnByContractor.get(contractor.id) ?? 0;
+        const grossPay = fee + addOnsTotal;
+        const net = Math.max(0, grossPay - paye.employeePaye - clawbackTotal);
+        rows.push({
+          staffId: contractor.id,
+          staffName: contractor.name,
+          staffRole: 'CONTRACTOR',
+          baseSalary: fee,
+          performanceBonus: 0,
+          addOnsTotal,
+          deductionsTotal: paye.employeePaye + clawbackTotal,
+          grossPay,
+          payeTax: paye.employeePaye,
+          totalPayout: net,
+          branchName: contractor.branchId
+            ? opts.branchNameById?.get(contractor.branchId) ?? null
+            : null,
+          department,
+        });
+        totalAmount += net;
+      }
+      contractorCount = payableContractors.length;
+    }
+
+    return { staffCount, contractorCount, totalAmount, rows };
+  }
+
+  /**
+   * Grand-total preview for a whole payroll SELECTION (which may fan out into
+   * several batches: one per department, plus contractors, or an ALL run). Unlike
+   * `previewBatch` (single branch + department roster), this returns only the
+   * combined { staffCount, contractorCount, totalAmount, batchCount } and inserts
+   * nothing. Numbers are produced by `computeSelectionTotals`, which mirrors the
+   * generate path exactly, so the preview equals what generation would produce.
+   */
+  async previewSelectionTotal(
+    input: PreviewSelectionInput,
+    actor: SessionUser,
+  ): Promise<{ staffCount: number; contractorCount: number; totalAmount: number; batchCount: number; rows: PreviewLineRow[] }> {
+    const { periodStart, periodEnd } = nigeriaMonthWindow(input.periodMonth);
+    const periodMonth = input.periodMonth;
+    // Preview is read-only: run against the pool (this.db), NOT a single-connection
+    // transaction, so the per-member/per-department compute can fan out in parallel.
+    const db = this.db;
+
+    // Branch-name lookup so roster rows can show which branch each person is on
+    // (matters for the multi-branch fan-out roster). One cheap query, reused below.
+    const branchRows = await db
+      .select({ id: schema.branches.id, name: schema.branches.name })
+      .from(schema.branches);
+    const branchNameById = new Map(branchRows.map((b) => [b.id, b.name]));
+
+    // CONTRACTORS scope: one contractor-only slot. branchId optional (a Head may
+    // pin their branch; admin/HR run org-wide with branchId null).
+    if (input.scopeType === 'CONTRACTORS') {
+      const branchId = input.branchId ?? null;
+      if (!(await this.canPrepareDept(actor, branchId, null))) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot preview this contractor payroll batch.' });
+      }
+      const totals = await this.computeSelectionTotals(db, {
+        branchId,
+        department: null,
+        periodStart,
+        periodEnd,
+        periodMonth,
+        includeContractors: true,
+        staffMode: 'none',
+        scopeBranchIds: branchId ? [branchId] : null,
+        branchNameById,
+      });
+      return { ...totals, batchCount: 1 };
+    }
+
+    // ALL scope: every staff role across every branch + contractors, org-wide.
+    if (input.scopeType === 'ALL') {
+      if (!(await this.canPrepareDept(actor, null, null))) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot preview an org-wide payroll batch.' });
+      }
+      const totals = await this.computeSelectionTotals(db, {
+        branchId: null,
+        department: null,
+        periodStart,
+        periodEnd,
+        periodMonth,
+        includeContractors: true,
+        staffMode: 'all',
+        scopeBranchIds: null,
+        branchNameById,
+      });
+      return { ...totals, batchCount: 1 };
+    }
+
+    // Department scope: one staff batch per selected department, combining the
+    // selected branches (mirrors generateBatch's BRANCHES/DEPARTMENT + the
+    // includeNullBranch-on-home-branch rule). Contractors are their own scope now,
+    // so staff department batches never include them.
+    const departments = (
+      input.departments?.length
+        ? input.departments
+        : input.department
+          ? [input.department]
+          : []
+    ) as PayrollDepartment[];
+    if (departments.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Select at least one department.' });
+    }
     const scopeBranchIds = [
       ...new Set(
-        (input.scopeBranchIds?.length ? input.scopeBranchIds : [input.branchId]).filter(Boolean),
+        (input.scopeBranchIds?.length
+          ? input.scopeBranchIds
+          : input.branchId
+            ? [input.branchId]
+            : []
+        ).filter(Boolean),
       ),
     ];
-    if (!scopeBranchIds.includes(input.branchId)) scopeBranchIds.unshift(input.branchId);
+    if (input.branchId && !scopeBranchIds.includes(input.branchId)) {
+      scopeBranchIds.unshift(input.branchId);
+    }
+    if (scopeBranchIds.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Select at least one branch.' });
+    }
+    const homeBranchId = scopeBranchIds[0] as string;
+
+    // Authz once per (department × branch) up front (cheap in-memory checks).
+    for (const department of departments) {
+      for (const bid of scopeBranchIds) {
+        if (!(await this.canPrepareDept(actor, bid, department))) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: `You cannot preview payroll for ${department} on one of the selected branches.`,
+          });
+        }
+      }
+    }
+
+    // Departments computed sequentially. Each department's staff are computed by
+    // the BATCHED fast path (a handful of aggregate queries, not per-member), so
+    // total in-flight queries stay tiny regardless of headcount.
+    let staffCount = 0;
+    let contractorCount = 0;
+    let totalAmount = 0;
+    const rows: PreviewLineRow[] = [];
+    for (const department of departments) {
+      const t = await this.computeSelectionTotals(db, {
+        branchId: homeBranchId,
+        department,
+        periodStart,
+        periodEnd,
+        periodMonth,
+        includeContractors: false,
+        staffMode: 'department',
+        scopeBranchIds,
+        // No-branch staff ride along on the HOME branch's batch only.
+        includeNullBranch: input.includeNullBranch ?? false,
+        branchNameById,
+      });
+      staffCount += t.staffCount;
+      contractorCount += t.contractorCount;
+      totalAmount += t.totalAmount;
+      rows.push(...t.rows);
+    }
+
+    return { staffCount, contractorCount, totalAmount, batchCount: departments.length, rows };
+  }
+
+  async previewBatch(input: GenerateBatchInput, actor: SessionUser) {
+    // Preview is a staff/department feature only; null-scope batches (contractors /
+    // all) generate directly without a preview step.
+    if (isNullScopeType(input.scopeType) || !input.branchId || !input.department) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Preview requires a branch and department.' });
+    }
+    const branchId = input.branchId;
+    const department = input.department;
+    const scopeBranchIds = [
+      ...new Set(
+        (input.scopeBranchIds?.length ? input.scopeBranchIds : [branchId]).filter(Boolean),
+      ),
+    ];
+    if (!scopeBranchIds.includes(branchId)) scopeBranchIds.unshift(branchId);
 
     for (const bid of scopeBranchIds) {
-      if (!(await this.canPrepareDept(actor, bid, input.department))) {
+      if (!(await this.canPrepareDept(actor, bid, department))) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: `You cannot preview payroll for ${input.department} on one of the selected branches.`,
+          message: `You cannot preview payroll for ${department} on one of the selected branches.`,
         });
       }
     }
-    const periodStart = nigeriaDayStart(input.periodMonth);
-    const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
-    const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
+    const { periodStart, periodEnd } = nigeriaMonthWindow(input.periodMonth);
 
-    return withActorAndBranch(this.db, { id: actor.id, currentBranchId: input.branchId }, async (tx) => {
-      const departmentRoles = DEPARTMENT_ROLES[input.department];
+    return withActorAndBranch(this.db, { id: actor.id, currentBranchId: branchId }, async (tx) => {
+      const departmentRoles = DEPARTMENT_ROLES[department];
       const staff = await tx
         .select({
           id: schema.users.id,
@@ -801,7 +1832,13 @@ export class PayrollBatchService {
         .from(schema.users)
         .where(
           and(
-            inArray(schema.users.primaryBranchId, scopeBranchIds),
+            // Mirror generation: scoped branches, optionally OR-ing in no-branch staff.
+            input.includeNullBranch
+              ? or(
+                  inArray(schema.users.primaryBranchId, scopeBranchIds),
+                  isNull(schema.users.primaryBranchId),
+                )
+              : inArray(schema.users.primaryBranchId, scopeBranchIds),
             inArray(schema.users.role, departmentRoles as unknown as typeof schema.users.$inferSelect['role'][]),
             // Match generation: ACTIVE staff + mid-period leavers owed final pay.
             or(
@@ -827,15 +1864,23 @@ export class PayrollBatchService {
         addOnsTotal: number;
         deductionsTotal: number;
         totalPayout: number;
+        // Gross + PAYE surfaced so the preview roster matches the batch-detail
+        // review columns (HR sees gross/tax before generating the draft).
+        grossPay: number;
+        payeTax: number;
       }>;
       for (const member of staff) {
-        const computed = (await this.computePayoutForMember(tx, member, periodStart, periodEnd))
+        const computed = (await this.computePayoutForMember(tx, member, periodStart, periodEnd, input.periodMonth))
           ?? { baseSalary: 0, performanceBonus: 0, addOnsTotal: 0, deductionsTotal: 0, totalPayout: 0 };
         rows.push({
           staffId: member.id,
           staffName: member.name,
           staffRole: member.role,
           ...computed,
+          // computePayoutForMember returns grossPay/payeTax on the PRD path but the
+          // legacy fallback may omit them — default to gross=total, tax=0.
+          grossPay: computed.grossPay ?? computed.totalPayout,
+          payeTax: computed.payeTax ?? 0,
         });
       }
 
@@ -855,7 +1900,7 @@ export class PayrollBatchService {
    * the same data inside the caller's transaction so totals are consistent.
    */
   private async computePayoutForMember(
-    tx: TxLike,
+    tx: DbOrTx,
     member: {
       id: string;
       role: string;
@@ -871,6 +1916,9 @@ export class PayrollBatchService {
     },
     periodStart: Date,
     periodEnd: Date,
+    // YYYY-MM-01 for the batch being computed. Gates which pending adjustments
+    // fold into this payout (un-earmarked, or earmarked for this exact month).
+    periodMonth: string,
   ): Promise<Omit<PayoutRow, 'staffId'> | null> {
     const branchRow = (
       await tx
@@ -903,7 +1951,7 @@ export class PayrollBatchService {
       { effectiveBranchIds },
     );
     if (!computed) {
-      return this.computePayoutForMemberLegacy(tx, member, periodStart, periodEnd);
+      return this.computePayoutForMemberLegacy(tx, member, periodStart, periodEnd, periodMonth);
     }
 
     const pendingClawbackRows = await tx
@@ -913,7 +1961,7 @@ export class PayrollBatchService {
         and(
           eq(schema.earningsAdjustments.staffId, member.id),
           inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
-          isNull(schema.earningsAdjustments.payoutId),
+          pendingAdjustmentForMonth(periodMonth),
         ),
       );
     const clawbackTotal = Math.abs(Number(pendingClawbackRows[0]?.total ?? 0));
@@ -924,7 +1972,7 @@ export class PayrollBatchService {
       .where(
         and(
           eq(schema.earningsAdjustments.staffId, member.id),
-          isNull(schema.earningsAdjustments.payoutId),
+          pendingAdjustmentForMonth(periodMonth),
           inArray(schema.earningsAdjustments.category, ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER']),
         ),
       );
@@ -957,10 +2005,11 @@ export class PayrollBatchService {
 
   /** Legacy commission math fallback when no PRD formula resolves. */
   private async computePayoutForMemberLegacy(
-    tx: TxLike,
+    tx: DbOrTx,
     member: { id: string; role: string; commissionPlanId?: string | null },
     periodStart: Date,
     periodEnd: Date,
+    periodMonth: string,
   ): Promise<Omit<PayoutRow, 'staffId'> | null> {
     // Pay count by `deliveredAt` — staff get credited in the period their
     // delivery actually closed, so cross-period orders aren't lost.
@@ -1046,7 +2095,7 @@ export class PayrollBatchService {
         and(
           eq(schema.earningsAdjustments.staffId, member.id),
           inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
-          isNull(schema.earningsAdjustments.payoutId),
+          pendingAdjustmentForMonth(periodMonth),
         ),
       );
     const clawbackTotal = Math.abs(Number(pendingClawbackRows[0]?.total ?? 0));
@@ -1057,7 +2106,7 @@ export class PayrollBatchService {
       .where(
         and(
           eq(schema.earningsAdjustments.staffId, member.id),
-          isNull(schema.earningsAdjustments.payoutId),
+          pendingAdjustmentForMonth(periodMonth),
           inArray(schema.earningsAdjustments.category, ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER']),
         ),
       );
@@ -1140,7 +2189,7 @@ export class PayrollBatchService {
     await this.notifyByRoleOnBranch('HR_MANAGER', batch.branchId, {
       type: 'hr:batch_submitted',
       title: 'Payroll batch submitted for review',
-      body: `${this.formatDepartment(batch.department)} batch for ${this.formatPeriod(batch.periodMonth)} is ready for your review.`,
+      body: `${this.formatDepartment(batch.department, batch.scopeType)} batch for ${this.formatPeriod(batch.periodMonth)} is ready for your review.`,
       batchId: batch.id,
     });
 
@@ -1198,7 +2247,7 @@ export class PayrollBatchService {
     await this.notifyFinance(batch.branchId, {
       type: 'hr:batch_approved',
       title: 'Payroll batch ready for disbursement',
-      body: `${this.formatDepartment(batch.department)} batch for ${this.formatPeriod(batch.periodMonth)} (${batch.staffCount} staff, ₦${Number(batch.totalAmount).toLocaleString('en-NG')}) is approved.`,
+      body: `${this.formatDepartment(batch.department, batch.scopeType)} batch for ${this.formatPeriod(batch.periodMonth)} (${batch.staffCount} staff, ₦${Number(batch.totalAmount).toLocaleString('en-NG')}) is approved.`,
       batchId: batch.id,
     });
 
@@ -1225,7 +2274,10 @@ export class PayrollBatchService {
       }
       nextStatus = 'DRAFT';
       notifyType = 'hr:batch_rejected';
-      notifyRole = DEPARTMENT_OWNER_ROLE[batch.department as PayrollDepartment];
+      // Null-scope batches have no department owner — route back to HR.
+      notifyRole = isNullScopeBatch(batch)
+        ? 'HR_MANAGER'
+        : DEPARTMENT_OWNER_ROLE[batch.department as PayrollDepartment];
     } else if (batch.status === 'PENDING_FINANCE') {
       // Finance rejects back to HR — must be Finance/admin
       if (!canProcessBatch(actor)) {
@@ -1275,7 +2327,7 @@ export class PayrollBatchService {
     await this.notifyByRoleOnBranch(notifyRole, batch.branchId, {
       type: notifyType,
       title: nextStatus === 'DRAFT' ? 'Payroll batch sent back for edits' : 'Payroll batch returned by Finance',
-      body: `${this.formatDepartment(batch.department)} batch for ${this.formatPeriod(batch.periodMonth)} was rejected. Reason: ${input.reason}`,
+      body: `${this.formatDepartment(batch.department, batch.scopeType)} batch for ${this.formatPeriod(batch.periodMonth)} was rejected. Reason: ${input.reason}`,
       batchId: batch.id,
     });
 
@@ -1351,15 +2403,18 @@ export class PayrollBatchService {
     await this.notifyByRoleOnBranch('HR_MANAGER', batch.branchId, {
       type: 'hr:batch_paid',
       title: 'Payroll batch paid',
-      body: `${this.formatDepartment(batch.department)} batch for ${this.formatPeriod(batch.periodMonth)} marked paid.`,
+      body: `${this.formatDepartment(batch.department, batch.scopeType)} batch for ${this.formatPeriod(batch.periodMonth)} marked paid.`,
       batchId: batch.id,
     });
-    const ownerRole = DEPARTMENT_OWNER_ROLE[batch.department as PayrollDepartment];
-    if (ownerRole !== 'HR_MANAGER') {
+    // Null-scope batches have no department owner to notify beyond HR (already done above).
+    const ownerRole = isNullScopeBatch(batch)
+      ? null
+      : DEPARTMENT_OWNER_ROLE[batch.department as PayrollDepartment];
+    if (ownerRole && ownerRole !== 'HR_MANAGER') {
       await this.notifyByRoleOnBranch(ownerRole, batch.branchId, {
         type: 'hr:batch_paid',
         title: 'Your team has been paid',
-        body: `Finance disbursed ${this.formatDepartment(batch.department)} payroll for ${this.formatPeriod(batch.periodMonth)} (₦${Number(batch.totalAmount).toLocaleString('en-NG')}).`,
+        body: `Finance disbursed ${this.formatDepartment(batch.department, batch.scopeType)} payroll for ${this.formatPeriod(batch.periodMonth)} (₦${Number(batch.totalAmount).toLocaleString('en-NG')}).`,
         batchId: batch.id,
       });
     }
@@ -1392,9 +2447,7 @@ export class PayrollBatchService {
       throw new TRPCError({ code: 'CONFLICT', message: 'Only DRAFT batches can be recalculated.' });
     }
 
-    const periodStart = nigeriaDayStart(String(batch.periodMonth));
-    const lastDay = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
-    const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
+    const { periodStart, periodEnd } = nigeriaMonthWindow(String(batch.periodMonth));
 
     return withActorAndBranch(
       this.db,
@@ -1419,6 +2472,7 @@ export class PayrollBatchService {
           batch.department as PayrollDepartment,
           periodStart,
           periodEnd,
+          String(batch.periodMonth),
           {
             includeContractors: batch.includeContractors ?? false,
             scopeEmployeeIds: batch.scopeEmployeeIds ?? null,
@@ -1755,7 +2809,9 @@ export class PayrollBatchService {
     const rows = await this.db
       .select({
         branchId: schema.payrollBatches.branchId,
-        branchName: schema.branches.name,
+        // Null-branch (contractor / ALL) batches group under a synthetic label so
+        // their cost is not dropped from the report.
+        branchName: sql<string>`COALESCE(${schema.branches.name}, 'Contractors / All')`,
         totalGross: sum(
           sql`COALESCE(NULLIF(${schema.payrollBatches.totalGross}, 0), ${schema.payrollBatches.totalAmount})`,
         ),
@@ -1766,7 +2822,7 @@ export class PayrollBatchService {
         batchCount: count(),
       })
       .from(schema.payrollBatches)
-      .innerJoin(schema.branches, eq(schema.branches.id, schema.payrollBatches.branchId))
+      .leftJoin(schema.branches, eq(schema.branches.id, schema.payrollBatches.branchId))
       .where(and(...conditions))
       .groupBy(schema.payrollBatches.branchId, schema.branches.name)
       .orderBy(
@@ -1912,13 +2968,15 @@ export class PayrollBatchService {
       }
 
       const detail = await this.getBatchDetail(batchId, viewer, effectiveBranchIds);
-      const branchRow = (
-        await this.db
-          .select({ name: schema.branches.name })
-          .from(schema.branches)
-          .where(eq(schema.branches.id, batch.branchId))
-          .limit(1)
-      )[0];
+      const branchRow = batch.branchId
+        ? (
+            await this.db
+              .select({ name: schema.branches.name })
+              .from(schema.branches)
+              .where(eq(schema.branches.id, batch.branchId))
+              .limit(1)
+          )[0]
+        : undefined;
 
       const rows = detail.payouts
         .filter((p) => Number(p.totalPayout ?? p.netPay) > 0)
@@ -1961,7 +3019,9 @@ export class PayrollBatchService {
       .innerJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
       .leftJoin(schema.users, eq(schema.users.id, schema.payoutRecords.staffId))
       .leftJoin(schema.payrollContractors, eq(schema.payrollContractors.id, schema.payoutRecords.contractorId))
-      .innerJoin(schema.branches, eq(schema.branches.id, schema.payrollBatches.branchId))
+      // Left join: a null-scope (contractor / ALL) batch has no branch — an inner
+      // join would drop the row and 404 the payslip.
+      .leftJoin(schema.branches, eq(schema.branches.id, schema.payrollBatches.branchId))
       .where(eq(schema.payoutRecords.id, payoutId))
       .limit(1);
 
@@ -2150,9 +3210,103 @@ export class PayrollBatchService {
     );
   }
 
+  /**
+   * "Keep absorbing until it leaves HR": when a standalone adjustment
+   * (HrService.createAdjustment — the Deduct Salary / Add-on toolbar path) is
+   * created and an OPEN batch already exists for that staff member's month, fold
+   * it into that batch's payout right away instead of leaving it floating for the
+   * next month's run.
+   *
+   * Scope is deliberately DRAFT + PENDING_HR only — the same window
+   * `addBatchAdjustment` allows. Once a batch reaches Finance we never mutate the
+   * payout underneath them (Financial Truth / SoD boundary): the adjustment stays
+   * floating and folds into a later batch for its month.
+   *
+   * Staff only. Contractors have no role→department mapping here; their pending
+   * adjustments fold in at generation time. Best-effort: any miss just leaves the
+   * adjustment pending, which the next generate/recalculate sweeps correctly.
+   *
+   * Returns true if the adjustment was attached to an open batch.
+   */
+  async absorbPendingStaffAdjustment(adjustmentId: string): Promise<boolean> {
+    const adjRows = await this.db
+      .select()
+      .from(schema.earningsAdjustments)
+      .where(eq(schema.earningsAdjustments.id, adjustmentId))
+      .limit(1);
+    const adj = adjRows[0];
+    // Only un-linked staff adjustments earmarked for a specific month can target
+    // an existing open batch. NULL-month adjustments keep legacy behavior (swept
+    // at generation), matching the pendingAdjustmentForMonth predicate.
+    if (!adj || !adj.staffId || adj.payoutId || !adj.periodMonth) return false;
+
+    const staffRows = await this.db
+      .select({ role: schema.users.role, branchId: schema.users.primaryBranchId })
+      .from(schema.users)
+      .where(eq(schema.users.id, adj.staffId))
+      .limit(1);
+    const staff = staffRows[0];
+    if (!staff?.branchId) return false;
+
+    const department = (Object.keys(DEPARTMENT_ROLES) as PayrollDepartment[]).find((d) =>
+      DEPARTMENT_ROLES[d].includes(staff.role),
+    );
+    if (!department) return false;
+
+    return withActorAndBranch(
+      this.db,
+      { id: adj.staffId, currentBranchId: staff.branchId },
+      async (tx) => {
+        const batchRows = await tx
+          .select({ id: schema.payrollBatches.id })
+          .from(schema.payrollBatches)
+          .where(
+            and(
+              eq(schema.payrollBatches.branchId, staff.branchId as string),
+              eq(schema.payrollBatches.periodMonth, adj.periodMonth as string),
+              eq(schema.payrollBatches.department, department),
+              inArray(schema.payrollBatches.status, ['DRAFT', 'PENDING_HR']),
+            ),
+          )
+          .limit(1);
+        const batch = batchRows[0];
+        if (!batch) return false;
+
+        const payoutRows = await tx
+          .select({ id: schema.payoutRecords.id })
+          .from(schema.payoutRecords)
+          .where(
+            and(
+              eq(schema.payoutRecords.batchId, batch.id),
+              eq(schema.payoutRecords.staffId, adj.staffId as string),
+            ),
+          )
+          .limit(1);
+        const payout = payoutRows[0];
+        // Staff has no line in this batch (e.g. joined after generation) — leave
+        // the adjustment pending; recalculate will pick them up.
+        if (!payout) return false;
+
+        await tx
+          .update(schema.earningsAdjustments)
+          .set({ payoutId: payout.id })
+          .where(eq(schema.earningsAdjustments.id, adjustmentId));
+
+        await this.recomputePayoutTotals(tx, payout.id);
+        await this.recomputeBatchTotals(tx, batch.id);
+        return true;
+      },
+    );
+  }
+
   async getPrepareAccess(viewer: SessionUser) {
     const departments = new Set<PayrollDepartment>();
     const branchIds = new Set<string>();
+
+    // Count ACTIVE payroll-role staff with no primary branch. These are invisible
+    // to branch-scoped department batches — the generate UI warns and offers to
+    // sweep them in (includeNullBranch) so they are never silently unpaid.
+    const unassignedStaffCount = await this.countUnassignedPayrollStaff();
 
     const viewerHasFullHr =
       viewer.role === 'SUPER_ADMIN' ||
@@ -2163,7 +3317,7 @@ export class PayrollBatchService {
         .select({ id: schema.branches.id, name: schema.branches.name })
         .from(schema.branches)
         .where(sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`);
-      return { allowed: true, departments: [...departments], branches: allBranches };
+      return { allowed: true, departments: [...departments], branches: allBranches, unassignedStaffCount };
     }
 
     const ownerDept = (Object.keys(DEPARTMENT_OWNER_ROLE) as PayrollDepartment[])
@@ -2194,6 +3348,7 @@ export class PayrollBatchService {
         allowed: departments.size > 0 && allBranches.length > 0,
         departments: [...departments],
         branches: allBranches,
+        unassignedStaffCount,
       };
     }
 
@@ -2208,7 +3363,24 @@ export class PayrollBatchService {
       allowed: departments.size > 0 && branches.length > 0,
       departments: [...departments],
       branches,
+      unassignedStaffCount,
     };
+  }
+
+  /** Count ACTIVE staff on any payroll role who have no primary branch. */
+  private async countUnassignedPayrollStaff(): Promise<number> {
+    const payrollRoles = [...new Set(Object.values(DEPARTMENT_ROLES).flat())];
+    const rows = await this.db
+      .select({ n: count() })
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.status, 'ACTIVE'),
+          isNull(schema.users.primaryBranchId),
+          inArray(schema.users.role, payrollRoles as unknown as typeof schema.users.$inferSelect['role'][]),
+        ),
+      );
+    return Number(rows[0]?.n ?? 0);
   }
 
   // ============================================
@@ -2234,16 +3406,36 @@ export class PayrollBatchService {
     const orgWideHeadNullSession =
       isOrgWideDepartmentHead(viewer) && viewer.currentBranchId == null;
 
+    // Null-branch batches (org-wide contractors / ALL) have no branch to scope by.
+    // They are visible to anyone with cross-branch HR reach (hr.write / SuperAdmin);
+    // branch-scoped viewers only ever see them via a branch-pinned contractor batch,
+    // which passes the normal branch filters below.
+    const canSeeOrgWide =
+      viewer.role === 'SUPER_ADMIN' || (viewer.permissions ?? []).includes('hr.write');
+    const orgWideBatch = and(
+      isNull(schema.payrollBatches.branchId),
+      inArray(schema.payrollBatches.scopeType, ['CONTRACTORS', 'ALL']),
+    );
+
     // Company group isolation: even cross-branch / org-wide viewers must be scoped
-    // to their effective branch set when a company group is active.
+    // to their effective branch set when a company group is active. Null-branch
+    // org-wide batches are exempt (they belong to no single company) for hr.write.
     if (effectiveBranchIds?.length) {
-      conditions.push(inArray(schema.payrollBatches.branchId, effectiveBranchIds));
+      conditions.push(
+        canSeeOrgWide
+          ? or(inArray(schema.payrollBatches.branchId, effectiveBranchIds), orgWideBatch)
+          : inArray(schema.payrollBatches.branchId, effectiveBranchIds),
+      );
     }
 
     if (!cross) {
       if (!viewer.currentBranchId && !orgWideHeadNullSession) return { batches: [], byMonth: [] };
       if (viewer.currentBranchId) {
-        conditions.push(eq(schema.payrollBatches.branchId, viewer.currentBranchId));
+        conditions.push(
+          canSeeOrgWide
+            ? or(eq(schema.payrollBatches.branchId, viewer.currentBranchId), orgWideBatch)
+            : eq(schema.payrollBatches.branchId, viewer.currentBranchId),
+        );
       }
 
       // Restrict branch-scoped non-admin viewers to departments they can actually prepare/review/process.
@@ -2264,6 +3456,9 @@ export class PayrollBatchService {
         }
         const uniqueAllowed = [...new Set(allowedDepts)];
         if (uniqueAllowed.length === 0) return { batches: [], byMonth: [] };
+        // Dept-restricted viewers (Heads) only see their own department's batches.
+        // A department filter also naturally excludes null-department (contractor /
+        // ALL) batches — those are only for cross-branch admin/HR viewers.
         if (uniqueAllowed.length === 1) {
           const firstAllowed = uniqueAllowed[0] as PayrollDepartment;
           conditions.push(eq(schema.payrollBatches.department, firstAllowed));
@@ -2271,7 +3466,7 @@ export class PayrollBatchService {
           conditions.push(
             inArray(
               schema.payrollBatches.department,
-              uniqueAllowed as unknown as typeof schema.payrollBatches.$inferSelect['department'][],
+              uniqueAllowed as unknown as NonNullable<typeof schema.payrollBatches.$inferSelect['department']>[],
             ),
           );
         }
@@ -2483,13 +3678,13 @@ export class PayrollBatchService {
   }
 
   private async getAllowedTransitions(
-    batch: { status: PayrollBatchStatus; branchId: string; department: string },
+    batch: { status: PayrollBatchStatus; branchId: string | null; department: string | null },
     viewer: SessionUser,
   ): Promise<string[]> {
     const out: string[] = [];
     if (
       batch.status === 'DRAFT' &&
-      (await this.canPrepareDept(viewer, batch.branchId, batch.department as PayrollDepartment))
+      (await this.canPrepareDept(viewer, batch.branchId, batch.department as PayrollDepartment | null))
     ) {
       out.push('SUBMIT');
     }
@@ -2502,7 +3697,13 @@ export class PayrollBatchService {
     return out;
   }
 
-  private formatDepartment(d: string): string {
+  private formatDepartment(d: string | null | undefined, scopeType?: string | null): string {
+    // Null-scope batches have no department — describe them by scope instead.
+    if (!d) {
+      if (scopeType === 'CONTRACTORS') return 'Contractors';
+      if (scopeType === 'ALL') return 'All staff & contractors';
+      return 'Payroll';
+    }
     if (d === 'CS') return 'Customer Service';
     if (d === 'HR') return 'HR';
     return d.charAt(0) + d.slice(1).toLowerCase();
@@ -2519,9 +3720,11 @@ export class PayrollBatchService {
    */
   private async notifyByRoleOnBranch(
     role: string,
-    branchId: string,
+    branchId: string | null,
     payload: { type: string; title: string; body: string; batchId: string },
   ) {
+    // For null-scope (contractor/all) batches there is no owning branch, so notify
+    // every ACTIVE holder of the role org-wide rather than only branch-local ones.
     const recipients = await this.db
       .select({ id: schema.users.id })
       .from(schema.users)
@@ -2529,7 +3732,9 @@ export class PayrollBatchService {
         and(
           eq(schema.users.status, 'ACTIVE'),
           eq(schema.users.role, role as typeof schema.users.$inferSelect['role']),
-          or(eq(schema.users.primaryBranchId, branchId), isNull(schema.users.primaryBranchId)),
+          branchId
+            ? or(eq(schema.users.primaryBranchId, branchId), isNull(schema.users.primaryBranchId))
+            : sql`true`,
         ),
       );
     for (const r of recipients) {
@@ -2544,7 +3749,7 @@ export class PayrollBatchService {
   }
 
   private async notifyFinance(
-    branchId: string,
+    branchId: string | null,
     payload: { type: string; title: string; body: string; batchId: string },
   ) {
     // Finance Officers (any branch). The Finance "hat" pattern was retired in favour of
@@ -2572,3 +3777,6 @@ export class PayrollBatchService {
 
 // ── tx type alias ──────────────────────────────────────────────
 type TxLike = Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
+// Accepts either a transaction OR the pool handle. Used by read-only compute that
+// can run against the pool (e.g. parallel preview) as well as inside a tx.
+type DbOrTx = TxLike | PostgresJsDatabase<typeof schema>;

@@ -123,6 +123,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
       reportsToRequired: formData.get('reportsToRequired') === 'true',
       perProductBonus: formData.get('perProductBonus') === 'true',
       defaultTaxStatus: formData.get('defaultTaxStatus')?.toString() ?? 'STANDARD_PAYE',
+      deliveredMetricSource:
+        formData.get('deliveredMetricSource')?.toString() === 'RECOVERY_COMBINED'
+          ? 'RECOVERY_COMBINED'
+          : 'FUNNEL',
     };
 
     const createRes = await apiRequest<unknown>('/trpc/hr.createPayRole', {

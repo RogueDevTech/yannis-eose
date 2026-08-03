@@ -852,6 +852,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
           periodMonth: schema.payrollBatches.periodMonth,
           branchId: schema.payrollBatches.branchId,
           department: schema.payrollBatches.department,
+          scopeType: schema.payrollBatches.scopeType,
           financeProcessedAt: schema.payrollBatches.financeProcessedAt,
         })
         .from(schema.payrollBatches)
@@ -883,7 +884,14 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       }
 
       const postingDate = nigeriaCalendarDate(batch.financeProcessedAt ?? new Date());
-      const dept = batch.department ?? 'General';
+      // Null-scope batches have no department — label the voucher lines by scope.
+      const dept =
+        batch.department ??
+        (batch.scopeType === 'CONTRACTORS'
+          ? 'Contractors'
+          : batch.scopeType === 'ALL'
+            ? 'All staff & contractors'
+            : 'General');
 
       const lines: Array<{ accountId: string; debit: number; credit: number; remarks: string }> = [
         { accountId: salary.id, debit: amount, credit: 0, remarks: `${dept} payroll gross` },

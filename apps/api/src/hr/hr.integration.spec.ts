@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
-import { eq, and, gte, lte } from 'drizzle-orm';
+import { eq, and, gte, lte, or, isNull } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
 import { createTestProduct, createTestUser } from '../test/factories/order.factory';
@@ -289,5 +289,174 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
 
     expect(count).toBe(40);
     expect(baseSalaryEarned).toBe(0); // Below threshold
+  });
+
+  // ---------------------------------------------------------------------------
+  // Period-earmarked adjustments: the batch sweep predicate
+  //   payout_id IS NULL AND (period_month IS NULL OR period_month = <batch month>)
+  // must select only adjustments for the batch's own month (plus un-earmarked
+  // legacy rows), and never an adjustment earmarked for a different month.
+  // ---------------------------------------------------------------------------
+
+  it('month-scoped sweep selects this-month + null-month, not other-month adjustments', async () => {
+    const hrActor = await createTestUser(db as any, { role: 'HR_MANAGER' });
+    const staff = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    await setSessionActor(pgClient, hrActor.id);
+
+    // Three pending (unlinked) adjustments for the same staff member.
+    const rows = await db
+      .insert(schema.earningsAdjustments)
+      .values([
+        { staffId: staff.id, category: 'DEDUCTION', amount: '-1000', reason: 'August earmark', periodMonth: '2026-08-01' },
+        { staffId: staff.id, category: 'DEDUCTION', amount: '-2000', reason: 'September earmark', periodMonth: '2026-09-01' },
+        { staffId: staff.id, category: 'DEDUCTION', amount: '-3000', reason: 'No earmark (legacy)', periodMonth: null },
+      ])
+      .returning({ id: schema.earningsAdjustments.id, periodMonth: schema.earningsAdjustments.periodMonth });
+    const augustId = rows[0]!.id;
+    const septemberId = rows[1]!.id;
+    const nullMonthId = rows[2]!.id;
+
+    // Mirror pendingAdjustmentForMonth('2026-08-01').
+    const augustSweep = await db
+      .select({ id: schema.earningsAdjustments.id })
+      .from(schema.earningsAdjustments)
+      .where(
+        and(
+          eq(schema.earningsAdjustments.staffId, staff.id),
+          isNull(schema.earningsAdjustments.payoutId),
+          or(
+            isNull(schema.earningsAdjustments.periodMonth),
+            eq(schema.earningsAdjustments.periodMonth, '2026-08-01'),
+          ),
+        ),
+      );
+    const augustIds = augustSweep.map((r) => r.id);
+
+    expect(augustIds).toContain(augustId); // this month
+    expect(augustIds).toContain(nullMonthId); // legacy un-earmarked
+    expect(augustIds).not.toContain(septemberId); // other month excluded
+  });
+
+  it('already-linked adjustments are never re-swept', async () => {
+    const hrActor = await createTestUser(db as any, { role: 'HR_MANAGER' });
+    const staff = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    await setSessionActor(pgClient, hrActor.id);
+
+    // A payout to link against.
+    const payoutRows = await db
+      .insert(schema.payoutRecords)
+      .values({
+        staffId: staff.id,
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-31'),
+        baseSalary: '50000',
+        deductionsTotal: '0',
+        totalPayout: '50000',
+        status: 'DRAFT',
+      })
+      .returning({ id: schema.payoutRecords.id });
+    const payoutId = payoutRows[0]!.id;
+
+    // One already linked to that payout, one still pending — both August.
+    await db.insert(schema.earningsAdjustments).values([
+      { staffId: staff.id, category: 'DEDUCTION', amount: '-1000', reason: 'Already applied', periodMonth: '2026-08-01', payoutId },
+      { staffId: staff.id, category: 'DEDUCTION', amount: '-2000', reason: 'Still pending', periodMonth: '2026-08-01' },
+    ]);
+
+    const augustSweep = await db
+      .select({ id: schema.earningsAdjustments.id })
+      .from(schema.earningsAdjustments)
+      .where(
+        and(
+          eq(schema.earningsAdjustments.staffId, staff.id),
+          isNull(schema.earningsAdjustments.payoutId),
+          or(
+            isNull(schema.earningsAdjustments.periodMonth),
+            eq(schema.earningsAdjustments.periodMonth, '2026-08-01'),
+          ),
+        ),
+      );
+
+    // Only the still-pending row is eligible; the linked one is excluded.
+    expect(augustSweep.length).toBe(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Null-scope batches (CONTRACTORS / ALL): branch_id / department nullable, and
+  // the partial unique index uq_payroll_batch_null_scope must still dedup one
+  // batch per (scope_type, month, branch, run_label) despite the NULLs.
+  // ---------------------------------------------------------------------------
+
+  it('allows a CONTRACTORS batch with null branch + department, and dedups a duplicate', async () => {
+    const hrActor = await createTestUser(db as any, { role: 'HR_MANAGER' });
+    await setSessionActor(pgClient, hrActor.id);
+
+    // First org-wide contractor batch for the month — should insert fine.
+    await db.insert(schema.payrollBatches).values({
+      periodMonth: '2026-08-01',
+      branchId: null,
+      department: null,
+      scopeType: 'CONTRACTORS',
+      status: 'DRAFT',
+    });
+
+    const rows = await db
+      .select({ id: schema.payrollBatches.id, branchId: schema.payrollBatches.branchId, department: schema.payrollBatches.department })
+      .from(schema.payrollBatches)
+      .where(
+        and(
+          eq(schema.payrollBatches.scopeType, 'CONTRACTORS'),
+          eq(schema.payrollBatches.periodMonth, '2026-08-01'),
+          isNull(schema.payrollBatches.branchId),
+        ),
+      );
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.branchId).toBeNull();
+    expect(rows[0]!.department).toBeNull();
+
+    // A second identical-scope batch (same scope_type, month, null branch, null
+    // run_label) must violate the partial unique index.
+    let dupRejected = false;
+    try {
+      await db.insert(schema.payrollBatches).values({
+        periodMonth: '2026-08-01',
+        branchId: null,
+        department: null,
+        scopeType: 'CONTRACTORS',
+        status: 'DRAFT',
+      });
+    } catch {
+      dupRejected = true;
+    }
+    expect(dupRejected).toBe(true);
+  });
+
+  it('lets a branch-pinned CONTRACTORS batch coexist with an org-wide one', async () => {
+    const hrActor = await createTestUser(db as any, { role: 'HR_MANAGER' });
+    const staff = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    await setSessionActor(pgClient, hrActor.id);
+    // staff.primaryBranchId gives us a real branch id to pin to.
+    const [staffRow] = await db
+      .select({ branchId: schema.users.primaryBranchId })
+      .from(schema.users)
+      .where(eq(schema.users.id, staff.id));
+    const branchId = staffRow!.branchId;
+
+    await db.insert(schema.payrollBatches).values([
+      { periodMonth: '2026-08-01', branchId: null, department: null, scopeType: 'CONTRACTORS', status: 'DRAFT' },
+      { periodMonth: '2026-08-01', branchId, department: null, scopeType: 'CONTRACTORS', status: 'DRAFT' },
+    ]);
+
+    const all = await db
+      .select({ id: schema.payrollBatches.id })
+      .from(schema.payrollBatches)
+      .where(
+        and(
+          eq(schema.payrollBatches.scopeType, 'CONTRACTORS'),
+          eq(schema.payrollBatches.periodMonth, '2026-08-01'),
+        ),
+      );
+    // Org-wide (null branch) + branch-pinned are distinct slots — both survive.
+    expect(all.length).toBe(2);
   });
 });

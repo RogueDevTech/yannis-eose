@@ -139,6 +139,12 @@ export const createAdjustmentSchema = z
     amount: z.coerce.number().multipleOf(0.01),
     category: z.enum(['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'DEDUCTION', 'CLAWBACK', 'OTHER']),
     reason: z.string().min(5).max(500),
+    // Target payroll month (YYYY-MM-01). Omit to attach to the next batch for this
+    // party regardless of month; set to earmark for a specific month's batch.
+    periodMonth: z
+      .string()
+      .regex(/^\d{4}-\d{2}-01$/, 'periodMonth must be YYYY-MM-01')
+      .optional(),
     periodStart: z.string().date().optional(),
     periodEnd: z.string().date().optional(),
   })
@@ -193,33 +199,103 @@ export type PayrollBatchStatus = z.infer<typeof payrollBatchStatusSchema>;
 /** First day of the month, e.g. "2026-04-01". */
 const periodMonthSchema = z.string().regex(/^\d{4}-\d{2}-01$/, 'periodMonth must be YYYY-MM-01');
 
-export const payrollBatchScopeTypeSchema = z.enum(['ALL_BRANCHES', 'BRANCHES', 'EMPLOYEES', 'DEPARTMENT']);
+export const payrollBatchScopeTypeSchema = z.enum([
+  'ALL_BRANCHES',
+  'BRANCHES',
+  'EMPLOYEES',
+  'DEPARTMENT',
+  'CONTRACTORS',
+  'ALL',
+]);
 
-export const generateBatchSchema = z.object({
-  branchId: z.string().uuid(),
-  department: payrollDepartmentSchema,
-  periodMonth: periodMonthSchema,
-  scopeType: payrollBatchScopeTypeSchema.default('DEPARTMENT').optional(),
-  scopeBranchIds: z.array(z.string().uuid()).optional(),
-  scopeEmployeeIds: z.array(z.string().uuid()).optional(),
-  includeContractors: z.boolean().default(false).optional(),
-  runLabel: z.string().max(200).optional(),
-});
+/** Null-scope batches carry no department (and often no branch). */
+const isNullScopeType = (t: string | undefined): boolean =>
+  t === 'CONTRACTORS' || t === 'ALL';
+
+export const generateBatchSchema = z
+  .object({
+    // Optional for null-scope batches. A CONTRACTORS batch may still set branchId
+    // (a Head running their own branch's contractors); ALL never does.
+    branchId: z.string().uuid().optional(),
+    department: payrollDepartmentSchema.optional(),
+    periodMonth: periodMonthSchema,
+    scopeType: payrollBatchScopeTypeSchema.default('DEPARTMENT').optional(),
+    scopeBranchIds: z.array(z.string().uuid()).optional(),
+    scopeEmployeeIds: z.array(z.string().uuid()).optional(),
+    includeContractors: z.boolean().default(false).optional(),
+    // Also sweep matching-role staff who have no primary branch (primary_branch_id
+    // NULL) into this department batch — they ride along on the home branch.
+    includeNullBranch: z.boolean().default(false).optional(),
+    runLabel: z.string().max(200).optional(),
+  })
+  .refine((d) => isNullScopeType(d.scopeType) || (!!d.branchId && !!d.department), {
+    message: 'branchId and department are required for a staff (department-scoped) batch.',
+    path: ['department'],
+  })
+  .refine((d) => d.scopeType !== 'ALL' || (!d.branchId && !d.department), {
+    message: 'An ALL-scope batch cannot target a specific branch or department.',
+    path: ['scopeType'],
+  })
+  .refine((d) => d.scopeType !== 'CONTRACTORS' || !d.department, {
+    message: 'A CONTRACTORS batch cannot target a department.',
+    path: ['department'],
+  });
 export type GenerateBatchInput = z.infer<typeof generateBatchSchema>;
 
+/**
+ * Grand-total preview for a whole selection. Looser than generateBatchSchema: a
+ * staff preview may target several departments via `departments[]` (a fan-out)
+ * instead of a single `department`, so it does not require branchId+department.
+ */
+export const previewSelectionSchema = z
+  .object({
+    branchId: z.string().uuid().optional(),
+    department: payrollDepartmentSchema.optional(),
+    departments: z.array(payrollDepartmentSchema).optional(),
+    periodMonth: periodMonthSchema,
+    scopeType: payrollBatchScopeTypeSchema.optional(),
+    scopeBranchIds: z.array(z.string().uuid()).optional(),
+    includeNullBranch: z.boolean().default(false).optional(),
+  })
+  .refine(
+    (d) =>
+      isNullScopeType(d.scopeType) ||
+      !!d.department ||
+      (d.departments?.length ?? 0) > 0,
+    {
+      message: 'Select at least one department to preview a staff run.',
+      path: ['departments'],
+    },
+  );
+export type PreviewSelectionInput = z.infer<typeof previewSelectionSchema>;
+
 /** Fan-out: create missing batches only (skipped if a row already exists for the slot). */
-export const generateBatchesBulkSchema = z.object({
-  branchIds: z.array(z.string().uuid()).min(1).max(50),
-  departments: z.array(payrollDepartmentSchema).min(1).max(4),
-  periodMonth: periodMonthSchema,
-  /**
-   * When true, each department gets ONE batch spanning all `branchIds`
-   * (`scopeType: BRANCHES`) instead of one batch per branch × department.
-   */
-  combineBranches: z.boolean().default(false).optional(),
-  includeContractors: z.boolean().default(false).optional(),
-  runLabel: z.string().max(200).optional(),
-});
+export const generateBatchesBulkSchema = z
+  .object({
+    // Empty allowed only for a null-scope run (CONTRACTORS / ALL); a staff fan-out
+    // still requires at least one branch and one department.
+    branchIds: z.array(z.string().uuid()).max(50).default([]),
+    departments: z.array(payrollDepartmentSchema).max(7).default([]),
+    periodMonth: periodMonthSchema,
+    /**
+     * When true, each department gets ONE batch spanning all `branchIds`
+     * (`scopeType: BRANCHES`) instead of one batch per branch × department.
+     */
+    combineBranches: z.boolean().default(false).optional(),
+    /** CONTRACTORS / ALL create a single null-scope batch instead of a fan-out. */
+    scopeType: payrollBatchScopeTypeSchema.optional(),
+    includeContractors: z.boolean().default(false).optional(),
+    /** Sweep no-branch staff into each department's home-branch batch. */
+    includeNullBranch: z.boolean().default(false).optional(),
+    runLabel: z.string().max(200).optional(),
+  })
+  .refine(
+    (d) => isNullScopeType(d.scopeType) || (d.branchIds.length >= 1 && d.departments.length >= 1),
+    {
+      message: 'Select at least one branch and one department.',
+      path: ['departments'],
+    },
+  );
 export type GenerateBatchesBulkInput = z.infer<typeof generateBatchesBulkSchema>;
 
 export const submitBatchSchema = z.object({

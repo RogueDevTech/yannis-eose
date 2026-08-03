@@ -267,6 +267,20 @@ export const payrollEmploymentTypeEnum = pgEnum('payroll_employment_type', [
   'CONTRACTOR_AGENCY',
 ]);
 
+/**
+ * Which order pipelines feed the payroll delivered-order metrics for staff on a
+ * pay role. Migration 0288.
+ *   FUNNEL            — orders-table funnel only (default; existing behaviour).
+ *   RECOVERY_COMBINED — orders WHERE is_delivered_follow_up = true (graduated
+ *                       follow-ups + CS-created delivered-follow-up) PLUS
+ *                       cart_orders. Excludes the follow_up_orders table to avoid
+ *                       double-counting graduated follow-up deliveries.
+ */
+export const payrollDeliveredMetricSourceEnum = pgEnum('payroll_delivered_metric_source', [
+  'FUNNEL',
+  'RECOVERY_COMBINED',
+]);
+
 export const payrollSalaryBasisEnum = pgEnum('payroll_salary_basis', [
   'FORMULA_BASED',
   'FLAT_RATE',
@@ -301,6 +315,9 @@ export const payrollBatchScopeTypeEnum = pgEnum('payroll_batch_scope_type', [
   'BRANCHES',
   'EMPLOYEES',
   'DEPARTMENT',
+  // Null-scope batches (branch_id / department NULL). Migration 0287.
+  'CONTRACTORS',
+  'ALL',
 ]);
 
 export const payrollPayslipLineStatusEnum = pgEnum('payroll_payslip_line_status', [

@@ -31,7 +31,7 @@ import { formatRole } from '~/features/users/types';
 import type { PayrollBatch, ViewerInfo } from './types';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import { formatNaira } from '~/lib/format-amount';
-import { ADMIN_ROLES, DEPT_LABEL } from './payroll-constants';
+import { ADMIN_ROLES, batchScopeLabel, batchBranchLabel } from './payroll-constants';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -95,9 +95,12 @@ function canReview(viewer: ViewerInfo): boolean {
   return ADMIN_ROLES.has(viewer.role) || viewer.role === 'HR_MANAGER';
 }
 
-function canPrepareDept(viewer: ViewerInfo, dept: string, branchId: string): boolean {
+function canPrepareDept(viewer: ViewerInfo, dept: string | null, branchId: string | null): boolean {
   if (ADMIN_ROLES.has(viewer.role)) return true;
   if (viewer.role === 'HR_MANAGER') return true;
+  // Null-scope (contractor / ALL) batches are admin/HR-only above; a dept-scoped
+  // preparer needs both a department and a branch match.
+  if (!dept || !branchId) return false;
   if (viewer.prepareDepartments?.includes(dept as never) && viewer.prepareBranchIds?.includes(branchId)) return true;
   return false;
 }
@@ -538,11 +541,11 @@ function BatchTimeline({ batch }: { batch: PayrollBatch }) {
 
 export function PayrollBatchDetailPage({
   detail,
-  branchName,
+  branchName: branchNameProp,
   viewer,
 }: {
   detail: BatchDetail;
-  branchName: string;
+  branchName: string | null;
   viewer: ViewerInfo;
 }) {
   const fetcher = useFetcher();
@@ -575,6 +578,8 @@ export function PayrollBatchDetailPage({
   useCloseOnFetcherSuccess(fetcher, handleSuccess);
 
   const { batch, payouts: allPayouts, adjustments, allowedTransitions } = detail;
+  // Display label for the batch's branch, tolerant of null-branch (org-wide) batches.
+  const branchName = batchBranchLabel(branchNameProp, batch.branchId, batch.scopeType);
   const payouts = useMemo(() => {
     const q = payoutSearch.toLowerCase().trim();
     if (!q) return allPayouts;
@@ -584,11 +589,17 @@ export function PayrollBatchDetailPage({
   const submitRegenerate = useCallback(() => {
     const fd = new FormData();
     fd.set('intent', 'generateBatch');
-    fd.set('branchId', batch.branchId);
-    fd.set('department', batch.department);
     fd.set('periodMonth', batch.periodMonth.slice(0, 7));
+    // Null-scope (contractor / ALL) batches refresh by scope, not branch/department.
+    if (batch.scopeType === 'CONTRACTORS' || batch.scopeType === 'ALL') {
+      fd.set('scopeType', batch.scopeType);
+      if (batch.branchId) fd.set('branchId', batch.branchId);
+    } else {
+      if (batch.branchId) fd.set('branchId', batch.branchId);
+      if (batch.department) fd.set('department', batch.department);
+    }
     fetcher.submit(fd, { method: 'post' });
-  }, [batch.branchId, batch.department, batch.periodMonth, fetcher]);
+  }, [batch.branchId, batch.department, batch.scopeType, batch.periodMonth, fetcher]);
   const adjustmentsByPayout = new Map<string, typeof adjustments>();
   for (const a of adjustments) {
     if (!a.payoutId) continue;
@@ -700,7 +711,7 @@ export function PayrollBatchDetailPage({
   return (
     <div className="space-y-4">
       <PageHeader
-        title={`${DEPT_LABEL[batch.department]} \u00b7 ${formatMonth(batch.periodMonth)}`}
+        title={`${batchScopeLabel(batch.department, batch.scopeType)} \u00b7 ${formatMonth(batch.periodMonth)}`}
         backTo="/hr/payroll"
         mobileInlineActions
         description={`${branchName} \u00b7 ${batch.staffCount} staff`}
@@ -1004,7 +1015,7 @@ export function PayrollBatchDetailPage({
           description={
             <>
               <p>
-                Submit this {DEPT_LABEL[batch.department]} draft for{' '}
+                Submit this {batchScopeLabel(batch.department, batch.scopeType)} draft for{' '}
                 <strong>{formatMonth(batch.periodMonth)}</strong> ({branchName}) to HR for review?
               </p>
               <p className="mt-2">
@@ -1046,7 +1057,7 @@ export function PayrollBatchDetailPage({
                 payroll rules, delivered orders, and staff pay profiles.
               </p>
               <p className="mt-2 text-app-fg-muted">
-                {DEPT_LABEL[batch.department]} · {formatMonth(batch.periodMonth)} · {branchName}
+                {batchScopeLabel(batch.department, batch.scopeType)} · {formatMonth(batch.periodMonth)} · {branchName}
               </p>
             </>
           }

@@ -10,6 +10,7 @@ import {
   setSettlementConfigSchema,
   generateBatchSchema,
   generateBatchesBulkSchema,
+  previewSelectionSchema,
   submitBatchSchema,
   approveBatchSchema,
   rejectBatchSchema,
@@ -315,6 +316,14 @@ export const hrRouter = router({
       return getPayrollBatchService().previewBatch(input, ctx.user);
     }),
 
+  // Grand-total preview for a whole selection (multi-branch / multi-department
+  // fan-out, CONTRACTORS, or ALL). Reuses the exact generate-path compute.
+  previewSelection: authedProcedure
+    .input(previewSelectionSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollBatchService().previewSelectionTotal(input, ctx.user);
+    }),
+
   generateBatchesBulk: authedProcedure
     .input(generateBatchesBulkSchema)
     .mutation(async ({ input, ctx }) => {
@@ -441,6 +450,7 @@ export const hrRouter = router({
             role: user.role,
             crmLinked: true,
             reportsToUserId: user.reportsToUserId,
+            payRoleId: user.payRoleId ?? null,
           };
         }),
       );

@@ -27,6 +27,33 @@ export function nigeriaDayEnd(input: string): Date {
   return new Date(`${input}T23:59:59.999${NIGERIA_OFFSET}`);
 }
 
+/**
+ * Nigeria-calendar month window for a payroll period given as `YYYY-MM-01`.
+ *
+ * IMPORTANT: derive the last day from the MONTH STRING, never from
+ * `nigeriaDayStart(periodMonth)`. That start is a UTC+1 instant whose UTC
+ * representation for the 1st of the month rolls back into the PREVIOUS calendar
+ * month (e.g. `2026-07-01T00:00+01:00` === `2026-06-30T23:00Z`), so
+ * `periodStart.getUTCMonth()` returns June for a July period. Doing
+ * `Date.UTC(year, getUTCMonth()+1, 0)` then collapses the window to a single
+ * inverted day (end < start) and every delivered-count / metric query matches
+ * ZERO rows — which silently zeroed every performance bonus.
+ *
+ * @param periodMonth `YYYY-MM-01` (or any `YYYY-MM-DD`; only year+month used).
+ */
+export function nigeriaMonthWindow(periodMonth: string): { periodStart: Date; periodEnd: Date } {
+  const ym = periodMonth.slice(0, 7); // "YYYY-MM"
+  const [yStr, mStr] = ym.split('-');
+  const y = Number(yStr);
+  const m = Number(mStr);
+  const periodStart = nigeriaDayStart(`${ym}-01`);
+  // Day 0 of the next month = last day of THIS month. Computed from the string's
+  // own year/month, so it is immune to the UTC-shift trap described above.
+  const lastDay = new Date(Date.UTC(y, m, 0)); // m is 1-based here → next month index is m
+  const periodEnd = nigeriaDayEnd(lastDay.toISOString().slice(0, 10));
+  return { periodStart, periodEnd };
+}
+
 const NIGERIA_MONTH_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Africa/Lagos',
   year: 'numeric',

@@ -20,7 +20,7 @@ import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
-import { getManageableRolesForViewer } from './payroll-batch.service';
+import { getManageableRolesForViewer, PayrollBatchService } from './payroll-batch.service';
 import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
 import { computeEarningsFromPlanRules, resolveClawbackPerReturnAmount } from './commission-rules-math';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -37,6 +37,7 @@ export class HrService {
     private readonly notifications: NotificationsService,
     private readonly payrollCompute: PayrollComputeService,
     private readonly payrollMetrics: PayrollMetricsService,
+    private readonly payrollBatch: PayrollBatchService,
   ) {}
 
   // ============================================
@@ -837,6 +838,7 @@ export class HrService {
           amount: sql`${input.amount}::numeric`,
           category: input.category,
           reason: input.reason,
+          periodMonth: input.periodMonth ?? null,
         })
         .returning();
 
@@ -865,6 +867,20 @@ export class HrService {
         body: 'A deduction has been added to your earnings. It will be applied to your next payout.',
         data: { adjustmentId: adj.id, amount: input.amount, category: input.category, branchId: staffBranch?.branchId ?? null },
       });
+    }
+
+    // If this adjustment is earmarked for a month that already has an OPEN batch
+    // (DRAFT / PENDING_HR) for the staff member, fold it in now instead of leaving
+    // it floating until the next run. Best-effort and non-fatal: on any miss the
+    // adjustment stays pending and the next generate/recalculate sweeps it.
+    if (input.staffId && input.periodMonth) {
+      try {
+        await this.payrollBatch.absorbPendingStaffAdjustment(adj.id);
+      } catch (err) {
+        this.logger.warn(
+          `absorbPendingStaffAdjustment failed for ${adj.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     return adj;

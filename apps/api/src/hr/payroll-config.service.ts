@@ -113,6 +113,7 @@ export class PayrollConfigService {
           // for schema compatibility but forced off on new roles.
           perProductBonus: false,
           defaultTaxStatus: input.defaultTaxStatus ?? 'STANDARD_PAYE',
+          deliveredMetricSource: input.deliveredMetricSource ?? 'FUNNEL',
           commissionPlanId: input.commissionPlanId ?? null,
         })
         .returning();
@@ -130,6 +131,9 @@ export class PayrollConfigService {
           ...(input.category != null ? { category: input.category } : {}),
           ...(input.reportsToRequired != null ? { reportsToRequired: input.reportsToRequired } : {}),
           ...(input.perProductBonus != null ? { perProductBonus: input.perProductBonus } : {}),
+          ...(input.deliveredMetricSource != null
+            ? { deliveredMetricSource: input.deliveredMetricSource }
+            : {}),
           ...(input.defaultTaxStatus != null
             ? {
                 defaultTaxStatus:
@@ -641,7 +645,9 @@ export class PayrollConfigService {
         })
         .from(schema.payoutRecords)
         .innerJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
-        .innerJoin(schema.branches, eq(schema.branches.id, schema.payrollBatches.branchId))
+        // Left join: null-scope (contractor / ALL) batches have no branch and would
+        // otherwise be dropped from this payout list entirely.
+        .leftJoin(schema.branches, eq(schema.branches.id, schema.payrollBatches.branchId))
         .where(where)
         .orderBy(desc(schema.payrollBatches.periodMonth))
         .limit(limit)

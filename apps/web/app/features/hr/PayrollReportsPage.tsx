@@ -21,6 +21,7 @@ import {
 } from '~/components/ui/compact-table';
 import { exportToCsv } from '~/lib/csv-export';
 import type { PayrollRegisterRow } from './payroll-prd-types';
+import { batchScopeLabel } from './payroll-constants';
 
 export interface PayrollReportsPageProps {
   rows: PayrollRegisterRow[];
@@ -162,7 +163,7 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
       {
         key: 'dept',
         header: 'Dept',
-        render: (row) => <span className="text-xs text-app-fg-muted">{row.batch.department}</span>,
+        render: (row) => <span className="text-xs text-app-fg-muted">{batchScopeLabel(row.batch.department)}</span>,
       },
       {
         key: 'gross',
@@ -215,7 +216,7 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
       employee: row.staffName ?? '',
       role: row.staffRole ?? '',
       period: row.batch.periodMonth,
-      department: row.batch.department,
+      department: batchScopeLabel(row.batch.department),
       batchStatus: row.batch.status,
       baseSalary: row.payout.baseSalary,
       performanceBonus: row.payout.performanceBonus,
@@ -443,7 +444,7 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
                       {row.staffName ?? 'Contractor / unknown'}
                     </p>
                     <p className="text-xs text-app-fg-muted mt-0.5">
-                      {formatMonth(row.batch.periodMonth)} · {row.batch.department}
+                      {formatMonth(row.batch.periodMonth)} · {batchScopeLabel(row.batch.department)}
                     </p>
                   </div>
                   <StatusBadge status={row.batch.status} />
