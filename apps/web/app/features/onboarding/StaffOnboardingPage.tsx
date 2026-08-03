@@ -558,6 +558,15 @@ export function StaffOnboardingPage({
     (mode === 'self' || (mode === 'hr' && canHrEdit && hrEditing));
   const showHrReviewActions =
     mode === 'hr' && record.status === 'SUBMITTED' && !isMirroring && !hrEditing;
+  // HR set the staff up themselves: the packet never got self-submitted, so it
+  // sits at IN_PROGRESS/NOT_STARTED forever. Let HR complete & approve it in one
+  // step (backend re-checks the submission checklist + hr.onboarding.approve).
+  const showHrCompleteAction =
+    mode === 'hr' &&
+    canHrEdit &&
+    !isMirroring &&
+    !hrEditing &&
+    (record.status === 'IN_PROGRESS' || record.status === 'NOT_STARTED');
   const canEditPayrollBank = mode === 'hr' && canHrEdit && !isMirroring && !hrEditing;
   const showHrPayrollBankEditor = canEditPayrollBank && hrEditingPayroll;
 
@@ -583,6 +592,7 @@ export function StaffOnboardingPage({
   const [accountNumber, setAccountNumber] = useState(record.payoutAccountNumber ?? '');
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
+  const [confirmComplete, setConfirmComplete] = useState(false);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [requestChangesReason, setRequestChangesReason] = useState('');
 
@@ -644,6 +654,7 @@ export function StaffOnboardingPage({
   useCloseOnFetcherSuccess(fetcher, () => {
     setConfirmSubmit(false);
     setConfirmApprove(false);
+    setConfirmComplete(false);
     setRequestChangesOpen(false);
     setRequestChangesReason('');
   });
@@ -665,6 +676,8 @@ export function StaffOnboardingPage({
     fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'submitOnboarding';
   const isApproving =
     fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'approveOnboarding';
+  const isCompleting =
+    fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'completeAndApproveOnboarding';
   const isRequestingChanges =
     fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'requestOnboardingChanges';
   const trimmedReason = requestChangesReason.trim();
@@ -927,6 +940,19 @@ export function StaffOnboardingPage({
                 onClick={() => setConfirmApprove(true)}
               >
                 Approve onboarding
+              </Button>
+            </div>
+          ) : null}
+
+          {showHrCompleteAction ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="primary"
+                loading={isCompleting}
+                onClick={() => setConfirmComplete(true)}
+              >
+                Complete &amp; approve
               </Button>
             </div>
           ) : null}
@@ -1255,6 +1281,22 @@ export function StaffOnboardingPage({
         onConfirm={() => {
           const fd = new FormData();
           fd.set('intent', 'approveOnboarding');
+          fd.set('userId', subject.id);
+          fetcher.submit(fd, { method: 'post', action: actionUrl });
+        }}
+      />
+
+      <ConfirmActionModal
+        open={confirmComplete}
+        onClose={() => setConfirmComplete(false)}
+        title="Complete and approve onboarding?"
+        description="Marks this onboarding complete on the staff member's behalf and approves it. Bank and core details must be filled in. The record then locks and payroll can proceed."
+        confirmLabel="Complete & approve"
+        variant="warning"
+        loading={isCompleting}
+        onConfirm={() => {
+          const fd = new FormData();
+          fd.set('intent', 'completeAndApproveOnboarding');
           fd.set('userId', subject.id);
           fetcher.submit(fd, { method: 'post', action: actionUrl });
         }}

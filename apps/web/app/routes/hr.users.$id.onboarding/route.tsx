@@ -214,6 +214,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'completeAndApproveOnboarding') {
+    const res = await apiRequest<unknown>('/trpc/onboarding.completeAndApprove', {
+      method: 'POST',
+      cookie,
+      body: { userId },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to complete and approve onboarding') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
   if (intent === 'requestOnboardingChanges') {
     const reason = (fd.get('reason') ?? '').toString().trim();
     if (reason.length < 10) {

@@ -74,10 +74,22 @@ export const onboardingRouter = router({
     return getService().submit(targetId, ctx.user);
   }),
 
-  /** Approve — HR / admin only. */
+  /** Approve — HR / admin only. Requires the record to already be SUBMITTED. */
   approve: authedProcedure.input(approveOnboardingSchema).mutation(async ({ input, ctx }) => {
     return getService().approve(input.userId, ctx.user);
   }),
+
+  /**
+   * HR complete & approve — advance an HR-configured IN_PROGRESS (or SUBMITTED)
+   * packet straight to APPROVED once the submission checklist is satisfied.
+   * Fixes onboarding staying IN_PROGRESS when HR sets a staff member up. HR /
+   * admin only (service enforces `hr.onboarding.approve`).
+   */
+  completeAndApprove: authedProcedure
+    .input(approveOnboardingSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getService().hrCompleteAndApprove(input.userId, ctx.user);
+    }),
 
   /** Send a SUBMITTED packet back to the staff for edits — HR / admin only. */
   requestChanges: authedProcedure
