@@ -521,6 +521,16 @@
     animation: pulse 3s ease-in-out infinite;
   }
 
+  /* Indeterminate progress bar (payroll preview): a segment sweeps across. */
+  .payroll-preview-bar {
+    animation: payrollPreviewSweep 1.2s ease-in-out infinite;
+  }
+
+  @keyframes payrollPreviewSweep {
+    0% { transform: translateX(-120%); }
+    100% { transform: translateX(420%); }
+  }
+
   /* Live indicator: yellow dot blink when idle (listening) */
   .animate-live-blink {
     animation: liveBlink 1.2s ease-in-out infinite;

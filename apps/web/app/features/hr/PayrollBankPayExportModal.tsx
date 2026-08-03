@@ -14,7 +14,7 @@ import {
   type BankPayPdfInput,
 } from '~/lib/bank-pay-pdf';
 import { createZipStoreBlob } from '~/lib/zip-store';
-import { DEPT_LABEL } from './payroll-constants';
+import { batchScopeLabel, batchBranchLabel } from './payroll-constants';
 import type { BranchOption, MonthlyPayrollGroup, PayrollBatch } from './types';
 
 type ExportMode = 'one_file' | 'by_batch';
@@ -29,8 +29,9 @@ function isExportable(status: string): boolean {
 
 function batchFilename(batch: BankPayBatchSection): string {
   const month = String(batch.periodMonth).slice(0, 7);
-  const dept = batch.department.toLowerCase();
-  const branch = batch.branchName.replace(/\s+/g, '-').toLowerCase().slice(0, 24);
+  // Null-scope batches have no department/branch — fall back to the scope label.
+  const dept = (batch.department ?? batch.scopeType ?? 'payroll').toLowerCase();
+  const branch = (batch.branchName ?? 'org-wide').replace(/\s+/g, '-').toLowerCase().slice(0, 24);
   return `bank-pay-${month}-${dept}-${branch}.pdf`;
 }
 
@@ -52,7 +53,11 @@ export function PayrollBankPayExportModal({
       for (const b of group.items) {
         rows.push({
           ...b,
-          branchName: branchById.get(b.branchId) ?? b.branchId.slice(0, 8),
+          branchName: batchBranchLabel(
+            b.branchId ? branchById.get(b.branchId) : null,
+            b.branchId,
+            b.scopeType,
+          ),
           monthLabel: formatBankPayPeriod(b.periodMonth),
         });
       }
@@ -194,7 +199,7 @@ export function PayrollBankPayExportModal({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium text-app-fg">
-                        {DEPT_LABEL[batch.department]} · {batch.monthLabel}
+                        {batchScopeLabel(batch.department, batch.scopeType)} · {batch.monthLabel}
                       </span>
                       <StatusBadge status={batch.status} />
                     </div>

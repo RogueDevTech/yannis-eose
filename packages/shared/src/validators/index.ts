@@ -543,6 +543,7 @@ export {
   payrollBatchStatusSchema,
   generateBatchSchema,
   generateBatchesBulkSchema,
+  previewSelectionSchema,
   submitBatchSchema,
   approveBatchSchema,
   rejectBatchSchema,
@@ -588,6 +589,7 @@ export {
   exportPayRunDraftSchema,
   exportBankUploadSchema,
   productTierRowSchema,
+  payRoleDeliveredMetricSourceSchema,
 } from './payroll';
 
 export type {
@@ -605,6 +607,7 @@ export type {
   PayrollBatchStatus,
   GenerateBatchInput,
   GenerateBatchesBulkInput,
+  PreviewSelectionInput,
   SubmitBatchInput,
   ApproveBatchInput,
   RejectBatchInput,
@@ -618,6 +621,7 @@ export type {
   PayrollFormula,
   PayrollMetrics,
   PayeBandConfig,
+  PayRoleDeliveredMetricSource,
   CreatePayRoleInput,
   UpdatePayRoleInput,
   SaveProductTierConfigInput,

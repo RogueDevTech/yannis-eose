@@ -1,6 +1,6 @@
 import type { PayslipPdfInput } from '~/lib/payslip-pdf';
 import { formatRole } from '~/features/users/types';
-import { DEPT_LABEL } from './payroll-constants';
+import { batchScopeLabel } from './payroll-constants';
 
 export type PayslipApiRow = {
   payout: {
@@ -23,7 +23,8 @@ export type PayslipApiRow = {
   batch: {
     id: string;
     periodMonth: string;
-    department: string;
+    // Null for null-scope batches (contractors / ALL).
+    department: string | null;
     status?: string;
     disbursementDate?: string | null;
     financeProcessedAt?: string | null;
@@ -91,7 +92,7 @@ export function toPayslipPdfInput(row: PayslipApiRow): PayslipPdfInput {
     employeeName: row.staffName ?? 'Unknown',
     employeeId: row.payout.staffId ?? undefined,
     roleName,
-    department: DEPT_LABEL[row.batch.department as keyof typeof DEPT_LABEL] ?? row.batch.department,
+    department: batchScopeLabel(row.batch.department),
     branchName: row.branchName ?? undefined,
     periodMonth: row.batch.periodMonth,
     baseSalary: Number(row.payout.baseSalary),

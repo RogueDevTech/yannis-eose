@@ -85,9 +85,11 @@ export type BankPayLine = {
 
 export type BankPayBatchSection = {
   batchId: string;
-  branchName: string;
+  // Null for null-scope batches (contractors / ALL) — rendered as a scope label.
+  branchName: string | null;
   periodMonth: string;
-  department: string;
+  department: string | null;
+  scopeType?: string | null;
   status?: string;
   rows: BankPayLine[];
 };
@@ -189,7 +191,16 @@ async function buildBankPayPdf(input: BankPayPdfInput): Promise<jsPDF> {
     doc.setFontSize(11);
     doc.setTextColor(0, 0, 0);
     const period = formatBankPayPeriod(batch.periodMonth);
-    doc.text(`${batch.department} · ${period} · ${batch.branchName}`, margin, y);
+    // Null-scope batches (contractors / ALL) have no department/branch.
+    const deptLabel =
+      batch.department ??
+      (batch.scopeType === 'CONTRACTORS'
+        ? 'Contractors'
+        : batch.scopeType === 'ALL'
+          ? 'All staff & contractors'
+          : 'Payroll');
+    const branchLabel = batch.branchName ?? 'Org-wide';
+    doc.text(`${deptLabel} · ${period} · ${branchLabel}`, margin, y);
     y += 6;
 
     doc.setFillColor(245, 245, 245);

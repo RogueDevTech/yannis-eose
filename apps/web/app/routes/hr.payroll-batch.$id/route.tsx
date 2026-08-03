@@ -50,7 +50,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const branchRows = branchesRes.ok
       ? (branchesRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? []
       : [];
-    const branchName = branchRows.find((b) => b.id === detail.batch.branchId)?.name ?? detail.batch.branchId.slice(0, 8);
+    // Null for null-scope (contractor / ALL) batches — the detail page renders a
+    // scope-aware fallback via batchBranchLabel.
+    const branchName = detail.batch.branchId
+      ? (branchRows.find((b) => b.id === detail.batch.branchId)?.name ?? detail.batch.branchId.slice(0, 8))
+      : null;
 
     const viewer: ViewerInfo = {
       id: user.id,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -18,7 +18,7 @@ import type {
   BranchOption,
 } from './types';
 import { DateTimeText } from '~/components/ui/date-time-text';
-import { DEPT_LABEL } from './payroll-constants';
+import { batchScopeLabel, batchBranchLabel } from './payroll-constants';
 
 function formatMonth(periodMonth: string): string {
   const [yyyy, mm] = periodMonth.split('-');
@@ -63,10 +63,16 @@ export function MonthlyPayrolls({
     }
   }, [initialBatchId, navigate]);
 
-  /** One-shot toast after bulk generate redirect from `/hr/payroll/generate`. */
+  /** One-shot toast after bulk generate redirect from `/hr/payroll/generate`.
+   * A ref guards against the effect re-firing on re-renders (toast/setSearchParams
+   * are unstable references) before the URL param clears — which stacked up dozens
+   * of identical toasts. Fire once per distinct summary value, then clear the param. */
   const generateSummaryFlash = searchParams.get('generateSummary');
+  const flashedSummaryRef = useRef<string | null>(null);
   useEffect(() => {
     if (!generateSummaryFlash) return;
+    if (flashedSummaryRef.current === generateSummaryFlash) return;
+    flashedSummaryRef.current = generateSummaryFlash;
     toast.success(generateSummaryFlash);
     setSearchParams(
       (prev) => {
@@ -129,7 +135,11 @@ function MonthGroup({
   const [open, setOpen] = useState(true);
   const rows: BatchRow[] = group.items.map((b) => ({
     ...b,
-    _branchName: branchById.get(b.branchId) ?? b.branchId.slice(0, 8),
+    _branchName: batchBranchLabel(
+      b.branchId ? branchById.get(b.branchId) : null,
+      b.branchId,
+      b.scopeType,
+    ),
   }));
 
   const columns: CompactTableColumn<BatchRow>[] = [
@@ -137,7 +147,9 @@ function MonthGroup({
       key: 'department',
       header: 'Department',
       hideable: false,
-      render: (row) => <span className="text-sm font-medium text-app-fg">{DEPT_LABEL[row.department]}</span>,
+      render: (row) => (
+        <span className="text-sm font-medium text-app-fg">{batchScopeLabel(row.department, row.scopeType)}</span>
+      ),
     },
     {
       key: 'branch',
@@ -230,7 +242,7 @@ function MonthGroup({
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="font-medium text-app-fg text-sm">{DEPT_LABEL[row.department]}</p>
+                    <p className="font-medium text-app-fg text-sm">{batchScopeLabel(row.department, row.scopeType)}</p>
                     <p className="text-xs text-app-fg-muted mt-0.5">{row._branchName}</p>
                   </div>
                   <StatusBadge status={row.status} />

@@ -63,6 +63,9 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
   const [defaultTaxStatus, setDefaultTaxStatus] = useState(
     payRole?.defaultTaxStatus ?? 'STANDARD_PAYE',
   );
+  const [deliveredMetricSource, setDeliveredMetricSource] = useState(
+    payRole?.deliveredMetricSource ?? 'FUNNEL',
+  );
 
   useFetcherToast(fetcher.data, {
     successMessage: isCreate ? 'Pay role created' : 'Formula saved',
@@ -173,6 +176,17 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
                   { value: 'GROSS_NO_DEDUCTION', label: 'None (no tax)' },
                 ]}
                 hint="Applies to all staff and contractors on this pay role. Choose None to skip PAYE."
+              />
+              <FormSelect
+                label="Delivered source"
+                name="deliveredMetricSource"
+                value={deliveredMetricSource}
+                onChange={(e) => setDeliveredMetricSource(e.target.value)}
+                options={[
+                  { value: 'FUNNEL', label: 'Funnel orders' },
+                  { value: 'RECOVERY_COMBINED', label: 'Recovery (cart + delivered follow-up)' },
+                ]}
+                hint="Which deliveries count toward pay. Recovery covers cart orders plus delivered follow-up orders. Use it for the Follow-up on Delivered Orders category."
               />
             </div>
           </div>

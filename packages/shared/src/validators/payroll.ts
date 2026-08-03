@@ -216,6 +216,15 @@ export const payRoleTaxStatusSchema = z.enum([
   'GROSS_NO_DEDUCTION',
 ]);
 
+/**
+ * Which order pipelines feed delivered-order payroll metrics for staff on a pay
+ * role. FUNNEL (default) = orders funnel; RECOVERY_COMBINED = cart +
+ * delivered-follow-up recovery deliveries (excludes follow_up_orders to avoid
+ * double-counting graduated follow-ups). Migration 0288.
+ */
+export const payRoleDeliveredMetricSourceSchema = z.enum(['FUNNEL', 'RECOVERY_COMBINED']);
+export type PayRoleDeliveredMetricSource = z.infer<typeof payRoleDeliveredMetricSourceSchema>;
+
 export const createPayRoleSchema = z.object({
   name: z.string().min(2).max(200),
   category: payrollPayRoleCategorySchema,
@@ -223,6 +232,8 @@ export const createPayRoleSchema = z.object({
   perProductBonus: z.boolean().default(false),
   /** Default PAYE treatment for people on this role. GROSS_NO_DEDUCTION = none. */
   defaultTaxStatus: payRoleTaxStatusSchema.default('STANDARD_PAYE'),
+  /** Delivered-metric pipeline source. Recovery categories use RECOVERY_COMBINED. */
+  deliveredMetricSource: payRoleDeliveredMetricSourceSchema.default('FUNNEL'),
   commissionPlanId: z.string().uuid().optional(),
 });
 

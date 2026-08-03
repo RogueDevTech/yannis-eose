@@ -10,6 +10,7 @@ import {
   payrollBatchScopeTypeEnum,
   payrollPayslipLineStatusEnum,
   payrollTaxStatusEnum,
+  payrollDeliveredMetricSourceEnum,
 } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
@@ -50,6 +51,14 @@ export const payrollPayRoles = pgTable('payroll_pay_roles', {
    * Migration 0281. `GROSS_NO_DEDUCTION` = no PAYE ("None" in Payroll Config UI).
    */
   defaultTaxStatus: payrollTaxStatusEnum('default_tax_status').default('STANDARD_PAYE').notNull(),
+  /**
+   * Which order pipelines feed delivered-order payroll metrics for staff on this
+   * role. FUNNEL (default) = orders funnel; RECOVERY_COMBINED = cart +
+   * delivered-follow-up recovery deliveries. Migration 0288.
+   */
+  deliveredMetricSource: payrollDeliveredMetricSourceEnum('delivered_metric_source')
+    .default('FUNNEL')
+    .notNull(),
   active: boolean('active').default(true).notNull(),
   ...temporalColumns,
   ...timestampColumns,
@@ -117,11 +126,21 @@ export const payrollContractors = pgTable('payroll_contractors', {
 });
 
 /**
- * Table: payroll_batches — monthly grouping of payouts by (branch × department × month).
+ * Table: payroll_batches — monthly grouping of payouts.
+ *
+ * `scope_type` is the authoritative grouping discriminator:
+ *   - DEPARTMENT / BRANCHES / ALL_BRANCHES / EMPLOYEES — staff batches keyed on
+ *     (branch_id, period_month, department), both NOT NULL. Deduped by partial
+ *     index `uq_payroll_batch_dept_slot`.
+ *   - CONTRACTORS / ALL — null-scope batches that group contractors (or everyone)
+ *     with no department (department NULL) and often no branch (branch_id NULL).
+ *     Deduped by partial index `uq_payroll_batch_null_scope`
+ *     (scope_type, period_month, COALESCE(branch_id,…), COALESCE(run_label,…)).
+ * Hence branch_id / department are nullable (migration 0287). Consumers must treat
+ * a batch as null-scope when scope_type IN ('CONTRACTORS','ALL').
  *
  * Lifecycle: DRAFT → PENDING_HR → PENDING_FINANCE → PAID. Reject sends PENDING_* one
- * stage back. One row per (branch_id, period_month, department) — enforced by
- * unique index `uq_payroll_batch_per_branch_dept_month`.
+ * stage back.
  *
  * `staff_count` and `total_amount` are denormalised summaries recomputed on every
  * status transition or payout edit so the monthly list view doesn't need to aggregate
@@ -129,12 +148,12 @@ export const payrollContractors = pgTable('payroll_contractors', {
  */
 export const payrollBatches = pgTable('payroll_batches', {
   id: uuidv7Pk(),
-  branchId: uuid('branch_id')
-    .notNull()
-    .references(() => branches.id),
+  /** NULL for null-scope batches (scope_type CONTRACTORS/ALL); see table doc. */
+  branchId: uuid('branch_id').references(() => branches.id),
   /** First day of the month this batch covers, e.g. 2026-04-01 for April 2026. */
   periodMonth: date('period_month').notNull(),
-  department: payrollDepartmentEnum('department').notNull(),
+  /** NULL for null-scope batches (scope_type CONTRACTORS/ALL); see table doc. */
+  department: payrollDepartmentEnum('department'),
   status: payrollBatchStatusEnum('status').default('DRAFT').notNull(),
 
   scopeType: payrollBatchScopeTypeEnum('scope_type').default('DEPARTMENT'),
@@ -223,6 +242,10 @@ export const earningsAdjustments = pgTable('earnings_adjustments', {
   category: adjustmentCategoryEnum('category').notNull(),
   reason: text('reason').notNull(),
   approvedBy: uuid('approved_by').references(() => users.id),
+  // Target payroll month (YYYY-MM-01). NULL = attach to the next batch generated
+  // for this party regardless of month (legacy behavior). When set, the batch
+  // sweep only links this row into a batch for the matching period_month.
+  periodMonth: date('period_month'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   ...temporalColumns,
 });

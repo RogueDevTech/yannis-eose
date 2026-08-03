@@ -68,9 +68,13 @@ export type PayrollDepartment = 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR' | 'OPERA
 
 export interface PayrollBatch {
   id: string;
-  branchId: string;
+  /** Null for null-scope batches (scopeType CONTRACTORS / ALL). */
+  branchId: string | null;
   periodMonth: string;
-  department: PayrollDepartment;
+  /** Null for null-scope batches (scopeType CONTRACTORS / ALL). */
+  department: PayrollDepartment | null;
+  /** Batch grouping discriminator; drives null-scope display. */
+  scopeType?: 'ALL_BRANCHES' | 'BRANCHES' | 'EMPLOYEES' | 'DEPARTMENT' | 'CONTRACTORS' | 'ALL' | null;
   status: PayrollBatchStatus;
   preparedBy: string | null;
   preparedAt: string | null;

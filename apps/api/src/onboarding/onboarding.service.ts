@@ -9,7 +9,7 @@ import {
   type UpdateOnboardingProfileInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
-import { withActor } from '../common/db/with-actor';
+import { withActor, type Tx } from '../common/db/with-actor';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CacheService } from '../common/cache/cache.service';
@@ -360,6 +360,65 @@ export class OnboardingService {
   }
 
   /**
+   * Shared submission checklist. Enforced both on staff self-submit and on the
+   * HR "complete & approve" path, so Finance always gets a payable profile
+   * (bank details) plus HR's core personal fields no matter who advances it.
+   * Returns the fetched bank row so callers can echo it back in their response.
+   * Throws BAD_REQUEST listing every missing item.
+   */
+  private async assertSubmissionChecklist(
+    tx: Tx,
+    targetUserId: string,
+    onboarding: typeof schema.staffOnboarding.$inferSelect,
+  ) {
+    const [bankRow] = await tx
+      .select({
+        payoutBankName: schema.users.payoutBankName,
+        payoutAccountName: schema.users.payoutAccountName,
+        payoutAccountNumber: schema.users.payoutAccountNumber,
+        payoutBankCode: schema.users.payoutBankCode,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, targetUserId))
+      .limit(1);
+
+    // Payout bank details plus core personal details are required so HR gets a
+    // complete profile and Finance can pay. Document uploads remain optional;
+    // HR can request them later via request-changes.
+    const missing: string[] = [];
+    if (
+      !bankRow?.payoutBankName?.trim() ||
+      !bankRow?.payoutAccountName?.trim() ||
+      !bankRow?.payoutAccountNumber?.trim() ||
+      !bankRow?.payoutBankCode?.trim()
+    ) {
+      missing.push(
+        'payout bank details (bank name, bank code, account name, account number)',
+      );
+    }
+    if (!onboarding.gender) {
+      missing.push('gender');
+    }
+    if (!onboarding.dateOfBirth) {
+      missing.push('date of birth');
+    }
+    if (!onboarding.residentialAddress?.trim()) {
+      missing.push('residential address');
+    }
+    if (!onboarding.currentStateOfResidence?.trim()) {
+      missing.push('current state of residence');
+    }
+    if (missing.length > 0) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot complete yet — missing: ${missing.join(', ')}.`,
+      });
+    }
+
+    return bankRow;
+  }
+
+  /**
    * Move the record to SUBMITTED — locks it for the staff member. Only self-submit.
    *
    * Required at submission: payout bank details (bank name, bank code, account
@@ -399,49 +458,7 @@ export class OnboardingService {
         });
       }
 
-      const [bankRow] = await tx
-        .select({
-          payoutBankName: schema.users.payoutBankName,
-          payoutAccountName: schema.users.payoutAccountName,
-          payoutAccountNumber: schema.users.payoutAccountNumber,
-          payoutBankCode: schema.users.payoutBankCode,
-        })
-        .from(schema.users)
-        .where(eq(schema.users.id, targetUserId))
-        .limit(1);
-
-      // Submission checklist — payout bank details plus core personal details are
-      // required so HR gets a complete profile and Finance can pay. Document
-      // uploads remain optional at submit; HR can request them later if needed.
-      const missing: string[] = [];
-      if (
-        !bankRow?.payoutBankName?.trim() ||
-        !bankRow?.payoutAccountName?.trim() ||
-        !bankRow?.payoutAccountNumber?.trim() ||
-        !bankRow?.payoutBankCode?.trim()
-      ) {
-        missing.push(
-          'payout bank details (bank name, bank code, account name, account number)',
-        );
-      }
-      if (!existing.gender) {
-        missing.push('gender');
-      }
-      if (!existing.dateOfBirth) {
-        missing.push('date of birth');
-      }
-      if (!existing.residentialAddress?.trim()) {
-        missing.push('residential address');
-      }
-      if (!existing.currentStateOfResidence?.trim()) {
-        missing.push('current state of residence');
-      }
-      if (missing.length > 0) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Cannot submit yet — missing: ${missing.join(', ')}.`,
-        });
-      }
+      const bankRow = await this.assertSubmissionChecklist(tx, targetUserId, existing);
 
       // Clear any prior "changes requested" trail so the staff banner doesn't
       // linger after the resubmission lands in HR's queue. The history table
@@ -545,6 +562,92 @@ export class OnboardingService {
       type: 'hr:onboarding_approved',
       title: 'Onboarding approved',
       body: 'Your onboarding profile has been approved by HR.',
+      data: { userId: targetUserId },
+    });
+
+    return approved;
+  }
+
+  /**
+   * HR "complete & approve" — the fix for onboarding staying IN_PROGRESS forever
+   * when HR sets a staff member up on their behalf.
+   *
+   * The normal flow is staff self-submit (IN_PROGRESS → SUBMITTED) then HR
+   * approve (SUBMITTED → APPROVED). But HR cannot self-submit for the staff, and
+   * approve() requires SUBMITTED, so an HR-configured packet was stuck at
+   * IN_PROGRESS and blocked payroll. This lets HR advance IN_PROGRESS (or an
+   * already-SUBMITTED) record straight to APPROVED once the SAME submission
+   * checklist submit() enforces is satisfied — so Finance still only ever sees a
+   * payable, complete profile. HR / admin only; never self-approve.
+   */
+  async hrCompleteAndApprove(targetUserId: string, actor: SessionUser) {
+    if (!this.canApproveOnboarding(actor)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only HR or an admin can complete and approve onboarding records.',
+      });
+    }
+    if (targetUserId === actor.id && !this.canApproveOwnOnboarding(actor)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'You cannot approve your own onboarding.',
+      });
+    }
+
+    const approved = await withActor(this.db, actor, async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(schema.staffOnboarding)
+        .where(eq(schema.staffOnboarding.userId, targetUserId))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'No onboarding record exists for this user. Fill in their details first.',
+        });
+      }
+      if (existing.status === 'APPROVED') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This onboarding is already approved.',
+        });
+      }
+
+      // Same completeness gate as staff self-submit — bank details + core
+      // personal fields — so an HR-approved packet is never less complete than
+      // a staff-submitted one.
+      await this.assertSubmissionChecklist(tx, targetUserId, existing);
+
+      const now = new Date();
+      const [updated] = await tx
+        .update(schema.staffOnboarding)
+        .set({
+          status: 'APPROVED',
+          // Stamp submittedAt if the staff never self-submitted, so downstream
+          // views that key off it (queues, sorting) still have a timestamp.
+          submittedAt: existing.submittedAt ?? now,
+          approvedAt: now,
+          approvedBy: actor.id,
+          updatedAt: now,
+          // Clear any lingering change-request trail.
+          changesRequestedAt: null,
+          changesRequestedBy: null,
+          changesRequestedReason: null,
+        })
+        .where(eq(schema.staffOnboarding.userId, targetUserId))
+        .returning();
+      return updated!;
+    });
+
+    // Status flipped → APPROVED. Drop the cached user bundle so the staff
+    // member's /auth/me reflects it (login onboarding nudge suppressed).
+    await this.invalidateUserBundle(targetUserId);
+
+    this.notifications.enqueueCreate({
+      userId: targetUserId,
+      type: 'hr:onboarding_approved',
+      title: 'Onboarding approved',
+      body: 'Your onboarding profile has been completed and approved by HR.',
       data: { userId: targetUserId },
     });
 

@@ -25,7 +25,7 @@ import { useToast } from '~/components/ui/toast';
 import type { PayslipListItem } from './payroll-prd-types';
 import type { BranchOption } from './types';
 import { formatRole } from '~/features/users/types';
-import { DEPT_LABEL } from './payroll-constants';
+import { DEPT_LABEL, batchScopeLabel } from './payroll-constants';
 import { payslipFilename, toPayslipPdfInput } from './payslip-mappers';
 
 interface PayrollPayslipsPageProps {
@@ -174,7 +174,7 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
         header: 'Dept',
         nowrap: true,
         render: (row) => (
-          <span className="text-sm text-app-fg-muted">{DEPT_LABEL[row.batch.department as keyof typeof DEPT_LABEL] ?? row.batch.department}</span>
+          <span className="text-sm text-app-fg-muted">{batchScopeLabel(row.batch.department)}</span>
         ),
       },
       {
@@ -409,7 +409,7 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
                     ? formatRole(row.staffRole)
                     : row.payout.payRoleName?.trim() || 'N/A'}
                   {' \u00b7 '}
-                  {DEPT_LABEL[row.batch.department as keyof typeof DEPT_LABEL] ?? row.batch.department}
+                  {batchScopeLabel(row.batch.department)}
                   {' \u00b7 '}
                   {formatPeriod(row.batch.periodMonth)}
                 </p>

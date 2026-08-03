@@ -23,6 +23,8 @@ export type PayRole = {
   perProductBonus: boolean;
   /** Role-level PAYE default; GROSS_NO_DEDUCTION = none (no tax). */
   defaultTaxStatus?: 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION' | string;
+  /** Which delivered orders count toward pay. RECOVERY_COMBINED = cart + delivered follow-up. */
+  deliveredMetricSource?: 'FUNNEL' | 'RECOVERY_COMBINED' | string;
   commissionPlanId: string | null;
   active: boolean;
   /** Combined headcount: active employees + active contractors on this role. */
@@ -96,8 +98,8 @@ export type PayslipListItem = {
   batch: {
     id: string;
     periodMonth: string;
-    branchId: string;
-    department: string;
+    branchId: string | null;
+    department: string | null;
     status: string;
     disbursementDate?: string | null;
     financeProcessedAt?: string | null;
@@ -124,8 +126,8 @@ export type PayrollRegisterRow = {
   batch: {
     id: string;
     periodMonth: string;
-    branchId: string;
-    department: string;
+    branchId: string | null;
+    department: string | null;
     status: string;
   };
   staffName: string | null;
@@ -162,8 +164,8 @@ export type ContractorPayoutRow = {
   payoutId: string;
   batchId: string;
   periodMonth: string;
-  department: string;
-  branchId: string;
+  department: string | null;
+  branchId: string | null;
   branchName: string;
   batchStatus: string;
   payoutStatus: string;

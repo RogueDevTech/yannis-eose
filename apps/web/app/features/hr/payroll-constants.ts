@@ -26,3 +26,29 @@ export const DEPT_OWNER_ROLE: Record<PayrollDepartment, string> = {
 };
 
 export const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
+
+/**
+ * Human label for a batch's department, tolerant of null-scope batches
+ * (scopeType CONTRACTORS / ALL) which have no department.
+ */
+export function batchScopeLabel(
+  department: PayrollDepartment | string | null | undefined,
+  scopeType?: string | null,
+): string {
+  if (department) return DEPT_LABEL[department as PayrollDepartment] ?? department;
+  if (scopeType === 'CONTRACTORS') return 'Contractors';
+  if (scopeType === 'ALL') return 'All staff & contractors';
+  return 'Payroll';
+}
+
+/** Human label for a batch's branch, tolerant of null-branch (org-wide) batches. */
+export function batchBranchLabel(
+  branchName: string | null | undefined,
+  branchId: string | null | undefined,
+  scopeType?: string | null,
+): string {
+  if (branchName) return branchName;
+  if (branchId) return branchId.slice(0, 8);
+  if (scopeType === 'CONTRACTORS' || scopeType === 'ALL') return 'Org-wide';
+  return 'Unknown';
+}

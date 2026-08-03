@@ -76,6 +76,13 @@ export function HRPage({
   const [showBankPayExport, setShowBankPayExport] = useState(false);
   const [adjustmentStaffId, setAdjustmentStaffId] = useState('');
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
+  // Target payroll month (YYYY-MM), defaulting to the current month. Folds the
+  // adjustment into that month's batch; an open (DRAFT/PENDING_HR) batch absorbs
+  // it immediately, otherwise it waits for that month's generate.
+  const [adjustmentMonth, setAdjustmentMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
   const [approveAdjustmentTarget, setApproveAdjustmentTarget] = useState<Adjustment | null>(null);
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
@@ -323,6 +330,14 @@ export function HRPage({
             const isDeduct = adjustmentMode === 'DEDUCT';
             const categories = isDeduct ? ADJ_DEDUCT_CATEGORIES : ADJ_ADDON_CATEGORIES;
             const magnitude = Math.abs(Number(adjustmentAmount) || 0);
+            // Human-readable label for the selected payroll month (e.g. "August 2026").
+            const adjustmentMonthLabel = /^\d{4}-\d{2}$/.test(adjustmentMonth)
+              ? new Date(`${adjustmentMonth}-01T00:00:00Z`).toLocaleDateString('en-NG', {
+                  month: 'long',
+                  year: 'numeric',
+                  timeZone: 'UTC',
+                })
+              : 'next';
             return (
           <>
           <div className="flex items-start justify-between gap-3">
@@ -395,11 +410,11 @@ export function HRPage({
                 <p className={`mt-1 text-xs font-medium ${isDeduct ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
                   {magnitude > 0
                     ? isDeduct
-                      ? `This will reduce the next payout by ${formatNaira(magnitude)}.`
-                      : `This will add ${formatNaira(magnitude)} to the next payout.`
+                      ? `This will reduce the ${adjustmentMonthLabel} payout by ${formatNaira(magnitude)}.`
+                      : `This will add ${formatNaira(magnitude)} to the ${adjustmentMonthLabel} payout.`
                     : isDeduct
-                      ? 'This amount will be subtracted from the next payout.'
-                      : 'This amount will be added to the next payout.'}
+                      ? `This amount will be subtracted from the ${adjustmentMonthLabel} payout.`
+                      : `This amount will be added to the ${adjustmentMonthLabel} payout.`}
                 </p>
               </div>
               <div>
@@ -411,6 +426,23 @@ export function HRPage({
                   minLength={5}
                   placeholder={isDeduct ? 'Reason for deduction (min 5 chars)' : 'Reason for add-on (min 5 chars)'}
                 />
+              </div>
+              <div>
+                <label htmlFor="hr-adjustment-month" className="block text-sm font-medium text-app-fg-muted mb-1">
+                  Payroll month
+                </label>
+                <input
+                  id="hr-adjustment-month"
+                  type="month"
+                  name="periodMonth"
+                  required
+                  className="input"
+                  value={adjustmentMonth}
+                  onChange={(e) => setAdjustmentMonth(e.target.value)}
+                />
+                <p className="mt-1 text-xs text-app-fg-muted">
+                  Applies to this month's batch. An open batch picks it up right away.
+                </p>
               </div>
             </div>
             <div className="flex gap-2 pt-1">

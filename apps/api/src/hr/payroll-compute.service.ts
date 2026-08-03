@@ -109,6 +109,21 @@ export class PayrollComputeService {
       reporteeIds = reporteeRows.map((r) => r.id);
     }
 
+    // Recovery categories (e.g. "CS – Follow-up on Delivered Orders") count
+    // delivered orders across the recovery pipelines, not the funnel. The
+    // discriminator lives on the assigned pay role.
+    let deliveredMetricSource: 'FUNNEL' | 'RECOVERY_COMBINED' = 'FUNNEL';
+    if (member.payRoleId) {
+      const [payRoleSrc] = await tx
+        .select({ deliveredMetricSource: schema.payrollPayRoles.deliveredMetricSource })
+        .from(schema.payrollPayRoles)
+        .where(eq(schema.payrollPayRoles.id, member.payRoleId))
+        .limit(1);
+      if (payRoleSrc?.deliveredMetricSource === 'RECOVERY_COMBINED') {
+        deliveredMetricSource = 'RECOVERY_COMBINED';
+      }
+    }
+
     const metrics = await this.metricsService.getStaffMetrics(
       {
         staffId: member.id,
@@ -117,6 +132,7 @@ export class PayrollComputeService {
         periodEnd,
         crmLinked: true,
         reporteeIds: reporteeIds.length > 0 ? reporteeIds : undefined,
+        deliveredMetricSource,
       },
       tx,
     );
@@ -219,6 +235,171 @@ export class PayrollComputeService {
     };
   }
 
+  /**
+   * PURE, IN-MEMORY twin of the second half of `computeForMember` — takes
+   * pre-fetched metrics, a resolved plan, a resolved pay-role (name + tax
+   * status), and a pre-loaded tax config, and runs the SAME formula / proration
+   * / PAYE math with ZERO database access. Used only by the batched preview fast
+   * path (`computeSelectionTotalsBatched`); the per-member `computeForMember`
+   * remains the authoritative DB-reading path and generation is unchanged.
+   *
+   * INVARIANT: for identical inputs this MUST return the same line
+   * `computeForMember` would. It reuses the exact same shared functions
+   * (`resolveFormulaFromRules`, `computePayrollFormula`, `computeProration`
+   * result, `computePaye`) — no math is reimplemented here.
+   */
+  computeForMemberInMemory(
+    member: {
+      id: string;
+      role: string;
+      payRoleId?: string | null;
+      salaryBasis?: string | null;
+      taxStatus?: string | null;
+      flatMonthlyAmount?: string | number | null;
+      annualRent?: string | number | null;
+      dateOfJoining?: string | Date | null;
+      exitDate?: string | Date | null;
+    },
+    periodStart: Date,
+    periodEnd: Date,
+    metrics: PayrollMetrics,
+    resolved: {
+      /** Plan resolved via the same rules as `resolvePlanForMember` (null → no PRD formula). */
+      plan: { planName: string; rules: unknown } | null;
+      /** Pay-role name + defaultTaxStatus (from the pay-role row), when payRoleId set. */
+      payRole?: { name: string | null; defaultTaxStatus: string | null } | null;
+      taxConfig: PayeBandConfig;
+    },
+  ): ComputedPayslipLine | null {
+    const useFlatRate =
+      !member.payRoleId &&
+      member.salaryBasis === 'FLAT_RATE' &&
+      member.flatMonthlyAmount != null;
+
+    const annualRent = member.annualRent != null ? Number(member.annualRent) : 0;
+    const proration = computeProration({
+      periodStart,
+      periodEnd,
+      dateOfJoining: member.dateOfJoining ?? null,
+      exitDate: member.exitDate ?? null,
+    });
+
+    if (useFlatRate) {
+      return this.buildFlatLineInMemory(
+        Number(member.flatMonthlyAmount),
+        metrics,
+        member.taxStatus ?? 'STANDARD_PAYE',
+        resolved.taxConfig,
+        annualRent,
+        proration,
+      );
+    }
+
+    if (!resolved.plan) return null;
+
+    const formula = resolveFormulaFromRules(resolved.plan.rules as PayrollFormula);
+    const formulaResult = computePayrollFormula(formula, metrics);
+
+    let payRoleName: string | null = resolved.plan.planName;
+    let taxStatus: 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION' =
+      (member.taxStatus as 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION') ??
+      'STANDARD_PAYE';
+
+    if (member.payRoleId) {
+      payRoleName = resolved.payRole?.name ?? resolved.plan.planName;
+      if (resolved.payRole?.defaultTaxStatus) {
+        taxStatus = resolved.payRole.defaultTaxStatus as typeof taxStatus;
+      }
+    }
+
+    const proratedBase = formulaResult.baseSalary * proration.fraction;
+    const proratedAllowances = formulaResult.allowancesTotal * proration.fraction;
+    const grossBeforeAdj =
+      proratedBase + formulaResult.performanceBonus + proratedAllowances - formulaResult.penalties;
+
+    const paye = computePaye(
+      {
+        monthlyGross: grossBeforeAdj,
+        taxStatus,
+        employerSubsidyPercent: formulaResult.employerPayeSubsidyPercent,
+        annualRent,
+      },
+      resolved.taxConfig,
+    );
+
+    const netPay = grossBeforeAdj - paye.employeePaye;
+    const lineStatus = metrics.missingData ? 'NEEDS_ATTENTION' : 'OK';
+
+    if (netPay <= 0 && formulaResult.penalties <= 0 && proratedBase <= 0) return null;
+
+    return {
+      baseSalary: proratedBase,
+      performanceBonus: formulaResult.performanceBonus,
+      addOnsTotal: 0,
+      deductionsTotal: formulaResult.penalties,
+      allowancesTotal: proratedAllowances,
+      grossPay: grossBeforeAdj,
+      payeTax: paye.employeePaye,
+      employerPayeSubsidy: paye.employerSubsidy,
+      netPay,
+      totalPayout: netPay,
+      metricsSnapshot: metrics,
+      bonusBreakdown: formulaResult.bonusBreakdown,
+      lineStatus,
+      payRoleName,
+      proration: proration.isProrated
+        ? {
+            activeDays: proration.activeDays,
+            periodDays: proration.periodDays,
+            fraction: proration.fraction,
+            reason: proration.reason,
+          }
+        : null,
+    };
+  }
+
+  /** In-memory twin of `buildFlatLine` (no tax-config DB read). */
+  private buildFlatLineInMemory(
+    amount: number,
+    metrics: PayrollMetrics,
+    taxStatus: string,
+    taxConfig: PayeBandConfig,
+    annualRent = 0,
+    proration?: ProrationResult,
+  ): ComputedPayslipLine {
+    const fraction = proration?.fraction ?? 1;
+    const proratedAmount = amount * fraction;
+    const paye = computePaye(
+      { monthlyGross: proratedAmount, taxStatus: taxStatus as 'STANDARD_PAYE' | 'GROSS_NO_DEDUCTION', annualRent },
+      taxConfig,
+    );
+    const netPay = proratedAmount - paye.employeePaye;
+    return {
+      baseSalary: proratedAmount,
+      performanceBonus: 0,
+      addOnsTotal: 0,
+      deductionsTotal: 0,
+      allowancesTotal: 0,
+      grossPay: proratedAmount,
+      payeTax: paye.employeePaye,
+      employerPayeSubsidy: 0,
+      netPay,
+      totalPayout: netPay,
+      metricsSnapshot: metrics,
+      bonusBreakdown: [],
+      lineStatus: metrics.missingData ? 'NEEDS_ATTENTION' : 'OK',
+      payRoleName: 'Flat rate',
+      proration: proration?.isProrated
+        ? {
+            activeDays: proration.activeDays,
+            periodDays: proration.periodDays,
+            fraction: proration.fraction,
+            reason: proration.reason,
+          }
+        : null,
+    };
+  }
+
   private async buildFlatLine(
     amount: number,
     metrics: PayrollMetrics,
@@ -260,6 +441,52 @@ export class PayrollComputeService {
           }
         : null,
     };
+  }
+
+  /**
+   * Fetch a pay-role's name + defaultTaxStatus (the two fields `computeForMember`
+   * reads on the PRD path). Exposed so the batched preview can pre-load all
+   * distinct pay roles at once and resolve each member in memory.
+   */
+  async loadPayRole(
+    tx: TxLike,
+    payRoleId: string,
+  ): Promise<{
+    name: string | null;
+    defaultTaxStatus: string | null;
+    deliveredMetricSource: 'FUNNEL' | 'RECOVERY_COMBINED';
+  } | null> {
+    const [row] = await tx
+      .select({
+        name: schema.payrollPayRoles.name,
+        defaultTaxStatus: schema.payrollPayRoles.defaultTaxStatus,
+        deliveredMetricSource: schema.payrollPayRoles.deliveredMetricSource,
+      })
+      .from(schema.payrollPayRoles)
+      .where(eq(schema.payrollPayRoles.id, payRoleId))
+      .limit(1);
+    if (!row) return null;
+    return {
+      name: row.name,
+      defaultTaxStatus: row.defaultTaxStatus,
+      deliveredMetricSource:
+        row.deliveredMetricSource === 'RECOVERY_COMBINED' ? 'RECOVERY_COMBINED' : 'FUNNEL',
+    };
+  }
+
+  /**
+   * Public wrapper over the plan resolution used by `computeForMember`. Same
+   * logic, exposed so the batched preview can memoize identical resolutions
+   * (by payRoleId / role) instead of re-running per member. Returns the resolved
+   * commission plan row (with `.planName` + `.rules`) or null.
+   */
+  resolvePlanForMemberPublic(
+    tx: TxLike,
+    member: { id: string; role: string; commissionPlanId?: string | null; payRoleId?: string | null },
+    periodStart: Date,
+    periodEnd: Date,
+  ) {
+    return this.resolvePlanForMember(tx, member, periodStart, periodEnd);
   }
 
   private async resolvePlanForMember(

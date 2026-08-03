@@ -5,6 +5,9 @@ import {
   createCommissionPlanSchema,
   createAdjustmentSchema,
   approvePayoutSchema,
+  generateBatchSchema,
+  generateBatchesBulkSchema,
+  previewSelectionSchema,
 } from './hr';
 
 // ---------------------------------------------------------------------------
@@ -224,6 +227,39 @@ describe('createAdjustmentSchema', () => {
     ).toThrow();
   });
 
+  it('accepts an optional periodMonth in YYYY-MM-01 form', () => {
+    const result = createAdjustmentSchema.parse({
+      staffId: VALID_UUID,
+      amount: 5000,
+      category: 'BONUS',
+      reason: 'Earmarked for August',
+      periodMonth: '2026-08-01',
+    });
+    expect(result.periodMonth).toBe('2026-08-01');
+  });
+
+  it('omits periodMonth when not provided (legacy next-batch behavior)', () => {
+    const result = createAdjustmentSchema.parse({
+      staffId: VALID_UUID,
+      amount: 5000,
+      category: 'BONUS',
+      reason: 'No month earmark',
+    });
+    expect(result.periodMonth).toBeUndefined();
+  });
+
+  it('rejects a periodMonth that is not the first of the month', () => {
+    expect(() =>
+      createAdjustmentSchema.parse({
+        staffId: VALID_UUID,
+        amount: 5000,
+        category: 'BONUS',
+        reason: 'Bad month value',
+        periodMonth: '2026-08-15',
+      }),
+    ).toThrow();
+  });
+
   it('rejects invalid category', () => {
     expect(() =>
       createAdjustmentSchema.parse({
@@ -287,6 +323,160 @@ describe('approvePayoutSchema', () => {
         status: 'APPROVED',
         notes: 'A'.repeat(501),
       }),
+    ).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateBatchSchema — scope types (staff vs null-scope CONTRACTORS / ALL)
+// ---------------------------------------------------------------------------
+
+describe('generateBatchSchema', () => {
+  const UUID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+
+  it('accepts a normal staff batch with branch + department', () => {
+    expect(() =>
+      generateBatchSchema.parse({
+        branchId: UUID,
+        department: 'CS',
+        periodMonth: '2026-08-01',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects a staff batch missing department', () => {
+    expect(() =>
+      generateBatchSchema.parse({
+        branchId: UUID,
+        periodMonth: '2026-08-01',
+      }),
+    ).toThrow();
+  });
+
+  it('accepts a CONTRACTORS batch with no branch or department', () => {
+    expect(() =>
+      generateBatchSchema.parse({
+        periodMonth: '2026-08-01',
+        scopeType: 'CONTRACTORS',
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts a branch-pinned CONTRACTORS batch (Head running own branch)', () => {
+    expect(() =>
+      generateBatchSchema.parse({
+        branchId: UUID,
+        periodMonth: '2026-08-01',
+        scopeType: 'CONTRACTORS',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects a CONTRACTORS batch that targets a department', () => {
+    expect(() =>
+      generateBatchSchema.parse({
+        periodMonth: '2026-08-01',
+        scopeType: 'CONTRACTORS',
+        department: 'CS',
+      }),
+    ).toThrow();
+  });
+
+  it('accepts an ALL batch with no branch or department', () => {
+    expect(() =>
+      generateBatchSchema.parse({
+        periodMonth: '2026-08-01',
+        scopeType: 'ALL',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects an ALL batch that targets a specific branch', () => {
+    expect(() =>
+      generateBatchSchema.parse({
+        branchId: UUID,
+        periodMonth: '2026-08-01',
+        scopeType: 'ALL',
+      }),
+    ).toThrow();
+  });
+});
+
+describe('generateBatchesBulkSchema', () => {
+  const UUID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+
+  it('requires at least one branch and department for a staff fan-out', () => {
+    expect(() =>
+      generateBatchesBulkSchema.parse({
+        branchIds: [],
+        departments: [],
+        periodMonth: '2026-08-01',
+      }),
+    ).toThrow();
+  });
+
+  it('accepts a null-scope run with empty branch/department arrays', () => {
+    expect(() =>
+      generateBatchesBulkSchema.parse({
+        branchIds: [],
+        departments: [],
+        periodMonth: '2026-08-01',
+        scopeType: 'CONTRACTORS',
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts a normal staff fan-out', () => {
+    expect(() =>
+      generateBatchesBulkSchema.parse({
+        branchIds: [UUID],
+        departments: ['CS', 'MARKETING'],
+        periodMonth: '2026-08-01',
+      }),
+    ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// previewSelectionSchema — looser than generate; allows multi-department preview
+// ---------------------------------------------------------------------------
+
+describe('previewSelectionSchema', () => {
+  const UUID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+
+  it('accepts a multi-department preview (departments[] instead of a single dept)', () => {
+    expect(() =>
+      previewSelectionSchema.parse({
+        periodMonth: '2026-08-01',
+        scopeType: 'DEPARTMENT',
+        scopeBranchIds: [UUID],
+        departments: ['CS', 'MARKETING', 'HR'],
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts a single-department preview', () => {
+    expect(() =>
+      previewSelectionSchema.parse({
+        periodMonth: '2026-08-01',
+        branchId: UUID,
+        department: 'CS',
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts CONTRACTORS / ALL preview with no department', () => {
+    expect(() =>
+      previewSelectionSchema.parse({ periodMonth: '2026-08-01', scopeType: 'CONTRACTORS' }),
+    ).not.toThrow();
+    expect(() =>
+      previewSelectionSchema.parse({ periodMonth: '2026-08-01', scopeType: 'ALL' }),
+    ).not.toThrow();
+  });
+
+  it('rejects a staff preview with no department at all', () => {
+    expect(() =>
+      previewSelectionSchema.parse({ periodMonth: '2026-08-01', scopeBranchIds: [UUID] }),
     ).toThrow();
   });
 });

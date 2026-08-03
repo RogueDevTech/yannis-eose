@@ -3,7 +3,8 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 
 type Drizzle = PostgresJsDatabase<typeof schema>;
-type Tx = Parameters<Parameters<Drizzle['transaction']>[0]>[0];
+/** The transaction handle passed to `withActor`/`withActorAndBranch` callbacks. */
+export type Tx = Parameters<Parameters<Drizzle['transaction']>[0]>[0];
 
 /**
  * Wrap a block of DB writes in a transaction with `yannis.current_user_id` set to the

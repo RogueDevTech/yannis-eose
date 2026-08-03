@@ -269,6 +269,14 @@ export function PayrollPayRoleViewPage({
                   : 'Standard PAYE'}
             </dd>
           </div>
+          <div className="flex justify-between gap-3 sm:block sm:space-y-0.5">
+            <dt className="text-app-fg-muted">Delivered source</dt>
+            <dd className="text-app-fg font-medium">
+              {payRole.deliveredMetricSource === 'RECOVERY_COMBINED'
+                ? 'Recovery (cart + delivered follow-up)'
+                : 'Funnel orders'}
+            </dd>
+          </div>
         </dl>
       </div>
 
