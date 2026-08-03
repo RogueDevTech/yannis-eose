@@ -5,6 +5,7 @@
 import { randomUUID } from 'crypto';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
+import { createTestProduct, createTestUser } from './order.factory';
 
 export async function createTestCommissionPlan(
   db: PostgresJsDatabase<typeof schema>,
@@ -29,6 +30,10 @@ export async function createTestCommissionPlan(
     penaltyPerReturn: overrides.penaltyPerReturn ?? 200,
   };
 
+  // commission_plans.created_by has an FK to users — a random UUID violates it.
+  // Create a real HR user as the author when the caller doesn't supply one.
+  const createdBy = overrides.createdBy ?? (await createTestUser(db, { role: 'HR_MANAGER' })).id;
+
   const [inserted] = await db.insert(schema.commissionPlans).values({
     role:
       overrides.role === undefined
@@ -38,7 +43,7 @@ export async function createTestCommissionPlan(
     rules,
     effectiveFrom: new Date('2026-01-01'),
     effectiveTo: null,
-    createdBy: overrides.createdBy ?? randomUUID(),
+    createdBy,
   }).returning({ id: schema.commissionPlans.id });
 
   const id = inserted!.id;
@@ -55,7 +60,8 @@ export async function createTestDeliveredOrder(
     productId?: string;
   } = {},
 ) {
-  const productId = overrides.productId ?? randomUUID();
+  // order_items.product_id has an FK to products — a random UUID violates it.
+  const productId = overrides.productId ?? (await createTestProduct(db)).id;
   const deliveredAt = overrides.deliveredAt ?? new Date();
 
   const [insertedOrder] = await db.insert(schema.orders).values({

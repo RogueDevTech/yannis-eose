@@ -108,6 +108,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
               payrolls?: { byMonth: MonthlyPayrollGroup[] };
               adjustments?: Adjustment[];
               users?: HRUser[];
+              contractors?: Array<{ id: string; name: string }>;
               branches?: BranchOption[];
             };
           };
@@ -126,6 +127,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return {
       adjustments: bundle?.adjustments ?? [],
       users: bundle?.users ?? [],
+      contractors: (bundle?.contractors ?? []).map((c) => ({ id: c.id, name: c.name })),
       monthlyPayrolls: bundle?.payrolls?.byMonth ?? [],
       branches: bundle?.branches ?? prepareAccessData?.branches ?? [],
       viewer,
@@ -145,11 +147,15 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'createAdjustment') {
+    // The selector value is prefixed `staff:` or `contractor:` so a single
+    // dropdown can target either party type. Route to the matching id field.
+    const party = formData.get('staffId')?.toString() ?? '';
+    const [partyType, partyId] = party.includes(':') ? party.split(':', 2) : ['staff', party];
     const res = await apiRequest<unknown>('/trpc/hr.createAdjustment', {
       method: 'POST',
       cookie,
       body: {
-        staffId: formData.get('staffId')?.toString() ?? '',
+        ...(partyType === 'contractor' ? { contractorId: partyId } : { staffId: partyId }),
         amount: formData.get('amount')?.toString() ?? '',
         category: formData.get('category')?.toString() ?? '',
         reason: formData.get('reason')?.toString() ?? '',
@@ -263,6 +269,7 @@ export default function HRPayrollIndexRoute() {
         <HRPage
           adjustments={data.adjustments}
           users={data.users}
+          contractors={data.contractors}
           monthlyPayrolls={data.monthlyPayrolls}
           branches={data.branches}
           viewer={data.viewer}

@@ -95,7 +95,11 @@ function extractBundleCookieValue(cookieHeader: string | undefined | null): stri
   return null;
 }
 
-function verifyAndDecode(cookieValue: string, secret: string): SessionBundlePayload | null {
+function verifyAndDecode(
+  cookieValue: string,
+  secret: string,
+  ignoreExpiry: boolean,
+): SessionBundlePayload | null {
   const dot = cookieValue.indexOf('.');
   if (dot < 0) return null;
 
@@ -120,7 +124,13 @@ function verifyAndDecode(cookieValue: string, secret: string): SessionBundlePayl
   const raw = parsed as RawSessionBundlePayload;
 
   if (raw.v !== BUNDLE_VERSION) return null;
-  if (typeof raw.exp !== 'number' || Date.now() > raw.exp) return null;
+  // `exp` must always be a number (guards malformed payloads). Skip the actual
+  // freshness comparison only when the caller explicitly asks for a stale read
+  // (see `decodeSessionBundleCookie({ ignoreExpiry })`) — the HMAC above already
+  // proved the API issued this identity, so an expired-but-signed bundle is a
+  // trustworthy "last known good" fallback when `/auth/me` is momentarily down.
+  if (typeof raw.exp !== 'number') return null;
+  if (!ignoreExpiry && Date.now() > raw.exp) return null;
   if (typeof raw.p !== 'string') return null; // Required since v2 — old shape (`permissions: string[]`) was retired in BUNDLE_VERSION bump.
 
   // Expand the bitmask back to the canonical permission codes.
@@ -131,6 +141,19 @@ function verifyAndDecode(cookieValue: string, secret: string): SessionBundlePayl
   };
 }
 
+export interface DecodeBundleOptions {
+  /**
+   * Skip the `exp` freshness check while still requiring a valid HMAC + version.
+   * Use ONLY as a last-known-good fallback when `/auth/me` is momentarily
+   * unreachable (see `getCurrentUser` transient-failure path) — never for the
+   * normal fast-path, which must respect the short TTL so permission/branch
+   * changes propagate promptly.
+   *
+   * Default `false` — the standard "is this bundle still fresh?" behaviour.
+   */
+  ignoreExpiry?: boolean;
+}
+
 /**
  * Decode the bundle cookie from a Remix `Request`. Returns null if missing,
  * malformed, signed with a different secret, version-stale, or past `exp`.
@@ -138,10 +161,18 @@ function verifyAndDecode(cookieValue: string, secret: string): SessionBundlePayl
  * `null` is the universal "fall back to /auth/me" signal — every failure mode
  * is benign because the API endpoint will re-issue a fresh bundle on its
  * next response.
+ *
+ * Pass `{ ignoreExpiry: true }` to accept an expired-but-signed bundle. The
+ * signature check still runs, so the identity is guaranteed to be one the API
+ * genuinely issued — it's just past its freshness window. This is the
+ * "last known good" identity we serve when a live session check blips.
  */
-export function decodeSessionBundleCookie(request: Request): SessionBundlePayload | null {
+export function decodeSessionBundleCookie(
+  request: Request,
+  options?: DecodeBundleOptions,
+): SessionBundlePayload | null {
   const cookieHeader = request.headers.get('Cookie');
   const value = extractBundleCookieValue(cookieHeader);
   if (!value) return null;
-  return verifyAndDecode(value, resolveBundleSecret());
+  return verifyAndDecode(value, resolveBundleSecret(), options?.ignoreExpiry ?? false);
 }

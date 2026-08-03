@@ -655,35 +655,84 @@ export class PayrollBatchService {
           (contractor.taxStatus as 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION') ??
           'GROSS_NO_DEDUCTION';
         const paye = computePaye({ monthlyGross: fee, taxStatus }, taxConfig);
-        const netPay = Math.max(0, fee - paye.employeePaye);
-        await tx.insert(schema.payoutRecords).values({
-          batchId,
-          contractorId: contractor.id,
-          staffId: null,
-          periodStart,
-          periodEnd,
-          baseSalary: sql`${fee.toFixed(2)}::numeric`,
-          performanceBonus: sql`0::numeric`,
-          addOnsTotal: sql`0::numeric`,
-          deductionsTotal: sql`${paye.employeePaye.toFixed(2)}::numeric`,
-          totalPayout: sql`${netPay.toFixed(2)}::numeric`,
-          allowancesTotal: sql`0::numeric`,
-          grossPay: sql`${fee.toFixed(2)}::numeric`,
-          payeTax: sql`${paye.employeePaye.toFixed(2)}::numeric`,
-          employerPayeSubsidy: sql`${paye.employerSubsidy.toFixed(2)}::numeric`,
-          netPay: sql`${netPay.toFixed(2)}::numeric`,
-          payRoleName: contractor.name,
-          lineStatus: 'OK',
-          status: 'DRAFT',
-        });
+
+        // Fold pending manual adjustments (bonuses / deductions / penalties) that
+        // HR applied to this contractor. Deduction categories are stored negative;
+        // add-ons positive (same convention as staff earnings adjustments).
+        const [contractorClawbackRows, contractorAddOnRows] = await Promise.all([
+          tx
+            .select({ total: sum(schema.earningsAdjustments.amount) })
+            .from(schema.earningsAdjustments)
+            .where(
+              and(
+                eq(schema.earningsAdjustments.contractorId, contractor.id),
+                inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
+                isNull(schema.earningsAdjustments.payoutId),
+              ),
+            ),
+          tx
+            .select({ total: sum(schema.earningsAdjustments.amount) })
+            .from(schema.earningsAdjustments)
+            .where(
+              and(
+                eq(schema.earningsAdjustments.contractorId, contractor.id),
+                inArray(schema.earningsAdjustments.category, ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER']),
+                isNull(schema.earningsAdjustments.payoutId),
+              ),
+            ),
+        ]);
+        const clawbackTotal = Math.abs(Number(contractorClawbackRows[0]?.total ?? 0));
+        const addOnsTotal = Number(contractorAddOnRows[0]?.total ?? 0);
+
+        const grossPay = fee + addOnsTotal;
+        const deductionsTotal = paye.employeePaye + clawbackTotal;
+        const netPay = Math.max(0, grossPay - paye.employeePaye - clawbackTotal);
+        const inserted = await tx
+          .insert(schema.payoutRecords)
+          .values({
+            batchId,
+            contractorId: contractor.id,
+            staffId: null,
+            periodStart,
+            periodEnd,
+            baseSalary: sql`${fee.toFixed(2)}::numeric`,
+            performanceBonus: sql`0::numeric`,
+            addOnsTotal: sql`${addOnsTotal.toFixed(2)}::numeric`,
+            deductionsTotal: sql`${deductionsTotal.toFixed(2)}::numeric`,
+            totalPayout: sql`${netPay.toFixed(2)}::numeric`,
+            allowancesTotal: sql`0::numeric`,
+            grossPay: sql`${grossPay.toFixed(2)}::numeric`,
+            payeTax: sql`${paye.employeePaye.toFixed(2)}::numeric`,
+            employerPayeSubsidy: sql`${paye.employerSubsidy.toFixed(2)}::numeric`,
+            netPay: sql`${netPay.toFixed(2)}::numeric`,
+            payRoleName: contractor.name,
+            lineStatus: 'OK',
+            status: 'DRAFT',
+          })
+          .returning({ id: schema.payoutRecords.id });
+
+        // Link the settled adjustments to this payout so they aren't re-applied.
+        const contractorPayoutId = inserted[0]?.id;
+        if (contractorPayoutId) {
+          await tx
+            .update(schema.earningsAdjustments)
+            .set({ payoutId: contractorPayoutId })
+            .where(
+              and(
+                eq(schema.earningsAdjustments.contractorId, contractor.id),
+                isNull(schema.earningsAdjustments.payoutId),
+              ),
+            );
+        }
+
         generatedPayouts.push({
           staffId: contractor.id,
           baseSalary: fee,
           performanceBonus: 0,
-          addOnsTotal: 0,
-          deductionsTotal: paye.employeePaye,
+          addOnsTotal,
+          deductionsTotal,
           totalPayout: netPay,
-          grossPay: fee,
+          grossPay,
           payeTax: paye.employeePaye,
           netPay,
           payRoleName: contractor.name,
@@ -832,6 +881,18 @@ export class PayrollBatchService {
         .limit(1)
     )[0];
 
+    // Head team-DR counts reportees across the whole company (all branches sharing
+    // the member's groupId), not just their primary branch — multi-branch teams
+    // otherwise under-count and the team bonus silently drops to zero.
+    let effectiveBranchIds: string[] | null = null;
+    if (branchRow?.groupId) {
+      const companyBranches = await tx
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(eq(schema.branches.groupId, branchRow.groupId));
+      effectiveBranchIds = companyBranches.map((b) => b.id);
+    }
+
     const computed = await this.payrollCompute.computeForMember(
       tx,
       member,
@@ -839,6 +900,7 @@ export class PayrollBatchService {
       periodEnd,
       branchRow?.groupId ?? null,
       branchRow?.branchId ?? null,
+      { effectiveBranchIds },
     );
     if (!computed) {
       return this.computePayoutForMemberLegacy(tx, member, periodStart, periodEnd);

@@ -68,7 +68,9 @@ export async function createTestOrder(
     productId?: string;
   } = {},
 ) {
-  const productId = overrides.productId ?? randomUUID();
+  // order_items.product_id has an FK to products — a random UUID violates it.
+  // Create a real product when the caller doesn't supply one.
+  const productId = overrides.productId ?? (await createTestProduct(db)).id;
   const status = overrides.status ?? 'UNPROCESSED';
 
   const [insertedOrder] = await db.insert(schema.orders).values({
@@ -96,15 +98,30 @@ export async function createTestOrder(
   return { orderId, productId };
 }
 
-export async function createTestBranch(db: PostgresJsDatabase<typeof schema>) {
+export async function createTestBranch(
+  db: PostgresJsDatabase<typeof schema>,
+  overrides: { groupId?: string } = {},
+) {
   const id = randomUUID();
+  // branches.group_id is NOT NULL since the multi-company rollout: every test
+  // branch needs a company (branch group). Reuse a caller-supplied group when
+  // several branches must share a company; otherwise mint a fresh one.
+  let groupId = overrides.groupId;
+  if (!groupId) {
+    const [group] = await db
+      .insert(schema.branchGroups)
+      .values({ name: `Test Group ${randomUUID().slice(0, 8)}` })
+      .returning({ id: schema.branchGroups.id });
+    groupId = group!.id;
+  }
   await db.insert(schema.branches).values({
     id,
     name: `Test Branch ${id.slice(0, 8)}`,
     code: `TB${id.slice(0, 4).toUpperCase()}`,
     status: 'ACTIVE',
+    groupId,
   });
-  return { id };
+  return { id, groupId };
 }
 
 /** CS + Marketing department rows — required before inserting branch_teams (migration 0135). */

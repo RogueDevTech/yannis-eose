@@ -72,11 +72,11 @@ export class PayrollComputeService {
     branchId?: string | null,
     opts?: {
       /**
-       * Skip fan-out over branch reportees + team DR (expensive on large CS/MB teams).
-       * Used by Earnings outlook so Head profiles still return a base-salary estimate.
-       * TEAM_DR formula tiers fall back to individual DR when teamDr is absent.
+       * Company-wide branch set the Head's team spans. When present, team DR
+       * counts reportees across ALL these branches (multi-branch teams), not just
+       * the Head's primary branch. Falls back to [branchId] when omitted.
        */
-      skipTeamMetrics?: boolean;
+      effectiveBranchIds?: string[] | null;
     },
   ): Promise<ComputedPayslipLine | null> {
     // Derive team membership from branch + subordinate role instead of explicit reportsTo links.
@@ -86,8 +86,16 @@ export class PayrollComputeService {
       HEAD_OF_LOGISTICS: ['TPL_MANAGER', 'STOCK_MANAGER'],
     };
     const subRoles = subordinateRoles[member.role];
+    // Team-DR resolution is cheap (one reportee-id lookup + two count queries) and
+    // is required even on the Earnings Outlook path: Head bonus/subsidy tiers are
+    // keyed on TEAM_DR, so skipping it collapses the whole variable-pay estimate
+    // to base salary. Scope reportees to the Head's effective (company-wide)
+    // branches so multi-branch teams count correctly; default to the primary branch.
+    const teamBranchIds = [
+      ...new Set((opts?.effectiveBranchIds?.length ? opts.effectiveBranchIds : branchId ? [branchId] : []).filter(Boolean)),
+    ] as string[];
     let reporteeIds: string[] = [];
-    if (!opts?.skipTeamMetrics && subRoles?.length && branchId) {
+    if (subRoles?.length && teamBranchIds.length) {
       const reporteeRows = await tx
         .select({ id: schema.users.id })
         .from(schema.users)
@@ -95,7 +103,7 @@ export class PayrollComputeService {
           and(
             inArray(schema.users.role, subRoles as typeof schema.users.role.enumValues),
             eq(schema.users.status, 'ACTIVE'),
-            eq(schema.users.primaryBranchId, branchId),
+            inArray(schema.users.primaryBranchId, teamBranchIds),
           ),
         );
       reporteeIds = reporteeRows.map((r) => r.id);

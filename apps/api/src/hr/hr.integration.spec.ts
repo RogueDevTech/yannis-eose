@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import { eq, and, gte, lte } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
-import { createTestUser } from '../test/factories/order.factory';
+import { createTestProduct, createTestUser } from '../test/factories/order.factory';
 import { createTestCommissionPlan, createTestDeliveredOrder } from '../test/factories/commission.factory';
 
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
@@ -206,12 +206,15 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
     const actor = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, actor.id);
 
-    // Create 60 delivered orders in January
+    // Create 60 delivered orders in January (all sharing one product to avoid
+    // 60 redundant product+group inserts).
+    const { id: productId } = await createTestProduct(db as any);
     const janDate = new Date('2026-01-20T10:00:00Z');
     const insertPromises = Array.from({ length: 60 }, () =>
       createTestDeliveredOrder(db as any, {
         assignedCsId: actor.id,
         deliveredAt: janDate,
+        productId,
       }),
     );
     await Promise.all(insertPromises);
@@ -248,12 +251,14 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
     const actor = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, actor.id);
 
-    // Only 40 delivered orders
+    // Only 40 delivered orders (all sharing one product).
+    const { id: productId } = await createTestProduct(db as any);
     const janDate = new Date('2026-01-20T10:00:00Z');
     const insertPromises = Array.from({ length: 40 }, () =>
       createTestDeliveredOrder(db as any, {
         assignedCsId: actor.id,
         deliveredAt: janDate,
+        productId,
       }),
     );
     await Promise.all(insertPromises);

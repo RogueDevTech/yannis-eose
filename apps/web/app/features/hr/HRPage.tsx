@@ -58,6 +58,7 @@ const ADJ_DEDUCT_CATEGORIES = ['DEDUCTION', 'CLAWBACK'];
 export function HRPage({
   adjustments,
   users,
+  contractors,
   monthlyPayrolls,
   branches,
   viewer,
@@ -350,13 +351,22 @@ export function HRPage({
                   {(resolvedUsers) => (
                     <SearchableSelect
                       id="hr-adjustment-staffId"
-                      label="Staff Member"
+                      label="Staff or contractor"
                       required
                       value={adjustmentStaffId}
                       onChange={setAdjustmentStaffId}
-                      placeholder="Select staff..."
-                      searchPlaceholder="Search staff..."
-                      options={resolvedUsers.map((u: HRUser) => ({ value: u.id, label: `${u.name}${u.role ? ` (${formatRoleLabel(u.role)})` : ''}` }))}
+                      placeholder="Select staff or contractor..."
+                      searchPlaceholder="Search..."
+                      options={[
+                        ...resolvedUsers.map((u: HRUser) => ({
+                          value: `staff:${u.id}`,
+                          label: `${u.name}${u.role ? ` (${formatRoleLabel(u.role)})` : ''}`,
+                        })),
+                        ...contractors.map((c) => ({
+                          value: `contractor:${c.id}`,
+                          label: `${c.name} (Contractor)`,
+                        })),
+                      ]}
                     />
                   )}
                 </DeferredSection>
@@ -457,13 +467,20 @@ export function HRPage({
                   resolvedAdjustments,
                   adjustmentApprovalPatches,
                 );
-                const getStaffName = (id: string) => resolvedUsers.find((u: HRUser) => u.id === id)?.name ?? id.slice(0, 8) + '...';
+                const getPartyName = (adj: Adjustment) => {
+                  if (adj.contractorId) {
+                    const c = contractors.find((c) => c.id === adj.contractorId);
+                    return c ? `${c.name} (Contractor)` : adj.contractorId.slice(0, 8) + '...';
+                  }
+                  if (!adj.staffId) return 'Unknown';
+                  return resolvedUsers.find((u: HRUser) => u.id === adj.staffId)?.name ?? adj.staffId.slice(0, 8) + '...';
+                };
                 const adjustmentColumns: CompactTableColumn<Adjustment>[] = [
                   {
                     key: 'staff',
-                    header: 'Staff',
+                    header: 'Staff / contractor',
                     render: (adj) => (
-                      <p className="text-sm font-medium text-app-fg">{getStaffName(adj.staffId)}</p>
+                      <p className="text-sm font-medium text-app-fg">{getPartyName(adj)}</p>
                     ),
                   },
                   {
@@ -539,7 +556,7 @@ export function HRPage({
                       renderMobileCard={(adj) => (
                         <div className="p-4 space-y-3">
                           <div className="flex items-center justify-between">
-                            <span className="font-medium text-app-fg text-sm">{getStaffName(adj.staffId)}</span>
+                            <span className="font-medium text-app-fg text-sm">{getPartyName(adj)}</span>
                             <StatusBadge status={adj.category} />
                           </div>
                           <div className="flex items-center justify-between">
@@ -596,7 +613,9 @@ export function HRPage({
         description={
           approveAdjustmentTarget
             ? `Approve this ${approveAdjustmentTarget.category.replace(/_/g, ' ').toLowerCase()} adjustment for ${
-                users.find((u) => u.id === approveAdjustmentTarget.staffId)?.name ?? 'staff'
+                approveAdjustmentTarget.contractorId
+                  ? contractors.find((c) => c.id === approveAdjustmentTarget.contractorId)?.name ?? 'contractor'
+                  : users.find((u) => u.id === approveAdjustmentTarget.staffId)?.name ?? 'staff'
               }?`
             : ''
         }

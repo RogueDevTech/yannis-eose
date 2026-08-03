@@ -2,7 +2,10 @@ import { redirect } from '@remix-run/node';
 import { isNetworkErrorLike } from './network-error';
 import { canAccessGlobalAuditLog, isAdminLevel, isOrgWideDepartmentHead } from './rbac';
 import { canonicalPermissionCode } from './permission-codes';
-import { decodeSessionBundleCookie } from './session-bundle-cookie.server';
+import {
+  decodeSessionBundleCookie,
+  type SessionBundlePayload,
+} from './session-bundle-cookie.server';
 
 /**
  * Server-side API helper for Remix loaders/actions.
@@ -498,10 +501,50 @@ const currentUserCache = new WeakMap<
 >();
 
 /**
+ * Map a verified session bundle to the `getCurrentUser` return shape. Shared by
+ * the fresh fast-path and the stale last-known-good fallback so the two never
+ * drift. Optional/flag fields are spread conditionally to preserve the exact
+ * shape the fast path has always returned.
+ */
+function mapBundleToCurrentUser(bundle: SessionBundlePayload) {
+  return {
+    id: bundle.id,
+    email: bundle.email,
+    name: bundle.name,
+    role: bundle.role,
+    roleTemplateId: bundle.roleTemplateId,
+    scopeGlobal: bundle.scopeGlobal,
+    scopeOrgWideHead: bundle.scopeOrgWideHead,
+    scopeTeamSupervisor: bundle.scopeTeamSupervisor,
+    permissions: bundle.permissions,
+    logisticsLocationId: bundle.logisticsLocationId,
+    currentBranchId: bundle.currentBranchId,
+    selectedBranchIds: bundle.selectedBranchIds,
+    activeGroupId: bundle.activeGroupId,
+    branchIds: bundle.branchIds,
+    appTheme: bundle.appTheme,
+    fontScale: bundle.fontScale,
+    mirroredBy: bundle.mirroredBy,
+    ...(bundle.staffOnboardingStatus !== undefined
+      ? { staffOnboardingStatus: bundle.staffOnboardingStatus }
+      : {}),
+    ...(bundle.isMarketingTeamSupervisorOnActiveBranch === true
+      ? { isMarketingTeamSupervisorOnActiveBranch: true as const }
+      : {}),
+    ...(bundle.isCsTeamSupervisorOnActiveBranch === true
+      ? { isCsTeamSupervisorOnActiveBranch: true as const }
+      : {}),
+    ...(bundle.isTeamSupervisor === true ? { isTeamSupervisor: true as const } : {}),
+  };
+}
+
+/**
  * Get the current user from the session.
  * Returns null when there is no cookie or the API returns 401 (invalid/expired session).
- * On transient API failures (503/504/5xx from network or server), throws Response(503) so layout
- * loaders do not mis-treat a blip as logout — unless `softNetwork: true`.
+ * On transient API failures (503/504/5xx from network or server), falls back to the
+ * expired-but-HMAC-verified bundle if present (so an idle-resume blip doesn't blank a
+ * logged-in user), and only throws Response(503) when no such last-known-good identity
+ * exists — unless `softNetwork: true`.
  *
  * Per-request memoized: repeated calls with the same `Request` reuse the
  * single in-flight `/auth/me` promise. `softNetwork: true` bypasses the cache
@@ -532,35 +575,7 @@ async function getCurrentUserUncached(request: Request, options?: GetCurrentUser
   if (!options?.softNetwork) {
     const bundle = decodeSessionBundleCookie(request);
     if (bundle) {
-      return {
-        id: bundle.id,
-        email: bundle.email,
-        name: bundle.name,
-        role: bundle.role,
-        roleTemplateId: bundle.roleTemplateId,
-        scopeGlobal: bundle.scopeGlobal,
-        scopeOrgWideHead: bundle.scopeOrgWideHead,
-        scopeTeamSupervisor: bundle.scopeTeamSupervisor,
-        permissions: bundle.permissions,
-        logisticsLocationId: bundle.logisticsLocationId,
-        currentBranchId: bundle.currentBranchId,
-        selectedBranchIds: bundle.selectedBranchIds,
-        activeGroupId: bundle.activeGroupId,
-        branchIds: bundle.branchIds,
-        appTheme: bundle.appTheme,
-        fontScale: bundle.fontScale,
-        mirroredBy: bundle.mirroredBy,
-        ...(bundle.staffOnboardingStatus !== undefined
-          ? { staffOnboardingStatus: bundle.staffOnboardingStatus }
-          : {}),
-        ...(bundle.isMarketingTeamSupervisorOnActiveBranch === true
-          ? { isMarketingTeamSupervisorOnActiveBranch: true as const }
-          : {}),
-        ...(bundle.isCsTeamSupervisorOnActiveBranch === true
-          ? { isCsTeamSupervisorOnActiveBranch: true as const }
-          : {}),
-        ...(bundle.isTeamSupervisor === true ? { isTeamSupervisor: true as const } : {}),
-      };
+      return mapBundleToCurrentUser(bundle);
     }
   }
 
@@ -612,6 +627,26 @@ async function getCurrentUserUncached(request: Request, options?: GetCurrentUser
 
   if (isTransientAuthMeFailure(res.status)) {
     if (options?.softNetwork) return null;
+
+    // LAST-KNOWN-GOOD FALLBACK — the live `/auth/me` blipped (5xx / timeout /
+    // TCP reset). This is the classic "app was idle, tab woke, network stack
+    // wasn't ready yet" case: the fresh-bundle fast path missed only because
+    // the 60s TTL lapsed while idle, and now the recovery probe failed too.
+    //
+    // Rather than throw a 503 that blanks the whole shell into the "Connection
+    // issue" boundary, serve the expired-but-HMAC-verified bundle. The
+    // signature proves the API issued this exact identity; it's stale by at
+    // most the idle gap, and the very next successful request re-issues a fresh
+    // one. Permission/branch changes still propagate on that next good call.
+    //
+    // Only 401 (line above) means "genuinely logged out" — and that still
+    // returns null → redirect to /auth. A transient failure must never be
+    // mistaken for logout.
+    const staleBundle = decodeSessionBundleCookie(request, { ignoreExpiry: true });
+    if (staleBundle) {
+      return mapBundleToCurrentUser(staleBundle);
+    }
+
     const upstreamReason =
       typeof res.data === 'object' && res.data && 'error' in res.data
         ? String((res.data as { error?: unknown }).error ?? '')

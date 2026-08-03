@@ -662,8 +662,11 @@ export class HrService {
     }
 
     // Company scope for product tiers + PAYE config comes from the staff's
-    // primary branch.
+    // primary branch. For Head roles, the team-DR bonus basis counts reportees
+    // across the whole company (all branches sharing the staff's groupId), not
+    // just the staff's primary branch — multi-branch teams otherwise under-count.
     let groupId: string | null = null;
+    let effectiveBranchIds: string[] | null = null;
     if (user.primaryBranchId) {
       const [branch] = await this.db
         .select({ groupId: schema.branches.groupId })
@@ -671,6 +674,13 @@ export class HrService {
         .where(eq(schema.branches.id, user.primaryBranchId))
         .limit(1);
       groupId = branch?.groupId ?? null;
+      if (groupId) {
+        const companyBranches = await this.db
+          .select({ id: schema.branches.id })
+          .from(schema.branches)
+          .where(eq(schema.branches.groupId, groupId));
+        effectiveBranchIds = companyBranches.map((b) => b.id);
+      }
     }
 
     let computed: ComputedPayslipLine | null = null;
@@ -691,9 +701,10 @@ export class HrService {
         end,
         groupId,
         user.primaryBranchId ?? null,
-        // Outlook must stay fast: HoCS/HoM team-DR fan-out was timing out the
-        // Remix earnings loader and leaving preview=null ("No estimate yet").
-        { skipTeamMetrics: true },
+        // Team-DR is required for Head bonus/subsidy tiers (they're keyed on
+        // TEAM_DR). It's cheap (one reportee lookup + two counts), so the Outlook
+        // computes it too — scoped company-wide so multi-branch teams count.
+        { effectiveBranchIds },
       );
     } catch (err) {
       computeError = err instanceof Error ? err.message : 'Payroll formula failed';
@@ -821,7 +832,8 @@ export class HrService {
       const rows = await tx
         .insert(schema.earningsAdjustments)
         .values({
-          staffId: input.staffId,
+          staffId: input.staffId ?? null,
+          contractorId: input.contractorId ?? null,
           amount: sql`${input.amount}::numeric`,
           category: input.category,
           reason: input.reason,
@@ -835,9 +847,10 @@ export class HrService {
       return inserted;
     });
 
-    // Notify staff when clawback/deduction is created (they need to know)
+    // Notify staff when clawback/deduction is created (they need to know).
+    // Contractors are external and have no app account to notify.
     const isDeduction = ['CLAWBACK', 'DEDUCTION'].includes(input.category) || Number(input.amount) < 0;
-    if (isDeduction) {
+    if (isDeduction && input.staffId) {
       // Look up the staff's primary branch for notification group isolation
       const [staffBranch] = await this.db
         .select({ branchId: schema.userBranches.branchId })
@@ -879,18 +892,20 @@ export class HrService {
       return rows[0];
     });
 
-    // Notify staff when add-on/bonus is approved (or clawback/deduction is applied)
-    if (input.approved) {
+    // Notify staff when add-on/bonus is approved (or clawback/deduction is applied).
+    // Contractors are external (no app account) — nothing to notify.
+    if (input.approved && row.staffId) {
+      const staffUserId = row.staffId;
       // Look up the staff's primary branch for notification group isolation
       const [staffBranch] = await this.db
         .select({ branchId: schema.userBranches.branchId })
         .from(schema.userBranches)
-        .where(and(eq(schema.userBranches.userId, row.staffId), eq(schema.userBranches.isPrimary, true)))
+        .where(and(eq(schema.userBranches.userId, staffUserId), eq(schema.userBranches.isPrimary, true)))
         .limit(1);
 
       const isDeduction = Number(row.amount) < 0 || ['CLAWBACK', 'DEDUCTION'].includes(row.category);
       this.notifications.enqueueCreate({
-        userId: row.staffId,
+        userId: staffUserId,
         type: isDeduction ? 'hr:deduction_applied' : 'hr:addon_approved',
         title: isDeduction ? 'Deduction applied' : 'Add-on approved',
         body: isDeduction
@@ -909,15 +924,27 @@ export class HrService {
       conditions.push(eq(schema.earningsAdjustments.staffId, staffId));
     }
     if (effectiveBranchIds?.length) {
+      // Match staff rows via user_branches, and contractor rows via the
+      // contractor's own branch (contractors have no user_branches entry).
       conditions.push(
-        exists(
-          this.db.select({ one: sql`1` })
-            .from(schema.userBranches)
-            .where(and(
-              eq(schema.userBranches.userId, schema.earningsAdjustments.staffId),
-              inArray(schema.userBranches.branchId, effectiveBranchIds),
-            )),
-        ),
+        or(
+          exists(
+            this.db.select({ one: sql`1` })
+              .from(schema.userBranches)
+              .where(and(
+                sql`${schema.userBranches.userId} = ${schema.earningsAdjustments.staffId}`,
+                inArray(schema.userBranches.branchId, effectiveBranchIds),
+              )),
+          ),
+          exists(
+            this.db.select({ one: sql`1` })
+              .from(schema.payrollContractors)
+              .where(and(
+                sql`${schema.payrollContractors.id} = ${schema.earningsAdjustments.contractorId}`,
+                inArray(schema.payrollContractors.branchId, effectiveBranchIds),
+              )),
+          ),
+        )!,
       );
     }
 
