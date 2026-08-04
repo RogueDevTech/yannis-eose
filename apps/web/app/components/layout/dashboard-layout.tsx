@@ -533,6 +533,18 @@ const navStructure: NavGroupDef[] = [
       },
       { label: 'Settings', href: '/admin/settings', icon: SidebarIcons.settings },
       {
+        label: 'Marketing Automation',
+        href: '/admin/marketing/automation',
+        icon: SidebarIcons.campaigns,
+        // ADMIN / SUPER_ADMIN / SUPPORT reach it via the permission bypass; Head of
+        // Marketing is granted marketing.automation.manage in the RBAC catalog.
+        permission: 'marketing.automation.manage',
+        roles: ['HEAD_OF_MARKETING'],
+        // Phase 1 foundation only (email-only, no engine yet) — keep it out of the
+        // sidebar in prod. Visible when window.__ENV.IS_DEV is true.
+        devOnly: true,
+      },
+      {
         label: 'Branches',
         href: '/admin/branches',
         icon: SidebarIcons.settings,

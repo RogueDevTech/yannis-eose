@@ -81,6 +81,60 @@ const financeFieldsMiddleware = t.middleware(async ({ ctx, next }) => {
 export const publicProcedure = t.procedure;
 
 /**
+ * Constant-time string compare — avoids leaking the key length/prefix via
+ * response-timing differences. Both sides are hex secrets of equal length in
+ * practice, but we still guard against unequal-length short-circuits.
+ */
+function safeKeyEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
+/**
+ * Edge-forward procedure — public order/cart intake endpoints that MUST only be
+ * reachable through the Cloudflare edge worker (`orders.create`, `cart.save`,
+ * `preparePaystackOrder`). The worker attaches `X-Edge-Api-Key`; without a
+ * valid key the tRPC endpoints were fully open, letting anyone POST forged
+ * orders straight to the API and bypass the worker's honeypot + rate limiter.
+ *
+ * Fail-open by design (Pillar-1: forms never go offline): if the server has no
+ * `EDGE_API_KEY` configured we do NOT enforce — so a deploy that lands before
+ * the secret is set can't take the whole order pipeline down. The gate is
+ * armed only once the secret exists on the API; the edge worker is likewise
+ * fail-open on its side, so enforcement begins exactly when both are keyed.
+ */
+const requireEdgeApiKey = t.middleware(async ({ ctx, next }) => {
+  const expected = process.env.EDGE_API_KEY;
+  // Fail-open when unconfigured (see edgeProcedure docstring).
+  if (!expected || expected.length === 0) return next();
+
+  const provided = ctx.req.headers['x-edge-api-key'];
+  const providedKey = Array.isArray(provided) ? provided[0] : provided;
+  if (typeof providedKey === 'string' && safeKeyEqual(providedKey, expected)) {
+    return next();
+  }
+
+  // An authenticated session is also a legitimate caller (admin tooling, E2E
+  // order seeding). Anonymous requests without the edge key are the forgery
+  // vector we're closing — reject those.
+  if (ctx.user) return next();
+
+  throw new TRPCError({
+    code: 'UNAUTHORIZED',
+    message: 'Edge authentication required.',
+  });
+});
+
+/**
+ * Order/cart intake procedure — public but edge-gated. See requireEdgeApiKey.
+ */
+export const edgeProcedure = t.procedure.use(requireEdgeApiKey);
+
+/**
  * Mirror Mode read-only guard.
  *
  * When the session has `mirroredBy` set the actor is browsing the app through

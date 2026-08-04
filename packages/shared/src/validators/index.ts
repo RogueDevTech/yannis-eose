@@ -91,6 +91,19 @@ export type {
   ListFollowUpOrdersInput,
 } from './follow-up-config';
 
+// Marketing automation validators (distinct from push automation rules)
+export {
+  marketingAutomationRuleKindSchema,
+  marketingAutomationChannelSchema,
+  createMarketingAutomationRuleSchema,
+  listMarketingAutomationRulesSchema,
+} from './automation';
+
+export type {
+  CreateMarketingAutomationRuleInput,
+  ListMarketingAutomationRulesInput,
+} from './automation';
+
 // User validators
 export {
   userRoleSchema,

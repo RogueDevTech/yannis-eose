@@ -106,6 +106,9 @@ import { setUserFilterPreferencesService } from './routers/user-filter-preferenc
 import { AiAssistantModule } from '../ai-assistant/ai-assistant.module';
 import { AiAssistantService } from '../ai-assistant/ai-assistant.service';
 import { setAiAssistantService, setAiAssistantToolServices } from './routers/ai-assistant.router';
+import { AutomationModule } from '../automation/automation.module';
+import { AutomationService } from '../automation/automation.service';
+import { setAutomationService } from './routers/automation.router';
 
 @Module({
   imports: [
@@ -122,6 +125,7 @@ import { setAiAssistantService, setAiAssistantToolServices } from './routers/ai-
     CartOrdersModule,
     UserFilterPreferencesModule,
     AiAssistantModule,
+    AutomationModule,
   ],
   providers: [TrpcMiddleware],
 })
@@ -164,6 +168,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly cartOrdersService: CartOrdersService,
     private readonly userFilterPreferencesService: UserFilterPreferencesService,
     private readonly aiAssistantService: AiAssistantService,
+    private readonly automationService: AutomationService,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
@@ -197,6 +202,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setPayrollConfigService(this.payrollConfigService);
     setPayrollMetricsService(this.payrollMetricsService);
     setNotificationsService(this.notificationsService);
+    setAutomationService(this.automationService);
     setPushSchedulerService(this.pushSchedulerService);
     setAuditService(this.auditService);
     setImportHistoryService(this.importHistoryService);
