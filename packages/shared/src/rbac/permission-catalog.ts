@@ -597,6 +597,11 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'payroll.config.write',
     'payroll.run.prepare',
     'payroll.run.approve',
+    // HR completes the payroll process end-to-end: bank-pay export + mark batch
+    // paid. This is a payroll-scoped disbursement key, intentionally NARROWER
+    // than finance.disburse — it does NOT grant funding-request approvals or the
+    // finance disbursements page. The payroll endpoints accept EITHER key.
+    'payroll.run.disburse',
     // HR can deactivate and reactivate staff accounts (CEO directive 2026-06-09).
     'users.staff.deactivate',
   ],

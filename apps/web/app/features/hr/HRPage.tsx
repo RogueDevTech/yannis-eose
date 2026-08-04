@@ -148,7 +148,9 @@ export function HRPage({
   const canExportBankPay =
     isAdmin ||
     hasFinanceAccess(viewer) ||
-    (viewer.permissions ?? []).includes('finance.disburse');
+    (viewer.permissions ?? []).includes('finance.disburse') ||
+    // HR completes its own payroll run via the payroll-scoped disbursement key.
+    (viewer.permissions ?? []).includes('payroll.run.disburse');
 
   const showGenerateButton = useMemo(() => {
     const generatableDepartments = ADMIN_ROLES.has(viewer.role)

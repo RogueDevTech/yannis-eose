@@ -136,10 +136,16 @@ function canReviewBatch(user: SessionUser): boolean {
   return (user.permissions ?? []).includes('hr.write');
 }
 
-/** Finance disbursement stage — requires finance.disburse (not merely cost-view / auditor). */
+/**
+ * Payroll disbursement stage (Mark Paid + bank export). Requires finance.disburse
+ * (Finance) OR payroll.run.disburse (HR completing its own payroll run) — NOT
+ * merely cost-view / auditor. payroll.run.disburse is payroll-scoped and does not
+ * confer funding approvals or the finance disbursements page.
+ */
 function canProcessBatch(user: SessionUser): boolean {
   if (user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') return true;
-  return (user.permissions ?? []).includes('finance.disburse');
+  const perms = user.permissions ?? [];
+  return perms.includes('finance.disburse') || perms.includes('payroll.run.disburse');
 }
 
 function assertBatchInScope(
@@ -2421,7 +2427,7 @@ export class PayrollBatchService {
     if (!canProcessBatch(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Only users with finance.disburse (or SuperAdmin) can mark batches paid.',
+        message: 'Only users with finance.disburse or payroll.run.disburse (or SuperAdmin) can mark batches paid.',
       });
     }
     if (batch.status !== 'PENDING_FINANCE') {
