@@ -3871,10 +3871,20 @@ export class LogisticsService implements OnModuleInit {
           eq(schema.orders.logisticsLocationId, loc.id),
           sql`NOT EXISTS (SELECT 1 FROM ${schema.deliveryRemittanceOrders} WHERE ${schema.deliveryRemittanceOrders.orderId} = ${schema.orders.id})`,
         ];
+        // Branch scope: filter to the selected branches when we have a concrete set.
+        // An empty set means "no company-branch context" — treat it as no filter (the
+        // canonical pattern elsewhere in this service), NOT as "match nothing", so the
+        // reconciliation statement isn't silently blanked. The statement is already
+        // scoped to this partner location, so cross-branch leakage isn't a concern here.
+        // Unassigned delivered orders (servicing_branch_id IS NULL) are always kept so
+        // they still reconcile.
         if (effectiveBranchIds && effectiveBranchIds.length > 0) {
-          awaitingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
-        } else if (effectiveBranchIds && effectiveBranchIds.length === 0) {
-          awaitingConditions.push(sql`false`);
+          awaitingConditions.push(
+            or(
+              inArray(schema.orders.servicingBranchId, effectiveBranchIds),
+              isNull(schema.orders.servicingBranchId),
+            )!,
+          );
         }
         if (input.startDate) awaitingConditions.push(gte(dateScopeCol, nigeriaDayStart(input.startDate)));
         if (input.endDate) awaitingConditions.push(lte(dateScopeCol, nigeriaDayEnd(input.endDate)));
