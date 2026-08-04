@@ -39,7 +39,7 @@ import {
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { canonicalPermissionCode } from '@yannis/shared';
-import { router, authedProcedure, permissionProcedure, edgeProcedure } from '../trpc';
+import { router, authedProcedure, permissionProcedure, publicProcedure } from '../trpc';
 import { getBranchTeamsService } from './branches.router';
 import { getUsersService } from './users.router';
 import { getProductsService } from './products.router';
@@ -468,7 +468,7 @@ export const ordersRouter = router({
    * When called by Edge Worker (source: edge-form), audit uses EDGE_FORM_ACTOR_ID.
    * When called by authenticated user, actor is tracked.
    */
-  create: edgeProcedure
+  create: publicProcedure
     .input(createOrderSchema)
     .mutation(async ({ input, ctx }) => {
       const actorId =
@@ -600,7 +600,7 @@ export const ordersRouter = router({
    * Stores payload in Redis, returns Paystack authorization URL. Order is created only after payment in completePaymentByReference.
    * Public procedure — Edge Worker calls without auth when user selects Pay online.
    */
-  preparePaystackOrder: edgeProcedure
+  preparePaystackOrder: publicProcedure
     .input(createOrderSchema)
     .mutation(async ({ input, ctx }) => {
       const actorId =
