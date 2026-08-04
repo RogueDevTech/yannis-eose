@@ -764,6 +764,23 @@ async function bufferCartToQStash(
 }
 
 /**
+ * True when the API rejected with the edge-auth gate (HTTP 401 +
+ * "Edge authentication required."). This is an INFRASTRUCTURE failure disguised
+ * as a client error: the order is valid, the API is simply mis-keyed relative to
+ * the worker. We treat it like a 5xx (buffer to QStash/Redis) so a gate
+ * misconfiguration can never silently drop revenue again. On QStash replay the
+ * `Upstash-Forward-X-Edge-Api-Key` header is attached, so a replay that reaches a
+ * correctly-keyed API succeeds. Matches the specific message so a genuine 4xx
+ * (bad customer data → 400) is still forwarded as an error, never buffered.
+ * See the 2026-08-04 form-freeze incident.
+ */
+function isEdgeAuthRejection(result: { status: number; data: unknown }): boolean {
+  if (result.status !== 401) return false;
+  const message = (result.data as { error?: { message?: string } })?.error?.message;
+  return message === 'Edge authentication required.';
+}
+
+/**
  * Handle a QStash failure callback. QStash POSTs a JSON envelope after a
  * buffered message exhausts every retry; `body` is the base64-encoded original
  * request payload. We decode it and push the ORIGINAL order/cart onto the
@@ -2923,9 +2940,10 @@ async function handleCart(request: Request, env: Env): Promise<Response> {
   }
 
   // API 5xx/unreachable — same failover ladder as orders: QStash → Redis healer.
+  // An edge-auth 401 is a mis-key (not a bad cart), so fail it over the same way.
   // Return success when buffered so the form keeps progressive capture alive;
   // the cart id may be missing until the buffer drains.
-  if (result.status >= 500 || result.status === 503) {
+  if (result.status >= 500 || result.status === 503 || isEdgeAuthRejection(result)) {
     const buffered = await bufferCartToQStash(payload, env);
     if (buffered) {
       return corsResponse({ success: true, buffered: true });
@@ -3074,15 +3092,22 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     });
   }
 
-  // PAY_ONLINE + 5xx/503: no QStash — ask user to retry
-  if (isPayOnline && (apiResult.status >= 500 || apiResult.status === 503)) {
+  // An edge-auth 401 is a mis-key, not a bad order — fail it over like a 5xx
+  // (buffer to QStash/Redis) so a gate slip never drops revenue. See
+  // isEdgeAuthRejection + the 2026-08-04 incident.
+  const isInfraFailure =
+    apiResult.status >= 500 || apiResult.status === 503 || isEdgeAuthRejection(apiResult);
+
+  // PAY_ONLINE + infra failure: no QStash (order created only after payment) —
+  // ask the user to retry.
+  if (isPayOnline && isInfraFailure) {
     const errorMessage = (apiResult.data as { error?: { message?: string } })?.error?.message
       ?? 'Payment service is temporarily unavailable. Please try again in a moment.';
     return corsResponse({ error: errorMessage }, 503);
   }
 
   // 9. API failed — try QStash failover (Pay on delivery only)
-  if (apiResult.status >= 500 || apiResult.status === 503) {
+  if (isInfraFailure) {
     const buffered = await bufferToQStash(orderPayload, env);
 
     if (buffered) {

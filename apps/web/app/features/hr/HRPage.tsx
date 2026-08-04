@@ -80,8 +80,17 @@ export function HRPage({
   // adjustment into that month's batch; an open (DRAFT/PENDING_HR) batch absorbs
   // it immediately, otherwise it waits for that month's generate.
   const [adjustmentMonth, setAdjustmentMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    // Default to the current NIGERIA month (payroll runs on WAT), not the
+    // browser's local month — otherwise a user near midnight in another TZ could
+    // earmark the adjustment to the wrong payroll period.
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Lagos',
+      year: 'numeric',
+      month: '2-digit',
+    }).formatToParts(new Date());
+    const y = parts.find((p) => p.type === 'year')?.value ?? '';
+    const m = parts.find((p) => p.type === 'month')?.value ?? '';
+    return `${y}-${m}`;
   });
   const [approveAdjustmentTarget, setApproveAdjustmentTarget] = useState<Adjustment | null>(null);
   // Edit / delete of an existing adjustment (only while not locked in a finalized batch).
