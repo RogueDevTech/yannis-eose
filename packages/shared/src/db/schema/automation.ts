@@ -21,7 +21,12 @@ export const automationRules = pgTable('automation_rules', {
   groupId: uuid('group_id').references(() => branchGroups.id),
   name: text('name').notNull(),
   kind: automationRuleKindEnum('kind').notNull(),
-  channel: automationChannelEnum('channel').notNull(),
+  /** Channels this rule sends on (EMAIL / SMS / WHATSAPP). A multi-channel rule fans
+   *  out into one job per channel at send time. */
+  channels: text('channels').array().notNull().default([]),
+  /** Legacy single channel — nullable, retained for back-compat until dropped. New
+   *  rules write `channels` instead. */
+  channel: automationChannelEnum('channel'),
   /** Rendered content lives in the reused message_templates table. */
   templateId: uuid('template_id').references(() => messageTemplates.id),
   /** Trigger/segment definition. jsonb so the rule builder evolves without a migration. */

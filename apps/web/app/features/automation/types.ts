@@ -5,7 +5,7 @@ export interface AutomationRuleRow {
   id: string;
   name: string;
   kind: AutomationRuleKind;
-  channel: AutomationChannel;
+  channels: AutomationChannel[];
   templateId: string | null;
   delayMinutes: number | null;
   scheduleCron: string | null;

@@ -12,6 +12,7 @@ import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { CONTROL_HEIGHT_CLASS } from '~/components/ui/_control-heights';
+import { invalidateCachedLoader } from '~/lib/loader-cache';
 import type { BranchOption, ViewerInfo, PayrollDepartment } from './types';
 import {
   ALL_DEPARTMENTS,
@@ -999,6 +1000,10 @@ export function PayrollGeneratePage({ branches, viewer, unassignedStaffCount = 0
         variant="warning"
         loading={generating}
         onConfirm={() => {
+          // The generate action redirects back to /hr/payroll, which is served
+          // by cachedClientLoader. Bust that cached snapshot now so the new batch
+          // shows immediately instead of only after a manual Refresh.
+          invalidateCachedLoader('/hr/payroll');
           const form = document.getElementById('payroll-generate-form') as HTMLFormElement | null;
           form?.requestSubmit();
           setShowGenerateConfirm(false);

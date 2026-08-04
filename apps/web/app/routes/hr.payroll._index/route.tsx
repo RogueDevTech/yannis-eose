@@ -80,7 +80,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   let allowedByRoleOrPermission = false;
   try {
-    await requirePermissionOrRoles(request, { roles: PAYROLL_VIEWER_ROLES, permission: 'hr.read' });
+    // hr.read is the broad HR key; payroll.batches.view is the narrow "Payroll page
+    // only" key (e.g. a finance approver who isn't in HR). Either grants this page.
+    await requirePermissionOrRoles(request, {
+      roles: PAYROLL_VIEWER_ROLES,
+      permission: ['hr.read', 'payroll.batches.view'],
+    });
     allowedByRoleOrPermission = true;
   } catch {
     allowedByRoleOrPermission = false;

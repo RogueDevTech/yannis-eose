@@ -107,6 +107,11 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'finance.initMaterializedViews', resource: 'finance', action: 'initMaterializedViews', description: 'Initialize materialized views' },
   { code: 'hr.read', resource: 'hr', action: 'read', description: 'View HR & payroll' },
   { code: 'hr.write', resource: 'hr', action: 'write', description: 'Manage HR (plans, payouts, adjustments)' },
+  // Narrow payroll-batch view: unlocks ONLY the Payroll batches page (and its data),
+  // without the broader hr.read surface (Users, Payslips, Reports, Commission Plans,
+  // salary directory). Pair with finance.disburse to let a non-HR finance approver
+  // (e.g. a Stock Manager) see and pay batches without seeing the whole HR module.
+  { code: 'payroll.batches.view', resource: 'payroll.batches', action: 'view', description: 'View payroll batches (Payroll page) without full HR read access' },
   { code: 'hr.approveAdjustment', resource: 'hr', action: 'approveAdjustment', description: 'Approve HR adjustments' },
   { code: 'payroll.config.read', resource: 'payroll', action: 'config.read', description: 'View payroll config (roles, products, tax bands)' },
   { code: 'payroll.config.write', resource: 'payroll', action: 'config.write', description: 'Edit payroll config (Rule Builder, products, tax bands)' },

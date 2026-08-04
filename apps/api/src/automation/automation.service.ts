@@ -66,13 +66,14 @@ export class AutomationService {
     actor: SessionUser,
     activeGroupId: string | null,
   ) {
-    // Guard: a rule can only target a channel that is actually usable, so the CEO
-    // isn't left with rules that silently never send. (Email is live; SMS/WhatsApp
-    // become selectable once their providers report configured.)
-    if (!this.channels.get(input.channel).isConfigured()) {
+    // Guard: every selected channel must actually be usable, so the CEO isn't left
+    // with a rule that silently never sends on one of its channels. (Email is live;
+    // SMS/WhatsApp become selectable once their providers report configured.)
+    const unconfigured = input.channels.filter((c) => !this.channels.get(c).isConfigured());
+    if (unconfigured.length > 0) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: `The ${input.channel} channel is not configured yet, so a rule using it could never send. Configure the channel first.`,
+        message: `These channels are not configured yet, so the rule could never send on them: ${unconfigured.join(', ')}. Configure them first or remove them.`,
       });
     }
 
@@ -83,7 +84,7 @@ export class AutomationService {
           groupId: activeGroupId ?? null,
           name: input.name,
           kind: input.kind,
-          channel: input.channel,
+          channels: input.channels,
           templateId: input.templateId ?? null,
           trigger: input.trigger ?? {},
           conditions: input.conditions ?? null,

@@ -24,7 +24,13 @@ const PAYROLL_VIEWER_ROLES = [
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   if (!user) throw new Response('Not authenticated', { status: 401 });
-  await requirePermissionOrRoles(request, { roles: PAYROLL_VIEWER_ROLES, permission: 'hr.read' });
+  // hr.read = full HR access; payroll.batches.view = narrow "Payroll only" key (e.g.
+  // a finance approver outside HR). Either grants the batch detail page. The finance
+  // action itself (Mark paid / bank export) still gates on finance.disburse server-side.
+  await requirePermissionOrRoles(request, {
+    roles: PAYROLL_VIEWER_ROLES,
+    permission: ['hr.read', 'payroll.batches.view'],
+  });
   const cookie = getSessionCookie(request);
   const batchId = params['id'];
   if (!batchId) throw new Response('Batch ID required', { status: 400 });

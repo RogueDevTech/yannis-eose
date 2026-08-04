@@ -92,8 +92,9 @@ interface NavItemDef {
   /**
    * Required permission. With no `roles`, undefined = visible to all authenticated users.
    * If both `permission` and `roles` are set, the user can see the item with EITHER.
+   * A string[] means "any one of these codes grants the item".
    */
-  permission?: string;
+  permission?: string | string[];
   /**
    * Roles allowlist. When set without `permission`, the item is restricted to these roles
    * (admin-class always bypasses). When set with `permission`, listed roles see it without
@@ -483,7 +484,9 @@ const navStructure: NavGroupDef[] = [
         label: 'Payroll',
         href: '/hr/payroll',
         icon: SidebarIcons.hr,
-        permission: 'hr.read',
+        // hr.read = full HR access; payroll.batches.view = narrow "Payroll page only"
+        // (e.g. a finance approver outside HR). Either grants the link.
+        permission: ['hr.read', 'payroll.batches.view'],
         roles: ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'FINANCE_OFFICER'],
       },
       {
@@ -659,8 +662,10 @@ function buildCanonicalPermSet(permissions: readonly string[] | undefined): Set<
   return set;
 }
 
-function permSetHas(set: Set<string>, catalogOrLegacyCode: string): boolean {
-  return set.has(canonicalPermissionCode(catalogOrLegacyCode));
+function permSetHas(set: Set<string>, catalogOrLegacyCode: string | string[]): boolean {
+  // Accept a single code or a list — a list means "any of these grants the item".
+  const codes = Array.isArray(catalogOrLegacyCode) ? catalogOrLegacyCode : [catalogOrLegacyCode];
+  return codes.some((c) => set.has(canonicalPermissionCode(c)));
 }
 
 function getNavGroupsForUser(

@@ -18,7 +18,8 @@ export const createMarketingAutomationRuleSchema = z
   .object({
     name: z.string().min(2).max(200),
     kind: marketingAutomationRuleKindSchema,
-    channel: marketingAutomationChannelSchema,
+    /** One or more channels this rule sends on. At least one is required. */
+    channels: z.array(marketingAutomationChannelSchema).min(1, 'Pick at least one channel').max(3),
     templateId: z.string().uuid().optional(),
     trigger: z.record(z.string(), z.unknown()).default({}),
     conditions: z.record(z.string(), z.unknown()).optional(),
