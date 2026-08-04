@@ -588,6 +588,7 @@ export {
   previewPayeSchema,
   payrollOnboardingActionSchema,
   updatePayrollProfileSchema,
+  updateMyPayrollProfileSchema,
   bulkAssignPayRoleSchema,
   bulkAssignContractorsToPayRoleSchema,
   markBatchPaidExtendedSchema,

@@ -176,6 +176,10 @@ export interface UserDetail {
   employmentType?: string | null;
   salaryBasis?: string | null;
   taxStatus?: string | null;
+  /** Flat monthly salary (₦) when salaryBasis is FLAT_RATE. */
+  flatMonthlyAmount?: string | number | null;
+  /** Declared annual rent (₦) for PAYE rent relief. */
+  annualRent?: string | number | null;
   reportsToUserId?: string | null;
   crmLinked?: boolean | null;
   primaryBranchId: string | null;
