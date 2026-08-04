@@ -86,17 +86,61 @@ export class OnboardingService {
   }
 
   /**
+   * Company-boundary guard for cross-user onboarding access. HR_MANAGER is
+   * org-wide *within its company* (multi-branch by design — not a bug), but must
+   * NOT reach another company's staff. The `listStaffDocuments` sibling already
+   * scopes by `effectiveBranchIds` (the active company's branch set); the
+   * per-record get/update/approve paths historically skipped it, letting a
+   * Company-A reviewer read + rewrite a Company-B staff member's onboarding PII
+   * and payout bank account (→ next payroll routes cash to the wrong place).
+   *
+   * A target is in-scope iff they have a `user_branches` row in one of the
+   * actor's `effectiveBranchIds`. When `effectiveBranchIds` is null/empty the
+   * actor is org-wide with no company selected → no restriction (matches the
+   * list). Self-access is always allowed and never reaches this guard.
+   */
+  private async assertTargetInCompanyScope(
+    targetUserId: string,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<void> {
+    if (!effectiveBranchIds || effectiveBranchIds.length === 0) return;
+    const [membership] = await this.db
+      .select({ userId: schema.userBranches.userId })
+      .from(schema.userBranches)
+      .where(
+        and(
+          eq(schema.userBranches.userId, targetUserId),
+          inArray(schema.userBranches.branchId, effectiveBranchIds),
+        ),
+      )
+      .limit(1);
+    if (!membership) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'This staff member is not in your company.',
+      });
+    }
+  }
+
+  /**
    * Read the onboarding row for a target user. Self-read is always allowed;
    * cross-user read requires `hr.onboarding.read` or admin-class. If no row
    * exists yet, returns a synthetic NOT_STARTED placeholder so the UI can
    * render an empty form.
    */
-  async getForUser(targetUserId: string, actor: SessionUser) {
-    if (targetUserId !== actor.id && !this.canManageAnyOnboarding(actor)) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'You can only view your own onboarding record.',
-      });
+  async getForUser(
+    targetUserId: string,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    if (targetUserId !== actor.id) {
+      if (!this.canManageAnyOnboarding(actor)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You can only view your own onboarding record.',
+        });
+      }
+      await this.assertTargetInCompanyScope(targetUserId, effectiveBranchIds);
     }
 
     // Pull payout bank fields from `users` alongside the onboarding row so the
@@ -185,13 +229,17 @@ export class OnboardingService {
     targetUserId: string,
     input: UpdateOnboardingProfileInput,
     actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ) {
     const isSelf = targetUserId === actor.id;
-    if (!isSelf && !this.canWriteAnyOnboarding(actor)) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'You do not have permission to update another staff member\'s onboarding.',
-      });
+    if (!isSelf) {
+      if (!this.canWriteAnyOnboarding(actor)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You do not have permission to update another staff member\'s onboarding.',
+        });
+      }
+      await this.assertTargetInCompanyScope(targetUserId, effectiveBranchIds);
     }
 
     return withActor(this.db, actor, async (tx) => {
@@ -501,7 +549,11 @@ export class OnboardingService {
   }
 
   /** Approve a submitted record. Locks edits for staff permanently. */
-  async approve(targetUserId: string, actor: SessionUser) {
+  async approve(
+    targetUserId: string,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
     if (!this.canApproveOnboarding(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -513,6 +565,9 @@ export class OnboardingService {
         code: 'BAD_REQUEST',
         message: 'You cannot approve your own onboarding.',
       });
+    }
+    if (targetUserId !== actor.id) {
+      await this.assertTargetInCompanyScope(targetUserId, effectiveBranchIds);
     }
 
     const approved = await withActor(this.db, actor, async (tx) => {
@@ -580,7 +635,11 @@ export class OnboardingService {
    * checklist submit() enforces is satisfied — so Finance still only ever sees a
    * payable, complete profile. HR / admin only; never self-approve.
    */
-  async hrCompleteAndApprove(targetUserId: string, actor: SessionUser) {
+  async hrCompleteAndApprove(
+    targetUserId: string,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
     if (!this.canApproveOnboarding(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -592,6 +651,9 @@ export class OnboardingService {
         code: 'BAD_REQUEST',
         message: 'You cannot approve your own onboarding.',
       });
+    }
+    if (targetUserId !== actor.id) {
+      await this.assertTargetInCompanyScope(targetUserId, effectiveBranchIds);
     }
 
     const approved = await withActor(this.db, actor, async (tx) => {
@@ -660,7 +722,12 @@ export class OnboardingService {
    * reason is stored on the row so the staff banner explains what HR asked
    * for. HR / admin only.
    */
-  async requestChanges(targetUserId: string, reason: string, actor: SessionUser) {
+  async requestChanges(
+    targetUserId: string,
+    reason: string,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
     if (!this.canApproveOnboarding(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -673,6 +740,7 @@ export class OnboardingService {
         message: 'You cannot request changes on your own onboarding.',
       });
     }
+    await this.assertTargetInCompanyScope(targetUserId, effectiveBranchIds);
     const trimmedReason = reason.trim();
     if (trimmedReason.length < 10) {
       throw new TRPCError({

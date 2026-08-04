@@ -14,6 +14,7 @@ import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { usePersistedRemittanceSelection } from '~/hooks/usePersistedRemittanceSelection';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { DateInput } from '~/components/ui/date-input';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
@@ -233,6 +234,28 @@ export function DeliveryRemittancesPage({
   } = eligiblePagination;
   const navigateTo = useNavigate();
   const [showExportModal, setShowExportModal] = useState(false);
+  // In-modal export filters (batches view). Prefilled from the page's active
+  // filters when the modal opens, then editable independently. `fetchAllRows`
+  // reads these so the generated report reflects exactly what the user picked.
+  const [exportFilters, setExportFilters] = useState({
+    status: filters.status ?? '',
+    location: filters.location ?? '',
+    sentBy: filters.sentBy ?? '',
+    startDate: filters.startDate ?? '',
+    endDate: filters.endDate ?? '',
+    dateScope: (filters.dateScope ?? 'createdAt') as 'createdAt' | 'deliveredAt',
+  });
+  useEffect(() => {
+    if (!showExportModal) return;
+    setExportFilters({
+      status: filters.status ?? '',
+      location: filters.location ?? '',
+      sentBy: filters.sentBy ?? '',
+      startDate: filters.startDate ?? '',
+      endDate: filters.endDate ?? '',
+      dateScope: (filters.dateScope ?? 'createdAt') as 'createdAt' | 'deliveredAt',
+    });
+  }, [showExportModal, filters.status, filters.location, filters.sentBy, filters.startDate, filters.endDate, filters.dateScope]);
   const [showCashStatementModal, setShowCashStatementModal] = useState(false);
   const [eligibleInvoicePreview, setEligibleInvoicePreview] = useState<OrderInvoice | null>(null);
   const generateInvoiceFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -914,7 +937,74 @@ export function DeliveryRemittancesPage({
         title={viewMode === 'orders' ? 'Export Remittance Orders' : 'Export Delivery Remittances'}
         description={viewMode === 'orders' ? 'Export individual orders with category breakdown.' : 'Choose format and columns for delivery remittances export.'}
         filenamePrefix={viewMode === 'orders' ? 'remittance-orders' : 'cash-remittances'}
-        totalRows={viewMode === 'orders' ? (remittanceOrdersPagination?.total ?? 0) : pagination.total}
+        totalRows={viewMode === 'orders' ? (remittanceOrdersPagination?.total ?? 0) : undefined}
+        filters={viewMode === 'orders' ? undefined : (
+          <div className="space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <DateInput
+                kind="date"
+                label="Start date"
+                value={exportFilters.startDate}
+                max={exportFilters.endDate || undefined}
+                onChange={(e) => setExportFilters((p) => ({ ...p, startDate: e.target.value }))}
+              />
+              <DateInput
+                kind="date"
+                label="End date"
+                value={exportFilters.endDate}
+                min={exportFilters.startDate || undefined}
+                onChange={(e) => setExportFilters((p) => ({ ...p, endDate: e.target.value }))}
+              />
+            </div>
+            <FormSelect
+              label="Date basis"
+              value={exportFilters.dateScope}
+              onChange={(e) => setExportFilters((p) => ({ ...p, dateScope: e.target.value as 'createdAt' | 'deliveredAt' }))}
+              options={[
+                { value: 'createdAt', label: 'By order date' },
+                { value: 'deliveredAt', label: 'By delivery date' },
+              ]}
+            />
+            <FormSelect
+              label="Status"
+              value={exportFilters.status}
+              onChange={(e) => setExportFilters((p) => ({ ...p, status: e.target.value }))}
+              options={[
+                { value: '', label: 'All statuses' },
+                { value: 'SENT', label: 'Pending' },
+                { value: 'RECEIVED', label: 'Received' },
+                { value: 'DISPUTED', label: 'Disputed' },
+              ]}
+            />
+            <SearchableSelect
+              id="export-location-filter"
+              label="Location"
+              value={exportFilters.location}
+              onChange={(v) => setExportFilters((p) => ({ ...p, location: v }))}
+              placeholder="All locations"
+              searchPlaceholder="Search locations..."
+              options={[
+                { value: '', label: 'All locations' },
+                ...locations.map((loc) => ({
+                  value: loc.id,
+                  label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
+                })),
+              ]}
+            />
+            <SearchableSelect
+              id="export-sent-by-filter"
+              label="Sent by"
+              value={exportFilters.sentBy}
+              onChange={(v) => setExportFilters((p) => ({ ...p, sentBy: v }))}
+              placeholder="Sent by anyone"
+              searchPlaceholder="Search accountants..."
+              options={[
+                { value: '', label: 'Sent by anyone' },
+                ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
+              ]}
+            />
+          </div>
+        )}
         rows={viewMode === 'orders'
           ? remittanceOrders.map((r) => ({
               orderNumber: r.orderNumber ? `YNS-${String(r.orderNumber).padStart(5, '0')}` : '',
@@ -975,14 +1065,19 @@ export function DeliveryRemittancesPage({
               }));
             };
           }
-          if (pagination.total <= remittances.length) return undefined;
+          // Batches view always re-fetches so the export honours the in-modal
+          // filters (which may differ from the page's active filters) and so it
+          // works on the "Awaiting" tab where the loader fetched summaryOnly=true
+          // (empty client-side records). If truly nothing matches, the re-fetch
+          // returns [] and the CSV is legitimately empty.
           return async () => {
             const params: Record<string, unknown> = { page: 1, limit: 10000 };
-            if (filters.status) params.status = filters.status;
-            if (filters.location) params.logisticsLocationId = filters.location;
-            if (filters.sentBy) params.sentBy = filters.sentBy;
-            if (filters.startDate) params.startDate = filters.startDate;
-            if (filters.endDate) params.endDate = filters.endDate;
+            if (exportFilters.status) params.status = exportFilters.status;
+            if (exportFilters.location) params.logisticsLocationId = exportFilters.location;
+            if (exportFilters.sentBy) params.sentBy = exportFilters.sentBy;
+            if (exportFilters.startDate) params.startDate = exportFilters.startDate;
+            if (exportFilters.endDate) params.endDate = exportFilters.endDate;
+            params.dateScope = exportFilters.dateScope;
             if (filters.remittanceSearch) params.search = filters.remittanceSearch;
             const res = await fetch(`/trpc/logistics.deliveryRemittancesPageBundle?input=${encodeURIComponent(JSON.stringify(params))}`);
             const json = await res.json();

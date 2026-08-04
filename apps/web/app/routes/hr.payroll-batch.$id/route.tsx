@@ -87,6 +87,17 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'deleteBatch') {
+    const res = await apiRequest<unknown>('/trpc/hr.deleteBatch', {
+      method: 'POST', cookie,
+      body: { batchId: formData.get('batchId')?.toString() ?? '' },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to delete batch') }, { status: safeStatus(res.status) });
+    // Batch is gone. The page invalidates the payroll list cache and navigates
+    // away on success (a redirect here would land on a stale cached list).
+    return json({ success: true, deleted: true });
+  }
+
   if (intent === 'approveBatch') {
     const res = await apiRequest<unknown>('/trpc/hr.approveBatch', {
       method: 'POST', cookie,
@@ -123,12 +134,19 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'generateBatch') {
     const rawMonth = formData.get('periodMonth')?.toString() ?? '';
     const periodMonth = /^\d{4}-\d{2}$/.test(rawMonth) ? `${rawMonth}-01` : rawMonth;
+    // Only forward branch/department/scope when the client actually set them.
+    // Null-scope batches (org-wide ALL, CONTRACTORS) carry no branch or department;
+    // sending empty strings would fail the server's uuid/enum validation.
+    const branchId = formData.get('branchId')?.toString() || undefined;
+    const department = formData.get('department')?.toString() || undefined;
+    const scopeType = formData.get('scopeType')?.toString() || undefined;
     const res = await apiRequest<unknown>('/trpc/hr.generateBatch', {
       method: 'POST', cookie,
       body: {
-        branchId: formData.get('branchId')?.toString() ?? '',
-        department: formData.get('department')?.toString() ?? '',
         periodMonth,
+        ...(scopeType ? { scopeType } : {}),
+        ...(branchId ? { branchId } : {}),
+        ...(department ? { department } : {}),
       },
     });
     if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to re-generate batch') }, { status: safeStatus(res.status) });

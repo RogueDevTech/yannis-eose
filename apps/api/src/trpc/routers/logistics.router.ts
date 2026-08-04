@@ -363,7 +363,9 @@ export const logisticsRouter = router({
     .input(
       z.object({
         page: z.number().int().min(1).default(1),
-        limit: z.number().int().min(1).max(500).default(500),
+        // Up to 500 for normal paginated views; higher ceiling lets the
+        // "Generate report" export pull the full filtered set in one request.
+        limit: z.number().int().min(1).max(10000).default(500),
         status: z.enum(['SENT', 'RECEIVED', 'DISPUTED']).optional(),
         logisticsLocationId: z.string().uuid().optional(),
         sentBy: z.string().uuid().optional(),

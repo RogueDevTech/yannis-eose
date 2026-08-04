@@ -1,7 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, desc, gte, lte, isNull, ilike, count, sum, inArray, sql, type SQL } from 'drizzle-orm';
-// `isNotNull` is imported separately so the compile-time exports list stays sorted.
+import { eq, ne, and, or, desc, gte, lte, isNull, isNotNull, ilike, count, sum, inArray, sql, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { computePaye, db as schema } from '@yannis/shared';
 import type {
@@ -9,6 +8,7 @@ import type {
   GenerateBatchesBulkInput,
   PreviewSelectionInput,
   SubmitBatchInput,
+  DeleteBatchInput,
   ApproveBatchInput,
   RejectBatchInput,
   MarkBatchPaidInput,
@@ -19,7 +19,7 @@ import type {
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
-import { withActorAndBranch } from '../common/db/with-actor';
+import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { runGlPostWithFinanceAlert } from '../finance/gl-posting-notify';
 import { canAccessStaffHrUserDetail, isOrgWideDepartmentHead } from '../common/authz';
@@ -35,13 +35,16 @@ import type { PayrollMetrics } from '@yannis/shared';
 
 /**
  * Predicate: an adjustment is eligible to attach to a batch for `periodMonth`
- * (a YYYY-MM-01 string) when it is not yet linked to a payout AND it is either
- * un-earmarked (period_month IS NULL, legacy "next batch, any month") or
- * earmarked for exactly this month. Used by every sweep + compute read so the
- * link, compute, and preview paths stay in lockstep.
+ * (a YYYY-MM-01 string) when it has been APPROVED (approved_by IS NOT NULL) AND
+ * is not yet linked to a payout AND is either un-earmarked (period_month IS NULL,
+ * legacy "next batch, any month") or earmarked for exactly this month. Used by
+ * every sweep + compute read so the link, compute, and preview paths stay in
+ * lockstep. The approval gate is essential: without it, unapproved (and rejected,
+ * which also have approved_by NULL) adjustments would leak onto generated payroll.
  */
 function pendingAdjustmentForMonth(periodMonth: string) {
   return and(
+    isNotNull(schema.earningsAdjustments.approvedBy),
     isNull(schema.earningsAdjustments.payoutId),
     or(
       isNull(schema.earningsAdjustments.periodMonth),
@@ -2196,6 +2199,80 @@ export class PayrollBatchService {
     return updated;
   }
 
+  /**
+   * Hard-delete a payroll batch and its payout lines, allowed only while the
+   * batch has NOT been paid. PAID batches are immutable (financial record).
+   * Any earnings adjustments attached to this batch's payouts are detached
+   * (payoutId nulled) so the per-staff adjustment trail survives.
+   */
+  async deleteBatch(
+    input: DeleteBatchInput,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    const batch = await this.requireBatch(input.batchId);
+    assertBatchInScope(batch, actor, effectiveBranchIds);
+
+    // Only someone who can act on the batch at its current stage may delete it:
+    // the owning department head (DRAFT), HR (PENDING_HR), or an admin. Reuse the
+    // same allowed-transition gates so authorization stays consistent.
+    const canAct =
+      (await this.canPrepareDept(actor, batch.branchId, batch.department as PayrollDepartment | null)) ||
+      canReviewBatch(actor) ||
+      canProcessBatch(actor);
+    if (!canAct) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Not allowed to delete this batch.',
+      });
+    }
+
+    if (batch.status === 'PAID') {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'Cannot delete a PAID batch. Paid payroll is an immutable financial record.',
+      });
+    }
+
+    await withActorAndBranch(
+      this.db,
+      { id: actor.id, currentBranchId: batch.branchId },
+      async (tx) => {
+        const payouts = await tx
+          .select({ id: schema.payoutRecords.id })
+          .from(schema.payoutRecords)
+          .where(eq(schema.payoutRecords.batchId, input.batchId));
+        const payoutIds = payouts.map((p) => p.id);
+        if (payoutIds.length) {
+          // Keep the earnings-adjustment history; just unlink it from the payouts.
+          await tx
+            .update(schema.earningsAdjustments)
+            .set({ payoutId: null })
+            .where(inArray(schema.earningsAdjustments.payoutId, payoutIds));
+          await tx.delete(schema.payoutRecords).where(eq(schema.payoutRecords.batchId, input.batchId));
+        }
+        // Optimistic guard: refuse if the batch flipped to PAID concurrently.
+        const rows = await tx
+          .delete(schema.payrollBatches)
+          .where(
+            and(
+              eq(schema.payrollBatches.id, input.batchId),
+              ne(schema.payrollBatches.status, 'PAID'),
+            ),
+          )
+          .returning({ id: schema.payrollBatches.id });
+        if (!rows[0]) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Batch was paid concurrently. Refresh and try again.',
+          });
+        }
+      },
+    );
+
+    return { success: true as const };
+  }
+
   async approveBatch(
     input: ApproveBatchInput,
     actor: SessionUser,
@@ -3299,6 +3376,41 @@ export class PayrollBatchService {
     );
   }
 
+  /**
+   * Status of the batch an adjustment is currently linked to, or null when the
+   * adjustment is floating (payoutId IS NULL). Used by the HR edit/delete guard to
+   * decide whether the adjustment is still correctable.
+   */
+  async getAdjustmentBatchStatus(adjustmentId: string): Promise<PayrollBatchStatus | null> {
+    const rows = await this.db
+      .select({ status: schema.payrollBatches.status })
+      .from(schema.earningsAdjustments)
+      .innerJoin(schema.payoutRecords, eq(schema.payoutRecords.id, schema.earningsAdjustments.payoutId))
+      .innerJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
+      .where(eq(schema.earningsAdjustments.id, adjustmentId))
+      .limit(1);
+    return (rows[0]?.status as PayrollBatchStatus | undefined) ?? null;
+  }
+
+  /**
+   * After an adjustment linked to an OPEN batch (DRAFT / PENDING_HR) is edited or
+   * detached, re-roll its payout + batch totals so the batch reflects the change.
+   * No-op when the adjustment is floating or its payout can't be resolved.
+   */
+  async recomputeForAdjustment(payoutId: string, actorId: string): Promise<void> {
+    await withActor(this.db, { id: actorId }, async (tx) => {
+      const payoutRows = await tx
+        .select({ batchId: schema.payoutRecords.batchId })
+        .from(schema.payoutRecords)
+        .where(eq(schema.payoutRecords.id, payoutId))
+        .limit(1);
+      const batchId = payoutRows[0]?.batchId;
+      if (!batchId) return;
+      await this.recomputePayoutTotals(tx, payoutId);
+      await this.recomputeBatchTotals(tx, batchId);
+    });
+  }
+
   async getPrepareAccess(viewer: SessionUser) {
     const departments = new Set<PayrollDepartment>();
     const branchIds = new Set<string>();
@@ -3693,6 +3805,16 @@ export class PayrollBatchService {
     }
     if (batch.status === 'PENDING_FINANCE' && canProcessBatch(viewer)) {
       out.push('MARK_PAID', 'REJECT');
+    }
+    // Delete is allowed at any stage before PAID, for anyone who can act on the
+    // batch (owning head, HR, or Finance/admin). PAID batches are immutable.
+    if (
+      batch.status !== 'PAID' &&
+      ((await this.canPrepareDept(viewer, batch.branchId, batch.department as PayrollDepartment | null)) ||
+        canReviewBatch(viewer) ||
+        canProcessBatch(viewer))
+    ) {
+      out.push('DELETE');
     }
     return out;
   }

@@ -84,12 +84,19 @@ export function HRPage({
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
   const [approveAdjustmentTarget, setApproveAdjustmentTarget] = useState<Adjustment | null>(null);
+  // Edit / delete of an existing adjustment (only while not locked in a finalized batch).
+  const [editAdjustmentTarget, setEditAdjustmentTarget] = useState<Adjustment | null>(null);
+  const [deleteAdjustmentTarget, setDeleteAdjustmentTarget] = useState<Adjustment | null>(null);
+  const [editAmount, setEditAmount] = useState('');
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const [dismissedError, setDismissedError] = useState(false);
   useFetcherToast(fetcher.data, {
     successMessage: 'HR action completed',
-    skipErrorToast: Boolean(showAddAdjustment && hrSurface.errorMatchingIntent('createAdjustment')),
+    skipErrorToast: Boolean(
+      (showAddAdjustment && hrSurface.errorMatchingIntent('createAdjustment')) ||
+        (editAdjustmentTarget && hrSurface.errorMatchingIntent('updateAdjustment')),
+    ),
   });
 
   useEffect(() => {
@@ -101,7 +108,10 @@ export function HRPage({
   const handleHrFetcherSuccess = useCallback(() => {
     setShowAddAdjustment(false);
     setApproveAdjustmentTarget(null);
+    setEditAdjustmentTarget(null);
+    setDeleteAdjustmentTarget(null);
     setAdjustmentAmount('');
+    setEditAmount('');
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleHrFetcherSuccess);
 
@@ -125,6 +135,16 @@ export function HRPage({
 
   const isAdmin = isAdminLevel(viewer);
   const isHrOrFinance = isAdmin || viewer.role === 'HR_MANAGER' || viewer.role === 'FINANCE_OFFICER';
+
+  /**
+   * HR may still correct an adjustment while it is floating or only sitting in an
+   * open batch (DRAFT / PENDING_HR). Once it advances to Finance review or is paid
+   * the numbers are committed, so Edit/Delete is hidden. Mirrors the server guard.
+   */
+  const canModifyAdjustment = useCallback(
+    (adj: Adjustment) => !adj.batchStatus || adj.batchStatus === 'DRAFT' || adj.batchStatus === 'PENDING_HR',
+    [],
+  );
   const canExportBankPay =
     isAdmin ||
     hasFinanceAccess(viewer) ||
@@ -562,17 +582,43 @@ export function HRPage({
                     key: 'action',
                     header: 'Action',
                     tight: true,
-                    render: (adj) =>
-                      !adj.approvedBy && adj.category !== 'CLAWBACK' ? (
-                        <TableActionButton
-                          type="button"
-                          variant="primary"
-                          disabled={fetcher.state === 'submitting'}
-                          onClick={() => setApproveAdjustmentTarget(adj)}
-                        >
-                          Approve
-                        </TableActionButton>
-                      ) : null,
+                    render: (adj) => (
+                      <div className="flex items-center justify-end gap-1.5">
+                        {!adj.approvedBy && adj.category !== 'CLAWBACK' ? (
+                          <TableActionButton
+                            type="button"
+                            variant="primary"
+                            disabled={fetcher.state === 'submitting'}
+                            onClick={() => setApproveAdjustmentTarget(adj)}
+                          >
+                            Approve
+                          </TableActionButton>
+                        ) : null}
+                        {canModifyAdjustment(adj) ? (
+                          <>
+                            <TableActionButton
+                              type="button"
+                              variant="neutral"
+                              disabled={fetcher.state === 'submitting'}
+                              onClick={() => {
+                                setEditAmount(String(Math.abs(Number(adj.amount))));
+                                setEditAdjustmentTarget(adj);
+                              }}
+                            >
+                              Edit
+                            </TableActionButton>
+                            <TableActionButton
+                              type="button"
+                              variant="danger"
+                              disabled={fetcher.state === 'submitting'}
+                              onClick={() => setDeleteAdjustmentTarget(adj)}
+                            >
+                              Delete
+                            </TableActionButton>
+                          </>
+                        ) : null}
+                      </div>
+                    ),
                   },
                 ];
                 return (
@@ -617,6 +663,31 @@ export function HRPage({
                             >
                               Approve
                             </TableActionButton>
+                          )}
+                          {canModifyAdjustment(adj) && (
+                            <div className="flex gap-2">
+                              <TableActionButton
+                                type="button"
+                                variant="neutral"
+                                className="flex-1 justify-center"
+                                disabled={fetcher.state === 'submitting'}
+                                onClick={() => {
+                                  setEditAmount(String(Math.abs(Number(adj.amount))));
+                                  setEditAdjustmentTarget(adj);
+                                }}
+                              >
+                                Edit
+                              </TableActionButton>
+                              <TableActionButton
+                                type="button"
+                                variant="danger"
+                                className="flex-1 justify-center"
+                                disabled={fetcher.state === 'submitting'}
+                                onClick={() => setDeleteAdjustmentTarget(adj)}
+                              >
+                                Delete
+                              </TableActionButton>
+                            </div>
                           )}
                         </div>
                       )}
@@ -670,6 +741,154 @@ export function HRPage({
           if (!approveAdjustmentTarget) return;
           fetcher.submit(
             { intent: 'approveAdjustment', adjustmentId: approveAdjustmentTarget.id },
+            { method: 'post' },
+          );
+        }}
+      />
+
+      {/* Edit an existing adjustment (party can't be changed). */}
+      {isHrOrFinance && editAdjustmentTarget && (
+        <Modal
+          open
+          onClose={() => {
+            if (fetcher.state !== 'idle') return;
+            setEditAdjustmentTarget(null);
+          }}
+          maxWidth="max-w-lg"
+          backdropBlur
+          contentClassName="p-5 space-y-4"
+        >
+          {(() => {
+            const target = editAdjustmentTarget;
+            const isDeduct = ADJ_DEDUCT_CATEGORIES.includes(target.category);
+            const categories = isDeduct ? ADJ_DEDUCT_CATEGORIES : ADJ_ADDON_CATEGORIES;
+            const magnitude = Math.abs(Number(editAmount) || 0);
+            return (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="text-lg font-semibold text-app-fg">Edit adjustment</h3>
+                  <button
+                    type="button"
+                    onClick={() => setEditAdjustmentTarget(null)}
+                    disabled={fetcher.state !== 'idle'}
+                    className="text-app-fg-muted hover:text-app-fg p-1 shrink-0 disabled:opacity-50"
+                    aria-label="Close"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <ModalFetcherInlineError message={hrSurface.errorMatchingIntent('updateAdjustment')} />
+                <fetcher.Form method="post" className="space-y-3">
+                  <input type="hidden" name="intent" value="updateAdjustment" />
+                  <input type="hidden" name="adjustmentId" value={target.id} />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <FormSelect
+                        label="Category"
+                        name="category"
+                        required
+                        defaultValue={target.category}
+                        placeholder="Select category..."
+                        options={categories.map((c) => ({ value: c, label: c.replace(/_/g, ' ') }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-app-fg-muted mb-1">Amount (&#8358;)</label>
+                      <AmountInput
+                        name="amount"
+                        required
+                        placeholder="e.g. 5,000.00"
+                        className="input"
+                        value={editAmount}
+                        onChange={setEditAmount}
+                      />
+                      <p className={`mt-1 text-xs font-medium ${isDeduct ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+                        {isDeduct
+                          ? `Reduces the payout by ${formatNaira(magnitude)}.`
+                          : `Adds ${formatNaira(magnitude)} to the payout.`}
+                      </p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <TextInput
+                        label="Reason"
+                        name="reason"
+                        type="text"
+                        required
+                        minLength={5}
+                        defaultValue={target.reason}
+                        placeholder="Reason (min 5 chars)"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="hr-edit-adjustment-month" className="block text-sm font-medium text-app-fg-muted mb-1">
+                        Payroll month
+                      </label>
+                      <input
+                        id="hr-edit-adjustment-month"
+                        type="month"
+                        name="periodMonth"
+                        className="input"
+                        defaultValue={target.periodMonth ? String(target.periodMonth).slice(0, 7) : ''}
+                      />
+                      <p className="mt-1 text-xs text-app-fg-muted">Leave blank to keep it un-earmarked.</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="sm"
+                      loading={fetcher.state === 'submitting'}
+                      loadingText="Saving..."
+                    >
+                      Save changes
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={fetcher.state !== 'idle'}
+                      onClick={() => setEditAdjustmentTarget(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </fetcher.Form>
+              </>
+            );
+          })()}
+        </Modal>
+      )}
+
+      <ConfirmActionModal
+        open={!!deleteAdjustmentTarget}
+        onClose={() => setDeleteAdjustmentTarget(null)}
+        title="Delete adjustment"
+        description={
+          deleteAdjustmentTarget
+            ? `Delete this ${deleteAdjustmentTarget.category.replace(/_/g, ' ').toLowerCase()} adjustment? This cannot be undone.`
+            : ''
+        }
+        details={
+          deleteAdjustmentTarget ? (
+            <ul className="list-disc pl-4 space-y-1 text-sm">
+              <li>
+                Amount <NairaPrice amount={Math.abs(Number(deleteAdjustmentTarget.amount))} />
+                {Number(deleteAdjustmentTarget.amount) < 0 ? ' (deduction)' : ''}
+              </li>
+              <li>{deleteAdjustmentTarget.reason}</li>
+            </ul>
+          ) : null
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        loading={fetcher.state === 'submitting'}
+        onConfirm={() => {
+          if (!deleteAdjustmentTarget) return;
+          fetcher.submit(
+            { intent: 'deleteAdjustment', adjustmentId: deleteAdjustmentTarget.id },
             { method: 'post' },
           );
         }}

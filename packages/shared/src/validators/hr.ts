@@ -171,6 +171,40 @@ export const approveAdjustmentSchema = z.object({
 });
 export type ApproveAdjustmentInput = z.infer<typeof approveAdjustmentSchema>;
 
+/**
+ * Edit an existing adjustment. Only the correctable fields are accepted; the
+ * target party (staff/contractor) can't be swapped. Sign is re-canonicalised
+ * from the (possibly new) category, mirroring createAdjustmentSchema. Editing is
+ * blocked server-side once the adjustment has advanced into a PENDING_FINANCE or
+ * PAID batch.
+ */
+export const updateAdjustmentSchema = z
+  .object({
+    adjustmentId: z.string().uuid(),
+    amount: z.coerce.number().multipleOf(0.01),
+    category: z.enum(['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'DEDUCTION', 'CLAWBACK', 'OTHER']),
+    reason: z.string().min(5).max(500),
+    periodMonth: z
+      .string()
+      .regex(/^\d{4}-\d{2}-01$/, 'periodMonth must be YYYY-MM-01')
+      .optional(),
+  })
+  .transform((data) => {
+    const isDeduction = (DEDUCTION_ADJUSTMENT_CATEGORIES as readonly string[]).includes(data.category);
+    const magnitude = Math.abs(data.amount);
+    return { ...data, amount: isDeduction ? -magnitude : magnitude };
+  })
+  .refine((data) => data.amount !== 0, {
+    message: 'Amount must not be zero',
+    path: ['amount'],
+  });
+export type UpdateAdjustmentInput = z.infer<typeof updateAdjustmentSchema>;
+
+export const deleteAdjustmentSchema = z.object({
+  adjustmentId: z.string().uuid(),
+});
+export type DeleteAdjustmentInput = z.infer<typeof deleteAdjustmentSchema>;
+
 // ============================================
 // Settlement Window Config Validators
 // ============================================
@@ -302,6 +336,11 @@ export const submitBatchSchema = z.object({
   batchId: z.string().uuid(),
 });
 export type SubmitBatchInput = z.infer<typeof submitBatchSchema>;
+
+export const deleteBatchSchema = z.object({
+  batchId: z.string().uuid(),
+});
+export type DeleteBatchInput = z.infer<typeof deleteBatchSchema>;
 
 export const approveBatchSchema = z.object({
   batchId: z.string().uuid(),

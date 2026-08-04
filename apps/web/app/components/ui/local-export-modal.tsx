@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import jsPDF from 'jspdf';
 import { Button } from './button';
 import { Checkbox } from './checkbox';
@@ -21,6 +21,10 @@ type Props = {
   fetchAllRows?: () => Promise<Array<Record<string, unknown>>>;
   /** Total row count for display when fetchAllRows is provided. */
   totalRows?: number;
+  /** Optional filter controls rendered above the format/columns section. The
+   *  page owns this UI and its state, and should wire the chosen values into
+   *  `fetchAllRows` so the export reflects them. */
+  filters?: ReactNode;
 };
 
 function escapeCsvField(value: unknown): string {
@@ -85,7 +89,7 @@ async function downloadXlsx(filename: string, csv: string) {
   );
 }
 
-export function LocalExportModal({ open, onClose, title, description, rows, columns, defaultColumns, filenamePrefix, fetchAllRows, totalRows }: Props) {
+export function LocalExportModal({ open, onClose, title, description, rows, columns, defaultColumns, filenamePrefix, fetchAllRows, totalRows, filters }: Props) {
   const [format, setFormat] = useState<'csv' | 'pdf' | 'xlsx'>('csv');
   const [selectedColumns, setSelectedColumns] = useState<string[]>(defaultColumns);
   const [exporting, setExporting] = useState(false);
@@ -130,11 +134,18 @@ export function LocalExportModal({ open, onClose, title, description, rows, colu
   };
 
   return (
-    <Modal open={open} onClose={onClose} maxWidth="max-w-lg" contentClassName="p-6 space-y-4">
+    <Modal open={open} onClose={onClose} maxWidth="max-w-lg" contentClassName="p-6 space-y-4 max-h-[85dvh] overflow-y-auto">
       <div>
         <h3 className="text-lg font-semibold text-app-fg">{title}</h3>
         {description ? <p className="text-sm text-app-fg-muted mt-1">{description}</p> : null}
       </div>
+
+      {filters ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Filters</p>
+          {filters}
+        </div>
+      ) : null}
 
       <div className="space-y-2">
         <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Format</p>
@@ -175,6 +186,10 @@ export function LocalExportModal({ open, onClose, title, description, rows, colu
       <div className="flex items-center justify-between gap-2">
         {totalRows != null && totalRows > rows.length ? (
           <span className="text-xs text-app-fg-muted">{totalRows.toLocaleString()} rows total</span>
+        ) : fetchAllRows && totalRows == null ? (
+          // The export re-fetches everything matching the chosen filters, so the
+          // upfront count is unknown — don't show a misleading page-derived number.
+          <span className="text-xs text-app-fg-muted">All matching rows</span>
         ) : (
           <span className="text-xs text-app-fg-muted">{rows.length.toLocaleString()} rows</span>
         )}
