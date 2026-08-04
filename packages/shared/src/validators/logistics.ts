@@ -223,7 +223,9 @@ export const listDeliveryRemittancesSchema = z.object({
   sortBy: z.enum(['sentAt', 'deliveredAt', 'totalAmount', 'deliveryFee', 'orderNumber']).optional(),
   sortDir: z.enum(['asc', 'desc']).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(1000).default(20),
+  // Up to 1000 for normal views; higher ceiling lets the "Generate report"
+  // export pull the full filtered order set in a single request.
+  limit: z.number().int().min(1).max(10000).default(20),
   /** When true, skip paginated records and only return summary stats + empty records array. */
   summaryOnly: z.boolean().optional().default(false),
 });
