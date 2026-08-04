@@ -99,6 +99,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'marketing.campaigns', resource: 'marketing', action: 'campaigns', description: 'Create/update campaigns' },
   { code: 'marketing.teamOverview', resource: 'marketing', action: 'teamOverview', description: 'Marketing team overview (Head of Marketing only)' },
   { code: 'marketing.orders', resource: 'marketing', action: 'orders', description: 'View own orders (Media Buyer) or marketing orders (Head of Marketing)' },
+  { code: 'marketing.automation.manage', resource: 'marketing.automation', action: 'manage', description: 'Configure marketing automations (email/SMS/WhatsApp rules, segments, schedules)' },
   { code: 'finance.read', resource: 'finance', action: 'read', description: 'View finance' },
   { code: 'finance.costView', resource: 'finance', action: 'costView', description: 'View cost/margin data' },
   { code: 'finance.approve', resource: 'finance', action: 'approve', description: 'Approve financial requests' },
@@ -106,6 +107,11 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'finance.initMaterializedViews', resource: 'finance', action: 'initMaterializedViews', description: 'Initialize materialized views' },
   { code: 'hr.read', resource: 'hr', action: 'read', description: 'View HR & payroll' },
   { code: 'hr.write', resource: 'hr', action: 'write', description: 'Manage HR (plans, payouts, adjustments)' },
+  // Narrow payroll-batch view: unlocks ONLY the Payroll batches page (and its data),
+  // without the broader hr.read surface (Users, Payslips, Reports, Commission Plans,
+  // salary directory). Pair with finance.disburse to let a non-HR finance approver
+  // (e.g. a Stock Manager) see and pay batches without seeing the whole HR module.
+  { code: 'payroll.batches.view', resource: 'payroll.batches', action: 'view', description: 'View payroll batches (Payroll page) without full HR read access' },
   { code: 'hr.approveAdjustment', resource: 'hr', action: 'approveAdjustment', description: 'Approve HR adjustments' },
   { code: 'payroll.config.read', resource: 'payroll', action: 'config.read', description: 'View payroll config (roles, products, tax bands)' },
   { code: 'payroll.config.write', resource: 'payroll', action: 'config.write', description: 'Edit payroll config (Rule Builder, products, tax bands)' },
@@ -309,6 +315,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'marketing.campaigns',
     'marketing.teamOverview',
     'marketing.orders',
+    'marketing.automation.manage',
     'marketing.requestFunding.orgWide',
     'marketing.funding.request',
     'marketing.funding.approve',

@@ -36,6 +36,7 @@ import {
   previewPayeSchema,
   payrollOnboardingActionSchema,
   updatePayrollProfileSchema,
+  updateMyPayrollProfileSchema,
   bulkAssignPayRoleSchema,
   bulkAssignContractorsToPayRoleSchema,
   listPayslipsSchema,
@@ -622,6 +623,24 @@ export const hrRouter = router({
     .input(updatePayrollProfileSchema)
     .mutation(async ({ input, ctx }) => {
       return getPayrollConfigService().updatePayrollProfile(input, ctx.user);
+    }),
+
+  /**
+   * Self-serve payroll profile edit — any authenticated user may maintain their
+   * OWN payroll declarations (pay role, salary basis, tax status, flat amount,
+   * annual rent). The target is FORCED to the caller (never a client-supplied
+   * userId), and the schema carries no role/permission/branch fields, so this
+   * cannot escalate access. Reuses the same service write as the HR path.
+   * Motivating case: an HR Manager setting their own annual rent for PAYE
+   * relief, which the staff-edit form blocks ("Cannot edit your own account").
+   */
+  updateMyPayrollProfile: authedProcedure
+    .input(updateMyPayrollProfileSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollConfigService().updatePayrollProfile(
+        { ...input, userId: ctx.user.id },
+        ctx.user,
+      );
     }),
 
   bulkAssignPayRole: permissionProcedure('hr.write')

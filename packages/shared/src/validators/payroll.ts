@@ -320,6 +320,17 @@ export const updatePayrollProfileSchema = z.object({
   annualRent: z.coerce.number().min(0).nullable().optional(),
 });
 
+/**
+ * Self-serve payroll profile edit. Same fields as {@link updatePayrollProfileSchema}
+ * minus `userId` — the target is always the authenticated caller (forced
+ * server-side), so a user can maintain their own payroll declarations
+ * (e.g. annual rent for PAYE relief) without holding `hr.write`. It carries NO
+ * role / permission / branch fields, so it can never escalate access.
+ */
+export const updateMyPayrollProfileSchema = updatePayrollProfileSchema.omit({
+  userId: true,
+});
+
 export const bulkAssignPayRoleSchema = z.object({
   userIds: z.array(z.string().uuid()).min(1).max(200),
   payRoleId: z.string().uuid(),

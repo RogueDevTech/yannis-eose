@@ -40,8 +40,13 @@ export interface Env {
 // Redis queue config — single source of truth for keys + retry policy.
 const REDIS_PENDING_KEY = 'edge:orders:pending';
 const REDIS_DEAD_LETTER_KEY = 'edge:orders:dead-letter';
+// In-flight list: each drained item lives here (moved atomically off pending)
+// while its API replay is in progress, so a worker crash mid-replay can't drop
+// it — the next cron reclaims anything left behind. See drainRedisQueue.
+const REDIS_PROCESSING_KEY = 'edge:orders:processing';
 const REDIS_CART_PENDING_KEY = 'edge:carts:pending';
 const REDIS_CART_DEAD_LETTER_KEY = 'edge:carts:dead-letter';
+const REDIS_CART_PROCESSING_KEY = 'edge:carts:processing';
 const REDIS_MAX_ATTEMPTS = 6;          // ~6 minutes of retries at 1-per-minute cron
 const REDIS_DRAIN_BATCH_SIZE = 20;     // max orders processed per cron tick (CPU budget)
 const REDIS_CART_DRAIN_BATCH_SIZE = 30; // carts are smaller; allow a slightly larger batch
@@ -272,6 +277,25 @@ function getApiTimeoutMs(apiUrl: string): number {
   }
   return CIRCUIT_BREAKER_TIMEOUT_MS;
 }
+
+/**
+ * Headers for any POST the edge forwards to the API's public order/cart
+ * endpoints (`orders.create`, `cart.save`, `preparePaystackOrder`). The
+ * `X-Edge-Api-Key` proves the request came from THIS worker — the API rejects
+ * order-create traffic that lacks it, so the public tRPC endpoints can't be
+ * hit directly to forge orders while bypassing the honeypot / rate limiter.
+ *
+ * Fail-safe: if EDGE_API_KEY isn't bound (e.g. before the secret is set on a
+ * fresh env), we simply omit the header. The API's guard is also fail-open
+ * when its own EDGE_API_KEY is unset, so Pillar-1 (forms never go offline)
+ * holds during rollout; the gate activates only once BOTH sides have the key.
+ */
+function apiForwardHeaders(env: Env): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (env.EDGE_API_KEY) headers['X-Edge-Api-Key'] = env.EDGE_API_KEY;
+  return headers;
+}
+
 // 5 min cache for campaign configs. NOT shorter: every cache miss is a KV
 // `put()`, and the account's daily KV write quota is a hard limit — a 60s TTL
 // multiplied writes ~5x and helped exhaust it (which, before the best-effort
@@ -562,7 +586,7 @@ async function forwardCartToApi(
   try {
     const response = await fetch(`${env.API_URL}/trpc/cart.save`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiForwardHeaders(env),
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -596,7 +620,7 @@ async function forwardToApi(
   try {
     const response = await fetch(`${env.API_URL}/trpc/orders.create`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiForwardHeaders(env),
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -635,7 +659,7 @@ async function forwardPreparePaystackToApi(
   try {
     const response = await fetch(`${env.API_URL}/trpc/orders.preparePaystackOrder`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiForwardHeaders(env),
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -660,6 +684,25 @@ async function forwardPreparePaystackToApi(
 
 // ── QStash Failover ────────────────────────────────────────────
 
+// Worker paths QStash calls when a buffered message exhausts all retries. The
+// original payload is then persisted to the Redis dead-letter list instead of
+// being silently dropped (Pillar-1: never lose a paid/placed order).
+const QSTASH_FAILED_ORDER_PATH = '/qstash/failed/order';
+const QSTASH_FAILED_CART_PATH = '/qstash/failed/cart';
+
+/**
+ * Build the `Upstash-Failure-Callback` header. QStash invokes this URL after
+ * the last retry fails, so an exhausted order is captured for manual replay
+ * rather than vanishing. Requires a public worker origin — if PUBLIC_WORKER_URL
+ * is unset (can't self-address), we omit the header and fall back to today's
+ * behavior (QStash still retries; only the terminal capture is skipped).
+ */
+function qstashFailureCallbackHeader(env: Env, path: string): Record<string, string> {
+  const origin = env.PUBLIC_WORKER_URL?.trim().replace(/\/+$/, '');
+  if (!origin) return {};
+  return { 'Upstash-Failure-Callback': `${origin}${path}` };
+}
+
 async function bufferToQStash(
   payload: OrderCreatePayload,
   env: Env,
@@ -676,6 +719,10 @@ async function bufferToQStash(
         'Authorization': `Bearer ${env.QSTASH_TOKEN}`,
         'Upstash-Retries': '3',
         'Upstash-Delay': '10s',
+        // QStash strips its own auth and replays `Upstash-Forward-*` headers to
+        // the destination as-is, so the edge key reaches orders.create on replay.
+        ...(env.EDGE_API_KEY ? { 'Upstash-Forward-X-Edge-Api-Key': env.EDGE_API_KEY } : {}),
+        ...qstashFailureCallbackHeader(env, QSTASH_FAILED_ORDER_PATH),
       },
       body: JSON.stringify(payload),
     });
@@ -702,6 +749,10 @@ async function bufferCartToQStash(
         'Authorization': `Bearer ${env.QSTASH_TOKEN}`,
         'Upstash-Retries': '3',
         'Upstash-Delay': '10s',
+        // QStash replays `Upstash-Forward-*` headers to the destination as-is,
+        // so the edge key reaches cart.save on replay.
+        ...(env.EDGE_API_KEY ? { 'Upstash-Forward-X-Edge-Api-Key': env.EDGE_API_KEY } : {}),
+        ...qstashFailureCallbackHeader(env, QSTASH_FAILED_CART_PATH),
       },
       body: JSON.stringify(payload),
     });
@@ -710,6 +761,63 @@ async function bufferCartToQStash(
   } catch {
     return false;
   }
+}
+
+/**
+ * Handle a QStash failure callback. QStash POSTs a JSON envelope after a
+ * buffered message exhausts every retry; `body` is the base64-encoded original
+ * request payload. We decode it and push the ORIGINAL order/cart onto the
+ * Redis dead-letter list so a fully-exhausted submission is preserved for
+ * manual replay instead of being silently lost (Pillar-1 revenue insurance).
+ *
+ * Always returns 200 — a non-2xx would make QStash retry the callback itself,
+ * and there's nothing useful to retry. Failures are logged for alerting.
+ */
+async function handleQStashFailureCallback(
+  request: Request,
+  env: Env,
+  deadLetterKey: string,
+): Promise<Response> {
+  try {
+    const envelope = (await request.json().catch(() => null)) as
+      | { body?: string; sourceMessageId?: string; status?: number }
+      | null;
+    // `body` is base64 of the original JSON payload we published.
+    let originalPayload: unknown = null;
+    if (envelope && typeof envelope.body === 'string') {
+      try {
+        originalPayload = JSON.parse(atob(envelope.body));
+      } catch {
+        originalPayload = null;
+      }
+    }
+
+    const redis = getRedis(env);
+    if (redis && originalPayload) {
+      const queued: QueuedOrder = {
+        payload: originalPayload as OrderCreatePayload,
+        attempts: REDIS_MAX_ATTEMPTS,
+        firstQueuedAt: new Date().toISOString(),
+        lastAttemptAt: new Date().toISOString(),
+      };
+      await redis.rpush(deadLetterKey, JSON.stringify(queued));
+      console.error(
+        `[qstash-failed] exhausted message ${envelope?.sourceMessageId ?? '?'} ` +
+          `(status ${envelope?.status ?? '?'}) dead-lettered to ${deadLetterKey}`,
+      );
+    } else {
+      // No Redis or undecodable body — at least log the raw envelope so the
+      // order isn't lost without a trace to reconstruct from.
+      console.error(
+        `[qstash-failed] could not dead-letter (redis=${!!redis}, payload=${!!originalPayload}); ` +
+          `envelope: ${JSON.stringify(envelope).slice(0, 2000)}`,
+      );
+    }
+  } catch (err) {
+    console.error('[qstash-failed] callback handler threw:', err);
+  }
+  // Ack regardless so QStash doesn't retry the callback.
+  return corsResponse({ received: true }, 200);
 }
 
 // ── Redis Failover (last-resort defense-in-depth) ───────────────
@@ -736,30 +844,70 @@ async function bufferToRedis(payload: OrderCreatePayload, env: Env): Promise<boo
   }
 }
 
+/**
+ * Reclaim items left in a processing list by a worker that crashed mid-replay.
+ * Moves everything from `processingKey` back to the tail of `pendingKey` so the
+ * current drain retries them. Runs before each drain; normally a no-op.
+ */
+async function reclaimProcessing(
+  redis: Redis,
+  processingKey: string,
+  pendingKey: string,
+): Promise<void> {
+  // Bounded loop: lmove one-at-a-time from processing head → pending tail until
+  // the processing list is empty. Atomic per move, so safe to interrupt.
+  for (let i = 0; i < REDIS_DRAIN_BATCH_SIZE * 4; i += 1) {
+    const moved = await redis.lmove(processingKey, pendingKey, 'left', 'right');
+    if (moved === null || moved === undefined) break;
+  }
+}
+
 // Drain up to REDIS_DRAIN_BATCH_SIZE pending orders back to the API. Called
 // from the healer cron when the API has been observed healthy. Each order
 // gets up to REDIS_MAX_ATTEMPTS retries before being moved to a dead-letter
 // list for manual replay. Order semantics: FIFO within attempts, but a
 // retried order goes to the tail so it doesn't block fresh ones.
+//
+// Crash-safety (Pillar-1): each item is moved ATOMICALLY from the pending list
+// to an in-flight "processing" list (lmove) before its API replay. It only
+// leaves processing once its terminal outcome is recorded (drained / requeued /
+// dead-lettered). If the worker dies mid-replay, the item survives in
+// processing and the next cron's reclaimProcessing() puts it back — so an order
+// can never vanish in the lpop→work→rpush gap that the old code had.
 async function drainRedisQueue(env: Env): Promise<{ drained: number; requeued: number; deadLettered: number }> {
   const redis = getRedis(env);
   if (!redis) return { drained: 0, requeued: 0, deadLettered: 0 };
+
+  // Recover anything a prior crashed run left in-flight.
+  await reclaimProcessing(redis, REDIS_PROCESSING_KEY, REDIS_PENDING_KEY);
 
   let drained = 0;
   let requeued = 0;
   let deadLettered = 0;
 
   for (let i = 0; i < REDIS_DRAIN_BATCH_SIZE; i += 1) {
-    const raw = (await redis.lpop(REDIS_PENDING_KEY)) as string | null;
-    if (!raw) break;
+    // Atomically move the head of pending onto the processing list. The item is
+    // never absent from Redis, so a crash here loses nothing.
+    const raw = (await redis.lmove(REDIS_PENDING_KEY, REDIS_PROCESSING_KEY, 'left', 'right')) as
+      | string
+      | Record<string, unknown>
+      | null;
+    if (raw === null || raw === undefined) break;
+
+    // `raw` is the exact value now sitting in the processing list; use it verbatim
+    // for the lrem that removes it, so the match can't miss on re-serialization.
+    const removeFromProcessing = async () => {
+      await redis.lrem(REDIS_PROCESSING_KEY, 1, raw as string);
+    };
 
     let queued: QueuedOrder;
     try {
       // Upstash REST returns parsed JSON when the stored value is JSON-shaped.
-      queued = typeof raw === 'string' ? JSON.parse(raw) : (raw as QueuedOrder);
+      queued = typeof raw === 'string' ? JSON.parse(raw) : (raw as unknown as QueuedOrder);
     } catch {
       // Corrupt entry — dead-letter and move on rather than block the queue.
-      await redis.rpush(REDIS_DEAD_LETTER_KEY, raw);
+      await redis.rpush(REDIS_DEAD_LETTER_KEY, raw as string);
+      await removeFromProcessing();
       deadLettered += 1;
       continue;
     }
@@ -770,12 +918,14 @@ async function drainRedisQueue(env: Env): Promise<{ drained: number; requeued: n
     const apiResult = await forwardToApi(queued.payload as OrderCreatePayload, env);
 
     if (apiResult.ok) {
+      await removeFromProcessing();
       drained += 1;
       continue;
     }
 
     if (queued.attempts >= REDIS_MAX_ATTEMPTS) {
       await redis.rpush(REDIS_DEAD_LETTER_KEY, JSON.stringify(queued));
+      await removeFromProcessing();
       deadLettered += 1;
       console.error(
         `[redis-drain] dead-lettered after ${queued.attempts} attempts (first queued ${queued.firstQueuedAt})`,
@@ -783,8 +933,12 @@ async function drainRedisQueue(env: Env): Promise<{ drained: number; requeued: n
       continue;
     }
 
-    // Push back to the tail with incremented attempts so fresh orders aren't blocked.
+    // Push back to the pending tail with incremented attempts so fresh orders
+    // aren't blocked, THEN remove from processing. Re-queue before remove so a
+    // crash between the two leaves a harmless duplicate (reclaimed + retried;
+    // the API's idempotency check dedups) rather than a lost order.
     await redis.rpush(REDIS_PENDING_KEY, JSON.stringify(queued));
+    await removeFromProcessing();
     requeued += 1;
   }
 
@@ -811,23 +965,34 @@ async function bufferCartToRedis(payload: CartSavePayload, env: Env): Promise<bo
   }
 }
 
+// Same crash-safe processing-list pattern as drainRedisQueue (see there).
 async function drainRedisCartQueue(env: Env): Promise<{ drained: number; requeued: number; deadLettered: number }> {
   const redis = getRedis(env);
   if (!redis) return { drained: 0, requeued: 0, deadLettered: 0 };
+
+  await reclaimProcessing(redis, REDIS_CART_PROCESSING_KEY, REDIS_CART_PENDING_KEY);
 
   let drained = 0;
   let requeued = 0;
   let deadLettered = 0;
 
   for (let i = 0; i < REDIS_CART_DRAIN_BATCH_SIZE; i += 1) {
-    const raw = (await redis.lpop(REDIS_CART_PENDING_KEY)) as string | null;
-    if (!raw) break;
+    const raw = (await redis.lmove(REDIS_CART_PENDING_KEY, REDIS_CART_PROCESSING_KEY, 'left', 'right')) as
+      | string
+      | Record<string, unknown>
+      | null;
+    if (raw === null || raw === undefined) break;
+
+    const removeFromProcessing = async () => {
+      await redis.lrem(REDIS_CART_PROCESSING_KEY, 1, raw as string);
+    };
 
     let queued: QueuedOrder;
     try {
-      queued = typeof raw === 'string' ? JSON.parse(raw) : (raw as QueuedOrder);
+      queued = typeof raw === 'string' ? JSON.parse(raw) : (raw as unknown as QueuedOrder);
     } catch {
-      await redis.rpush(REDIS_CART_DEAD_LETTER_KEY, raw);
+      await redis.rpush(REDIS_CART_DEAD_LETTER_KEY, raw as string);
+      await removeFromProcessing();
       deadLettered += 1;
       continue;
     }
@@ -838,12 +1003,14 @@ async function drainRedisCartQueue(env: Env): Promise<{ drained: number; requeue
     const apiResult = await forwardCartToApi(queued.payload as CartSavePayload, env);
 
     if (apiResult.ok) {
+      await removeFromProcessing();
       drained += 1;
       continue;
     }
 
     if (queued.attempts >= REDIS_MAX_ATTEMPTS) {
       await redis.rpush(REDIS_CART_DEAD_LETTER_KEY, JSON.stringify(queued));
+      await removeFromProcessing();
       deadLettered += 1;
       console.error(
         `[redis-drain] cart dead-lettered after ${queued.attempts} attempts (first queued ${queued.firstQueuedAt})`,
@@ -852,6 +1019,7 @@ async function drainRedisCartQueue(env: Env): Promise<{ drained: number; requeue
     }
 
     await redis.rpush(REDIS_CART_PENDING_KEY, JSON.stringify(queued));
+    await removeFromProcessing();
     requeued += 1;
   }
 
@@ -958,7 +1126,10 @@ function getFormScript(
   mediaBuyerId?: string,
   formMode: 'hosted' | 'embedded' | 'iframe' | 'fallback' = 'hosted',
 ): string {
-  const mediaBuyerIdJson = mediaBuyerId ? `'${mediaBuyerId}'` : 'undefined';
+  // JSON-encode rather than raw single-quote wrap so a stray quote in the id
+  // can't break out of the script string (defense-in-depth; ids are UUIDs).
+  const mediaBuyerIdJson = mediaBuyerId ? safeJsonForScript(mediaBuyerId) : 'undefined';
+  const campaignIdJson = safeJsonForScript(campaignId);
   // hosted / iframe / fallback are served BY the worker, so `/cart` and
   // `/submit` resolve to the same origin (= the worker) automatically. Only
   // embed.js runs inside a third-party page where relative paths would hit
@@ -971,7 +1142,7 @@ function getFormScript(
       var btn = document.getElementById('yannisSubmitBtn');
       var selectedProduct = null;
       var selectedOffer = null;
-      var products = ${JSON.stringify(products)};
+      var products = ${safeJsonForScript(products)};
       var card = form ? form.closest('.yannis-form-card') : null;
       var singleProductId = form ? form.dataset.singleProduct : null;
       var successPanel = null;
@@ -1243,7 +1414,7 @@ function getFormScript(
         cartSaveTimeout = setTimeout(function() {
           if (cartSaveInflight) return; // double-check at fire time
           var payload = {
-            campaignId: '${campaignId}',
+            campaignId: ${campaignIdJson},
             mediaBuyerId: ${mediaBuyerIdJson},
             customerPhone: phoneEl.value
           };
@@ -1695,7 +1866,7 @@ function getFormScript(
         cartSaveDisabled = true;
 
         var orderData = {
-          campaignId: '${campaignId}',
+          campaignId: ${campaignIdJson},
           mediaBuyerId: ${mediaBuyerIdJson},
           // Honeypot — humans never fill this; bots usually do. Server checks and silently
           // drops the submission. Sent every time so an absent field also fails closed.
@@ -2238,6 +2409,40 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
+/**
+ * `accentColor` comes straight from campaign form config (editable by media
+ * buyers) and is interpolated RAW into a <style> block. HTML-escaping is the
+ * wrong tool for a CSS context: an attacker could inject `red}</style><script>…`
+ * to break out of the stylesheet and run script. accentColor only ever needs
+ * to be a CSS color, so we allow-list color shapes and fall back to the default
+ * on anything else. Nothing but a well-formed color value can reach the CSS.
+ */
+const SAFE_COLOR_RE =
+  /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$|^(?:rgb|rgba|hsl|hsla)\(\s*[0-9.,%\s/]+\)$|^[a-zA-Z]{1,20}$/;
+function sanitizeAccentColor(color: string | undefined): string {
+  if (typeof color === 'string' && SAFE_COLOR_RE.test(color.trim())) {
+    return color.trim();
+  }
+  return DEFAULT_CAMPAIGN_FORM_ACCENT_HEX;
+}
+
+/**
+ * Serialize a value for embedding inside an inline <script> tag. Plain
+ * JSON.stringify is unsafe there: a `</script>` sequence (or an HTML comment
+ * opener) inside any string field — e.g. a product name a media buyer typed —
+ * closes the script element early and lets the rest run as markup. We escape
+ * the characters that can terminate/confuse the script context so the payload
+ * survives only as data. Output is still valid JS (a JSON literal).
+ */
+function safeJsonForScript(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
 function formatPrice(price: string): string {
   const num = parseFloat(price);
   if (isNaN(num)) return price;
@@ -2302,7 +2507,7 @@ function renderFallbackForm(campaignId: string, workerUrl: string): Response {
 // ── Hosted Form Page (GET /form/:campaignId) ───────────────────
 
 function renderHostedForm(config: CampaignConfig, workerUrl: string): Response {
-  const accentColor = config.formConfig?.accentColor ?? DEFAULT_CAMPAIGN_FORM_ACCENT_HEX;
+  const accentColor = sanitizeAccentColor(config.formConfig?.accentColor);
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2336,7 +2541,7 @@ function renderHostedForm(config: CampaignConfig, workerUrl: string): Response {
 // ── Embeddable Script (GET /embed.js?campaign=:id) ─────────────
 
 function renderEmbedScript(config: CampaignConfig, workerUrl: string): Response {
-  const accentColor = config.formConfig?.accentColor ?? DEFAULT_CAMPAIGN_FORM_ACCENT_HEX;
+  const accentColor = sanitizeAccentColor(config.formConfig?.accentColor);
 
   // Self-executing script that injects form into Shadow DOM.
   // Target the dedicated, campaign-scoped `#yannis-form-:id` div so the form
@@ -2380,7 +2585,7 @@ function renderEmbedScript(config: CampaignConfig, workerUrl: string): Response 
 
 function renderIframeForm(config: CampaignConfig, workerUrl: string): Response {
   // Same as hosted but with iframe-friendly styles (no body centering)
-  const accentColor = config.formConfig?.accentColor ?? DEFAULT_CAMPAIGN_FORM_ACCENT_HEX;
+  const accentColor = sanitizeAccentColor(config.formConfig?.accentColor);
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2533,6 +2738,16 @@ export default {
     // ── Order submission ─────────────────────────────────────
     if (url.pathname === '/submit' && request.method === 'POST') {
       return handleSubmission(request, env);
+    }
+
+    // ── QStash terminal-failure callbacks ─────────────────────
+    // Called by QStash when a buffered order/cart exhausts all retries. Persists
+    // the original payload to the Redis dead-letter list (Pillar-1 no-loss).
+    if (url.pathname === QSTASH_FAILED_ORDER_PATH && request.method === 'POST') {
+      return handleQStashFailureCallback(request, env, REDIS_DEAD_LETTER_KEY);
+    }
+    if (url.pathname === QSTASH_FAILED_CART_PATH && request.method === 'POST') {
+      return handleQStashFailureCallback(request, env, REDIS_CART_DEAD_LETTER_KEY);
     }
 
     return corsResponse({ error: 'Not Found' }, 404);

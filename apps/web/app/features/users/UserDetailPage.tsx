@@ -1162,6 +1162,13 @@ export function UserDetailPage({
             onClick={() => setOpenModal('branches')}
           />
         )}
+        {isSelfView && showPayrollTab && (
+          <SectionCard
+            label="Payroll details"
+            description="Pay role, tax, and annual rent"
+            linkTo={`/hr/users/${user.id}/edit`}
+          />
+        )}
         {showPayrollTab && (
           <SectionCard
             label="Payslips & history"

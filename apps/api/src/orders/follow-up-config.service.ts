@@ -2308,11 +2308,24 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     const systemActor = { id: SYSTEM_ACTOR_ID } as SessionUser;
 
     try {
-      await this.inventoryService.completeDeliveryInventory(
+      // Capture the real FIFO landed cost of the batches consumed and stamp it
+      // onto the graduated orders row. postSalesInvoice reads orders.landedCost
+      // and only posts the Dr COGS / Cr Stock pair when it is > 0 — without this
+      // stamp a graduated follow-up order recorded 100% margin (Pillar 3 breach).
+      // Mirrors the normal delivery path (orders.service.ts DELIVERED handler).
+      const { landedCost } = await this.inventoryService.completeDeliveryInventory(
         orderId,
         logisticsLocationId,
         systemActor,
       );
+      if (landedCost > 0) {
+        await withActor(this.db, systemActor, async (tx) => {
+          await tx
+            .update(schema.orders)
+            .set({ landedCost: sql`${landedCost}::numeric` })
+            .where(eq(schema.orders.id, orderId));
+        });
+      }
     } catch (err) {
       this.logger.error(
         `Follow-up graduation stock deduction failed for order ${orderId}: ${err instanceof Error ? err.message : err}`,

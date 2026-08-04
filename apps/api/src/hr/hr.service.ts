@@ -877,12 +877,15 @@ export class HrService {
     }
 
     // If this adjustment is earmarked for a month that already has an OPEN batch
-    // (DRAFT / PENDING_HR) for the staff member, fold it in now instead of leaving
-    // it floating until the next run. Best-effort and non-fatal: on any miss the
-    // adjustment stays pending and the next generate/recalculate sweeps it.
-    if (input.staffId && input.periodMonth) {
+    // (DRAFT / PENDING_HR) with a line for this staff member OR contractor, fold it
+    // in now instead of leaving it floating until the next run. The absorb helper
+    // only acts on APPROVED rows, so this is a no-op for the common case where the
+    // adjustment still needs approval — approveAdjustment then does the absorb.
+    // Best-effort and non-fatal: on any miss the adjustment stays pending and the
+    // next generate/recalculate sweeps it.
+    if ((input.staffId || input.contractorId) && input.periodMonth) {
       try {
-        await this.payrollBatch.absorbPendingStaffAdjustment(adj.id);
+        await this.payrollBatch.absorbPendingStaffAdjustment(adj.id, actorId);
       } catch (err) {
         this.logger.warn(
           `absorbPendingStaffAdjustment failed for ${adj.id}: ${err instanceof Error ? err.message : String(err)}`,
@@ -894,14 +897,25 @@ export class HrService {
   }
 
   async approveAdjustment(input: ApproveAdjustmentInput, actorId: string) {
+    // When unapproving a row that was already folded into an open batch, we also
+    // detach it (clear payout_id) so the batch stops counting it. Capture the
+    // linkage before the update. Guard: don't unapprove a row whose batch has left
+    // HR (Finance review / PAID) — those numbers are committed.
+    let detachPayoutId: string | null = null;
+    if (!input.approved) {
+      const existing = await this.loadCorrectableAdjustment(input.adjustmentId);
+      detachPayoutId = existing.payoutId ?? null;
+    }
+
     const row = await withActor(this.db, { id: actorId }, async (tx) => {
-      const updateFields: Record<string, unknown> = {};
-      if (input.approved) {
-        updateFields['approvedBy'] = actorId;
-      } else {
-        updateFields['rejectedBy'] = actorId;
-        updateFields['rejectedAt'] = new Date();
-      }
+      // earnings_adjustments has no rejected_by/rejected_at columns — "rejected"
+      // is represented by approved_by staying NULL (see pendingAdjustmentForMonth,
+      // which requires approved_by IS NOT NULL). Approving sets approvedBy;
+      // rejecting/unapproving clears it and detaches any open-batch link so the row
+      // is excluded from batch sweeps and no longer counted in the batch total.
+      const updateFields: Record<string, unknown> = input.approved
+        ? { approvedBy: actorId }
+        : { approvedBy: null, payoutId: null };
 
       const rows = await tx
         .update(schema.earningsAdjustments)
@@ -914,6 +928,32 @@ export class HrService {
       }
       return rows[0];
     });
+
+    // Approval is the correct moment to fold a late adjustment into an already-open
+    // batch: the absorb helper only acts on APPROVED rows. Covers both staff and
+    // contractors; earmarked (period_month) + still-floating (payout_id NULL) only.
+    // Best-effort and non-fatal — on any miss the next generate/recalculate sweeps.
+    if (input.approved && row.periodMonth && !row.payoutId) {
+      try {
+        await this.payrollBatch.absorbPendingStaffAdjustment(row.id, actorId);
+      } catch (err) {
+        this.logger.warn(
+          `absorbPendingStaffAdjustment failed for ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // If unapproving detached the row from an open batch, re-roll that payout so
+    // the batch total drops it. Best-effort and non-fatal.
+    if (!input.approved && detachPayoutId) {
+      try {
+        await this.payrollBatch.recomputeForAdjustment(detachPayoutId, actorId);
+      } catch (err) {
+        this.logger.warn(
+          `recomputeForAdjustment failed after unapprove of ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     // Notify staff when add-on/bonus is approved (or clawback/deduction is applied).
     // Contractors are external (no app account) — nothing to notify.
@@ -961,6 +1001,18 @@ export class HrService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Adjustment not found' });
     }
     const batchStatus = await this.payrollBatch.getAdjustmentBatchStatus(adjustmentId);
+    // Orphaned: the adjustment still points at a payout line but the join to the
+    // batch resolves nothing — the batch is gone (e.g. a manual DB delete that
+    // bypassed deleteBatch, which normally detaches adjustments first). Editing or
+    // deleting here would try to recompute a payout with no batch, so block it and
+    // surface the inconsistency rather than mutating an orphaned record.
+    if (adj.payoutId && batchStatus === null) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message:
+          'This adjustment is attached to a payroll batch that no longer exists. It can no longer be edited or deleted here.',
+      });
+    }
     if (batchStatus && (HrService.ADJUSTMENT_LOCKED_STATUSES as readonly string[]).includes(batchStatus)) {
       throw new TRPCError({
         code: 'CONFLICT',

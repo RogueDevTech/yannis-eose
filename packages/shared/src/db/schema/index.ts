@@ -40,3 +40,4 @@ export * from './wht-deductions';
 export * from './bank-reconciliation';
 export * from './ai-assistant';
 export * from './import-history';
+export * from './automation';

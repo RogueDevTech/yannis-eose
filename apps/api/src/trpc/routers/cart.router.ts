@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { router, publicProcedure, permissionProcedure } from '../trpc';
+import { router, permissionProcedure, edgeProcedure } from '../trpc';
 import { CartService } from '../../cart/cart.service';
 import { isAdminLevel } from '../../common/authz';
 import { saveCartSchema } from '@yannis/shared';
@@ -24,7 +24,7 @@ export const cartRouter = router({
    * (product/offer and other fields merge in progressively).
    * Public procedure (no auth). When caller is authenticated, audit trail records that user.
    */
-  save: publicProcedure
+  save: edgeProcedure
     .input(saveCartSchema)
     .mutation(async ({ input, ctx }) => {
       return getCartService().save(input, ctx.user?.id ?? null);

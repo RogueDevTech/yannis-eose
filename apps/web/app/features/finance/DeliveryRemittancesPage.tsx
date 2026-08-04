@@ -36,6 +36,7 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { useNavigate } from '@remix-run/react';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
+import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
 import type { EligibleOrder } from './eligible-order';
 import { CashStatementExportModal } from './CashStatementExportModal';
 
@@ -1046,7 +1047,12 @@ export function DeliveryRemittancesPage({
               if (filters.startDate) params.startDate = filters.startDate;
               if (filters.endDate) params.endDate = filters.endDate;
               if (filters.remittanceSearch) params.search = filters.remittanceSearch;
-              const res = await fetch(`/trpc/logistics.listDeliveryRemittanceOrders?input=${encodeURIComponent(JSON.stringify(params))}`);
+              const base = getBrowserApiBaseUrl();
+              const res = await fetch(
+                `${base}/trpc/logistics.listDeliveryRemittanceOrders?input=${encodeURIComponent(JSON.stringify(params))}`,
+                { credentials: 'include' },
+              );
+              if (!res.ok) throw new Error(`Export failed (${res.status}). Please try again.`);
               const json = await res.json();
               const allOrders: RemittanceOrderRow[] = json?.result?.data?.orders ?? [];
               return allOrders.map((r) => ({
@@ -1079,7 +1085,12 @@ export function DeliveryRemittancesPage({
             if (exportFilters.endDate) params.endDate = exportFilters.endDate;
             params.dateScope = exportFilters.dateScope;
             if (filters.remittanceSearch) params.search = filters.remittanceSearch;
-            const res = await fetch(`/trpc/logistics.deliveryRemittancesPageBundle?input=${encodeURIComponent(JSON.stringify(params))}`);
+            const base = getBrowserApiBaseUrl();
+            const res = await fetch(
+              `${base}/trpc/logistics.deliveryRemittancesPageBundle?input=${encodeURIComponent(JSON.stringify(params))}`,
+              { credentials: 'include' },
+            );
+            if (!res.ok) throw new Error(`Export failed (${res.status}). Please try again.`);
             const json = await res.json();
             const allRemittances: DeliveryRemittanceListItem[] = json?.result?.data?.remittances?.records ?? [];
             return allRemittances.map((r) => ({

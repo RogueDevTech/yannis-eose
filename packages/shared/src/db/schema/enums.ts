@@ -619,3 +619,35 @@ export const assetStatusEnum = pgEnum('asset_status', [
   'FULLY_DEPRECIATED',
   'DISPOSED',
 ]);
+
+// ── Marketing Automation ─────────────────────────────────────
+/** EVENT = per-customer reactive journey; SEGMENT = audience broadcast. */
+export const automationRuleKindEnum = pgEnum('automation_rule_kind', ['EVENT', 'SEGMENT']);
+
+/** Delivery channel for an automation. */
+export const automationChannelEnum = pgEnum('automation_channel', ['EMAIL', 'SMS', 'WHATSAPP']);
+
+/** Lifecycle of a scheduled automation send. */
+export const automationJobStatusEnum = pgEnum('automation_job_status', [
+  'PENDING',
+  'SENT',
+  'FAILED',
+  'SKIPPED',
+  'CANCELLED',
+]);
+
+/** Which channel(s) a suppression covers. ALL suppresses every channel. */
+export const messageSuppressionChannelEnum = pgEnum('message_suppression_channel', [
+  'EMAIL',
+  'SMS',
+  'WHATSAPP',
+  'ALL',
+]);
+
+/** Why a recipient landed on the suppression list. */
+export const messageSuppressionReasonEnum = pgEnum('message_suppression_reason', [
+  'UNSUBSCRIBED',
+  'BOUNCED',
+  'COMPLAINED',
+  'MANUAL',
+]);

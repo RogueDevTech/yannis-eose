@@ -15,6 +15,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { extractTrpc } from '~/lib/trpc-extract.server';
 import { canEditUser } from '~/lib/rbac';
 import { UserCreatePage, type EditingUser } from '~/features/users/UserCreatePage';
+import { SelfPayrollEditForm } from '~/features/users/SelfPayrollEditForm';
 import type {
   UserCreateProduct,
   UserCreateLocation,
@@ -79,7 +80,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // the user record OR a tagged error so the page-level <Await> can render
   // the appropriate state without waiting at the loader.
   const editingUserPromise: Promise<
-    | { kind: 'ok'; editingUser: EditingUser }
+    | { kind: 'ok'; editingUser: EditingUser; isSelfPayrollOnly: boolean }
     | { kind: 'notFound' }
     | { kind: 'forbidden'; message: string }
   > = (async () => {
@@ -89,6 +90,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const userPayload = userRes.data as { result?: { data?: UserDetail } };
     const user = userPayload?.result?.data;
     if (!user) return { kind: 'notFound' };
+
+    // Self-serve payroll edit. canEditUser returns 'none' for self (staff-edit
+    // of your own account is intentionally blocked — see canEditUser docs), but
+    // a user IS allowed to maintain their own payroll declarations (pay role,
+    // tax status, annual rent for PAYE relief). When the viewer is the target we
+    // render this page in a payroll-ONLY mode that saves through
+    // hr.updateMyPayrollProfile — no role / branch / permission fields exposed.
+    const isSelf = viewer.id === user.id;
 
     // Per-target edit-access gate — canEditUser is the single source of truth
     // for who can reach this form on which target. SuperAdmin can edit anyone
@@ -100,7 +109,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       role: user.role,
       primaryBranchId: user.primaryBranchId ?? null,
     });
-    if (accessLevel === 'none') {
+    if (accessLevel === 'none' && !isSelf) {
       return {
         kind: 'forbidden',
         message:
@@ -145,7 +154,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       flatMonthlyAmount: user.flatMonthlyAmount ? String(Number(user.flatMonthlyAmount)) : '',
       annualRent: user.annualRent != null ? String(Number(user.annualRent)) : '',
     };
-    return { kind: 'ok', editingUser };
+    return { kind: 'ok', editingUser, isSelfPayrollOnly: isSelf };
   })();
 
   // Deferred picklists — the form chrome (current values + auth gate) renders
@@ -297,6 +306,36 @@ export async function action({ request, params }: ActionFunctionArgs) {
       );
     }
     return json({ success: true });
+  }
+
+  // Self-serve payroll save (payroll-only mode for one's own profile). Posts to
+  // the self endpoint, which FORCES the target to the authenticated user — no
+  // userId is sent and no role/branch/permission fields are ever touched.
+  if (intent === 'updateMyPayroll') {
+    const payRoleRaw = formData.get('payRoleId')?.toString() ?? '';
+    const res = await apiRequest<unknown>('/trpc/hr.updateMyPayrollProfile', {
+      method: 'POST',
+      cookie,
+      body: {
+        payRoleId: payRoleRaw || null,
+        employmentType: formData.get('employmentType')?.toString() ?? 'STAFF',
+        salaryBasis: formData.get('salaryBasis')?.toString() ?? 'FORMULA_BASED',
+        taxStatus: formData.get('taxStatus')?.toString() ?? 'STANDARD_PAYE',
+        flatMonthlyAmount: formData.get('flatMonthlyAmount')?.toString() ? Number(formData.get('flatMonthlyAmount')) : undefined,
+        annualRent: formData.get('annualRent')?.toString()?.trim()
+          ? Number(formData.get('annualRent'))
+          : formData.has('annualRent')
+            ? null
+            : undefined,
+      },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to update payroll profile') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return redirect(`/hr/users/${userId}`);
   }
 
   // Re-stamp permissions — mirrors the same intent on the user-detail route so
@@ -595,6 +634,14 @@ export default function EditUserRoute() {
                   Back to Users
                 </Link>
               </div>
+            );
+          }
+          if (result.isSelfPayrollOnly) {
+            return (
+              <SelfPayrollEditForm
+                editingUser={result.editingUser}
+                picklistsPromise={picklistsPromise}
+              />
             );
           }
           return (
