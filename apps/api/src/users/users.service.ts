@@ -608,6 +608,29 @@ export class UsersService {
       }
     }
 
+    // Sensitive-permission self-escalation guard (mirrors update()). A
+    // non-sensitive role can still carry sensitive `permissionOverrides` that
+    // get stamped straight into the snapshot below — a non-SuperAdmin must not
+    // be able to mint a puppet account with elevated codes they don't hold.
+    if (input.permissionOverrides !== undefined && actor.role !== 'SUPER_ADMIN') {
+      const actorCodes = new Set(
+        (actor.permissions ?? []).map((c) => canonicalPermissionCode(c)),
+      );
+      const grantedSensitive = Object.entries(
+        (input.permissionOverrides ?? {}) as Record<string, boolean>,
+      )
+        .filter(([, granted]) => granted === true)
+        .map(([code]) => canonicalPermissionCode(code))
+        .filter((code) => this.permissionsService.isSensitivePermission(code))
+        .filter((code) => !actorCodes.has(code));
+      if (grantedSensitive.length > 0) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `Only SuperAdmin can grant these permissions: ${grantedSensitive.join(', ')}.`,
+        });
+      }
+    }
+
     // Phone + branch payload are validated synchronously (no DB) so we can short-circuit
     // before the round-trip pre-flight queries below. This trims ~1 RTT off the timeout
     // budget when the user submits an obviously-invalid form.
@@ -2222,6 +2245,35 @@ export class UsersService {
     }
 
     const overridesPayloadPresent = input.permissionOverrides !== undefined;
+
+    // Sensitive-permission self-escalation guard. `permissionOverrides` flow
+    // straight into the stamped snapshot with no queue (the sensitive-role queue
+    // above fires only on `input.role`). Without this, a non-SuperAdmin holding
+    // `users.update` could grant a puppet account (or, combined with the
+    // resetPassword takeover, themselves) an elevated code like
+    // `rbac.templates.manage` or `mirror.any.manage` and become effective admin.
+    // Rule: only SuperAdmin may GRANT a sensitive permission, and only ones they
+    // themselves hold. Revoking (override=false) and non-sensitive grants are
+    // unaffected, so ordinary HR permission edits keep working.
+    if (overridesPayloadPresent && actor.role !== 'SUPER_ADMIN') {
+      const actorCodes = new Set(
+        (actor.permissions ?? []).map((c) => canonicalPermissionCode(c)),
+      );
+      const grantedSensitive = Object.entries(
+        (input.permissionOverrides ?? {}) as Record<string, boolean>,
+      )
+        .filter(([, granted]) => granted === true)
+        .map(([code]) => canonicalPermissionCode(code))
+        .filter((code) => this.permissionsService.isSensitivePermission(code))
+        .filter((code) => !actorCodes.has(code));
+      if (grantedSensitive.length > 0) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `Only SuperAdmin can grant these permissions: ${grantedSensitive.join(', ')}.`,
+        });
+      }
+    }
+
     const roleChanged = input.role !== undefined && input.role !== beforeRow.role;
     const templateDirectChanged =
       input.roleTemplateId !== undefined &&
@@ -2782,6 +2834,35 @@ export class UsersService {
    * Reset a user's password (admin action).
    */
   async resetPassword(input: ResetPasswordInput, actor: SessionUser) {
+    // Target-role guard — mirrors deactivate()/deletePending(). Without this, any
+    // holder of users.deactivate (HR_MANAGER by default) could reset a SUPER_ADMIN
+    // password and hijack the account. A non-SuperAdmin may never reset an
+    // admin-level account's password, and no one may reset their own here (use the
+    // self-service change-password flow, which verifies the current password).
+    if (input.userId === actor.id) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Use the change-password flow to reset your own password.',
+      });
+    }
+
+    const [targetRoleRow] = await this.db
+      .select({ role: schema.users.role })
+      .from(schema.users)
+      .where(eq(schema.users.id, input.userId))
+      .limit(1);
+
+    if (
+      actor.role !== 'SUPER_ADMIN' &&
+      targetRoleRow &&
+      isAdminLevelRole(targetRoleRow.role as string)
+    ) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only SuperAdmin can reset an admin-level account password.',
+      });
+    }
+
     const passwordHash = await this.authService.hashPassword(input.newPassword);
 
     await withActor(this.db, actor, async (tx) => {

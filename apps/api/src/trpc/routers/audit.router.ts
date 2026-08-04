@@ -4,6 +4,7 @@ import { router, authedProcedure } from '../trpc';
 import type { AuditService } from '../../audit/audit.service';
 import type { ImportHistoryService } from '../../audit/import-history.service';
 import { canAccessGlobalAuditLog, isAdminLevel, shouldScopeGlobalAuditToBranch } from '../../common/authz';
+import { canonicalPermissionCode } from '@yannis/shared';
 import { CacheService } from '../../common/cache/cache.service';
 
 // Factory pattern — same as all other routers
@@ -78,6 +79,12 @@ export const auditRouter = router({
         input.recordId,
         input.page,
         input.limit,
+        {
+          role: ctx.user.role,
+          permissions: ctx.user.permissions,
+          currentBranchId: ctx.user.currentBranchId,
+          effectiveBranchIds: ctx.effectiveBranchIds,
+        },
       );
     }),
 
@@ -127,6 +134,12 @@ export const auditRouter = router({
         input.tableName,
         input.recordId,
         input.asOf,
+        {
+          role: ctx.user.role,
+          permissions: ctx.user.permissions,
+          currentBranchId: ctx.user.currentBranchId,
+          effectiveBranchIds: ctx.effectiveBranchIds,
+        },
       );
     }),
 
@@ -151,7 +164,13 @@ export const auditRouter = router({
    */
   actorNames: authedProcedure
     .input(z.object({ userIds: z.array(z.string().uuid()) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // Every sibling audit read gates on canAccessGlobalAuditLog; this one was
+      // missing it, letting any authed user resolve arbitrary userIds → name +
+      // role + employment history (directory / name-history harvesting).
+      if (!canAccessGlobalAuditLog(ctx.user)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to resolve audit actor names.' });
+      }
       return getAuditService().getUserNameMap(input.userIds);
     }),
 
@@ -260,6 +279,15 @@ export const auditRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      // Was ungated — any authed user could forge import-history rows (arbitrary
+      // resourceType / branchId / counts), polluting the trail. Require the same
+      // `data.import` capability that gates every real import flow (admins bypass).
+      const perms = (ctx.user.permissions ?? []).map((p) => canonicalPermissionCode(p));
+      const canImport =
+        isAdminLevel(ctx.user) || perms.includes(canonicalPermissionCode('data.import'));
+      if (!canImport) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to record imports.' });
+      }
       return getImportHistoryService().recordImport({
         ...input,
         createdBy: ctx.user.id,

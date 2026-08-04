@@ -54,7 +54,7 @@ export const onboardingRouter = router({
   /** Self-read by default; pass `userId` to read someone else's (HR / admin only). */
   get: authedProcedure.input(getOnboardingSchema).query(async ({ input, ctx }) => {
     const targetId = input.userId ?? ctx.user.id;
-    return getService().getForUser(targetId, ctx.user);
+    return getService().getForUser(targetId, ctx.user, ctx.effectiveBranchIds);
   }),
 
   /** Self-update — caller's own onboarding draft. */
@@ -65,7 +65,7 @@ export const onboardingRouter = router({
   /** HR/admin update of any staff member's onboarding (requires hr.onboarding.write). */
   hrUpdate: authedProcedure.input(hrUpdateOnboardingSchema).mutation(async ({ input, ctx }) => {
     const { userId, ...patch } = input;
-    return getService().updateProfile(userId, patch, ctx.user);
+    return getService().updateProfile(userId, patch, ctx.user, ctx.effectiveBranchIds);
   }),
 
   /** Submit — self only (`userId` must match caller when provided). */
@@ -76,7 +76,7 @@ export const onboardingRouter = router({
 
   /** Approve — HR / admin only. Requires the record to already be SUBMITTED. */
   approve: authedProcedure.input(approveOnboardingSchema).mutation(async ({ input, ctx }) => {
-    return getService().approve(input.userId, ctx.user);
+    return getService().approve(input.userId, ctx.user, ctx.effectiveBranchIds);
   }),
 
   /**
@@ -88,14 +88,14 @@ export const onboardingRouter = router({
   completeAndApprove: authedProcedure
     .input(approveOnboardingSchema)
     .mutation(async ({ input, ctx }) => {
-      return getService().hrCompleteAndApprove(input.userId, ctx.user);
+      return getService().hrCompleteAndApprove(input.userId, ctx.user, ctx.effectiveBranchIds);
     }),
 
   /** Send a SUBMITTED packet back to the staff for edits — HR / admin only. */
   requestChanges: authedProcedure
     .input(requestOnboardingChangesSchema)
     .mutation(async ({ input, ctx }) => {
-      return getService().requestChanges(input.userId, input.reason, ctx.user);
+      return getService().requestChanges(input.userId, input.reason, ctx.user, ctx.effectiveBranchIds);
     }),
 
   /** HR overview — staff × onboarding status (service enforces HR onboarding visibility). */

@@ -337,6 +337,7 @@ export class AuditService {
     recordId: string,
     page = 1,
     limit = 20,
+    viewer?: GlobalAuditAccessUser,
   ): Promise<{ rows: AuditEntry[]; total: number }> {
     if (!isAuditableTable(tableName)) {
       throw new TRPCError({
@@ -350,13 +351,23 @@ export class AuditService {
       return { rows: [], total: 0 };
     }
 
+    // Company/branch isolation — same scope the global log applies, but for a
+    // single record by id. Without this a Company-A audit.read viewer could read
+    // any Company-B record's full history simply by passing its id (sweep #39:
+    // get-by-id skipping the scope its list sibling enforces). `null` = the
+    // record is out of the viewer's scope → behave as if it doesn't exist.
+    const scope = this.recordScopePredicate(tableName, viewer);
+    if (scope === null) {
+      return { rows: [], total: 0 };
+    }
+
     const historyTable = `${tableName}_history`;
     const offset = (page - 1) * limit;
 
     // Count total rows
     const countResult = await this.sql.unsafe(
-      `SELECT COUNT(*)::int AS total FROM ${historyTable} WHERE id = $1`,
-      [recordId] as (string | number)[],
+      `SELECT COUNT(*)::int AS total FROM ${historyTable} WHERE id = $1${scope.clause}`,
+      [recordId, ...scope.params] as (string | number)[],
     );
     const total = (countResult[0] as Record<string, unknown> | undefined)?.total ?? 0;
 
@@ -364,15 +375,72 @@ export class AuditService {
     const rows = await this.sql.unsafe(
       `SELECT *
        FROM ${historyTable}
-       WHERE id = $1
+       WHERE id = $1${scope.clause}
        ORDER BY valid_from DESC
-       LIMIT $2 OFFSET $3`,
-      [recordId, limit, offset] as (string | number)[],
+       LIMIT $${scope.params.length + 2} OFFSET $${scope.params.length + 3}`,
+      [recordId, ...scope.params, limit, offset] as (string | number)[],
     );
 
     return {
       rows: rows.map((row) => this.mapHistoryRow(tableName, row as Record<string, unknown>)),
       total: total as number,
+    };
+  }
+
+  /**
+   * Branch/company scope predicate for single-record audit reads
+   * (getRecordHistory / timeTravel), mirroring getGlobalAuditLog's table
+   * filtering. Returns:
+   *  - `{ clause: '', params: [] }` — viewer is org-wide, no restriction.
+   *  - `{ clause: ' AND ...', params: [...] }` — scoped viewer; restrict by the
+   *    record's branch (`primary_branch_id` for users, `branch_id` otherwise).
+   *  - `null` — scoped viewer querying a table that carries no branch column
+   *    (org-wide catalog/settings) → deny entirely (globalLog omits these tables
+   *    for scoped viewers, so by-id must too).
+   *
+   * The returned param placeholders are numbered starting at `startIndex`
+   * (default $2 — callers put the record id in $1). Pass a higher startIndex
+   * when the query already uses later placeholders (e.g. timeTravel's asOf).
+   */
+  private recordScopePredicate(
+    tableName: string,
+    viewer?: GlobalAuditAccessUser,
+    startIndex = 2,
+  ): { clause: string; params: string[] } | null {
+    if (!viewer) return { clause: '', params: [] };
+
+    const scopeToBranch = shouldScopeGlobalAuditToBranch(viewer);
+    const eIds = viewer.effectiveBranchIds;
+    const scopeToGroup = !scopeToBranch && !!eIds && eIds.length > 0;
+
+    if (!scopeToBranch && !scopeToGroup) {
+      // Org-wide viewer (no company selected) — no restriction.
+      return { clause: '', params: [] };
+    }
+
+    const branchCol =
+      tableName === 'users'
+        ? 'primary_branch_id'
+        : HISTORY_TABLES_WITH_BRANCH_ID.has(tableName)
+          ? 'branch_id'
+          : null;
+    // Scoped viewer on an org-wide (branchless) table → deny.
+    if (!branchCol) return null;
+
+    if (scopeToBranch) {
+      const branchId = viewer.currentBranchId ?? null;
+      if (!branchId) return null;
+      return {
+        clause: ` AND ${branchCol} = $${startIndex}::uuid`,
+        params: [branchId],
+      };
+    }
+
+    // Group scope: the record's branch must be one of the company's branches.
+    const placeholders = eIds!.map((_, i) => `$${i + startIndex}::uuid`).join(',');
+    return {
+      clause: ` AND ${branchCol} IN (${placeholders})`,
+      params: [...eIds!],
     };
   }
 
@@ -589,6 +657,7 @@ export class AuditService {
           delete data.valid_from;
           delete data.valid_to;
           delete data.modified_by;
+          this.sanitizeHistoryData(String(rawRow._table_name ?? ''), data);
 
           return {
             id: String(rawRow.id ?? ''),
@@ -620,6 +689,7 @@ export class AuditService {
     tableName: string,
     recordId: string,
     asOf: string,
+    viewer?: GlobalAuditAccessUser,
   ): Promise<Record<string, unknown> | null> {
     if (!isAuditableTable(tableName)) {
       throw new TRPCError({
@@ -633,6 +703,11 @@ export class AuditService {
       return null;
     }
 
+    // Company/branch isolation — same as getRecordHistory. Scope params start at
+    // $3 ($1=recordId, $2=asOf). `null` = record out of the viewer's scope.
+    const scope = this.recordScopePredicate(tableName, viewer, 3);
+    if (scope === null) return null;
+
     const historyTable = `${tableName}_history`;
 
     // Find the version that was active at the given timestamp
@@ -641,9 +716,9 @@ export class AuditService {
        FROM ${historyTable}
        WHERE id = $1
          AND valid_from <= $2::timestamptz
-         AND (valid_to > $2::timestamptz OR valid_to IS NULL)
+         AND (valid_to > $2::timestamptz OR valid_to IS NULL)${scope.clause}
        LIMIT 1`,
-      [recordId, asOf] as (string | number)[],
+      [recordId, asOf, ...scope.params] as (string | number)[],
     );
 
     if (rows.length === 0) {
@@ -652,21 +727,21 @@ export class AuditService {
         `SELECT row_to_json(${tableName}.*) AS _row_data
          FROM ${tableName}
          WHERE id = $1
-           AND valid_from <= $2::timestamptz`,
-        [recordId, asOf] as (string | number)[],
+           AND valid_from <= $2::timestamptz${scope.clause}`,
+        [recordId, asOf, ...scope.params] as (string | number)[],
       );
       if (currentRows.length === 0) return null;
 
       const firstRow = currentRows[0] as Record<string, unknown>;
       const data = (firstRow._row_data ?? {}) as Record<string, unknown>;
       delete data.modified_by;
-      return data;
+      return this.sanitizeHistoryData(tableName, data);
     }
 
     const firstRow = rows[0] as Record<string, unknown>;
     const data = (firstRow._row_data ?? {}) as Record<string, unknown>;
     delete data.modified_by;
-    return data;
+    return this.sanitizeHistoryData(tableName, data);
   }
 
   /**
@@ -714,8 +789,14 @@ export class AuditService {
 
     const row0 = rows[0] as Record<string, unknown>;
     const row1 = rows[1] as Record<string, unknown>;
-    const oldData = (row0._row_data ?? {}) as Record<string, unknown>;
-    const newData = (row1._row_data ?? {}) as Record<string, unknown>;
+    const oldData = this.sanitizeHistoryData(
+      tableName,
+      (row0._row_data ?? {}) as Record<string, unknown>,
+    );
+    const newData = this.sanitizeHistoryData(
+      tableName,
+      (row1._row_data ?? {}) as Record<string, unknown>,
+    );
 
     // Internal fields to skip
     const skip = new Set(['valid_from', 'valid_to', 'modified_by']);
@@ -752,6 +833,54 @@ export class AuditService {
 
   // ── Private helpers ──────────────────────────────────────────
 
+  /**
+   * Strip columns that must never leave the audit read surface, regardless of
+   * viewer. The audit layer returns full raw `*_history` snapshots
+   * (`row_to_json(*)`), and the only response-path redactor
+   * (`financeFieldsMiddleware` → `stripFinanceFields`) covers ONLY cost/margin
+   * columns — so credential- and compensation-grade fields would otherwise pass
+   * straight through to any `audit.read` holder. We strip them here at the single
+   * data-building point shared by every read path.
+   *
+   * - `password_hash`: bcrypt hash → offline cracking. Stripped for EVERYONE
+   *   (must never appear in any response, finance viewers included).
+   * - Payroll compensation columns: salary/tax/net leak to non-finance audit
+   *   viewers. Stripped on the payroll history tables only, so an unrelated
+   *   table that happens to share a column name is unaffected.
+   *
+   * (Raw `customer_phone` is intentionally NOT stripped here — product decision
+   * 2026-08-03 to keep it visible on the audit surface.)
+   */
+  private sanitizeHistoryData(
+    tableName: string,
+    data: Record<string, unknown>,
+  ): Record<string, unknown> {
+    // Credential-grade — never expose the bcrypt hash on any surface.
+    if ('password_hash' in data) delete data.password_hash;
+
+    const PAYROLL_HISTORY_TABLES = new Set(['payroll_pay_roles', 'payroll_batches']);
+    if (PAYROLL_HISTORY_TABLES.has(tableName)) {
+      const SALARY_COLUMNS = [
+        'base_salary',
+        'performance_bonus',
+        'add_ons_total',
+        'deductions_total',
+        'total_payout',
+        'allowances_total',
+        'gross_pay',
+        'paye_tax',
+        'employer_paye_subsidy',
+        'net_pay',
+        'total_net',
+      ];
+      for (const col of SALARY_COLUMNS) {
+        if (col in data) data[col] = null;
+      }
+    }
+
+    return data;
+  }
+
   private mapHistoryRow(tableName: string, row: Record<string, unknown>): AuditEntry {
     const validFrom = row.valid_from as string | null;
     const validTo = row.valid_to as string | null;
@@ -761,6 +890,7 @@ export class AuditService {
     delete data.valid_from;
     delete data.valid_to;
     delete data.modified_by;
+    this.sanitizeHistoryData(tableName, data);
 
     return {
       id: String(row.id ?? ''),

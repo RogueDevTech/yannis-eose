@@ -4203,6 +4203,7 @@ export class OrdersService {
   async getCallablePhoneForViewer(
     orderId: string,
     actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ): Promise<{ phone: string; isDialable: boolean } | null> {
     const voipSetting = await this.settingsService.get('VOIP_ENABLED');
     if (voipSetting?.['enabled'] === true) return null;
@@ -4216,16 +4217,39 @@ export class OrdersService {
     // follow-up order (follow_up_orders) — all three flow through the same CS
     // detail page. Detail APIs seal the raw phone (Lead Fortress), so this
     // authorized channel is the only place the assigned CS can reveal/dial it.
+    //
+    // We also pull the branch columns so the phone is only revealed for orders
+    // this actor can actually SEE. Without the scope check below, any non-marketing
+    // authed user could harvest every customer's phone by iterating order ids
+    // across branches/companies (Pillar-2 IDOR). "As long as they see the order"
+    // = the order's servicing branch is in the actor's scoped branch set.
     const [regular] = await this.db
-      .select({ customerPhone: schema.orders.customerPhone, customerPhoneHash: schema.orders.customerPhoneHash })
+      .select({
+        customerPhone: schema.orders.customerPhone,
+        customerPhoneHash: schema.orders.customerPhoneHash,
+        branchId: schema.orders.branchId,
+        servicingBranchId: schema.orders.servicingBranchId,
+      })
       .from(schema.orders)
       .where(eq(schema.orders.id, orderId))
       .limit(1);
-    let phoneRow: { customerPhone: string | null; customerPhoneHash: string | null } | undefined = regular;
+    let phoneRow:
+      | {
+          customerPhone: string | null;
+          customerPhoneHash: string | null;
+          branchId: string | null;
+          servicingBranchId: string | null;
+        }
+      | undefined = regular;
 
     if (!phoneRow) {
       const [cart] = await this.db
-        .select({ customerPhone: schema.cartOrders.customerPhone, customerPhoneHash: schema.cartOrders.customerPhoneHash })
+        .select({
+          customerPhone: schema.cartOrders.customerPhone,
+          customerPhoneHash: schema.cartOrders.customerPhoneHash,
+          branchId: schema.cartOrders.branchId,
+          servicingBranchId: schema.cartOrders.servicingBranchId,
+        })
         .from(schema.cartOrders)
         .where(eq(schema.cartOrders.id, orderId))
         .limit(1);
@@ -4234,7 +4258,12 @@ export class OrdersService {
 
     if (!phoneRow) {
       const [followUp] = await this.db
-        .select({ customerPhone: schema.followUpOrders.customerPhone, customerPhoneHash: schema.followUpOrders.customerPhoneHash })
+        .select({
+          customerPhone: schema.followUpOrders.customerPhone,
+          customerPhoneHash: schema.followUpOrders.customerPhoneHash,
+          branchId: schema.followUpOrders.branchId,
+          servicingBranchId: schema.followUpOrders.servicingBranchId,
+        })
         .from(schema.followUpOrders)
         .where(eq(schema.followUpOrders.id, orderId))
         .limit(1);
@@ -4242,6 +4271,20 @@ export class OrdersService {
     }
 
     if (!phoneRow) return null;
+
+    // Visibility gate — reveal only for orders this actor is scoped to see.
+    // Global/org-wide viewers pass `effectiveBranchIds == null` (no branch
+    // restriction, exactly like the order lists). Branch-scoped viewers must
+    // have the order's servicing branch (marketing branch as fallback) inside
+    // their scoped set or their currently selected branch.
+    if (effectiveBranchIds != null) {
+      const orderBranch = phoneRow.servicingBranchId ?? phoneRow.branchId;
+      const allowedBranches = new Set(effectiveBranchIds);
+      if (actor.currentBranchId) allowedBranches.add(actor.currentBranchId);
+      // A branchless order (no servicing/marketing branch) can only be seen by
+      // org-wide viewers, who never reach this block — so deny for scoped viewers.
+      if (!orderBranch || !allowedBranches.has(orderBranch)) return null;
+    }
 
     // Phone is always visible once loaded — no status restriction.
     // VOIP gate + marketing-role gate above are sufficient.
