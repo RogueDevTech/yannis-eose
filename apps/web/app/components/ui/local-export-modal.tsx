@@ -93,12 +93,14 @@ export function LocalExportModal({ open, onClose, title, description, rows, colu
   const [format, setFormat] = useState<'csv' | 'pdf' | 'xlsx'>('csv');
   const [selectedColumns, setSelectedColumns] = useState<string[]>(defaultColumns);
   const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setFormat('csv');
     setSelectedColumns(defaultColumns);
     setExporting(false);
+    setError(null);
   }, [open, defaultColumns]);
 
   const selectedColumnDefs = useMemo(
@@ -111,23 +113,25 @@ export function LocalExportModal({ open, onClose, title, description, rows, colu
   const handleGenerate = async () => {
     if (!canGenerate) return;
     setExporting(true);
+    setError(null);
     try {
-    const exportRows = fetchAllRows ? await fetchAllRows() : rows;
-    const csv = buildCsv(exportRows, selectedColumnDefs);
-    const date = new Date().toISOString().split('T')[0] ?? 'export';
-    const filename = `${filenamePrefix}-${date}.csv`;
-    if (format === 'csv') {
-      downloadCsv(filename, csv);
+      const exportRows = fetchAllRows ? await fetchAllRows() : rows;
+      const csv = buildCsv(exportRows, selectedColumnDefs);
+      const date = new Date().toISOString().split('T')[0] ?? 'export';
+      const filename = `${filenamePrefix}-${date}.csv`;
+      if (format === 'csv') {
+        downloadCsv(filename, csv);
+      } else if (format === 'pdf') {
+        downloadPdf(filename, csv);
+      } else {
+        await downloadXlsx(filename, csv);
+      }
       onClose();
-      return;
-    }
-    if (format === 'pdf') {
-      downloadPdf(filename, csv);
-      onClose();
-      return;
-    }
-    await downloadXlsx(filename, csv);
-    onClose();
+    } catch (err) {
+      // Surface the failure instead of silently doing nothing (the old bare
+      // try/finally swallowed fetch/serialization errors, so the button just
+      // reset and no file downloaded).
+      setError(err instanceof Error ? err.message : 'Export failed. Please try again.');
     } finally {
       setExporting(false);
     }
@@ -182,6 +186,10 @@ export function LocalExportModal({ open, onClose, title, description, rows, colu
           })}
         </div>
       </div>
+
+      {error ? (
+        <p className="text-sm text-danger-600 dark:text-danger-400">{error}</p>
+      ) : null}
 
       <div className="flex items-center justify-between gap-2">
         {totalRows != null && totalRows > rows.length ? (
