@@ -21,7 +21,7 @@ import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
-import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
+import { nigeriaDayStart, nigeriaDayEnd, nigeriaCalendarDate } from '../common/utils/date-range';
 import { getManageableRolesForViewer, PayrollBatchService } from './payroll-batch.service';
 import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
 import { computeEarningsFromPlanRules, resolveClawbackPerReturnAmount } from './commission-rules-math';
@@ -622,6 +622,14 @@ export class HrService {
         const clawbackAmount = resolveClawbackPerReturnAmount(plan?.rules);
         if (clawbackAmount <= 0) continue;
 
+        // Earmark the clawback to the month the return happened (Nigeria
+        // calendar) so it lands in exactly one payroll batch — not floating as a
+        // null-month adjustment that shows in EVERY month's Earnings Outlook and
+        // gets swept into whichever batch generates first. Mark it approved: a
+        // return clawback is system-authoritative, and the sweep + preview both
+        // require `approvedBy` (unapproved rows are treated as drafts).
+        const returnPeriodMonth = `${nigeriaCalendarDate(at).slice(0, 7)}-01`;
+
         await tx
           .insert(schema.earningsAdjustments)
           .values({
@@ -629,6 +637,8 @@ export class HrService {
             amount: sql`${-clawbackAmount}::numeric`,
             category: 'CLAWBACK',
             reason: `Return clawback for order ${orderId.slice(0, 8)}`,
+            periodMonth: returnPeriodMonth,
+            approvedBy: actorId,
           });
 
         notifications.push({ staffId, amount: clawbackAmount });
@@ -657,6 +667,34 @@ export class HrService {
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid earnings period dates' });
     }
+
+    // The month this preview represents, as `YYYY-MM-01`. Derive it from the
+    // Nigeria-local calendar, NOT `start.getUTCMonth()`: periodStart is a
+    // WAT-midnight instant (e.g. 2026-08-01T00:00+01:00) whose UTC month is the
+    // PREVIOUS month, so getUTCMonth would earmark the wrong period (off-by-one).
+    // This must match the value the batch sweep compares against
+    // (`pendingAdjustmentForMonth` in payroll-batch.service.ts).
+    const lagosParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Lagos',
+      year: 'numeric',
+      month: '2-digit',
+    }).formatToParts(start);
+    const previewYear = lagosParts.find((p) => p.type === 'year')?.value ?? '';
+    const previewMonthNum = lagosParts.find((p) => p.type === 'month')?.value ?? '';
+    const previewPeriodMonth = `${previewYear}-${previewMonthNum}-01`;
+    // A pending adjustment counts toward THIS preview month when it is approved,
+    // not yet paid (payoutId NULL), and either untargeted (period_month NULL =
+    // "next batch, any month") or earmarked for exactly this month. Mirrors the
+    // batch sweep so the outlook estimate and the generated batch agree, and so
+    // an adjustment earmarked for June stops showing in July/August previews.
+    const pendingForPreviewMonth = and(
+      isNull(schema.earningsAdjustments.payoutId),
+      isNotNull(schema.earningsAdjustments.approvedBy),
+      or(
+        isNull(schema.earningsAdjustments.periodMonth),
+        eq(schema.earningsAdjustments.periodMonth, previewPeriodMonth),
+      ),
+    );
 
     const userRows = await this.db
       .select()
@@ -770,7 +808,7 @@ export class HrService {
           and(
             eq(schema.earningsAdjustments.staffId, staffId),
             inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
-            isNull(schema.earningsAdjustments.payoutId),
+            pendingForPreviewMonth,
           ),
         ),
       this.db
@@ -780,7 +818,7 @@ export class HrService {
           and(
             eq(schema.earningsAdjustments.staffId, staffId),
             eq(schema.earningsAdjustments.category, 'BONUS'),
-            isNull(schema.earningsAdjustments.payoutId),
+            pendingForPreviewMonth,
           ),
         ),
       this.db
@@ -789,7 +827,7 @@ export class HrService {
         .where(
           and(
             eq(schema.earningsAdjustments.staffId, staffId),
-            isNull(schema.earningsAdjustments.payoutId),
+            pendingForPreviewMonth,
             or(
               eq(schema.earningsAdjustments.category, 'EXTRA_SHIFT'),
               eq(schema.earningsAdjustments.category, 'PERFORMANCE'),
