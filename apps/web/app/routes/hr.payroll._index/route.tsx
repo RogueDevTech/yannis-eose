@@ -65,7 +65,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const url = new URL(request.url);
-  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  // Default to "All time". A preset/custom range puts `startDate`/`endDate` in the
+  // URL (and drops `period`), so the only way `periodAllTime` is false is when the
+  // user actually picked a range — the untouched page shows every period.
+  const hasExplicitRange =
+    url.searchParams.has('startDate') || url.searchParams.has('endDate');
+  const periodAllTime = !hasExplicitRange;
   const defaults = currentMonthRange();
   const startDate = url.searchParams.get('startDate') || defaults.startDate;
   const endDate = url.searchParams.get('endDate') || defaults.endDate;
@@ -184,19 +189,58 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'updateAdjustment') {
+    const rawAdjMonth = formData.get('periodMonth')?.toString() ?? '';
+    const adjPeriodMonth = /^\d{4}-\d{2}$/.test(rawAdjMonth)
+      ? `${rawAdjMonth}-01`
+      : /^\d{4}-\d{2}-01$/.test(rawAdjMonth)
+        ? rawAdjMonth
+        : undefined;
+    const res = await apiRequest<unknown>('/trpc/hr.updateAdjustment', {
+      method: 'POST',
+      cookie,
+      body: {
+        adjustmentId: formData.get('adjustmentId')?.toString() ?? '',
+        amount: formData.get('amount')?.toString() ?? '',
+        category: formData.get('category')?.toString() ?? '',
+        reason: formData.get('reason')?.toString() ?? '',
+        ...(adjPeriodMonth ? { periodMonth: adjPeriodMonth } : {}),
+      },
+    });
+    if (!res.ok) return json({ error: extractError(res, 'Failed to update adjustment') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
+  if (intent === 'deleteAdjustment') {
+    const res = await apiRequest<unknown>('/trpc/hr.deleteAdjustment', {
+      method: 'POST',
+      cookie,
+      body: { adjustmentId: formData.get('adjustmentId')?.toString() ?? '' },
+    });
+    if (!res.ok) return json({ error: extractError(res, 'Failed to delete adjustment') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
   // ── Monthly batch lifecycle intents ────────────────────────
 
   if (intent === 'generateBatch') {
     const rawMonth = formData.get('periodMonth')?.toString() ?? '';
     const periodMonth = /^\d{4}-\d{2}$/.test(rawMonth) ? `${rawMonth}-01` : rawMonth;
+    // Only forward branch/department/scope when actually set. Null-scope batches
+    // (org-wide ALL, CONTRACTORS) carry no branch or department; empty strings
+    // would fail the server's uuid/enum validation.
+    const branchId = formData.get('branchId')?.toString() || undefined;
+    const department = formData.get('department')?.toString() || undefined;
+    const scopeType = formData.get('scopeType')?.toString() || undefined;
     const res = await apiRequest<unknown>('/trpc/hr.generateBatch', {
       method: 'POST', cookie,
       body: {
-        branchId: formData.get('branchId')?.toString() ?? '',
-        department: formData.get('department')?.toString() ?? '',
         periodMonth,
         includeContractors: formData.get('includeContractors') === 'on',
         runLabel: formData.get('runLabel')?.toString() || undefined,
+        ...(scopeType ? { scopeType } : {}),
+        ...(branchId ? { branchId } : {}),
+        ...(department ? { department } : {}),
       },
     });
     if (!res.ok) return json({ error: extractError(res, 'Failed to generate batch') }, { status: safeStatus(res.status) });

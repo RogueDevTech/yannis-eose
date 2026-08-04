@@ -7,11 +7,14 @@ import {
   listPayoutsSchema,
   createAdjustmentSchema,
   approveAdjustmentSchema,
+  updateAdjustmentSchema,
+  deleteAdjustmentSchema,
   setSettlementConfigSchema,
   generateBatchSchema,
   generateBatchesBulkSchema,
   previewSelectionSchema,
   submitBatchSchema,
+  deleteBatchSchema,
   approveBatchSchema,
   rejectBatchSchema,
   markBatchPaidSchema,
@@ -248,6 +251,18 @@ export const hrRouter = router({
       return getHrService().approveAdjustment(input, ctx.user.id);
     }),
 
+  updateAdjustment: permissionProcedure('hr.write')
+    .input(updateAdjustmentSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getHrService().updateAdjustment(input, ctx.user.id);
+    }),
+
+  deleteAdjustment: permissionProcedure('hr.write')
+    .input(deleteAdjustmentSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getHrService().deleteAdjustment(input, ctx.user.id);
+    }),
+
   listAdjustments: permissionProcedure('hr.read')
     .input(z.object({ staffId: z.string().uuid().optional() }))
     .query(async ({ input, ctx }) => {
@@ -334,6 +349,12 @@ export const hrRouter = router({
     .input(submitBatchSchema)
     .mutation(async ({ input, ctx }) => {
       return getPayrollBatchService().submitBatch(input, ctx.user);
+    }),
+
+  deleteBatch: authedProcedure
+    .input(deleteBatchSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollBatchService().deleteBatch(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   approveBatch: authedProcedure
@@ -794,7 +815,7 @@ export const hrRouter = router({
         (async () => {
           if (!showOnboardingTab) return null;
           try {
-            return await getOnboardingService().getForUser(userId, actor);
+            return await getOnboardingService().getForUser(userId, actor, ctx.effectiveBranchIds);
           } catch (err: unknown) {
             const trpcErr = err as { code?: string };
             if (trpcErr?.code === 'FORBIDDEN') {

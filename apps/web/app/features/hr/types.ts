@@ -30,6 +30,10 @@ export interface Adjustment {
   reason: string;
   approvedBy: string | null;
   createdAt: string;
+  periodMonth?: string | null;
+  // Status of the batch this adjustment is linked to (null when floating). HR can
+  // edit/delete while floating or in DRAFT/PENDING_HR; PENDING_FINANCE/PAID lock it.
+  batchStatus?: string | null;
 }
 
 export interface HRUser {

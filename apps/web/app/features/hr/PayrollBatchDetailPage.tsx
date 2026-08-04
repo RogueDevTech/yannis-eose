@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { useFetcher, useNavigate } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { PageHeader } from '~/components/ui/page-header';
@@ -549,6 +549,7 @@ export function PayrollBatchDetailPage({
   viewer: ViewerInfo;
 }) {
   const fetcher = useFetcher();
+  const navigate = useNavigate();
   const payrollSurface = useFetcherActionSurface(fetcher);
   const [showAdjust, setShowAdjust] = useState<{ payoutId: string; staffName: string; currentTotal: number } | null>(null);
   // Live amount for the batch-adjustment before/after preview.
@@ -560,6 +561,7 @@ export function PayrollBatchDetailPage({
   const [showApprove, setShowApprove] = useState(false);
   const [showRegenerate, setShowRegenerate] = useState(false);
   const [showSubmit, setShowSubmit] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
   const [payoutSearch, setPayoutSearch] = useState('');
 
   useFetcherToast(fetcher.data, { successMessage: 'Payroll updated' });
@@ -571,10 +573,15 @@ export function PayrollBatchDetailPage({
     setShowMarkPaid(false);
     setShowRegenerate(false);
     setShowSubmit(false);
+    setShowDelete(false);
     // Finance overview / payroll list use cached loaders; clear so Paid vs Awaiting isn't stale.
     invalidateCachedLoader('/admin/finance/overview');
     invalidateCachedLoader('/hr/payroll');
-  }, []);
+    // The batch was deleted — it no longer exists, so leave the detail page.
+    if ((fetcher.data as { deleted?: boolean } | undefined)?.deleted) {
+      navigate('/hr/payroll');
+    }
+  }, [fetcher.data, navigate]);
   useCloseOnFetcherSuccess(fetcher, handleSuccess);
 
   const { batch, payouts: allPayouts, adjustments, allowedTransitions } = detail;
@@ -703,6 +710,17 @@ export function PayrollBatchDetailPage({
           onClick={() => setShowRegenerate(true)}
         >
           Re-generate from latest data
+        </Button>
+      )}
+      {allowedTransitions.includes('DELETE') && (
+        <Button
+          type="button"
+          variant="danger"
+          size="sm"
+          loading={fetcher.state === 'submitting' && showDelete}
+          onClick={() => setShowDelete(true)}
+        >
+          Delete batch
         </Button>
       )}
     </>
@@ -1104,6 +1122,45 @@ export function PayrollBatchDetailPage({
           onConfirm={() => {
             const form = document.getElementById('mark-paid-form') as HTMLFormElement | null;
             if (form) fetcher.submit(form);
+          }}
+        />
+      )}
+
+      {showDelete && (
+        <ConfirmActionModal
+          open
+          onClose={() => setShowDelete(false)}
+          error={payrollSurface.errorMatchingIntent('deleteBatch')}
+          title="Delete this batch"
+          description={
+            <>
+              <p>
+                Permanently delete the {batchScopeLabel(batch.department, batch.scopeType)} batch for{' '}
+                <strong>{formatMonth(batch.periodMonth)}</strong> ({branchName})?
+              </p>
+              <p className="mt-2">
+                {batch.staffCount} staff · Total{' '}
+                <strong>
+                  <NairaPrice amount={Number(batch.totalAmount)} />
+                </strong>
+              </p>
+            </>
+          }
+          details={
+            <ul className="list-disc pl-4 space-y-1 text-sm">
+              <li>All payout lines in this batch are removed</li>
+              <li>This cannot be undone</li>
+              <li>Paid batches cannot be deleted</li>
+            </ul>
+          }
+          confirmLabel="Delete batch"
+          variant="danger"
+          loading={fetcher.state === 'submitting'}
+          onConfirm={() => {
+            fetcher.submit(
+              { intent: 'deleteBatch', batchId: batch.id },
+              { method: 'post' },
+            );
           }}
         />
       )}

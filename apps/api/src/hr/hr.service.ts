@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, desc, gte, lte, isNull, count, sum, inArray, sql, exists } from 'drizzle-orm';
+import { eq, and, or, desc, gte, lte, isNull, isNotNull, count, sum, inArray, sql, exists } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -12,6 +12,8 @@ import type {
   ListPayoutsInput,
   CreateAdjustmentInput,
   ApproveAdjustmentInput,
+  UpdateAdjustmentInput,
+  DeleteAdjustmentInput,
   SetSettlementConfigInput,
   PayrollMetrics,
 } from '@yannis/shared';
@@ -336,6 +338,8 @@ export class HrService {
 
       // Get pending deductions (clawbacks from previous returns + manual deductions/fines).
       // Deduction-category amounts are stored negative, so abs() gives the amount owed.
+      // Approved only (approved_by IS NOT NULL): unapproved/rejected adjustments must
+      // never reach payroll.
       const deductionRows = await tx
         .select({ total: sum(schema.earningsAdjustments.amount) })
         .from(schema.earningsAdjustments)
@@ -343,6 +347,7 @@ export class HrService {
           and(
             eq(schema.earningsAdjustments.staffId, member.id),
             inArray(schema.earningsAdjustments.category, ['CLAWBACK', 'DEDUCTION']),
+            isNotNull(schema.earningsAdjustments.approvedBy),
             isNull(schema.earningsAdjustments.payoutId),
           ),
         );
@@ -356,6 +361,7 @@ export class HrService {
         .where(
           and(
             eq(schema.earningsAdjustments.staffId, member.id),
+            isNotNull(schema.earningsAdjustments.approvedBy),
             isNull(schema.earningsAdjustments.payoutId),
             // Exclude clawbacks — they're handled separately
             eq(schema.earningsAdjustments.category, 'BONUS'),
@@ -369,6 +375,7 @@ export class HrService {
         .where(
           and(
             eq(schema.earningsAdjustments.staffId, member.id),
+            isNotNull(schema.earningsAdjustments.approvedBy),
             isNull(schema.earningsAdjustments.payoutId),
             or(
               eq(schema.earningsAdjustments.category, 'EXTRA_SHIFT'),
@@ -934,6 +941,94 @@ export class HrService {
     return row;
   }
 
+  /**
+   * Batch statuses at which an adjustment is locked from HR edit/delete. Editing is
+   * allowed while the adjustment is floating or sitting in a DRAFT / PENDING_HR
+   * batch; once it advances to Finance review (PENDING_FINANCE) or is PAID, the
+   * numbers are committed and can no longer be corrected here.
+   */
+  private static readonly ADJUSTMENT_LOCKED_STATUSES = ['PENDING_FINANCE', 'PAID'] as const;
+
+  /** Load an adjustment and throw if it can't be corrected (missing or locked in a finalized batch). */
+  private async loadCorrectableAdjustment(adjustmentId: string) {
+    const rows = await this.db
+      .select()
+      .from(schema.earningsAdjustments)
+      .where(eq(schema.earningsAdjustments.id, adjustmentId))
+      .limit(1);
+    const adj = rows[0];
+    if (!adj) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Adjustment not found' });
+    }
+    const batchStatus = await this.payrollBatch.getAdjustmentBatchStatus(adjustmentId);
+    if (batchStatus && (HrService.ADJUSTMENT_LOCKED_STATUSES as readonly string[]).includes(batchStatus)) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message:
+          'This adjustment is already in a payroll batch under Finance review or paid, so it can no longer be edited or deleted.',
+      });
+    }
+    return adj;
+  }
+
+  async updateAdjustment(input: UpdateAdjustmentInput, actorId: string) {
+    const existing = await this.loadCorrectableAdjustment(input.adjustmentId);
+
+    const updated = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .update(schema.earningsAdjustments)
+        .set({
+          amount: sql`${input.amount}::numeric`,
+          category: input.category,
+          reason: input.reason,
+          periodMonth: input.periodMonth ?? null,
+        })
+        .where(eq(schema.earningsAdjustments.id, input.adjustmentId))
+        .returning();
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Adjustment not found' });
+      }
+      return rows[0];
+    });
+
+    // If it's linked to an open (DRAFT / PENDING_HR) batch, re-roll that payout so
+    // the edited amount is reflected. Best-effort: non-fatal on any recompute miss.
+    if (existing.payoutId) {
+      try {
+        await this.payrollBatch.recomputeForAdjustment(existing.payoutId, actorId);
+      } catch (err) {
+        this.logger.warn(
+          `recomputeForAdjustment failed for ${input.adjustmentId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return updated;
+  }
+
+  async deleteAdjustment(input: DeleteAdjustmentInput, actorId: string) {
+    const existing = await this.loadCorrectableAdjustment(input.adjustmentId);
+
+    await withActor(this.db, { id: actorId }, async (tx) => {
+      await tx
+        .delete(schema.earningsAdjustments)
+        .where(eq(schema.earningsAdjustments.id, input.adjustmentId));
+    });
+
+    // Re-roll the payout it was attached to (if any) now that the row is gone.
+    if (existing.payoutId) {
+      try {
+        await this.payrollBatch.recomputeForAdjustment(existing.payoutId, actorId);
+      } catch (err) {
+        this.logger.warn(
+          `recomputeForAdjustment failed after delete of ${input.adjustmentId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return { deleted: true };
+  }
+
   async listAdjustments(staffId?: string, effectiveBranchIds?: string[] | null) {
     const conditions: Parameters<typeof and>[0][] = [];
     if (staffId) {
@@ -965,13 +1060,23 @@ export class HrService {
     }
 
     const adjustments = await this.db
-      .select()
+      .select({
+        adjustment: schema.earningsAdjustments,
+        // Status of the batch this adjustment is linked to (NULL when floating).
+        // Lets the UI decide whether Edit/Delete is still allowed without a second
+        // round-trip. LEFT joins keep floating adjustments in the result.
+        batchStatus: schema.payrollBatches.status,
+      })
       .from(schema.earningsAdjustments)
+      .leftJoin(schema.payoutRecords, eq(schema.payoutRecords.id, schema.earningsAdjustments.payoutId))
+      .leftJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(schema.earningsAdjustments.createdAt))
       .limit(50);
 
-    return adjustments;
+    // Flatten the joined shape back to a single adjustment row + batchStatus so
+    // callers keep the same field access as before, plus the new lock signal.
+    return adjustments.map((r) => ({ ...r.adjustment, batchStatus: r.batchStatus ?? null }));
   }
 
   // ============================================
