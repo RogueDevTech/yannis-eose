@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
-import { eq, and, gte, lte, or, isNull } from 'drizzle-orm';
+import { eq, and, gte, lte, or, isNull, inArray, sum } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
 import { createTestProduct, createTestUser } from '../test/factories/order.factory';
@@ -458,5 +458,111 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
       );
     // Org-wide (null branch) + branch-pinned are distinct slots — both survive.
     expect(all.length).toBe(2);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Late-absorb for CONTRACTORS (fix 2026-08-04): a contractor adjustment created
+  // AFTER its batch was generated must fold into the open null-scope CONTRACTORS
+  // batch. The fixed absorbPendingStaffAdjustment locates the open line by joining
+  // payout_records -> payroll_batches on the party (contractor_id), not by the old
+  // staff-only role -> department derivation (which returned nothing for
+  // contractors and never matched a null branch/department batch).
+  // ---------------------------------------------------------------------------
+
+  it('locates a contractor payout line in a null-scope CONTRACTORS batch (late-absorb join)', async () => {
+    const hrActor = await createTestUser(db as any, { role: 'HR_MANAGER' });
+    await setSessionActor(pgClient, hrActor.id);
+
+    // An org-wide (null branch + department) CONTRACTORS batch for the month.
+    const batchRows = await db
+      .insert(schema.payrollBatches)
+      .values({
+        periodMonth: '2026-08-01',
+        branchId: null,
+        department: null,
+        scopeType: 'CONTRACTORS',
+        status: 'DRAFT',
+      })
+      .returning({ id: schema.payrollBatches.id });
+    const batchId = batchRows[0]!.id;
+
+    // A contractor with a payout line already in that batch.
+    const contractorRows = await db
+      .insert(schema.payrollContractors)
+      .values({ name: 'Kingstech Network Ltd', monthlyFee: '432818' })
+      .returning({ id: schema.payrollContractors.id });
+    const contractorId = contractorRows[0]!.id;
+
+    const payoutRows = await db
+      .insert(schema.payoutRecords)
+      .values({
+        batchId,
+        contractorId,
+        staffId: null,
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-31'),
+        baseSalary: '381625',
+        addOnsTotal: '51193',
+        deductionsTotal: '0',
+        grossPay: '432818',
+        totalPayout: '432818',
+        status: 'DRAFT',
+      })
+      .returning({ id: schema.payoutRecords.id });
+    const payoutId = payoutRows[0]!.id;
+
+    // A late, APPROVED, month-earmarked, still-floating contractor deduction —
+    // exactly the row the fixed helper must fold in.
+    const adjRows = await db
+      .insert(schema.earningsAdjustments)
+      .values({
+        contractorId,
+        staffId: null,
+        category: 'DEDUCTION',
+        amount: '-51193',
+        reason: 'Refund',
+        periodMonth: '2026-08-01',
+        approvedBy: hrActor.id,
+      })
+      .returning({ id: schema.earningsAdjustments.id });
+    const adjId = adjRows[0]!.id;
+
+    // Mirror the fixed absorbPendingStaffAdjustment line-locate query: find the
+    // party's line in an OPEN batch for the earmarked month via the payout->batch
+    // join, keyed on contractor_id.
+    const line = await db
+      .select({ payoutId: schema.payoutRecords.id, batchId: schema.payrollBatches.id })
+      .from(schema.payoutRecords)
+      .innerJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
+      .where(
+        and(
+          eq(schema.payoutRecords.contractorId, contractorId),
+          eq(schema.payrollBatches.periodMonth, '2026-08-01'),
+          inArray(schema.payrollBatches.status, ['DRAFT', 'PENDING_HR']),
+        ),
+      )
+      .limit(1);
+
+    // The contractor's open-batch line is found (old staff-only path found none).
+    expect(line.length).toBe(1);
+    expect(line[0]!.payoutId).toBe(payoutId);
+    expect(line[0]!.batchId).toBe(batchId);
+
+    // Linking the deduction to that line makes it eligible for recompute; the
+    // add-on and deduction net to zero (net returns to base 381,625).
+    await db
+      .update(schema.earningsAdjustments)
+      .set({ payoutId })
+      .where(eq(schema.earningsAdjustments.id, adjId));
+
+    const linked = await db
+      .select({ category: schema.earningsAdjustments.category, total: sum(schema.earningsAdjustments.amount) })
+      .from(schema.earningsAdjustments)
+      .where(eq(schema.earningsAdjustments.payoutId, payoutId))
+      .groupBy(schema.earningsAdjustments.category);
+    const deductionTotal = linked
+      .filter((r) => r.category === 'DEDUCTION' || r.category === 'CLAWBACK')
+      .reduce((acc, r) => acc + Math.abs(Number(r.total ?? 0)), 0);
+    expect(deductionTotal).toBe(51193);
   });
 });

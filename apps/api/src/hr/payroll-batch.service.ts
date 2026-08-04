@@ -3268,10 +3268,17 @@ export class PayrollBatchService {
         const payout = payoutRows[0];
         if (!payout) throw new TRPCError({ code: 'NOT_FOUND', message: 'Payout not in this batch' });
 
-        if (!payout.staffId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot adjust contractor payout lines this way' });
+        // A payout line targets exactly one party — a staff user (staffId) or an
+        // external contractor (contractorId). Attach the adjustment to whichever
+        // this line carries so the earnings_adjustments CHECK (exactly one of
+        // staff/contractor) is satisfied. recomputePayoutTotals is party-agnostic.
+        if (!payout.staffId && !payout.contractorId) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Payout line has no staff or contractor to adjust.' });
+        }
 
         await tx.insert(schema.earningsAdjustments).values({
           staffId: payout.staffId,
+          contractorId: payout.contractorId,
           payoutId: payout.id,
           amount: sql`${input.amount.toFixed(2)}::numeric`,
           category: input.category,
@@ -3289,91 +3296,92 @@ export class PayrollBatchService {
 
   /**
    * "Keep absorbing until it leaves HR": when a standalone adjustment
-   * (HrService.createAdjustment — the Deduct Salary / Add-on toolbar path) is
-   * created and an OPEN batch already exists for that staff member's month, fold
-   * it into that batch's payout right away instead of leaving it floating for the
-   * next month's run.
+   * (HrService.createAdjustment / approveAdjustment — the Deduct Salary / Add-on
+   * toolbar path) is approved and an OPEN batch already has a payout line for that
+   * party's month, fold it into that line right away instead of leaving it
+   * floating for the next month's run.
+   *
+   * Works for both staff and contractors: we locate the open batch by the party's
+   * existing payout line (join on payout_records → payroll_batches) rather than
+   * re-deriving branch/department/scope. This naturally covers null-scope
+   * CONTRACTORS/ALL batches and only fires when the party is already in the batch.
    *
    * Scope is deliberately DRAFT + PENDING_HR only — the same window
    * `addBatchAdjustment` allows. Once a batch reaches Finance we never mutate the
    * payout underneath them (Financial Truth / SoD boundary): the adjustment stays
    * floating and folds into a later batch for its month.
    *
-   * Staff only. Contractors have no role→department mapping here; their pending
-   * adjustments fold in at generation time. Best-effort: any miss just leaves the
-   * adjustment pending, which the next generate/recalculate sweeps correctly.
+   * Only APPROVED, un-linked, month-earmarked adjustments qualify — matching the
+   * `pendingAdjustmentForMonth` predicate used at generation, so absorption never
+   * folds in a row that a fresh generate would exclude. Best-effort: any miss just
+   * leaves the adjustment pending, which the next generate/recalculate sweeps.
+   *
+   * `actorId` is the HR user performing the create/approve — used for audit
+   * attribution (the party may be an external contractor with no users row).
    *
    * Returns true if the adjustment was attached to an open batch.
    */
-  async absorbPendingStaffAdjustment(adjustmentId: string): Promise<boolean> {
+  async absorbPendingStaffAdjustment(adjustmentId: string, actorId: string): Promise<boolean> {
     const adjRows = await this.db
       .select()
       .from(schema.earningsAdjustments)
       .where(eq(schema.earningsAdjustments.id, adjustmentId))
       .limit(1);
     const adj = adjRows[0];
-    // Only un-linked staff adjustments earmarked for a specific month can target
-    // an existing open batch. NULL-month adjustments keep legacy behavior (swept
-    // at generation), matching the pendingAdjustmentForMonth predicate.
-    if (!adj || !adj.staffId || adj.payoutId || !adj.periodMonth) return false;
+    // Must mirror pendingAdjustmentForMonth: approved, unlinked, month-earmarked.
+    // NULL-month adjustments keep legacy behavior (swept at generation only).
+    if (!adj || !adj.approvedBy || adj.payoutId || !adj.periodMonth) return false;
+    // Exactly one party per adjustment (staff XOR contractor).
+    const partyStaffId = adj.staffId ?? null;
+    const partyContractorId = adj.contractorId ?? null;
+    if (!partyStaffId && !partyContractorId) return false;
 
-    const staffRows = await this.db
-      .select({ role: schema.users.role, branchId: schema.users.primaryBranchId })
-      .from(schema.users)
-      .where(eq(schema.users.id, adj.staffId))
+    const partyMatch = partyStaffId
+      ? eq(schema.payoutRecords.staffId, partyStaffId)
+      : eq(schema.payoutRecords.contractorId, partyContractorId as string);
+
+    // Find the party's line in an OPEN batch for the earmarked month, joining the
+    // payout to its batch so this works for branch/department AND null-scope
+    // (CONTRACTORS/ALL) batches alike.
+    const lineRows = await this.db
+      .select({
+        payoutId: schema.payoutRecords.id,
+        batchId: schema.payrollBatches.id,
+        branchId: schema.payrollBatches.branchId,
+      })
+      .from(schema.payoutRecords)
+      .innerJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
+      .where(
+        and(
+          partyMatch,
+          eq(schema.payrollBatches.periodMonth, adj.periodMonth),
+          inArray(schema.payrollBatches.status, ['DRAFT', 'PENDING_HR']),
+        ),
+      )
       .limit(1);
-    const staff = staffRows[0];
-    if (!staff?.branchId) return false;
+    const line = lineRows[0];
+    // Party has no line in an open batch for this month (e.g. joined after
+    // generation) — leave the adjustment pending; recalculate will pick them up.
+    if (!line) return false;
 
-    const department = (Object.keys(DEPARTMENT_ROLES) as PayrollDepartment[]).find((d) =>
-      DEPARTMENT_ROLES[d].includes(staff.role),
-    );
-    if (!department) return false;
+    const run = async (tx: TxLike) => {
+      await tx
+        .update(schema.earningsAdjustments)
+        .set({ payoutId: line.payoutId })
+        .where(eq(schema.earningsAdjustments.id, adjustmentId));
 
-    return withActorAndBranch(
-      this.db,
-      { id: adj.staffId, currentBranchId: staff.branchId },
-      async (tx) => {
-        const batchRows = await tx
-          .select({ id: schema.payrollBatches.id })
-          .from(schema.payrollBatches)
-          .where(
-            and(
-              eq(schema.payrollBatches.branchId, staff.branchId as string),
-              eq(schema.payrollBatches.periodMonth, adj.periodMonth as string),
-              eq(schema.payrollBatches.department, department),
-              inArray(schema.payrollBatches.status, ['DRAFT', 'PENDING_HR']),
-            ),
-          )
-          .limit(1);
-        const batch = batchRows[0];
-        if (!batch) return false;
+      await this.recomputePayoutTotals(tx, line.payoutId);
+      await this.recomputeBatchTotals(tx, line.batchId);
+      return true;
+    };
 
-        const payoutRows = await tx
-          .select({ id: schema.payoutRecords.id })
-          .from(schema.payoutRecords)
-          .where(
-            and(
-              eq(schema.payoutRecords.batchId, batch.id),
-              eq(schema.payoutRecords.staffId, adj.staffId as string),
-            ),
-          )
-          .limit(1);
-        const payout = payoutRows[0];
-        // Staff has no line in this batch (e.g. joined after generation) — leave
-        // the adjustment pending; recalculate will pick them up.
-        if (!payout) return false;
-
-        await tx
-          .update(schema.earningsAdjustments)
-          .set({ payoutId: payout.id })
-          .where(eq(schema.earningsAdjustments.id, adjustmentId));
-
-        await this.recomputePayoutTotals(tx, payout.id);
-        await this.recomputeBatchTotals(tx, batch.id);
-        return true;
-      },
-    );
+    // Attribute to the acting HR user. Carry the batch's branch when it has one
+    // (branch/department batches write branch-scoped rows); null-scope contractor
+    // batches have no branch, so a plain actor tx is correct there.
+    if (line.branchId) {
+      return withActorAndBranch(this.db, { id: actorId, currentBranchId: line.branchId }, run);
+    }
+    return withActor(this.db, { id: actorId }, run);
   }
 
   /**
