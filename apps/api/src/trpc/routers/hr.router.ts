@@ -370,7 +370,9 @@ export const hrRouter = router({
       return getPayrollBatchService().rejectBatch(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
-  markBatchPaid: permissionProcedure('finance.disburse')
+  // finance.disburse (Finance) OR payroll.run.disburse (HR completes its own
+  // payroll run) — the payroll-scoped key does NOT grant funding approvals.
+  markBatchPaid: permissionProcedure('finance.disburse', 'payroll.run.disburse')
     .input(markBatchPaidSchema)
     .mutation(async ({ input, ctx }) => {
       return getPayrollBatchService().markBatchPaid(input, ctx.user, ctx.effectiveBranchIds);
@@ -430,7 +432,8 @@ export const hrRouter = router({
       return getPayrollBatchService().exportPayRunDraft(input.batchId, ctx.user);
     }),
 
-  exportBankUpload: permissionProcedure('finance.disburse')
+  // finance.disburse (Finance) OR payroll.run.disburse (HR completes payroll).
+  exportBankUpload: permissionProcedure('finance.disburse', 'payroll.run.disburse')
     .input(exportBankUploadSchema)
     .query(async ({ input, ctx }) => {
       return getPayrollBatchService().exportBankUpload(input, ctx.user, ctx.effectiveBranchIds);

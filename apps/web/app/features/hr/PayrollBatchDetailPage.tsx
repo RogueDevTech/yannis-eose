@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { useFetcher, useNavigate } from '@remix-run/react';
+import { Link, useFetcher, useNavigate } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { PageHeader } from '~/components/ui/page-header';
@@ -18,6 +18,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { LocalExportModal } from '~/components/ui/local-export-modal';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -73,8 +74,8 @@ export interface BatchDetail {
   allowedTransitions: string[];
 }
 
-type BatchPayoutLine = BatchDetail['payouts'][number];
-type BatchAdjustment = BatchDetail['adjustments'][number];
+export type BatchPayoutLine = BatchDetail['payouts'][number];
+export type BatchAdjustment = BatchDetail['adjustments'][number];
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -124,45 +125,67 @@ function moneyOrDash(amount: number): ReactNode {
   return <NairaPrice amount={amount} />;
 }
 
+/**
+ * Compact role tag for the payouts table. Renders the system role as a colored
+ * chip (or a neutral "Contractor" chip when the payout line has no staff role —
+ * external agency contractors carry no role). On hover it reveals a small
+ * tooltip with the full role label and the pay role, so the dense table row
+ * stays scannable while the detail is one hover away.
+ */
+function StaffRoleTag({
+  role,
+  payRoleName,
+}: {
+  role: string | null;
+  payRoleName?: string | null;
+}) {
+  const isContractor = !role;
+  const tooltip = isContractor
+    ? payRoleName?.trim()
+      ? `Contractor · ${payRoleName.trim()}`
+      : 'External contractor'
+    : payRoleName?.trim()
+      ? `${formatRole(role)} · ${payRoleName.trim()}`
+      : formatRole(role);
+
+  return (
+    <span className="group/roletag relative inline-flex shrink-0">
+      {isContractor ? (
+        <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-2xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+          Contractor
+        </span>
+      ) : (
+        <RoleBadge role={role} size="sm" variant="chip" />
+      )}
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-app-fg px-2 py-1 text-2xs font-medium text-app-bg opacity-0 shadow-lg transition-opacity duration-100 group-hover/roletag:opacity-100"
+      >
+        {tooltip}
+      </span>
+    </span>
+  );
+}
+
 // ── Column builder ─────────────────────────────────────────────
 
 function buildBatchPayoutColumns(args: {
   batch: BatchDetail['batch'];
-  adjustmentsByPayout: Map<string, BatchDetail['adjustments']>;
   viewer: ViewerInfo;
-  onView: (payout: BatchPayoutLine) => void;
   onAdjust: (payoutId: string, staffName: string, currentTotal: number) => void;
 }): CompactTableColumn<BatchPayoutLine>[] {
-  const { batch, adjustmentsByPayout, viewer, onView, onAdjust } = args;
+  const { batch, viewer, onAdjust } = args;
   const canAdjust = batch.status === 'PENDING_HR' && canReview(viewer);
   const cols: CompactTableColumn<BatchPayoutLine>[] = [
     {
       key: 'staff',
       header: 'Staff',
-      render: (p) => {
-        const adj = adjustmentsByPayout.get(p.id) ?? [];
-        return (
-          <div>
-            <p className="font-medium text-app-fg">{p.staffName}</p>
-            {p.staffRole && <RoleBadge role={p.staffRole} size="sm" />}
-            {adj.length > 0 && (
-              <ul className="mt-1 space-y-0.5">
-                {adj.map((a) => (
-                  <li key={a.id} className="text-xs text-app-fg-muted">
-                    <span className={Number(a.amount) < 0 ? 'text-danger-600' : 'text-success-600'}>
-                      {Number(a.amount) < 0 ? '\u2212' : '+'}
-                      <NairaPrice amount={Math.abs(Number(a.amount))} />
-                    </span>
-                    <span className="ml-1 text-app-fg-muted">
-                      {'\u00b7'} {a.category} {'\u00b7'} {a.reason}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        );
-      },
+      render: (p) => (
+        <div className="flex items-center gap-2 min-w-0">
+          <p className="font-medium text-app-fg truncate">{p.staffName}</p>
+          <StaffRoleTag role={p.staffRole} payRoleName={p.payRoleName} />
+        </div>
+      ),
     },
     {
       key: 'base',
@@ -236,12 +259,6 @@ function buildBatchPayoutColumns(args: {
       ),
     },
     {
-      key: 'status',
-      header: 'Status',
-      align: 'right',
-      render: (p) => <StatusBadge status={p.status} />,
-    },
-    {
       key: 'actions',
       header: '',
       mobileLabel: 'Actions',
@@ -251,7 +268,9 @@ function buildBatchPayoutColumns(args: {
       hideable: false,
       render: (p) => (
         <div className="flex items-center justify-end gap-1.5">
-          <CompactTableActionButton onClick={() => onView(p)}>View</CompactTableActionButton>
+          <CompactTableActionButton to={`/hr/payroll-batch/${batch.id}/payout/${p.id}`}>
+            View
+          </CompactTableActionButton>
           {canAdjust ? (
             <CompactTableActionButton onClick={() => onAdjust(p.id, p.staffName, Number(p.totalPayout ?? p.netPay ?? 0))}>
               + Adjust
@@ -264,14 +283,17 @@ function buildBatchPayoutColumns(args: {
   return cols;
 }
 
-function PayoutDetailModal({
+/**
+ * Full payout breakdown — staff/role, pay math, bonus lines, adjustments, and
+ * bank details. Rendered as page sections on the payout detail route (formerly
+ * a modal). Pure presentation; the route supplies the payout + its adjustments.
+ */
+export function PayoutDetailSections({
   payout,
   adjustments,
-  onClose,
 }: {
   payout: BatchPayoutLine;
   adjustments: BatchAdjustment[];
-  onClose: () => void;
 }) {
   const bonusLines = parseBonusLines(payout.bonusBreakdown);
   const proration = (() => {
@@ -290,7 +312,13 @@ function PayoutDetailModal({
     { label: 'Staff', value: payout.staffName },
     {
       label: 'Role',
-      value: payout.staffRole ? formatRole(payout.staffRole) : 'N/A',
+      value: payout.staffRole ? (
+        <RoleBadge role={payout.staffRole} size="sm" variant="chip" />
+      ) : (
+        <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-2xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+          Contractor
+        </span>
+      ),
     },
     {
       label: 'Pay role',
@@ -383,39 +411,23 @@ function PayoutDetailModal({
     : [];
 
   return (
-    <Modal
-      open
-      onClose={onClose}
-      maxWidth="max-w-lg"
-      backdropBlur
-      contentClassName="p-5 space-y-4 max-h-[90dvh] overflow-y-auto"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-app-fg">Payout details</h3>
-          <p className="mt-0.5 text-sm text-app-fg-muted">{payout.staffName}</p>
-        </div>
-        <Button type="button" variant="secondary" size="sm" onClick={onClose}>
-          Close
-        </Button>
-      </div>
-
-      <div className="space-y-1">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+      <div className="card space-y-1">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Staff</h4>
         <DescriptionList items={summaryItems} layout="stacked" divided />
       </div>
 
-      <div className="space-y-1">
+      <div className="card space-y-1">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Pay breakdown</h4>
         <DescriptionList items={payItems} layout="stacked" divided />
       </div>
 
       {bonusLines.length > 0 ? (
-        <div className="space-y-2">
+        <div className="card space-y-2">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
             Bonus lines
           </h4>
-          <ul className="space-y-1.5 rounded-md border border-app-border px-3 py-2">
+          <ul className="space-y-1.5">
             {bonusLines.map((line, idx) => (
               <li key={`${line.label}-${idx}`} className="flex justify-between gap-3 text-sm">
                 <span className="text-app-fg-muted">{line.label}</span>
@@ -429,11 +441,11 @@ function PayoutDetailModal({
       ) : null}
 
       {adjustments.length > 0 ? (
-        <div className="space-y-2">
+        <div className="card space-y-2">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
             Adjustments
           </h4>
-          <ul className="space-y-2 rounded-md border border-app-border px-3 py-2">
+          <ul className="space-y-2">
             {adjustments.map((a) => (
               <li key={a.id} className="text-sm">
                 <div className="flex justify-between gap-3">
@@ -457,14 +469,14 @@ function PayoutDetailModal({
       ) : null}
 
       {hasBank ? (
-        <div className="space-y-1">
+        <div className="card space-y-1">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
             Bank details
           </h4>
           <DescriptionList items={bankItems} layout="stacked" divided />
         </div>
       ) : null}
-    </Modal>
+    </div>
   );
 }
 
@@ -555,13 +567,13 @@ export function PayrollBatchDetailPage({
   // Live amount for the batch-adjustment before/after preview.
   const [adjustAmount, setAdjustAmount] = useState('');
   const [adjustCategory, setAdjustCategory] = useState('BONUS');
-  const [viewingPayout, setViewingPayout] = useState<BatchPayoutLine | null>(null);
   const [showReject, setShowReject] = useState(false);
   const [showMarkPaid, setShowMarkPaid] = useState(false);
   const [showApprove, setShowApprove] = useState(false);
   const [showRegenerate, setShowRegenerate] = useState(false);
   const [showSubmit, setShowSubmit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [payoutSearch, setPayoutSearch] = useState('');
 
   useFetcherToast(fetcher.data, { successMessage: 'Payroll updated' });
@@ -607,19 +619,10 @@ export function PayrollBatchDetailPage({
     }
     fetcher.submit(fd, { method: 'post' });
   }, [batch.branchId, batch.department, batch.scopeType, batch.periodMonth, fetcher]);
-  const adjustmentsByPayout = new Map<string, typeof adjustments>();
-  for (const a of adjustments) {
-    if (!a.payoutId) continue;
-    const arr = adjustmentsByPayout.get(a.payoutId) ?? [];
-    arr.push(a);
-    adjustmentsByPayout.set(a.payoutId, arr);
-  }
 
   const payoutColumns = buildBatchPayoutColumns({
     batch,
-    adjustmentsByPayout,
     viewer,
-    onView: (payout) => setViewingPayout(payout),
     onAdjust: (payoutId, staffName, currentTotal) => {
       setAdjustAmount('');
       setAdjustCategory('BONUS');
@@ -639,41 +642,11 @@ export function PayrollBatchDetailPage({
   const canRegenerateDraft =
     batch.status === 'DRAFT' && canPrepareDept(viewer, batch.department, batch.branchId);
 
-  /** Header: only draft prep actions. Approve / reject / mark paid live in the footer. */
+  /** All workflow actions live in the top-right header now (desktop inline + mobile sheet). */
   const showHeaderWorkflowActions =
-    allowedTransitions.includes('SUBMIT') || canRegenerateDraft;
-
-  const showFooterWorkflowActions =
     allowedTransitions.length > 0 || canRegenerateDraft;
 
   const headerWorkflowActions = (
-    <>
-      {allowedTransitions.includes('SUBMIT') && (
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          loading={fetcher.state === 'submitting' && showSubmit}
-          onClick={() => setShowSubmit(true)}
-        >
-          Submit to HR
-        </Button>
-      )}
-      {canRegenerateDraft && (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          loading={fetcher.state === 'submitting' && showRegenerate}
-          onClick={() => setShowRegenerate(true)}
-        >
-          Re-generate from latest data
-        </Button>
-      )}
-    </>
-  );
-
-  const footerWorkflowActions = (
     <>
       {allowedTransitions.includes('SUBMIT') && (
         <Button
@@ -741,17 +714,36 @@ export function PayrollBatchDetailPage({
               <div className="flex items-center gap-2 flex-wrap">
                 <PageRefreshButton />
                 <StatusBadge status={batch.status} />
+                {allPayouts.length > 0 && (
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowExport(true)}>
+                    Export
+                  </Button>
+                )}
                 {showHeaderWorkflowActions ? headerWorkflowActions : null}
               </div>
             }
             sheet={({ closeSheet }) => (
-              <div className="space-y-2">
+              <div className="space-y-2 [&_button]:w-full [&_button]:justify-center [&_button]:h-12">
+                {allPayouts.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full justify-center h-12"
+                    onClick={() => {
+                      closeSheet();
+                      setShowExport(true);
+                    }}
+                  >
+                    Export
+                  </Button>
+                )}
                 {showHeaderWorkflowActions ? (
                   <div className="space-y-2 [&_form]:block [&_form]:w-full [&_button]:w-full [&_button]:justify-center [&_button]:h-12">
                     {allowedTransitions.includes('SUBMIT') && (
                       <Button
                         type="button"
-                        variant="secondary"
+                        variant="primary"
                         size="sm"
                         className="w-full justify-center h-12"
                         loading={fetcher.state === 'submitting' && showSubmit}
@@ -761,6 +753,48 @@ export function PayrollBatchDetailPage({
                         }}
                       >
                         Submit to HR
+                      </Button>
+                    )}
+                    {allowedTransitions.includes('APPROVE') && (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        className="w-full justify-center h-12"
+                        onClick={() => {
+                          closeSheet();
+                          setShowApprove(true);
+                        }}
+                      >
+                        Approve & send to Finance
+                      </Button>
+                    )}
+                    {allowedTransitions.includes('MARK_PAID') && (
+                      <Button
+                        type="button"
+                        variant="success"
+                        size="sm"
+                        className="w-full justify-center h-12"
+                        onClick={() => {
+                          closeSheet();
+                          setShowMarkPaid(true);
+                        }}
+                      >
+                        Mark Paid
+                      </Button>
+                    )}
+                    {allowedTransitions.includes('REJECT') && (
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        className="w-full justify-center h-12"
+                        onClick={() => {
+                          closeSheet();
+                          setShowReject(true);
+                        }}
+                      >
+                        Reject & send back
                       </Button>
                     )}
                     {canRegenerateDraft && (
@@ -775,6 +809,21 @@ export function PayrollBatchDetailPage({
                         }}
                       >
                         Re-generate from latest data
+                      </Button>
+                    )}
+                    {allowedTransitions.includes('DELETE') && (
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        className="w-full justify-center h-12"
+                        loading={fetcher.state === 'submitting' && showDelete}
+                        onClick={() => {
+                          closeSheet();
+                          setShowDelete(true);
+                        }}
+                      >
+                        Delete batch
                       </Button>
                     )}
                   </div>
@@ -862,19 +911,19 @@ export function PayrollBatchDetailPage({
             rows={payouts}
             rowKey={(p) => p.id}
             renderMobileCard={(p) => (
-              <button
-                type="button"
-                onClick={() => setViewingPayout(p)}
-                className="w-full text-left p-4 space-y-2 hover:bg-app-hover transition-colors"
+              <Link
+                to={`/hr/payroll-batch/${batch.id}/payout/${p.id}`}
+                className="block w-full text-left p-4 space-y-2 hover:bg-app-hover transition-colors"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-medium text-app-fg text-sm">{p.staffName}</p>
-                    {p.staffRole ? (
-                      <p className="text-xs text-app-fg-muted mt-0.5">{formatRole(p.staffRole)}</p>
-                    ) : null}
-                  </div>
-                  <StatusBadge status={p.status} />
+                  <p className="font-medium text-app-fg text-sm truncate">{p.staffName}</p>
+                  {p.staffRole ? (
+                    <RoleBadge role={p.staffRole} size="sm" variant="chip" />
+                  ) : (
+                    <span className="inline-flex shrink-0 items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-2xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                      Contractor
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-app-fg-muted">Net</span>
@@ -882,27 +931,13 @@ export function PayrollBatchDetailPage({
                     <NairaPrice amount={Number(p.totalPayout ?? p.netPay)} />
                   </span>
                 </div>
-              </button>
+              </Link>
             )}
           />
         )}
       </div>
 
-      {showFooterWorkflowActions && (
-        <div className="flex flex-wrap gap-2">
-          {footerWorkflowActions}
-        </div>
-      )}
-
       {/* Sub-modals */}
-
-      {viewingPayout ? (
-        <PayoutDetailModal
-          payout={viewingPayout}
-          adjustments={adjustmentsByPayout.get(viewingPayout.id) ?? []}
-          onClose={() => setViewingPayout(null)}
-        />
-      ) : null}
 
       {showAdjust && (() => {
         const isDeduct = adjustCategory === 'DEDUCTION' || adjustCategory === 'CLAWBACK';
@@ -1164,6 +1199,39 @@ export function PayrollBatchDetailPage({
           }}
         />
       )}
+
+      <LocalExportModal
+        open={showExport}
+        onClose={() => setShowExport(false)}
+        title="Export payout lines"
+        description="Choose format and columns for this batch's staff payouts."
+        filenamePrefix={`payroll-${batchScopeLabel(batch.department, batch.scopeType).toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${batch.periodMonth.slice(0, 7)}`}
+        rows={allPayouts.map((p) => ({
+          staff: p.staffName,
+          role: p.staffRole ? formatRole(p.staffRole) : (p.payRoleName?.trim() || 'Contractor'),
+          base: Number(p.baseSalary),
+          bonus: Number(p.performanceBonus),
+          addOns: Number(p.addOnsTotal),
+          deductions: Number(p.deductionsTotal),
+          gross: Number(p.grossPay ?? p.totalPayout),
+          paye: Number(p.payeTax ?? 0),
+          net: Number(p.totalPayout ?? p.netPay),
+          status: p.status,
+        }))}
+        columns={[
+          { key: 'staff', label: 'Staff' },
+          { key: 'role', label: 'Role' },
+          { key: 'base', label: 'Base (₦)' },
+          { key: 'bonus', label: 'Bonus (₦)' },
+          { key: 'addOns', label: 'Add-ons (₦)' },
+          { key: 'deductions', label: 'Deductions (₦)' },
+          { key: 'gross', label: 'Gross (₦)' },
+          { key: 'paye', label: 'PAYE (₦)' },
+          { key: 'net', label: 'Net (₦)' },
+          { key: 'status', label: 'Status' },
+        ]}
+        defaultColumns={['staff', 'role', 'base', 'bonus', 'addOns', 'deductions', 'gross', 'paye', 'net', 'status']}
+      />
     </div>
   );
 }
