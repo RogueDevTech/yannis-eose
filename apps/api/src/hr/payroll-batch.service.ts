@@ -3311,7 +3311,7 @@ export class PayrollBatchService {
   }
 
   // ============================================
-  // HR adjustments during PENDING_HR review
+  // HR edits — open until Finance marks the batch paid (see isBatchOpenForHrEdit)
   // ============================================
 
   async addBatchAdjustment(input: AddBatchAdjustmentInput, actor: SessionUser) {
@@ -4007,9 +4007,6 @@ export class PayrollBatchService {
     }
     if (batch.status === 'PENDING_FINANCE' && canProcessBatch(viewer)) {
       out.push('MARK_PAID', 'REJECT');
-    }
-    if (await this.isBatchOpenForHrEdit(batch, viewer)) {
-      out.push('EDIT');
     }
     // Delete is allowed at any stage before PAID, for anyone who can act on the
     // batch (owning head, HR, or Finance/admin). PAID batches are immutable.
