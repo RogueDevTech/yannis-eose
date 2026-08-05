@@ -164,6 +164,12 @@ export interface CompactTableProps<T> {
    */
   rowHref?: (row: T, index: number) => string | undefined | null;
   /**
+   * Optional React Router link state to attach when navigating via `rowHref`
+   * (e.g. `{ from: currentUrl }` so the detail page's back button can return to
+   * the exact filtered list). Ignored for auto-discovered row links.
+   */
+  rowState?: (row: T, index: number) => unknown;
+  /**
    * Enable per-user column visibility. Pass a stable page key (e.g. 'hr.users')
    * and the table self-manages column toggling with persistence via filter
    * preferences. All columns are hideable by default; pin a column with
@@ -469,6 +475,7 @@ export function CompactTable<T>({
   footer,
   renderRowDetail,
   rowHref,
+  rowState,
   columnVisibilityKey,
   toolbarLeading,
   density = 'default',
@@ -864,7 +871,8 @@ export function CompactTable<T>({
 
                     // Explicit rowHref takes precedence
                     if (hasExplicitHref) {
-                      navigate(explicitHref!);
+                      const state = rowState?.(row, i);
+                      navigate(explicitHref!, state != null ? { state } : undefined);
                       return;
                     }
 

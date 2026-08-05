@@ -1735,6 +1735,13 @@ export function DeliveryRemittancesPage({
             columns={remittanceColumns}
             rows={remittances}
             rowKey={(r) => r.id}
+            // Clicking a row opens View (the detail page), not Edit. Without an
+            // explicit rowHref the table auto-navigates to the first <a> in the
+            // row, which is the Edit action — so a plain row click landed on Edit.
+            // Carry the same `from` state the View button uses so the detail
+            // page's back button returns to this exact filtered list.
+            rowHref={(r) => `/admin/finance/delivery-remittances/${r.id}`}
+            rowState={() => remittanceDetailLinkState}
             loading={isPageLoading}
             loadingVariant="skeleton"
             emptyTitle="No cash remittances found"
