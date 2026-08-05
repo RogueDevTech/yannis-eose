@@ -1568,13 +1568,16 @@ export class ReportsService {
   }
 
   /**
-   * Resolve the leaderboard/metrics `period` discriminator from an explicit
-   * date window. A concrete start+end is a custom range ('this_month' with the
-   * dates passed through); absence means all-time. Mirrors how the export
-   * methods derive `period` so report numbers reconcile with the pages.
+   * Resolve the leaderboard/metrics `period` discriminator from an explicit date
+   * window. The downstream services only honour a custom range when BOTH
+   * startDate AND endDate are present (`if (startDate && endDate)`), falling back
+   * to `period` otherwise. So we return 'this_month' only when both are present
+   * (the range then wins downstream); with one or neither we return 'all_time' so
+   * a partial range never silently collapses to the current month. The date
+   * bar always sends both together, so 'this_month' + range is the normal path.
    */
   private reportPeriod(input: { startDate?: string; endDate?: string }): 'this_month' | 'all_time' {
-    return input.startDate || input.endDate ? 'this_month' : 'all_time';
+    return input.startDate && input.endDate ? 'this_month' : 'all_time';
   }
 
   /**
@@ -1900,17 +1903,23 @@ export class ReportsService {
     }>
   > {
     this.ensureReportsAccess(user);
-    const [levels, productList] = await Promise.all([
-      this.inventoryService.listLevelsSummary(activeGroupId ?? null, null),
-      this.productsService.list(
-        listProductsSchema.parse({ page: 1, limit: 1000, sortBy: 'name', sortOrder: 'asc' }),
+    const levels = await this.inventoryService.listLevelsSummary(activeGroupId ?? null, null);
+
+    // Resolve product names. listProductsSchema caps limit at 1000, so paginate
+    // to cover companies with more than 1000 products (otherwise names past the
+    // first page silently fall back to a truncated id).
+    const nameById = new Map<string, string>();
+    for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
+      const productList = await this.productsService.list(
+        listProductsSchema.parse({ page, limit: 1000, sortBy: 'name', sortOrder: 'asc' }),
         user.id,
         user.role,
         activeGroupId ?? null,
-      ),
-    ]);
-    const nameById = new Map<string, string>();
-    for (const p of productList.products ?? []) nameById.set(p.id, p.name);
+      );
+      const products = productList.products ?? [];
+      for (const p of products) nameById.set(p.id, p.name);
+      if (products.length < 1000) break;
+    }
 
     const byProduct = new Map<
       string,
@@ -1937,15 +1946,30 @@ export class ReportsService {
   }
 
   /**
-   * Finance Reports — the finance dashboard's headline numbers for the window,
-   * one metric per row (label + value). Reuses FinanceService.getProfitReport so
-   * revenue, landed COGS, ad spend, and true (FIFO) profit match the dashboard.
+   * Finance Reports — the finance dashboard's headline numbers for the window as
+   * a single typed row (one column per metric). Reuses
+   * FinanceService.getProfitReport so revenue, landed COGS, ad spend, and true
+   * (FIFO) profit match the dashboard. A single row (not metric/value pairs) so
+   * each figure keeps its own format: money for currency, percent for margin,
+   * number for the order count.
    */
   async financeReport(
     input: { startDate?: string; endDate?: string; branchId?: string | null },
     user: SessionUser,
     effectiveBranchIds?: string[] | null,
-  ): Promise<Array<{ metric: string; value: number }>> {
+  ): Promise<
+    Array<{
+      revenue: number;
+      landedCogs: number;
+      deliveryFees: number;
+      adSpend: number;
+      commission: number;
+      operationalLoss: number;
+      trueProfit: number;
+      marginPct: number;
+      deliveredOrders: number;
+    }>
+  > {
     this.ensureReportsAccess(user);
     const profit = await this.financeService.getProfitReport(
       {
@@ -1957,28 +1981,44 @@ export class ReportsService {
       effectiveBranchIds,
     );
     return [
-      { metric: 'Revenue', value: profit.revenue ?? 0 },
-      { metric: 'Landed COGS', value: profit.landedCost ?? 0 },
-      { metric: 'Delivery Fees', value: profit.deliveryFee ?? 0 },
-      { metric: 'Ad Spend', value: profit.adSpend ?? 0 },
-      { metric: 'Commission', value: profit.commission ?? 0 },
-      { metric: 'Operational Loss', value: profit.operationalLoss ?? 0 },
-      { metric: 'True Profit', value: profit.trueProfit ?? 0 },
-      { metric: 'Margin %', value: profit.margin ?? 0 },
-      { metric: 'Delivered Orders', value: profit.orderCount ?? 0 },
+      {
+        revenue: profit.revenue ?? 0,
+        landedCogs: profit.landedCost ?? 0,
+        deliveryFees: profit.deliveryFee ?? 0,
+        adSpend: profit.adSpend ?? 0,
+        commission: profit.commission ?? 0,
+        operationalLoss: profit.operationalLoss ?? 0,
+        trueProfit: profit.trueProfit ?? 0,
+        marginPct: profit.margin ?? 0,
+        deliveredOrders: profit.orderCount ?? 0,
+      },
     ];
   }
 
   /**
-   * Marketing Reports — the marketing overview's headline metrics for the
-   * window, one metric per row. Reuses MarketingService.getPerformanceMetrics so
-   * spend / CPA / ROAS / rates reconcile with the Marketing dashboard.
+   * Marketing Reports — the marketing overview's headline metrics for the window
+   * as a single typed row. Reuses MarketingService.getPerformanceMetrics so
+   * spend / CPA / ROAS / rates reconcile with the Marketing dashboard. Single row
+   * so money, count, and rate columns each format correctly.
    */
   async marketingReport(
     input: { startDate?: string; endDate?: string; branchId?: string | null },
     user: SessionUser,
     effectiveBranchIds?: string[] | null,
-  ): Promise<Array<{ metric: string; value: number }>> {
+  ): Promise<
+    Array<{
+      totalOrders: number;
+      confirmedOrders: number;
+      deliveredOrders: number;
+      deliveredRevenue: number;
+      approvedAdSpend: number;
+      pendingAdSpend: number;
+      cpa: number;
+      trueRoas: number;
+      confirmationRate: number;
+      deliveryRate: number;
+    }>
+  > {
     this.ensureReportsAccess(user);
     const m = await this.marketingService.getPerformanceMetrics(
       undefined,
@@ -1992,16 +2032,18 @@ export class ReportsService {
       'marketing',
     );
     return [
-      { metric: 'Total Orders', value: m.totalOrders ?? 0 },
-      { metric: 'Confirmed Orders', value: m.confirmedOrders ?? 0 },
-      { metric: 'Delivered Orders', value: m.deliveredOrders ?? 0 },
-      { metric: 'Delivered Revenue', value: m.deliveredRevenue ?? 0 },
-      { metric: 'Approved Ad Spend', value: m.approvedSpend ?? 0 },
-      { metric: 'Pending Ad Spend', value: m.pendingSpend ?? 0 },
-      { metric: 'CPA', value: m.cpa ?? 0 },
-      { metric: 'True ROAS', value: m.trueRoas ?? 0 },
-      { metric: 'Confirmation Rate %', value: m.confirmationRate ?? 0 },
-      { metric: 'Delivery Rate %', value: m.deliveryRate ?? 0 },
+      {
+        totalOrders: m.totalOrders ?? 0,
+        confirmedOrders: m.confirmedOrders ?? 0,
+        deliveredOrders: m.deliveredOrders ?? 0,
+        deliveredRevenue: m.deliveredRevenue ?? 0,
+        approvedAdSpend: m.approvedSpend ?? 0,
+        pendingAdSpend: m.pendingSpend ?? 0,
+        cpa: m.cpa ?? 0,
+        trueRoas: m.trueRoas ?? 0,
+        confirmationRate: m.confirmationRate ?? 0,
+        deliveryRate: m.deliveryRate ?? 0,
+      },
     ];
   }
 
@@ -2013,6 +2055,7 @@ export class ReportsService {
   private async collectPayoutsWithStaff(
     input: { startDate?: string; endDate?: string },
     user: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ): Promise<
     Array<{
       staffId: string;
@@ -2037,10 +2080,22 @@ export class ReportsService {
         ...(input.startDate ? { periodStart: input.startDate } : {}),
         ...(input.endDate ? { periodEnd: input.endDate } : {}),
       });
-      const result = await this.hrService.listPayouts(parsed);
+      // Pass viewer + effectiveBranchIds so payouts stay company-scoped — without
+      // effectiveBranchIds, listPayouts returns EVERY company's payroll (its own
+      // doc warns of this). Report picks up the same isolation as the pages.
+      const result = await this.hrService.listPayouts(parsed, user, effectiveBranchIds ?? null);
       const batch = result.payouts ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) break;
+      // Match the export path: refuse to silently truncate. Without this, a window
+      // with >5000 payout lines would stop at exactly 5000 and staffPerformance
+      // would report understated per-staff totals with no signal.
+      if (page === EXPORT_MAX_PAGES) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Payroll report is limited to ${EXPORT_MAX_PAGES * EXPORT_PAGE_LIMIT} payout lines. Narrow the date range and try again.`,
+        });
+      }
     }
 
     const staffIds = [...new Set(all.map((p) => p.staffId).filter(Boolean))];
@@ -2081,6 +2136,7 @@ export class ReportsService {
   async payrollReport(
     input: { startDate?: string; endDate?: string; branchId?: string | null },
     user: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ): Promise<
     Array<{
       staffName: string;
@@ -2096,7 +2152,7 @@ export class ReportsService {
     }>
   > {
     this.ensureReportsAccess(user);
-    const payouts = await this.collectPayoutsWithStaff(input, user);
+    const payouts = await this.collectPayoutsWithStaff(input, user, effectiveBranchIds);
     return payouts.map(({ staffId: _staffId, ...row }) => row);
   }
 
@@ -2108,6 +2164,7 @@ export class ReportsService {
   async staffPerformance(
     input: { startDate?: string; endDate?: string; branchId?: string | null },
     user: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ): Promise<
     Array<{
       staffName: string;
@@ -2120,7 +2177,7 @@ export class ReportsService {
     }>
   > {
     this.ensureReportsAccess(user);
-    const payouts = await this.collectPayoutsWithStaff(input, user);
+    const payouts = await this.collectPayoutsWithStaff(input, user, effectiveBranchIds);
     const byStaff = new Map<
       string,
       {

@@ -95,13 +95,13 @@ export const reportsRouter = router({
   payrollReport: authedProcedure
     .input(reportDataInputSchema)
     .query(async ({ input, ctx }) => {
-      return getReportsService().payrollReport(input, ctx.user);
+      return getReportsService().payrollReport(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   staffPerformance: authedProcedure
     .input(reportDataInputSchema)
     .query(async ({ input, ctx }) => {
-      return getReportsService().staffPerformance(input, ctx.user);
+      return getReportsService().staffPerformance(input, ctx.user, ctx.effectiveBranchIds);
     }),
 });
 

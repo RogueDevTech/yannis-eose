@@ -113,6 +113,17 @@ All 11 remaining categories flipped to `status: 'live'`. Each = one `reports.*` 
 - Verification: `apps/api tsc --noEmit` = 0 errors; `apps/web tsc` = no new errors (6 pre-existing unrelated); full `remix vite:build` passes; `reports.*` router mounted (13 procedures).
 - ⏳ Remaining (non-blocking): live-data render + numbers-reconcile spot check against Marketing/Finance/Logistics dashboards (needs running stack + login).
 
+**Phase D.1 — Adversarial bug review + fixes (2026-08-05)**
+Ran a full correctness audit (every downstream service body read, not assumed). Fixed:
+- **[SEV-1, company-isolation leak] payroll + staff reports** — `collectPayoutsWithStaff` called `listPayouts` with no viewer/effectiveBranchIds, so a group-scoped viewer saw EVERY company's payroll. Now threads `user` + `effectiveBranchIds` (payrollReport/staffPerformance take + pass effectiveBranchIds; router passes ctx.effectiveBranchIds). listPayouts applies its documented group filter again.
+- **[SEV-2, wrong period] mediaBuyer/cs/marketing reports** — `reportPeriod()` returned 'this_month' when EITHER date was set, but downstreams only honour a range when BOTH are set, so a one-sided range silently showed current month. Now requires both dates (else 'all_time'), matching the downstream `startDate && endDate` gate. Both-dates path (normal preset) was already correct.
+- **[SEV-3, silent truncation] payroll/staff** — `collectPayoutsWithStaff` had no max-page throw; >5000 payout lines truncated silently and understated staff totals. Now throws at EXPORT_MAX_PAGES like exportPayroll.
+- **[SEV-4, name truncation] product-stock** — product-name lookup capped at 1000; now paginates so catalogs >1000 don't fall back to truncated UUIDs.
+- **[cosmetic] finance + marketing reports** — were metric/value rows with one column format, so `Margin %` rendered as "₦45.2". Restructured to a single typed row (one column per metric) with correct per-field formats (money/percent/number).
+- Left as-is (pre-existing, shared-method, low sev): `listLevelsSummary` group filter lacks `OR group_id IS NULL`, so product-stock excludes NULL-group/legacy-depot stock — same behavior as the existing inventory page; changing it would alter that page too, so deferred as a separate cross-cutting decision.
+- Verified NOT bugs: effectiveBranchIds threading on all order/finance/logistics reports; listPayouts param names; orderReport status-key lookup + no double-emit; no NaN leaks; all mapped fields exist on their source.
+- Re-verified: apps/api tsc 0 errors, 119/119 tests pass, apps/web no new errors, full remix build passes.
+
 **Phase D — Polish & verify**
 - Sortable columns, empty states, loading skeletons, mobile cards (per CLAUDE.md mobile rules), number-consistency check (report totals must match source dashboards — reuse SAME procedures, never recompute), export parity check (screen columns == exported columns).
 
