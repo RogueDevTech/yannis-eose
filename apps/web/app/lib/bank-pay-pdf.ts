@@ -78,10 +78,17 @@ export type BankPayLine = {
   bankCode: string;
   bankName: string;
   amount: number;
-  reference: string;
+  // Bank-upload narration (5-47 chars). Older payloads may still send `reference`.
+  narration?: string;
+  reference?: string;
   staffName?: string | null;
   payRoleName?: string | null;
 };
+
+// Narration is the current field; `reference` is the legacy name. Prefer narration.
+export function bankPayNarration(row: BankPayLine): string {
+  return row.narration || row.reference || '';
+}
 
 export type BankPayBatchSection = {
   batchId: string;
@@ -212,7 +219,7 @@ async function buildBankPayPdf(input: BankPayPdfInput): Promise<jsPDF> {
     doc.text('Bank code', col.code, y);
     doc.text('Account', col.account, y);
     doc.text('Amount', col.amount + 26, y, { align: 'right' });
-    doc.text('Reference', col.ref, y);
+    doc.text('Narration', col.ref, y);
     y += 6;
 
     doc.setFont(ff, 'normal');
@@ -226,7 +233,7 @@ async function buildBankPayPdf(input: BankPayPdfInput): Promise<jsPDF> {
       const bank = (row.bankName || 'N/A').slice(0, 18);
       const code = (row.bankCode || 'N/A').slice(0, 12);
       const acct = (row.accountNumber || 'N/A').slice(0, 16);
-      const ref = (row.reference || '').slice(0, 32);
+      const ref = bankPayNarration(row).slice(0, 47);
       doc.text(name, col.name, y);
       doc.text(bank, col.bank, y);
       doc.setFont(ff, 'bold');

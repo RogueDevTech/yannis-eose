@@ -393,3 +393,14 @@ export const addBatchAdjustmentSchema = z.object({
   reason: z.string().min(5).max(500),
 });
 export type AddBatchAdjustmentInput = z.infer<typeof addBatchAdjustmentSchema>;
+
+/**
+ * Remove a single payout line from an open (DRAFT / PENDING_HR) batch. Deletes
+ * the payout row, unlinks (but keeps) any earnings adjustments tied to it, and
+ * re-rolls the batch totals + staff count. Never allowed once a batch is PAID.
+ */
+export const removePayoutLineSchema = z.object({
+  batchId: z.string().uuid(),
+  payoutId: z.string().uuid(),
+});
+export type RemovePayoutLineInput = z.infer<typeof removePayoutLineSchema>;

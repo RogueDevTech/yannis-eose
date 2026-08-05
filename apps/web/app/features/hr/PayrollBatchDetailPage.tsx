@@ -172,9 +172,11 @@ function StaffRoleTag({
 function buildBatchPayoutColumns(args: {
   batch: BatchDetail['batch'];
   viewer: ViewerInfo;
+  canEditLines: boolean;
   onAdjust: (payoutId: string, staffName: string, currentTotal: number) => void;
+  onRemove: (payoutId: string, staffName: string) => void;
 }): CompactTableColumn<BatchPayoutLine>[] {
-  const { batch, viewer, onAdjust } = args;
+  const { batch, viewer, canEditLines, onAdjust, onRemove } = args;
   const canAdjust = batch.status === 'PENDING_HR' && canReview(viewer);
   const cols: CompactTableColumn<BatchPayoutLine>[] = [
     {
@@ -274,6 +276,11 @@ function buildBatchPayoutColumns(args: {
           {canAdjust ? (
             <CompactTableActionButton onClick={() => onAdjust(p.id, p.staffName, Number(p.totalPayout ?? p.netPay ?? 0))}>
               + Adjust
+            </CompactTableActionButton>
+          ) : null}
+          {canEditLines ? (
+            <CompactTableActionButton tone="danger" onClick={() => onRemove(p.id, p.staffName)}>
+              Remove
             </CompactTableActionButton>
           ) : null}
         </div>
@@ -564,6 +571,7 @@ export function PayrollBatchDetailPage({
   const navigate = useNavigate();
   const payrollSurface = useFetcherActionSurface(fetcher);
   const [showAdjust, setShowAdjust] = useState<{ payoutId: string; staffName: string; currentTotal: number } | null>(null);
+  const [showRemove, setShowRemove] = useState<{ payoutId: string; staffName: string } | null>(null);
   // Live amount for the batch-adjustment before/after preview.
   const [adjustAmount, setAdjustAmount] = useState('');
   const [adjustCategory, setAdjustCategory] = useState('BONUS');
@@ -580,6 +588,7 @@ export function PayrollBatchDetailPage({
 
   const handleSuccess = useCallback(() => {
     setShowAdjust(null);
+    setShowRemove(null);
     setShowApprove(false);
     setShowReject(false);
     setShowMarkPaid(false);
@@ -620,13 +629,24 @@ export function PayrollBatchDetailPage({
     fetcher.submit(fd, { method: 'post' });
   }, [batch.branchId, batch.department, batch.scopeType, batch.periodMonth, fetcher]);
 
+  // A payout line can be pulled from the batch while it's still open: the owning
+  // department head on a DRAFT, or HR/admins during PENDING_HR review. Mirrors the
+  // server gate on hr.removePayoutLine. Frozen once it reaches Finance.
+  const canEditLines =
+    (batch.status === 'DRAFT' && canPrepareDept(viewer, batch.department, batch.branchId)) ||
+    (batch.status === 'PENDING_HR' && canReview(viewer));
+
   const payoutColumns = buildBatchPayoutColumns({
     batch,
     viewer,
+    canEditLines,
     onAdjust: (payoutId, staffName, currentTotal) => {
       setAdjustAmount('');
       setAdjustCategory('BONUS');
       setShowAdjust({ payoutId, staffName, currentTotal });
+    },
+    onRemove: (payoutId, staffName) => {
+      setShowRemove({ payoutId, staffName });
     },
   });
 
@@ -714,30 +734,11 @@ export function PayrollBatchDetailPage({
               <div className="flex items-center gap-2 flex-wrap">
                 <PageRefreshButton />
                 <StatusBadge status={batch.status} />
-                {allPayouts.length > 0 && (
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowExport(true)}>
-                    Export
-                  </Button>
-                )}
                 {showHeaderWorkflowActions ? headerWorkflowActions : null}
               </div>
             }
             sheet={({ closeSheet }) => (
               <div className="space-y-2 [&_button]:w-full [&_button]:justify-center [&_button]:h-12">
-                {allPayouts.length > 0 && (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="w-full justify-center h-12"
-                    onClick={() => {
-                      closeSheet();
-                      setShowExport(true);
-                    }}
-                  >
-                    Export
-                  </Button>
-                )}
                 {showHeaderWorkflowActions ? (
                   <div className="space-y-2 [&_form]:block [&_form]:w-full [&_button]:w-full [&_button]:justify-center [&_button]:h-12">
                     {allowedTransitions.includes('SUBMIT') && (
@@ -910,28 +911,42 @@ export function PayrollBatchDetailPage({
             columns={payoutColumns}
             rows={payouts}
             rowKey={(p) => p.id}
+            rowHref={(p) => `/hr/payroll-batch/${batch.id}/payout/${p.id}`}
             renderMobileCard={(p) => (
-              <Link
-                to={`/hr/payroll-batch/${batch.id}/payout/${p.id}`}
-                className="block w-full text-left p-4 space-y-2 hover:bg-app-hover transition-colors"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-medium text-app-fg text-sm truncate">{p.staffName}</p>
-                  {p.staffRole ? (
-                    <RoleBadge role={p.staffRole} size="sm" variant="chip" />
-                  ) : (
-                    <span className="inline-flex shrink-0 items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-2xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                      Contractor
+              <div className="w-full">
+                <Link
+                  to={`/hr/payroll-batch/${batch.id}/payout/${p.id}`}
+                  className="block w-full text-left p-4 space-y-2 hover:bg-app-hover transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-medium text-app-fg text-sm truncate">{p.staffName}</p>
+                    {p.staffRole ? (
+                      <RoleBadge role={p.staffRole} size="sm" variant="chip" />
+                    ) : (
+                      <span className="inline-flex shrink-0 items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-2xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                        Contractor
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-app-fg-muted">Net</span>
+                    <span className="font-semibold text-app-fg">
+                      <NairaPrice amount={Number(p.totalPayout ?? p.netPay)} />
                     </span>
-                  )}
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-app-fg-muted">Net</span>
-                  <span className="font-semibold text-app-fg">
-                    <NairaPrice amount={Number(p.totalPayout ?? p.netPay)} />
-                  </span>
-                </div>
-              </Link>
+                  </div>
+                </Link>
+                {canEditLines ? (
+                  <div className="flex justify-end border-t border-app-border px-4 py-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowRemove({ payoutId: p.id, staffName: p.staffName })}
+                      className="text-xs font-medium text-danger-600 hover:text-danger-700 dark:text-danger-400 dark:hover:text-danger-300"
+                    >
+                      Remove from batch
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             )}
           />
         )}
@@ -1011,6 +1026,38 @@ export function PayrollBatchDetailPage({
         </Modal>
         );
       })()}
+
+      {showRemove && (
+        <ConfirmActionModal
+          open
+          onClose={() => setShowRemove(null)}
+          error={payrollSurface.errorMatchingIntent('removePayoutLine')}
+          title="Remove payout from batch"
+          description={
+            <p>
+              Remove <strong>{showRemove.staffName}</strong>&rsquo;s payout line from this{' '}
+              {batchScopeLabel(batch.department, batch.scopeType)} batch for{' '}
+              <strong>{formatMonth(batch.periodMonth)}</strong>?
+            </p>
+          }
+          details={
+            <ul className="list-disc pl-4 space-y-1 text-sm">
+              <li>Batch totals and staff count update to exclude this line</li>
+              <li>Any adjustments on this line are unlinked but kept for the record</li>
+              <li>Re-generating the batch brings the person back if they still qualify</li>
+            </ul>
+          }
+          confirmLabel="Remove payout"
+          variant="danger"
+          loading={fetcher.state === 'submitting'}
+          onConfirm={() => {
+            fetcher.submit(
+              { intent: 'removePayoutLine', batchId: batch.id, payoutId: showRemove.payoutId },
+              { method: 'post' },
+            );
+          }}
+        />
+      )}
 
       {showApprove && (
         <Modal open onClose={() => setShowApprove(false)} maxWidth="max-w-sm" backdropBlur contentClassName="p-5 space-y-3">

@@ -1,6 +1,7 @@
 import {
   INVOICE_LOGO_SRC,
   bankPayGrandTotal,
+  bankPayNarration,
   formatBankPayPeriod,
   type BankPayPdfInput,
 } from '~/lib/bank-pay-pdf';
@@ -77,7 +78,7 @@ export function BankPayDocumentPreview({ doc }: { doc: BankPayPdfInput }) {
                         Amount
                       </th>
                       <th className="px-1.5 py-2 text-left font-bold" style={{ color: 'rgb(80, 80, 80)' }}>
-                        Reference
+                        Narration
                       </th>
                     </tr>
                   </thead>
@@ -97,7 +98,7 @@ export function BankPayDocumentPreview({ doc }: { doc: BankPayPdfInput }) {
                         <td className="px-1.5 py-1.5 text-right align-top tabular-nums">
                           {money(row.amount)}
                         </td>
-                        <td className="px-1.5 py-1.5 align-top">{row.reference}</td>
+                        <td className="px-1.5 py-1.5 align-top">{bankPayNarration(row)}</td>
                       </tr>
                     ))}
                   </tbody>
