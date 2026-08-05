@@ -63,14 +63,27 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     JSON.stringify({ staffId: userId, periodStart: period.periodStart, periodEnd: period.periodEnd }),
   );
 
+  // Scope the paid-payroll lookup to the SELECTED period, not "latest paid
+  // overall". Without period bounds this returned the single most-recent PAID
+  // payout for every month, so June/July/August all showed July's payslip and
+  // months that were never paid still showed a paid card. listPayouts filters
+  // periodStart >= / periodEnd <= these bounds — send the Lagos-anchored ISO
+  // instants, NOT plain dates: a July payout is stored at 2026-06-30T23:00Z
+  // (= 2026-07-01 00:00 +01:00), which a UTC-midnight date bound would exclude.
+  const paidInput = encodeURIComponent(
+    JSON.stringify({
+      staffId: userId,
+      status: 'PAID' as const,
+      periodStart: period.periodStart,
+      periodEnd: period.periodEnd,
+      limit: 1,
+      page: 1,
+    }),
+  );
+
   const [previewRes, paidRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/hr.previewPayout?input=${previewInput}`, opt),
-    apiRequest<unknown>(
-      `/trpc/hr.listPayouts?input=${encodeURIComponent(
-        JSON.stringify({ staffId: userId, status: 'PAID' as const, limit: 1, page: 1 }),
-      )}`,
-      opt,
-    ),
+    apiRequest<unknown>(`/trpc/hr.listPayouts?input=${paidInput}`, opt),
   ]);
 
   if (!previewRes.ok) {

@@ -1502,7 +1502,7 @@ export function UserDetailPage({
                   ) : null}
                   {ep.lastPaidPayout ? (
                     <div className="card p-4 space-y-3">
-                      <h3 className="text-sm font-semibold text-app-fg">Last paid payroll</h3>
+                      <h3 className="text-sm font-semibold text-app-fg">Paid payroll</h3>
                       <p className="text-xs text-app-fg-muted">
                         Period{' '}
                         {new Date(ep.lastPaidPayout.periodStart).toLocaleDateString('en-NG', {

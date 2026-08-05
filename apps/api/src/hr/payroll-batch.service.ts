@@ -64,6 +64,30 @@ function isNullScopeType(scopeType: string | null | undefined): boolean {
   return scopeType === 'CONTRACTORS' || scopeType === 'ALL';
 }
 
+/**
+ * Company-scoped batch filter that DOESN'T drop org-wide (CONTRACTORS / ALL)
+ * batches. Those carry `branch_id = NULL`, so a plain `branch_id IN (branches)`
+ * never matches them — which hid a fully-PAID "All staff & contractors" batch
+ * from payslips / register / finance-overview whenever a company was selected.
+ * Cross-branch HR reach (SuperAdmin / SUPPORT / hr.write) sees the null-branch
+ * batch OR-ed in; everyone else keeps the plain company filter.
+ */
+function payrollBranchScope(effectiveBranchIds: string[], viewer?: SessionUser): SQL {
+  const inCompany = inArray(schema.payrollBatches.branchId, effectiveBranchIds);
+  const canSeeOrgWide =
+    viewer?.role === 'SUPER_ADMIN' ||
+    viewer?.role === 'SUPPORT' ||
+    (viewer?.permissions ?? []).includes('hr.write');
+  if (!canSeeOrgWide) return inCompany;
+  return or(
+    inCompany,
+    and(
+      isNull(schema.payrollBatches.branchId),
+      inArray(schema.payrollBatches.scopeType, ['CONTRACTORS', 'ALL']),
+    )!,
+  )!;
+}
+
 // Banks require the salary narration to be between 5 and 47 characters.
 const BANK_NARRATION_MIN = 5;
 const BANK_NARRATION_MAX = 47;
@@ -2761,6 +2785,7 @@ export class PayrollBatchService {
       limit?: number;
     },
     effectiveBranchIds?: string[] | null,
+    viewer?: SessionUser,
   ) {
     const page = input.page ?? 1;
     const limit = input.limit ?? 20;
@@ -2770,8 +2795,13 @@ export class PayrollBatchService {
     if (input.staffId) conditions.push(eq(schema.payoutRecords.staffId, input.staffId));
     if (input.batchId) conditions.push(eq(schema.payoutRecords.batchId, input.batchId));
     if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department as 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR' | 'OPERATIONS' | 'FINANCE' | 'SUPPORT'));
+    // Org-wide (CONTRACTORS / ALL) batches carry branch_id = NULL, so a plain
+    // `branch_id IN (companyBranches)` filter silently drops them — that hid a
+    // fully-PAID "All staff & contractors" batch (and its payslips) whenever a
+    // company was selected. Mirror getFinanceOverviewPayroll: cross-branch HR
+    // reach also sees the null-branch batch.
     if (effectiveBranchIds?.length) {
-      conditions.push(inArray(schema.payrollBatches.branchId, effectiveBranchIds));
+      conditions.push(payrollBranchScope(effectiveBranchIds, viewer));
     }
     if (input.branchId) conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
     if (input.fromMonth) conditions.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
@@ -2814,13 +2844,15 @@ export class PayrollBatchService {
   async payrollRegister(
     input: { batchId?: string; fromMonth?: string; toMonth?: string; branchId?: string; department?: string; status?: PayrollBatchStatus },
     effectiveBranchIds?: string[] | null,
+    viewer?: SessionUser,
   ) {
     const conditions: SQL[] = [];
     if (input.batchId) conditions.push(eq(schema.payoutRecords.batchId, input.batchId));
     if (input.status) conditions.push(eq(schema.payrollBatches.status, input.status));
     if (input.fromMonth) conditions.push(gte(schema.payrollBatches.periodMonth, input.fromMonth));
     if (input.toMonth) conditions.push(lte(schema.payrollBatches.periodMonth, input.toMonth));
-    if (effectiveBranchIds?.length) conditions.push(inArray(schema.payrollBatches.branchId, effectiveBranchIds));
+    // Don't drop null-branch org-wide (CONTRACTORS / ALL) batches — see payrollBranchScope.
+    if (effectiveBranchIds?.length) conditions.push(payrollBranchScope(effectiveBranchIds, viewer));
     if (input.branchId) conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
     if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department as 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR' | 'OPERATIONS' | 'FINANCE' | 'SUPPORT'));
 
@@ -2850,12 +2882,30 @@ export class PayrollBatchService {
    */
   async getFinanceOverviewPayroll(
     input: { fromMonth?: string; toMonth?: string; branchId?: string },
-    _viewer: SessionUser,
+    viewer: SessionUser,
     effectiveBranchIds?: string[] | null,
   ) {
+    // Org-wide (CONTRACTORS / ALL) batches carry branch_id = NULL, so a plain
+    // `branch_id IN (companyBranches)` filter silently drops them — that hid a
+    // fully-PAID org-wide "All staff & contractors" batch from this whole tab
+    // whenever a company was selected. Mirror listMonthlyPayrolls: cross-branch
+    // HR reach (SuperAdmin / SUPPORT / hr.write) also sees the null-branch batch.
+    const canSeeOrgWide =
+      viewer.role === 'SUPER_ADMIN' ||
+      viewer.role === 'SUPPORT' ||
+      (viewer.permissions ?? []).includes('hr.write');
+    const orgWideBatch = and(
+      isNull(schema.payrollBatches.branchId),
+      inArray(schema.payrollBatches.scopeType, ['CONTRACTORS', 'ALL']),
+    )!;
+
     const branchScope: SQL[] = [];
     if (effectiveBranchIds?.length) {
-      branchScope.push(inArray(schema.payrollBatches.branchId, effectiveBranchIds));
+      branchScope.push(
+        canSeeOrgWide
+          ? or(inArray(schema.payrollBatches.branchId, effectiveBranchIds), orgWideBatch)!
+          : inArray(schema.payrollBatches.branchId, effectiveBranchIds),
+      );
     }
     if (input.branchId) {
       branchScope.push(eq(schema.payrollBatches.branchId, input.branchId));

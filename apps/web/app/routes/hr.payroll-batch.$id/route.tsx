@@ -7,7 +7,7 @@ import { apiRequest, getCurrentUser, getSessionCookie, requirePermissionOrRoles,
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { PayrollBatchDetailPage, type BatchDetail } from '~/features/hr/PayrollBatchDetailPage';
 import { PayrollBatchDetailLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
-import type { ViewerInfo, BranchOption } from '~/features/hr/types';
+import type { ViewerInfo, BranchOption, HRUser } from '~/features/hr/types';
 
 export const meta: MetaFunction = () => [{ title: 'Payroll Batch — Yannis EOSE' }];
 
@@ -36,13 +36,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!batchId) throw new Response('Batch ID required', { status: 400 });
 
   const pageData = (async () => {
-    const [batchRes, prepareRes, branchesRes] = await Promise.all([
+    const [batchRes, prepareRes, branchesRes, usersRes, contractorsRes] = await Promise.all([
       apiRequest<unknown>(
         `/trpc/hr.getBatch?input=${encodeURIComponent(JSON.stringify({ batchId }))}`,
         { method: 'GET', cookie },
       ),
       apiRequest<unknown>('/trpc/hr.payrollPrepareAccess', { method: 'GET', cookie }),
       apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
+      // Adjustment targets for the batch-level Add-on / Deduct Salary modal:
+      // any staff or contractor (not just the batch's existing payout lines).
+      apiRequest<unknown>(
+        `/trpc/users.list?input=${encodeURIComponent(
+          JSON.stringify({ page: 1, limit: 500, sortBy: 'name', sortOrder: 'asc' }),
+        )}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>('/trpc/hr.listContractors', { method: 'GET', cookie }),
     ]);
 
     if (!batchRes.ok) throw new Response('Batch not found', { status: 404 });
@@ -70,7 +79,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       prepareBranchIds: (prepareData?.branches ?? []).map((b) => b.id),
     };
 
-    return { detail, branchName, viewer };
+    const users = usersRes.ok
+      ? (usersRes.data as { result?: { data?: { users?: HRUser[] } } })?.result?.data?.users ?? []
+      : [];
+    const contractors = contractorsRes.ok
+      ? (
+          (contractorsRes.data as { result?: { data?: Array<{ id: string; name: string }> } })
+            ?.result?.data ?? []
+        ).map((c) => ({ id: c.id, name: c.name }))
+      : [];
+
+    return { detail, branchName, viewer, users, contractors };
   })();
 
   return defer({ pageData });
@@ -159,6 +178,28 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'createAdjustment') {
+    // Batch-level Add-on / Deduct Salary: target any staff or contractor for
+    // THIS batch's month. The selector value is prefixed `staff:`/`contractor:`
+    // so one dropdown targets either party type.
+    const party = formData.get('staffId')?.toString() ?? '';
+    const [partyType, partyId] = party.includes(':') ? party.split(':', 2) : ['staff', party];
+    const rawAdjMonth = formData.get('periodMonth')?.toString() ?? '';
+    const adjPeriodMonth = /^\d{4}-\d{2}$/.test(rawAdjMonth) ? `${rawAdjMonth}-01` : rawAdjMonth;
+    const res = await apiRequest<unknown>('/trpc/hr.createAdjustment', {
+      method: 'POST', cookie,
+      body: {
+        ...(partyType === 'contractor' ? { contractorId: partyId } : { staffId: partyId }),
+        amount: formData.get('amount')?.toString() ?? '',
+        category: formData.get('category')?.toString() ?? '',
+        reason: formData.get('reason')?.toString() ?? '',
+        periodMonth: adjPeriodMonth,
+      },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to create adjustment') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
   if (intent === 'addBatchAdjustment') {
     const res = await apiRequest<unknown>('/trpc/hr.addBatchAdjustment', {
       method: 'POST', cookie,
@@ -203,6 +244,8 @@ export default function PayrollBatchDetailRoute() {
           detail={data.detail as BatchDetail}
           branchName={data.branchName}
           viewer={data.viewer as ViewerInfo}
+          users={data.users as HRUser[]}
+          contractors={data.contractors}
         />
       )}
     </CachedAwait>

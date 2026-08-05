@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFetcher, useNavigate } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
-import { formatRoleLabel } from '~/components/ui/role-badge';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import {
@@ -24,7 +23,6 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchInput } from '~/components/ui/search-input';
-import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
@@ -171,30 +169,10 @@ export function HRPage({
       cancelled = true;
     };
   }, [needsServerAdjustments, trimmedAdjustmentSearch, adjustmentPage]);
-  const [showAddAdjustment, setShowAddAdjustment] = useState(false);
-  // Which kind of adjustment the modal is creating. Deciding this up front (via
-  // two distinct buttons) removes the old ambiguity where a positive amount in a
-  // DEDUCTION-less form silently behaved like an add-on.
-  const [adjustmentMode, setAdjustmentMode] = useState<'ADDON' | 'DEDUCT'>('ADDON');
+  // Standalone Add-on / Deduct Salary was relocated to the payroll batch detail
+  // header (target any staff/contractor for that batch's month). The Adjustments
+  // tab below still edits/approves existing adjustments.
   const [showBankPayExport, setShowBankPayExport] = useState(false);
-  const [adjustmentStaffId, setAdjustmentStaffId] = useState('');
-  const [adjustmentAmount, setAdjustmentAmount] = useState('');
-  // Target payroll month (YYYY-MM), defaulting to the current month. Folds the
-  // adjustment into that month's batch; an open (DRAFT/PENDING_HR) batch absorbs
-  // it immediately, otherwise it waits for that month's generate.
-  const [adjustmentMonth, setAdjustmentMonth] = useState(() => {
-    // Default to the current NIGERIA month (payroll runs on WAT), not the
-    // browser's local month — otherwise a user near midnight in another TZ could
-    // earmark the adjustment to the wrong payroll period.
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Africa/Lagos',
-      year: 'numeric',
-      month: '2-digit',
-    }).formatToParts(new Date());
-    const y = parts.find((p) => p.type === 'year')?.value ?? '';
-    const m = parts.find((p) => p.type === 'month')?.value ?? '';
-    return `${y}-${m}`;
-  });
   const [approveAdjustmentTarget, setApproveAdjustmentTarget] = useState<Adjustment | null>(null);
   // Edit / delete of an existing adjustment (only while not locked in a finalized batch).
   const [editAdjustmentTarget, setEditAdjustmentTarget] = useState<Adjustment | null>(null);
@@ -206,8 +184,7 @@ export function HRPage({
   useFetcherToast(fetcher.data, {
     successMessage: 'HR action completed',
     skipErrorToast: Boolean(
-      (showAddAdjustment && hrSurface.errorMatchingIntent('createAdjustment')) ||
-        (editAdjustmentTarget && hrSurface.errorMatchingIntent('updateAdjustment')),
+      editAdjustmentTarget && hrSurface.errorMatchingIntent('updateAdjustment'),
     ),
   });
 
@@ -218,11 +195,9 @@ export function HRPage({
   /** Close add-on modal after a successful mutation (same fetcher handles
    *  approve actions too — both intents resolve through this single hook). */
   const handleHrFetcherSuccess = useCallback(() => {
-    setShowAddAdjustment(false);
     setApproveAdjustmentTarget(null);
     setEditAdjustmentTarget(null);
     setDeleteAdjustmentTarget(null);
-    setAdjustmentAmount('');
     setEditAmount('');
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleHrFetcherSuccess);
@@ -305,30 +280,6 @@ export function HRPage({
                     Export bank pay
                   </Button>
                 ) : null}
-                {isHrOrFinance ? (
-                  <>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => {
-                        setAdjustmentMode('ADDON');
-                        setShowAddAdjustment(true);
-                      }}
-                    >
-                      Add-on
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={() => {
-                        setAdjustmentMode('DEDUCT');
-                        setShowAddAdjustment(true);
-                      }}
-                    >
-                      Deduct Salary
-                    </Button>
-                  </>
-                ) : null}
                 {showGenerateButton ? (
                   <Button variant="primary" size="sm" onClick={() => navigate('/hr/payroll/generate')}>
                     Generate Monthly Batch
@@ -351,36 +302,6 @@ export function HRPage({
                   >
                     Export bank pay
                   </Button>
-                ) : null}
-                {isHrOrFinance ? (
-                  <>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="h-12 w-full justify-center"
-                      onClick={() => {
-                        closeSheet();
-                        setAdjustmentMode('ADDON');
-                        setShowAddAdjustment(true);
-                      }}
-                    >
-                      Add-on
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="danger"
-                      size="sm"
-                      className="h-12 w-full justify-center"
-                      onClick={() => {
-                        closeSheet();
-                        setAdjustmentMode('DEDUCT');
-                        setShowAddAdjustment(true);
-                      }}
-                    >
-                      Deduct Salary
-                    </Button>
-                  </>
                 ) : null}
                 {showGenerateButton ? (
                   <Button
@@ -409,8 +330,7 @@ export function HRPage({
       />
 
       {actionError &&
-        !dismissedError &&
-        !(showAddAdjustment && hrSurface.errorMatchingIntent('createAdjustment')) && (
+        !dismissedError && (
         <PageNotification
           variant="error"
           message={humanizeZodIssuesString(actionError)}
@@ -446,164 +366,6 @@ export function HRPage({
             );
           }}
         </DeferredSection>
-      )}
-
-      {/* Add-on (earning adjustment) — modal for HR / Finance */}
-      {isHrOrFinance && showAddAdjustment && (
-        <Modal
-          open
-          onClose={() => {
-            if (fetcher.state !== 'idle') return;
-            setShowAddAdjustment(false);
-          }}
-          maxWidth="max-w-lg"
-          backdropBlur
-          contentClassName="p-5 space-y-4"
-        >
-          {(() => {
-            const isDeduct = adjustmentMode === 'DEDUCT';
-            const categories = isDeduct ? ADJ_DEDUCT_CATEGORIES : ADJ_ADDON_CATEGORIES;
-            const magnitude = Math.abs(Number(adjustmentAmount) || 0);
-            // Human-readable label for the selected payroll month (e.g. "August 2026").
-            const adjustmentMonthLabel = /^\d{4}-\d{2}$/.test(adjustmentMonth)
-              ? new Date(`${adjustmentMonth}-01T00:00:00Z`).toLocaleDateString('en-NG', {
-                  month: 'long',
-                  year: 'numeric',
-                  timeZone: 'UTC',
-                })
-              : 'next';
-            return (
-          <>
-          <div className="flex items-start justify-between gap-3">
-            <h3 className="text-lg font-semibold text-app-fg">
-              {isDeduct ? 'Deduct Salary' : 'Add Earning Add-on'}
-            </h3>
-            <button
-              type="button"
-              onClick={() => setShowAddAdjustment(false)}
-              disabled={fetcher.state !== 'idle'}
-              className="text-app-fg-muted hover:text-app-fg p-1 shrink-0 disabled:opacity-50"
-              aria-label="Close"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <ModalFetcherInlineError message={hrSurface.errorMatchingIntent('createAdjustment')} />
-          <fetcher.Form method="post" className="space-y-3">
-            <input type="hidden" name="intent" value="createAdjustment" />
-            <input type="hidden" name="staffId" value={adjustmentStaffId} />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <DeferredSection resolve={users} skeleton="inline">
-                  {(resolvedUsers) => (
-                    <SearchableSelect
-                      id="hr-adjustment-staffId"
-                      label="Staff or contractor"
-                      required
-                      value={adjustmentStaffId}
-                      onChange={setAdjustmentStaffId}
-                      placeholder="Select staff or contractor..."
-                      searchPlaceholder="Search..."
-                      options={[
-                        ...resolvedUsers.map((u: HRUser) => ({
-                          value: `staff:${u.id}`,
-                          label: `${u.name}${u.role ? ` (${formatRoleLabel(u.role)})` : ''}`,
-                        })),
-                        ...contractors.map((c) => ({
-                          value: `contractor:${c.id}`,
-                          label: `${c.name} (Contractor)`,
-                        })),
-                      ]}
-                    />
-                  )}
-                </DeferredSection>
-              </div>
-              <div>
-                <FormSelect
-                  label="Category"
-                  name="category"
-                  required
-                  placeholder="Select category..."
-                  options={categories.map((c) => ({ value: c, label: c.replace(/_/g, ' ') }))}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-app-fg-muted mb-1">Amount (&#8358;)</label>
-                {/* Sign is derived server-side from the category, so HR only ever
-                    types a positive magnitude here — no confusing minus signs. */}
-                <AmountInput
-                  name="amount"
-                  required
-                  placeholder="e.g. 5,000.00"
-                  className="input"
-                  value={adjustmentAmount}
-                  onChange={setAdjustmentAmount}
-                />
-                <p className={`mt-1 text-xs font-medium ${isDeduct ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
-                  {magnitude > 0
-                    ? isDeduct
-                      ? `This will reduce the ${adjustmentMonthLabel} payout by ${formatNaira(magnitude)}.`
-                      : `This will add ${formatNaira(magnitude)} to the ${adjustmentMonthLabel} payout.`
-                    : isDeduct
-                      ? `This amount will be subtracted from the ${adjustmentMonthLabel} payout.`
-                      : `This amount will be added to the ${adjustmentMonthLabel} payout.`}
-                </p>
-              </div>
-              <div>
-                <TextInput
-                  label="Reason"
-                  name="reason"
-                  type="text"
-                  required
-                  minLength={5}
-                  placeholder={isDeduct ? 'Reason for deduction (min 5 chars)' : 'Reason for add-on (min 5 chars)'}
-                />
-              </div>
-              <div>
-                <label htmlFor="hr-adjustment-month" className="block text-sm font-medium text-app-fg-muted mb-1">
-                  Payroll month
-                </label>
-                <input
-                  id="hr-adjustment-month"
-                  type="month"
-                  name="periodMonth"
-                  required
-                  className="input"
-                  value={adjustmentMonth}
-                  onChange={(e) => setAdjustmentMonth(e.target.value)}
-                />
-                <p className="mt-1 text-xs text-app-fg-muted">
-                  Applies to this month's batch. An open batch picks it up right away.
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2 pt-1">
-              <Button
-                type="submit"
-                variant={isDeduct ? 'danger' : 'primary'}
-                size="sm"
-                loading={fetcher.state === 'submitting'}
-                loadingText="Saving..."
-              >
-                {isDeduct ? 'Deduct Salary' : 'Add Add-on'}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={fetcher.state !== 'idle'}
-                onClick={() => setShowAddAdjustment(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </fetcher.Form>
-          </>
-            );
-          })()}
-        </Modal>
       )}
 
       {isHrOrFinance ? (

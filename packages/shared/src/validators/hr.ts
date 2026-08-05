@@ -115,8 +115,12 @@ export type ApprovePayoutInput = z.infer<typeof approvePayoutSchema>;
 export const listPayoutsSchema = z.object({
   staffId: z.string().uuid().optional(),
   status: z.enum(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PAID', 'REJECTED']).optional(),
-  periodStart: z.string().date().optional(),
-  periodEnd: z.string().date().optional(),
+  // Accept a plain calendar date (YYYY-MM-DD) OR a full ISO datetime. Callers
+  // scoping to a timezone-anchored month (e.g. Lagos) must pass the exact
+  // instant: a bare date is read as UTC midnight and would exclude a period
+  // stored at 2026-06-30T23:00Z (= 2026-07-01 00:00 +01:00).
+  periodStart: z.union([z.string().date(), z.string().datetime()]).optional(),
+  periodEnd: z.union([z.string().date(), z.string().datetime()]).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(1000).default(20),
 });

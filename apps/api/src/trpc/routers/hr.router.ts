@@ -417,13 +417,13 @@ export const hrRouter = router({
   listPayslips: permissionProcedure('hr.read')
     .input(listPayslipsSchema)
     .query(async ({ input, ctx }) => {
-      return getPayrollBatchService().listPayslips(input, ctx.effectiveBranchIds);
+      return getPayrollBatchService().listPayslips(input, ctx.effectiveBranchIds, ctx.user);
     }),
 
   payrollRegister: permissionProcedure('hr.read')
     .input(payrollRegisterSchema)
     .query(async ({ input, ctx }) => {
-      return getPayrollBatchService().payrollRegister(input, ctx.effectiveBranchIds);
+      return getPayrollBatchService().payrollRegister(input, ctx.effectiveBranchIds, ctx.user);
     }),
 
   payrollCostByBranch: permissionProcedure('hr.read')

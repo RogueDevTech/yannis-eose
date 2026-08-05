@@ -7,9 +7,10 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { Button } from '~/components/ui/button';
-import { RoleBadge } from '~/components/ui/role-badge';
+import { RoleBadge, formatRoleLabel } from '~/components/ui/role-badge';
 import { Modal } from '~/components/ui/modal';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { AmountInput } from '~/components/ui/amount-input';
@@ -25,14 +26,20 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { DescriptionList, type DescriptionItem } from '~/components/ui/description-list';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { useFetcherToast } from '~/components/ui/toast';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { formatRole } from '~/features/users/types';
-import type { PayrollBatch, ViewerInfo } from './types';
+import type { PayrollBatch, ViewerInfo, HRUser, PayrollContractorOption } from './types';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import { formatNaira } from '~/lib/format-amount';
 import { ADMIN_ROLES, batchScopeLabel, batchBranchLabel } from './payroll-constants';
+
+// Add-on (earning) vs deduction categories for the batch-level Add-on / Deduct
+// Salary modal. Sign is derived server-side from the category, so HR only ever
+// types a positive magnitude. Mirrors the standalone adjustment on HRPage.
+const ADJ_ADDON_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
+const ADJ_DEDUCT_CATEGORIES = ['DEDUCTION', 'CLAWBACK'];
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -745,10 +752,14 @@ export function PayrollBatchDetailPage({
   detail,
   branchName: branchNameProp,
   viewer,
+  users = [],
+  contractors = [],
 }: {
   detail: BatchDetail;
   branchName: string | null;
   viewer: ViewerInfo;
+  users?: HRUser[];
+  contractors?: PayrollContractorOption[];
 }) {
   const fetcher = useFetcher();
   const navigate = useNavigate();
@@ -766,6 +777,12 @@ export function PayrollBatchDetailPage({
   const [showDelete, setShowDelete] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [payoutSearch, setPayoutSearch] = useState('');
+  // Batch-level Add-on / Deduct Salary: targets any staff/contractor for this
+  // batch's month (relocated from the /hr/payroll list header).
+  const [showBatchAdjustment, setShowBatchAdjustment] = useState(false);
+  const [batchAdjMode, setBatchAdjMode] = useState<'ADDON' | 'DEDUCT'>('ADDON');
+  const [batchAdjStaffId, setBatchAdjStaffId] = useState('');
+  const [batchAdjAmount, setBatchAdjAmount] = useState('');
 
   useFetcherToast(fetcher.data, { successMessage: 'Payroll updated' });
 
@@ -778,6 +795,9 @@ export function PayrollBatchDetailPage({
     setShowRegenerate(false);
     setShowSubmit(false);
     setShowDelete(false);
+    setShowBatchAdjustment(false);
+    setBatchAdjAmount('');
+    setBatchAdjStaffId('');
     // Finance overview / payroll list use cached loaders; clear so Paid vs Awaiting isn't stale.
     invalidateCachedLoader('/admin/finance/overview');
     invalidateCachedLoader('/hr/payroll');
@@ -852,9 +872,20 @@ export function PayrollBatchDetailPage({
   // marks the batch paid (CEO 2026-08-05).
   const canRegenerate = canEditLines;
 
+  // Batch-level Add-on / Deduct Salary is available on the same edit window as
+  // line adjustments: any staff/contractor can be adjusted for this batch's
+  // month while the batch is not yet paid.
+  const canBatchAdjust = canEditLines;
+  const openBatchAdjust = useCallback((mode: 'ADDON' | 'DEDUCT') => {
+    setBatchAdjMode(mode);
+    setBatchAdjStaffId('');
+    setBatchAdjAmount('');
+    setShowBatchAdjustment(true);
+  }, []);
+
   /** All workflow actions live in the top-right header now (desktop inline + mobile sheet). */
   const showHeaderWorkflowActions =
-    allowedTransitions.length > 0 || canRegenerate;
+    allowedTransitions.length > 0 || canRegenerate || canBatchAdjust;
 
   const headerWorkflowActions = (
     <>
@@ -883,6 +914,16 @@ export function PayrollBatchDetailPage({
         <Button variant="danger" size="sm" onClick={() => setShowReject(true)}>
           Reject & send back
         </Button>
+      )}
+      {canBatchAdjust && (
+        <>
+          <Button type="button" variant="primary" size="sm" onClick={() => openBatchAdjust('ADDON')}>
+            Add-on
+          </Button>
+          <Button type="button" variant="danger" size="sm" onClick={() => openBatchAdjust('DEDUCT')}>
+            Deduct Salary
+          </Button>
+        </>
       )}
       {canRegenerate && (
         <Button
@@ -988,6 +1029,34 @@ export function PayrollBatchDetailPage({
                         Reject & send back
                       </Button>
                     )}
+                    {canBatchAdjust && (
+                      <>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          className="w-full justify-center h-12"
+                          onClick={() => {
+                            closeSheet();
+                            openBatchAdjust('ADDON');
+                          }}
+                        >
+                          Add-on
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="danger"
+                          size="sm"
+                          className="w-full justify-center h-12"
+                          onClick={() => {
+                            closeSheet();
+                            openBatchAdjust('DEDUCT');
+                          }}
+                        >
+                          Deduct Salary
+                        </Button>
+                      </>
+                    )}
                     {canRegenerate && (
                       <Button
                         type="button"
@@ -1080,7 +1149,12 @@ export function PayrollBatchDetailPage({
         <div className="px-4 py-3 border-b border-app-border flex flex-wrap items-center justify-between gap-2">
           <h4 className="text-sm font-semibold text-app-fg">Staff payouts ({allPayouts.length})</h4>
           {allPayouts.length > 5 && (
-            <SearchInput value={payoutSearch} onChange={setPayoutSearch} placeholder="Search by name" className="w-48" />
+            <PageSearchControl
+              value={payoutSearch}
+              onApply={setPayoutSearch}
+              placeholder="Search by name"
+              title="Search payouts"
+            />
           )}
           {batch.status === 'PAID' && (
             <p className="text-xs text-success-600 dark:text-success-400 mt-0.5">
@@ -1144,6 +1218,118 @@ export function PayrollBatchDetailPage({
       </div>
 
       {/* Sub-modals */}
+
+      {/* Batch-level Add-on / Deduct Salary — target any staff/contractor for
+          THIS batch's month (relocated from the /hr/payroll list header). The
+          payroll month is locked to the batch's month. */}
+      {showBatchAdjustment && (() => {
+        const isDeduct = batchAdjMode === 'DEDUCT';
+        const categories = isDeduct ? ADJ_DEDUCT_CATEGORIES : ADJ_ADDON_CATEGORIES;
+        const magnitude = Math.abs(Number(batchAdjAmount) || 0);
+        const monthLabel = formatMonth(batch.periodMonth);
+        return (
+          <Modal
+            open
+            onClose={() => {
+              if (fetcher.state !== 'idle') return;
+              setShowBatchAdjustment(false);
+            }}
+            maxWidth="max-w-lg"
+            backdropBlur
+            contentClassName="p-5 space-y-4"
+          >
+            <h4 className="text-base font-semibold text-app-fg">
+              {isDeduct ? 'Deduct Salary' : 'Add Earning Add-on'}
+            </h4>
+            <p className="text-xs text-app-fg-muted">
+              Applies to this batch{'’'}s month: <strong>{monthLabel}</strong>.
+            </p>
+            <ModalFetcherInlineError message={payrollSurface.errorMatchingIntent('createAdjustment')} />
+            <fetcher.Form method="post" className="space-y-3">
+              <input type="hidden" name="intent" value="createAdjustment" />
+              <input type="hidden" name="staffId" value={batchAdjStaffId} />
+              {/* Lock the target month to the batch's month. */}
+              <input type="hidden" name="periodMonth" value={batch.periodMonth.slice(0, 7)} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <SearchableSelect
+                  id="batch-adjustment-staffId"
+                  label="Staff or contractor"
+                  required
+                  value={batchAdjStaffId}
+                  onChange={setBatchAdjStaffId}
+                  placeholder="Select staff or contractor..."
+                  searchPlaceholder="Search..."
+                  options={[
+                    ...users.map((u) => ({
+                      value: `staff:${u.id}`,
+                      label: `${u.name}${u.role ? ` (${formatRoleLabel(u.role)})` : ''}`,
+                    })),
+                    ...contractors.map((c) => ({
+                      value: `contractor:${c.id}`,
+                      label: `${c.name} (Contractor)`,
+                    })),
+                  ]}
+                />
+                <FormSelect
+                  label="Category"
+                  name="category"
+                  required
+                  placeholder="Select category..."
+                  options={categories.map((c) => ({ value: c, label: c.replace(/_/g, ' ') }))}
+                />
+                <div>
+                  <label className="block text-sm font-medium text-app-fg-muted mb-1">Amount (&#8358;)</label>
+                  <AmountInput
+                    name="amount"
+                    required
+                    placeholder="e.g. 5,000.00"
+                    className="input"
+                    value={batchAdjAmount}
+                    onChange={setBatchAdjAmount}
+                  />
+                  <p className={`mt-1 text-xs font-medium ${isDeduct ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+                    {magnitude > 0
+                      ? isDeduct
+                        ? `This will reduce the ${monthLabel} payout by ${formatNaira(magnitude)}.`
+                        : `This will add ${formatNaira(magnitude)} to the ${monthLabel} payout.`
+                      : isDeduct
+                        ? `This amount will be subtracted from the ${monthLabel} payout.`
+                        : `This amount will be added to the ${monthLabel} payout.`}
+                  </p>
+                </div>
+                <TextInput
+                  label="Reason"
+                  name="reason"
+                  type="text"
+                  required
+                  minLength={5}
+                  placeholder={isDeduct ? 'Reason for deduction (min 5 chars)' : 'Reason for add-on (min 5 chars)'}
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button
+                  type="submit"
+                  variant={isDeduct ? 'danger' : 'primary'}
+                  size="sm"
+                  loading={fetcher.state === 'submitting'}
+                  loadingText="Saving..."
+                >
+                  {isDeduct ? 'Deduct Salary' : 'Add Add-on'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={fetcher.state !== 'idle'}
+                  onClick={() => setShowBatchAdjustment(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </fetcher.Form>
+          </Modal>
+        );
+      })()}
 
       {showAdjust && (() => {
         const isDeduct = adjustCategory === 'DEDUCTION' || adjustCategory === 'CLAWBACK';
