@@ -67,9 +67,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ? ((payoutsRes.data as { result?: { data?: { payouts: UserPayoutRecord[] } } })?.result?.data?.payouts ?? [])
       : ([] as UserPayoutRecord[]);
 
+  // listAdjustments now returns { items, total, ... }; unwrap `.items`.
   const adjustmentsPayload = adjustmentsRes.ok ? extractTrpc(adjustmentsRes, null) : null;
-  const adjustments = Array.isArray(adjustmentsPayload)
-    ? (adjustmentsPayload as UserAdjustment[])
+  const adjustmentItems =
+    adjustmentsPayload && typeof adjustmentsPayload === 'object' && 'items' in adjustmentsPayload
+      ? (adjustmentsPayload as { items?: unknown }).items
+      : adjustmentsPayload;
+  const adjustments = Array.isArray(adjustmentItems)
+    ? (adjustmentItems as UserAdjustment[])
     : ([] as UserAdjustment[]);
 
   const auditLog = auditRes.ok && viewerMayAudit

@@ -147,9 +147,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       }
     }
 
+    // listAdjustments returns a paginated envelope ({ items, total, ... }); the
+    // per-user history only needs the rows for this staff, so pull `.items`.
     const adjustmentsPayload = adjustmentsRes.ok ? extractTrpc(adjustmentsRes, null) : null;
-    let adjustments = Array.isArray(adjustmentsPayload)
-      ? (adjustmentsPayload as RawAdjustment[]).map(mapAdjustment)
+    const adjustmentItems =
+      adjustmentsPayload && typeof adjustmentsPayload === 'object' && 'items' in adjustmentsPayload
+        ? (adjustmentsPayload as { items?: unknown }).items
+        : adjustmentsPayload;
+    let adjustments = Array.isArray(adjustmentItems)
+      ? (adjustmentItems as RawAdjustment[]).map(mapAdjustment)
       : [];
 
     // Client-side date filter for adjustments

@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, ne, and, or, desc, gte, lte, isNull, isNotNull, count, sum, inArray, sql, exists } from 'drizzle-orm';
+import { eq, ne, and, or, desc, gte, lte, isNull, isNotNull, count, sum, inArray, sql, exists, ilike } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -1123,7 +1123,19 @@ export class HrService {
     return { deleted: true };
   }
 
-  async listAdjustments(staffId?: string, effectiveBranchIds?: string[] | null) {
+  async listAdjustments(
+    staffId?: string,
+    effectiveBranchIds?: string[] | null,
+    opts?: { search?: string; page?: number; pageSize?: number },
+  ) {
+    // Page size defaults to 100 (was a flat 50-row cap with no paging, which hid
+    // any adjustment once 100 newer ones existed). Clamp to [1, 200] so a bad
+    // client value can't ask for an unbounded scan.
+    const pageSize = Math.min(Math.max(opts?.pageSize ?? 100, 1), 200);
+    const page = Math.max(opts?.page ?? 1, 1);
+    const offset = (page - 1) * pageSize;
+    const search = opts?.search?.trim();
+
     const conditions: Parameters<typeof and>[0][] = [];
     if (staffId) {
       conditions.push(eq(schema.earningsAdjustments.staffId, staffId));
@@ -1152,25 +1164,61 @@ export class HrService {
         )!,
       );
     }
+    if (search) {
+      // Search staff name, contractor name, or the adjustment reason — server-side
+      // so a match anywhere in the table is found, not just within the loaded page.
+      const like = `%${search}%`;
+      conditions.push(
+        or(
+          exists(
+            this.db.select({ one: sql`1` })
+              .from(schema.users)
+              .where(and(
+                sql`${schema.users.id} = ${schema.earningsAdjustments.staffId}`,
+                ilike(schema.users.name, like),
+              )),
+          ),
+          exists(
+            this.db.select({ one: sql`1` })
+              .from(schema.payrollContractors)
+              .where(and(
+                sql`${schema.payrollContractors.id} = ${schema.earningsAdjustments.contractorId}`,
+                ilike(schema.payrollContractors.name, like),
+              )),
+          ),
+          ilike(schema.earningsAdjustments.reason, like),
+        )!,
+      );
+    }
 
-    const adjustments = await this.db
-      .select({
-        adjustment: schema.earningsAdjustments,
-        // Status of the batch this adjustment is linked to (NULL when floating).
-        // Lets the UI decide whether Edit/Delete is still allowed without a second
-        // round-trip. LEFT joins keep floating adjustments in the result.
-        batchStatus: schema.payrollBatches.status,
-      })
-      .from(schema.earningsAdjustments)
-      .leftJoin(schema.payoutRecords, eq(schema.payoutRecords.id, schema.earningsAdjustments.payoutId))
-      .leftJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(schema.earningsAdjustments.createdAt))
-      .limit(50);
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [rows, totalRows] = await Promise.all([
+      this.db
+        .select({
+          adjustment: schema.earningsAdjustments,
+          // Status of the batch this adjustment is linked to (NULL when floating).
+          // Lets the UI decide whether Edit/Delete is still allowed without a second
+          // round-trip. LEFT joins keep floating adjustments in the result.
+          batchStatus: schema.payrollBatches.status,
+        })
+        .from(schema.earningsAdjustments)
+        .leftJoin(schema.payoutRecords, eq(schema.payoutRecords.id, schema.earningsAdjustments.payoutId))
+        .leftJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
+        .where(whereClause)
+        .orderBy(desc(schema.earningsAdjustments.createdAt))
+        .limit(pageSize)
+        .offset(offset),
+      this.db
+        .select({ total: count() })
+        .from(schema.earningsAdjustments)
+        .where(whereClause),
+    ]);
 
     // Flatten the joined shape back to a single adjustment row + batchStatus so
     // callers keep the same field access as before, plus the new lock signal.
-    return adjustments.map((r) => ({ ...r.adjustment, batchStatus: r.batchStatus ?? null }));
+    const items = rows.map((r) => ({ ...r.adjustment, batchStatus: r.batchStatus ?? null }));
+    return { items, total: Number(totalRows[0]?.total ?? 0), page, pageSize };
   }
 
   // ============================================

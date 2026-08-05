@@ -28,6 +28,8 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { Pagination } from '~/components/ui/pagination';
+import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { TextInput } from '~/components/ui/text-input';
 import { DateTimeText } from '~/components/ui/date-time-text';
@@ -99,13 +101,76 @@ export function HRPage({
   const fetcher = useFetcher();
   const hrSurface = useFetcherActionSurface(fetcher);
   const [activeTab, setActiveTab] = useState<'monthly' | 'adjustments'>('monthly');
-  // Adjustments tab filters. Search matches staff/contractor name + reason;
-  // category / status / period narrow the list. All client-side over the already
-  // loaded adjustments (the tab is a small HR inbox, not a paginated feed).
+  // Adjustments tab filters. Search matches staff/contractor name + reason and
+  // runs SERVER-SIDE (across the whole table, not just the loaded page), so an
+  // adjustment stays reachable no matter how many newer ones exist. Category /
+  // status / period narrow whichever page is loaded, client-side.
   const [adjustmentSearch, setAdjustmentSearch] = useState('');
   const [adjustmentCategoryFilter, setAdjustmentCategoryFilter] = useState('');
   const [adjustmentStatusFilter, setAdjustmentStatusFilter] = useState('');
   const [adjustmentPeriodFilter, setAdjustmentPeriodFilter] = useState('');
+  // Server-side page for the Adjustments tab (100 rows/page). Page 1 with no
+  // search reuses the bundle's first page (no extra round-trip); any search or a
+  // page beyond 1 fetches from hr.listAdjustments.
+  const ADJUSTMENTS_PAGE_SIZE = 100;
+  const [adjustmentPage, setAdjustmentPage] = useState(1);
+  const [serverAdjustments, setServerAdjustments] = useState<{
+    items: Adjustment[];
+    total: number;
+    forKey: string;
+  } | null>(null);
+  const [adjustmentsFetching, setAdjustmentsFetching] = useState(false);
+  // Reset to page 1 whenever the server-side search term changes.
+  useEffect(() => {
+    setAdjustmentPage(1);
+  }, [adjustmentSearch]);
+
+  // Fetch a server page of adjustments whenever the tab is active and the user
+  // is searching or paging past the first page. Page 1 with no search is served
+  // from the bundle, so this stays quiet during normal use.
+  const trimmedAdjustmentSearch = adjustmentSearch.trim();
+  const needsServerAdjustments =
+    activeTab === 'adjustments' && (!!trimmedAdjustmentSearch || adjustmentPage > 1);
+  useEffect(() => {
+    if (!needsServerAdjustments) {
+      setServerAdjustments(null);
+      setAdjustmentsFetching(false);
+      return;
+    }
+    const key = `${trimmedAdjustmentSearch}|${adjustmentPage}`;
+    let cancelled = false;
+    setAdjustmentsFetching(true);
+    const input = {
+      ...(trimmedAdjustmentSearch ? { search: trimmedAdjustmentSearch } : {}),
+      page: adjustmentPage,
+      pageSize: ADJUSTMENTS_PAGE_SIZE,
+    };
+    const url = `${getBrowserApiBaseUrl()}/trpc/hr.listAdjustments?input=${encodeURIComponent(
+      JSON.stringify(input),
+    )}`;
+    fetch(url, { credentials: 'include' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled) return;
+        const data = json?.result?.data as
+          | { items?: Adjustment[]; total?: number }
+          | undefined;
+        setServerAdjustments({
+          items: Array.isArray(data?.items) ? data!.items! : [],
+          total: Number(data?.total ?? 0),
+          forKey: key,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setServerAdjustments({ items: [], total: 0, forKey: key });
+      })
+      .finally(() => {
+        if (!cancelled) setAdjustmentsFetching(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsServerAdjustments, trimmedAdjustmentSearch, adjustmentPage]);
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
   // Which kind of adjustment the modal is creating. Deciding this up front (via
   // two distinct buttons) removes the old ambiguity where a positive amount in a
@@ -564,8 +629,15 @@ export function HRPage({
           {(resolvedAdjustments) => (
             <DeferredSection resolve={users} skeleton="table">
               {(resolvedUsers) => {
+                // When searching or paging past 1, the server page is authoritative
+                // (it looked across the whole table). Otherwise use the bundle's
+                // first page. Optimistic approval/edit patches apply to either.
+                const baseAdjustments =
+                  serverAdjustments && serverAdjustments.forKey === `${trimmedAdjustmentSearch}|${adjustmentPage}`
+                    ? serverAdjustments.items
+                    : resolvedAdjustments;
                 const overlaidAdjustments = applyOptimisticPatches(
-                  resolvedAdjustments,
+                  baseAdjustments,
                   adjustmentApprovalPatches,
                 );
                 const getPartyName = (adj: Adjustment) => {
@@ -599,8 +671,14 @@ export function HRPage({
                 })();
 
                 const searchQ = adjustmentSearch.toLowerCase().trim();
+                // Search is applied server-side once a page is fetched; only fall
+                // back to the client-side name/reason match for the bundle's first
+                // page (before the server result for this query lands).
+                const usingServerPage =
+                  !!serverAdjustments &&
+                  serverAdjustments.forKey === `${trimmedAdjustmentSearch}|${adjustmentPage}`;
                 const filteredAdjustments = overlaidAdjustments.filter((adj) => {
-                  if (searchQ) {
+                  if (searchQ && !usingServerPage) {
                     const haystack = `${getPartyName(adj)} ${adj.reason ?? ''}`.toLowerCase();
                     if (!haystack.includes(searchQ)) return false;
                   }
@@ -743,7 +821,7 @@ export function HRPage({
                   },
                 ];
                 return (
-                  <div className="list-panel">
+                  <div className={`list-panel ${adjustmentsFetching ? 'opacity-60' : ''}`}>
                     <div className="flex flex-col gap-2 border-b border-app-border p-3 sm:flex-row sm:items-center">
                       <SearchInput
                         value={adjustmentSearch}
@@ -880,6 +958,15 @@ export function HRPage({
                         </div>
                       )}
                     />
+                    {usingServerPage && serverAdjustments.total > ADJUSTMENTS_PAGE_SIZE ? (
+                      <div className="border-t border-app-border p-3">
+                        <Pagination
+                          page={adjustmentPage}
+                          totalPages={Math.ceil(serverAdjustments.total / ADJUSTMENTS_PAGE_SIZE)}
+                          onPageChange={setAdjustmentPage}
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 );
               }}

@@ -266,9 +266,20 @@ export const hrRouter = router({
     }),
 
   listAdjustments: permissionProcedure('hr.read')
-    .input(z.object({ staffId: z.string().uuid().optional() }))
+    .input(
+      z.object({
+        staffId: z.string().uuid().optional(),
+        search: z.string().trim().max(200).optional(),
+        page: z.number().int().min(1).optional(),
+        pageSize: z.number().int().min(1).max(200).optional(),
+      }),
+    )
     .query(async ({ input, ctx }) => {
-      return getHrService().listAdjustments(input.staffId, ctx.effectiveBranchIds);
+      return getHrService().listAdjustments(input.staffId, ctx.effectiveBranchIds, {
+        search: input.search,
+        page: input.page,
+        pageSize: input.pageSize,
+      });
     }),
 
   // Settlement Window Config
@@ -677,7 +688,11 @@ export const hrRouter = router({
       const filters = input ?? {};
       const [payrolls, adjustments, payRoles, contractors, prepareAccess, usersResult] = await Promise.all([
         getPayrollBatchService().listMonthlyPayrolls(filters, ctx.user, ctx.effectiveBranchIds),
-        getHrService().listAdjustments(undefined, ctx.effectiveBranchIds),
+        // Bundle keeps the first page as a plain array for back-compat; the
+        // Adjustments tab uses the standalone listAdjustments query for search + paging.
+        getHrService()
+          .listAdjustments(undefined, ctx.effectiveBranchIds)
+          .then((r) => r.items),
         getPayrollConfigService().listPayRoles(ctx.activeGroupId),
         getPayrollConfigService().listContractors(ctx.activeGroupId),
         getPayrollBatchService().getPrepareAccess(ctx.user),

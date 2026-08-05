@@ -161,14 +161,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // dropdown can target either party type. Route to the matching id field.
     const party = formData.get('staffId')?.toString() ?? '';
     const [partyType, partyId] = party.includes(':') ? party.split(':', 2) : ['staff', party];
-    // Target month: accept YYYY-MM (month input) or YYYY-MM-01; omit when blank
-    // so the adjustment attaches to the next batch regardless of month (legacy).
+    // Target month is REQUIRED: accept YYYY-MM (month input) or YYYY-MM-01.
+    // Pass through even when blank so the server returns the friendly
+    // "Select the target payroll month" validation error instead of dropping it.
     const rawAdjMonth = formData.get('periodMonth')?.toString() ?? '';
     const adjPeriodMonth = /^\d{4}-\d{2}$/.test(rawAdjMonth)
       ? `${rawAdjMonth}-01`
-      : /^\d{4}-\d{2}-01$/.test(rawAdjMonth)
-        ? rawAdjMonth
-        : undefined;
+      : rawAdjMonth;
     const res = await apiRequest<unknown>('/trpc/hr.createAdjustment', {
       method: 'POST',
       cookie,
@@ -177,7 +176,7 @@ export async function action({ request }: ActionFunctionArgs) {
         amount: formData.get('amount')?.toString() ?? '',
         category: formData.get('category')?.toString() ?? '',
         reason: formData.get('reason')?.toString() ?? '',
-        ...(adjPeriodMonth ? { periodMonth: adjPeriodMonth } : {}),
+        periodMonth: adjPeriodMonth,
       },
     });
     if (!res.ok) return json({ error: extractError(res, 'Failed to create adjustment') }, { status: safeStatus(res.status) });
