@@ -1,11 +1,39 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { requireRole } from '~/lib/api.server';
+import { requireRole, apiRequest, getSessionCookie } from '~/lib/api.server';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
 import { ReportShell } from '~/features/reports/ReportShell';
 import { getReportBySlug } from '~/features/reports/report-registry';
+
+/**
+ * Maps a report slug to the tRPC query that supplies its rows. Only slugs
+ * present here are 'live'; others fall through to the "coming soon" state.
+ * Each entry returns the flat row array the ReportShell renders.
+ */
+const REPORT_FETCHERS: Record<
+  string,
+  string // tRPC procedure path under /trpc
+> = {
+  'product-performance': 'reports.productPerformance',
+  'customer-acquisition-funnel': 'reports.customerAcquisitionFunnel',
+};
+
+async function fetchReportRows(
+  procedure: string,
+  input: { startDate?: string; endDate?: string },
+  cookie: string | undefined,
+): Promise<Array<Record<string, unknown>>> {
+  const encoded = encodeURIComponent(JSON.stringify(input));
+  const res = await apiRequest<unknown>(`/trpc/${procedure}?input=${encoded}`, {
+    method: 'GET',
+    cookie,
+  });
+  if (!res.ok) return [];
+  const data = (res.data as { result?: { data?: unknown } })?.result?.data;
+  return Array.isArray(data) ? (data as Array<Record<string, unknown>>) : [];
+}
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data?.report ? `${data.report.title} — Reports` : 'Report — Yannis EOSE' },
@@ -28,10 +56,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const endDate = url.searchParams.get('endDate') ?? '';
   const periodAllTime = url.searchParams.get('period') === 'all_time';
 
-  // Phase A: no report is wired to a data source yet, so rows are empty. Phase
-  // B/C attach a per-slug fetcher here that calls the report's tRPC procedure
-  // with the resolved date window and returns flat rows for the shell.
-  const rows: Array<Record<string, unknown>> = [];
+  // Wired reports fetch their rows from the mapped tRPC procedure for the
+  // resolved date window. All-time passes no dates (the procedure treats
+  // absent start/end as unbounded). Unwired slugs return no rows and render
+  // the "coming soon" state.
+  let rows: Array<Record<string, unknown>> = [];
+  const procedure = REPORT_FETCHERS[slug];
+  if (procedure) {
+    const cookie = getSessionCookie(request);
+    const input: { startDate?: string; endDate?: string } = periodAllTime
+      ? {}
+      : {
+          ...(startDate ? { startDate } : {}),
+          ...(endDate ? { endDate } : {}),
+        };
+    rows = await fetchReportRows(procedure, input, cookie);
+  }
 
   return json({
     report: {

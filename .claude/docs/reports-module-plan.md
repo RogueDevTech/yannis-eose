@@ -81,10 +81,14 @@ Status: APPROVED SPEC, ready to build. Author: pairing session 2026-08-05.
 - ✅ Milestone MET: hub navigable, shell plumbing proven, full `remix vite:build` passes.
 - Files touched: `date-filter-bar.tsx`, `sidebar.tsx`, `dashboard-layout.tsx`, + new `features/reports/*` and `routes/admin.reports*`.
 
-**Phase B — Flagships (prove the pattern)**
-- B1. Product Performance: backend `reports.productPerformance` + FIFO profit wiring + registry entry + export key.
-- B2. Customer Acquisition & Funnel: backend `reports.customerAcquisitionFunnel` + registry entry + export key.
-- ✅ Milestone: two full reports live end-to-end (table + presets + column picker + export). Sign-off on look/feel before templating.
+**Phase B — Flagships (prove the pattern) — ✅ CODE DONE (2026-08-05, build-verified; awaiting live-data sign-off)**
+- B1. ✅ Product Performance. Backend `reports.productPerformance` (reports.service.ts) merges `FinanceService.getProfitReport({groupBy:'product',includeProductBreakdown:true}).byProduct` (revenue/adSpend/FIFO profit) with new `OrdersService.getProductPerformanceCounts` (totalOrders/confirmed/delivered/returned/carryOver, funnel-scoped by created_at). CR/DR/CPA derived. Registry columns set, status=live, route fetcher wired.
+- B2. ✅ Customer Acquisition & Funnel. Backend `reports.customerAcquisitionFunnel` reuses `MarketingService.getPerformanceMetrics` (created/confirmed/delivered) + `CartService.countAllCarts` (leads = created + abandoned) + `getStatusCounts` RETURNED. Rendered as a per-stage funnel table with conversion-from-previous + conversion-from-created. Registry + route wired.
+- Decisions locked: per-product status counts = NEW query (built); leads = orders created + abandoned carts; carry-over = NEW per-product query (built, uses nigeriaCarryOverMonthStart).
+- Consistency audit: funnel RETURNED scoping (`include-imports` + excludeGraduated + excludeCartGraduated) matches getPerformanceMetrics marketing-scope population (order_source NULL/edge-form/import, isFollowUp=false). Product counts use same scope so they reconcile with the funnel; revenue/profit use delivered-in-window (getProfitReport), rates use created-cohort — the documented dashboard split.
+- New backend files/edits: reports.service.ts (+2 methods, CartService inject), orders.service.ts (getProductPerformanceCounts), reports.module.ts (+CartModule), reports.router.ts (+2 queries), shared reports.ts (reportDataInputSchema) + validators/index.ts.
+- Verification so far: `apps/api tsc --noEmit` = 0 errors; `apps/web remix vite:build` passes; both procedures mounted (`reports.*`). NOT yet run against live data (needs running stack + login).
+- ⏳ Milestone PENDING: live render + numbers reconcile with Marketing/Finance dashboards. Sign-off gate before Phase C.
 
 **Phase C — Wire existing-data categories (bulk)**
 - MB Performance (marketing.leaderboard), CS Performance (orders.csLeaderboard), Logistics Manager + Delivery Agent (logistics.listProviders/listLocations), Marketing Reports (marketing.overviewPageBundle), Order Reports (orders.list/statusCounts), Order Category (group orders by product/category), Staff Performance (payroll-metrics), Payroll (existing register), Product Stock (inventory), Finance (profitReport / GL statements).
