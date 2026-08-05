@@ -567,6 +567,7 @@ export {
   listMonthlyPayrollsSchema,
   getBatchSchema,
   addBatchAdjustmentSchema,
+  removePayoutLineSchema,
 } from './hr';
 
 export {
@@ -635,6 +636,7 @@ export type {
   ListMonthlyPayrollsInput,
   GetBatchInput,
   AddBatchAdjustmentInput,
+  RemovePayoutLineInput,
 } from './hr';
 
 export type {

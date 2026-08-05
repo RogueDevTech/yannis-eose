@@ -174,6 +174,18 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'removePayoutLine') {
+    const res = await apiRequest<unknown>('/trpc/hr.removePayoutLine', {
+      method: 'POST', cookie,
+      body: {
+        batchId: formData.get('batchId')?.toString() ?? '',
+        payoutId: formData.get('payoutId')?.toString() ?? '',
+      },
+    });
+    if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to remove payout') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 

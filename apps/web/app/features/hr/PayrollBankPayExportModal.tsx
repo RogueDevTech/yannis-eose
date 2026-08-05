@@ -13,11 +13,13 @@ import {
   type BankPayBatchSection,
   type BankPayPdfInput,
 } from '~/lib/bank-pay-pdf';
+import { bankPayUploadCsv, downloadBankPayUploadCsv } from '~/lib/bank-pay-csv';
 import { createZipStoreBlob } from '~/lib/zip-store';
 import { batchScopeLabel, batchBranchLabel } from './payroll-constants';
 import type { BranchOption, MonthlyPayrollGroup, PayrollBatch } from './types';
 
 type ExportMode = 'one_file' | 'by_batch';
+type ExportFormat = 'pdf' | 'csv';
 
 type ExportFetcherData =
   | { ok: true; batches: BankPayBatchSection[]; error: null }
@@ -27,12 +29,12 @@ function isExportable(status: string): boolean {
   return status === 'PENDING_FINANCE' || status === 'PAID';
 }
 
-function batchFilename(batch: BankPayBatchSection): string {
+function batchFilename(batch: BankPayBatchSection, ext: 'pdf' | 'csv'): string {
   const month = String(batch.periodMonth).slice(0, 7);
   // Null-scope batches have no department/branch — fall back to the scope label.
   const dept = (batch.department ?? batch.scopeType ?? 'payroll').toLowerCase();
   const branch = (batch.branchName ?? 'org-wide').replace(/\s+/g, '-').toLowerCase().slice(0, 24);
-  return `bank-pay-${month}-${dept}-${branch}.pdf`;
+  return `bank-pay-${month}-${dept}-${branch}.${ext}`;
 }
 
 export function PayrollBankPayExportModal({
@@ -72,6 +74,7 @@ export function PayrollBankPayExportModal({
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState<ExportMode>('one_file');
+  const [format, setFormat] = useState<ExportFormat>('csv');
   const [previewDoc, setPreviewDoc] = useState<BankPayPdfInput | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [requestKey, setRequestKey] = useState(0);
@@ -82,6 +85,7 @@ export function PayrollBankPayExportModal({
       setSelected(new Set());
       setPreviewDoc(null);
       setMode('one_file');
+      setFormat('csv');
     }
   }, [open]);
 
@@ -123,26 +127,39 @@ export function PayrollBankPayExportModal({
   const handleDownload = async () => {
     if (!previewDoc) return;
     setDownloading(true);
+    const stamp = new Date().toISOString().slice(0, 10);
     try {
+      const ext: 'pdf' | 'csv' = format === 'csv' ? 'csv' : 'pdf';
+      const downloadZip = (files: Array<{ name: string; data: Uint8Array }>, name: string) => {
+        const url = URL.createObjectURL(createZipStoreBlob(files));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
       if (mode === 'one_file') {
-        await downloadBankPayPdf(previewDoc, `bank-pay-${new Date().toISOString().slice(0, 10)}.pdf`);
+        if (format === 'csv') {
+          downloadBankPayUploadCsv(previewDoc, `bank-pay-${stamp}.csv`);
+        } else {
+          await downloadBankPayPdf(previewDoc, `bank-pay-${stamp}.pdf`);
+        }
       } else {
         const files: Array<{ name: string; data: Uint8Array }> = [];
         for (const batch of previewDoc.batches) {
-          const bytes = await generateBankPayPdfBytes({
+          const single = {
             title: 'BANK PAY LIST',
             generatedAt: previewDoc.generatedAt,
             batches: [batch],
-          });
-          files.push({ name: batchFilename(batch), data: bytes });
+          };
+          const data =
+            format === 'csv'
+              ? new TextEncoder().encode(bankPayUploadCsv(single))
+              : await generateBankPayPdfBytes(single);
+          files.push({ name: batchFilename(batch, ext), data });
         }
-        const zip = createZipStoreBlob(files);
-        const url = URL.createObjectURL(zip);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `bank-pay-batches-${new Date().toISOString().slice(0, 10)}.zip`;
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadZip(files, `bank-pay-batches-${stamp}.zip`);
       }
     } finally {
       setDownloading(false);
@@ -220,6 +237,38 @@ export function PayrollBankPayExportModal({
         </div>
 
         <fieldset className="space-y-2">
+          <legend className="text-sm font-medium text-app-fg">File format</legend>
+          <label className="flex items-start gap-2 text-sm text-app-fg cursor-pointer">
+            <input
+              type="radio"
+              name="bankPayFormat"
+              className="mt-1"
+              checked={format === 'csv'}
+              onChange={() => setFormat('csv')}
+            />
+            <span>
+              Bank upload (CSV)
+              <span className="block text-xs text-app-fg-muted">
+                Bank code, account number, beneficiary name, net amount, narration. Ready for direct upload.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2 text-sm text-app-fg cursor-pointer">
+            <input
+              type="radio"
+              name="bankPayFormat"
+              className="mt-1"
+              checked={format === 'pdf'}
+              onChange={() => setFormat('pdf')}
+            />
+            <span>
+              Printable document (PDF)
+              <span className="block text-xs text-app-fg-muted">For review, records, or sign-off.</span>
+            </span>
+          </label>
+        </fieldset>
+
+        <fieldset className="space-y-2">
           <legend className="text-sm font-medium text-app-fg">File packaging</legend>
           <label className="flex items-center gap-2 text-sm text-app-fg cursor-pointer">
             <input
@@ -228,7 +277,7 @@ export function PayrollBankPayExportModal({
               checked={mode === 'one_file'}
               onChange={() => setMode('one_file')}
             />
-            One file (single PDF for all selected)
+            One file (single {format === 'csv' ? 'CSV' : 'PDF'} for all selected)
           </label>
           <label className="flex items-center gap-2 text-sm text-app-fg cursor-pointer">
             <input
@@ -237,7 +286,7 @@ export function PayrollBankPayExportModal({
               checked={mode === 'by_batch'}
               onChange={() => setMode('by_batch')}
             />
-            By batch (ZIP with one PDF per batch)
+            By batch (ZIP with one {format === 'csv' ? 'CSV' : 'PDF'} per batch)
           </label>
         </fieldset>
 
@@ -269,7 +318,9 @@ export function PayrollBankPayExportModal({
             : undefined
         }
         downloading={downloading}
-        downloadLabel={mode === 'by_batch' ? 'Download ZIP' : 'Download PDF'}
+        downloadLabel={
+          mode === 'by_batch' ? 'Download ZIP' : format === 'csv' ? 'Download CSV' : 'Download PDF'
+        }
         onDownload={() => void handleDownload()}
         onClose={() => setPreviewDoc(null)}
       />

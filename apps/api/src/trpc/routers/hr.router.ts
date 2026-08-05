@@ -21,6 +21,7 @@ import {
   listMonthlyPayrollsSchema,
   getBatchSchema,
   addBatchAdjustmentSchema,
+  removePayoutLineSchema,
   createPayRoleSchema,
   updatePayRoleSchema,
   saveProductTierConfigSchema,
@@ -382,6 +383,12 @@ export const hrRouter = router({
     .input(addBatchAdjustmentSchema)
     .mutation(async ({ input, ctx }) => {
       return getPayrollBatchService().addBatchAdjustment(input, ctx.user);
+    }),
+
+  removePayoutLine: authedProcedure
+    .input(removePayoutLineSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollBatchService().removePayoutLine(input, ctx.user);
     }),
 
   recalculateBatch: authedProcedure

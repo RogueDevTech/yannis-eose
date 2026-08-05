@@ -14,6 +14,7 @@ import type {
   MarkBatchPaidInput,
   ListMonthlyPayrollsInput,
   AddBatchAdjustmentInput,
+  RemovePayoutLineInput,
   PayrollDepartment,
   PayrollBatchStatus,
 } from '@yannis/shared';
@@ -61,6 +62,39 @@ function pendingAdjustmentForMonth(periodMonth: string) {
  */
 function isNullScopeType(scopeType: string | null | undefined): boolean {
   return scopeType === 'CONTRACTORS' || scopeType === 'ALL';
+}
+
+// Banks require the salary narration to be between 5 and 47 characters.
+const BANK_NARRATION_MIN = 5;
+const BANK_NARRATION_MAX = 47;
+
+// Short "Mon YYYY" tag for narrations (e.g. "Jul 2026"). Avoids the full
+// locale month name so more of the beneficiary name fits inside 47 chars.
+function formatBankNarrationPeriod(periodMonth: string): string {
+  const d = new Date(periodMonth);
+  if (Number.isNaN(d.getTime())) return String(periodMonth).slice(0, 7);
+  return d.toLocaleDateString('en-NG', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
+// Build a bank-compliant salary narration clamped to [5, 47] chars.
+// Strips characters most bank portals reject, then truncates the name (not the
+// "Salary <period>" suffix) so the period stays intact, and pads if too short.
+function buildBankNarration(beneficiaryName: string, period: string): string {
+  const clean = (s: string) => s.replace(/[^A-Za-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const name = clean(beneficiaryName);
+  const suffix = clean(`Salary ${period}`);
+
+  let narration = clean(`${name} ${suffix}`);
+  if (narration.length > BANK_NARRATION_MAX) {
+    // Trim the name so the "Salary <period>" suffix always survives.
+    const room = BANK_NARRATION_MAX - suffix.length - 1; // -1 for the joining space
+    const trimmedName = room > 0 ? name.slice(0, room).trim() : '';
+    narration = clean(trimmedName ? `${trimmedName} ${suffix}` : suffix).slice(0, BANK_NARRATION_MAX);
+  }
+  if (narration.length < BANK_NARRATION_MIN) {
+    narration = (narration + ' Salary').trim().padEnd(BANK_NARRATION_MIN, '.').slice(0, BANK_NARRATION_MAX);
+  }
+  return narration;
 }
 
 function isNullScopeBatch(batch: { scopeType?: string | null }): boolean {
@@ -3061,19 +3095,24 @@ export class PayrollBatchService {
           )[0]
         : undefined;
 
+      const period = formatBankNarrationPeriod(batch.periodMonth);
       const rows = detail.payouts
         .filter((p) => Number(p.totalPayout ?? p.netPay) > 0)
-        .map((p) => ({
-          beneficiaryName: p.payoutAccountName ?? p.staffName ?? p.payRoleName ?? 'Unknown',
-          accountNumber: p.payoutAccountNumber ?? '',
-          bankCode: p.payoutBankCode ?? '',
-          bankName: p.payoutBankName ?? '',
-          // Cash to bank = totalPayout (after clawbacks); netPay is pre-deduction.
-          amount: Number(p.totalPayout ?? p.netPay),
-          reference: `${batch.periodMonth}-${batch.department}-${p.staffName ?? p.payRoleName ?? 'line'}`,
-          staffName: p.staffName,
-          payRoleName: p.payRoleName,
-        }));
+        .map((p) => {
+          const beneficiaryName = p.payoutAccountName ?? p.staffName ?? p.payRoleName ?? 'Unknown';
+          return {
+            beneficiaryName,
+            accountNumber: p.payoutAccountNumber ?? '',
+            bankCode: p.payoutBankCode ?? '',
+            bankName: p.payoutBankName ?? '',
+            // Cash to bank = totalPayout (after clawbacks); netPay is pre-deduction.
+            amount: Number(p.totalPayout ?? p.netPay),
+            // Bank-upload narration, clamped to the 5-47 char window banks require.
+            narration: buildBankNarration(beneficiaryName, period),
+            staffName: p.staffName,
+            payRoleName: p.payRoleName,
+          };
+        });
 
       batches.push({
         batchId,
@@ -3296,6 +3335,86 @@ export class PayrollBatchService {
         const recomputed = await this.recomputePayoutTotals(tx, payout.id);
         await this.recomputeBatchTotals(tx, input.batchId);
         return recomputed;
+      },
+    );
+  }
+
+  /**
+   * Remove a single staff/contractor payout line from an open batch. HR removes a
+   * line that shouldn't be in this run (wrong person, duplicate, someone paid off
+   * cycle) without regenerating the whole batch.
+   *
+   * Same authorization + status window as `addBatchAdjustment`: the owning
+   * department preparer on DRAFT, or HR/admins on PENDING_HR. Never on
+   * PENDING_FINANCE / PAID — once a batch reaches Finance the lines are frozen
+   * (Financial Truth / SoD boundary), so a stray line is corrected by rejecting
+   * the batch back, not mutating it underneath Finance.
+   *
+   * Any earnings adjustments tied to the line are unlinked (payoutId → null), not
+   * deleted, so the per-party audit trail survives and a later run can re-absorb
+   * them. Then the batch totals + staff count are re-rolled.
+   */
+  async removePayoutLine(input: RemovePayoutLineInput, actor: SessionUser) {
+    const batch = await this.requireBatch(input.batchId);
+    const canPrepareDraft =
+      batch.status === 'DRAFT' &&
+      (await this.canPrepareDept(actor, batch.branchId, batch.department as PayrollDepartment));
+    const canReviewPendingHr = batch.status === 'PENDING_HR' && canReviewBatch(actor);
+    if (!canPrepareDraft && !canReviewPendingHr) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message:
+          batch.status === 'DRAFT'
+            ? 'Only eligible department preparers can remove lines from DRAFT batches.'
+            : 'Only HR Manager or admins can remove lines during HR review.',
+      });
+    }
+    if (batch.status !== 'DRAFT' && batch.status !== 'PENDING_HR') {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: `Payout lines can only be removed in DRAFT or PENDING_HR (current: ${batch.status}).`,
+      });
+    }
+
+    return withActorAndBranch(
+      this.db,
+      { id: actor.id, currentBranchId: batch.branchId },
+      async (tx) => {
+        // Re-read the batch status inside the tx and lock the row so it can't flip
+        // to a frozen state (PENDING_FINANCE / PAID) between our check and delete.
+        const fresh = await tx
+          .select({ status: schema.payrollBatches.status })
+          .from(schema.payrollBatches)
+          .where(eq(schema.payrollBatches.id, input.batchId))
+          .for('update')
+          .limit(1);
+        if (fresh[0] && fresh[0].status !== 'DRAFT' && fresh[0].status !== 'PENDING_HR') {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Batch status changed concurrently — refresh and try again.',
+          });
+        }
+
+        const payoutRows = await tx
+          .select({ id: schema.payoutRecords.id })
+          .from(schema.payoutRecords)
+          .where(and(eq(schema.payoutRecords.id, input.payoutId), eq(schema.payoutRecords.batchId, input.batchId)))
+          .limit(1);
+        if (!payoutRows[0]) throw new TRPCError({ code: 'NOT_FOUND', message: 'Payout not in this batch' });
+
+        // Keep the earnings-adjustment history; just detach it from the removed
+        // line so a later run can re-absorb it (mirrors deleteBatch).
+        await tx
+          .update(schema.earningsAdjustments)
+          .set({ payoutId: null })
+          .where(eq(schema.earningsAdjustments.payoutId, input.payoutId));
+
+        await tx
+          .delete(schema.payoutRecords)
+          .where(and(eq(schema.payoutRecords.id, input.payoutId), eq(schema.payoutRecords.batchId, input.batchId)));
+
+        await this.recomputeBatchTotals(tx, input.batchId);
+        return { success: true as const };
       },
     );
   }

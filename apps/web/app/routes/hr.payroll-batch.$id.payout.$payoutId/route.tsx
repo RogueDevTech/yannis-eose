@@ -47,25 +47,39 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Reuse the batch bundle (no dedicated payout endpoint) and pick the one line
   // plus its adjustments. Same source of truth as the batch table, so numbers
   // never drift between the row and its detail page.
+  // Never throw inside the deferred promise: a rejection during a client-side
+  // transition can abort the navigation entirely (the click appears to do
+  // nothing). Always resolve to a payload; render the "not found" EmptyState
+  // when the batch or payout can't be loaded instead of killing the nav.
   const pageData = (async () => {
-    const batchRes = await apiRequest<unknown>(
-      `/trpc/hr.getBatch?input=${encodeURIComponent(JSON.stringify({ batchId }))}`,
-      { method: 'GET', cookie },
-    );
-    if (!batchRes.ok) throw new Response('Batch not found', { status: 404 });
-    const detail = (batchRes.data as { result?: { data?: BatchDetail } })?.result?.data ?? null;
-    if (!detail) throw new Response('Batch not found', { status: 404 });
-
-    const payout = detail.payouts.find((p) => p.id === payoutId) ?? null;
-    const adjustments = detail.adjustments.filter((a) => a.payoutId === payoutId);
-    const periodLabel = detail.batch.periodMonth ?? '';
-
-    return {
+    const empty = {
       batchId,
-      payout: payout as BatchPayoutLine | null,
-      adjustments: adjustments as BatchAdjustment[],
-      periodLabel,
+      payout: null as BatchPayoutLine | null,
+      adjustments: [] as BatchAdjustment[],
+      periodLabel: '',
     };
+    try {
+      const batchRes = await apiRequest<unknown>(
+        `/trpc/hr.getBatch?input=${encodeURIComponent(JSON.stringify({ batchId }))}`,
+        { method: 'GET', cookie },
+      );
+      if (!batchRes.ok) return empty;
+      const detail = (batchRes.data as { result?: { data?: BatchDetail } })?.result?.data ?? null;
+      if (!detail) return empty;
+
+      const payout = detail.payouts.find((p) => p.id === payoutId) ?? null;
+      const adjustments = detail.adjustments.filter((a) => a.payoutId === payoutId);
+      const periodLabel = detail.batch.periodMonth ?? '';
+
+      return {
+        batchId,
+        payout: payout as BatchPayoutLine | null,
+        adjustments: adjustments as BatchAdjustment[],
+        periodLabel,
+      };
+    } catch {
+      return empty;
+    }
   })();
 
   return defer({ pageData });
