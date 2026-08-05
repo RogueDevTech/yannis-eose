@@ -608,6 +608,21 @@ const navStructure: NavGroupDef[] = [
       },
     ],
   },
+  {
+    group: 'Admin',
+    items: [
+      {
+        // Centralized business reports hub. Admin-level only (SUPER_ADMIN /
+        // ADMIN / SUPPORT) — the report categories concentrate finance, payroll
+        // and acquisition-cost data, so the whole module is gated at this tier.
+        // The route loader re-checks isAdminLevel server-side.
+        label: 'Reports',
+        href: '/admin/reports',
+        icon: SidebarIcons.reports,
+        roles: ['SUPER_ADMIN', 'ADMIN', 'SUPPORT'],
+      },
+    ],
+  },
 ];
 
 /**

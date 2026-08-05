@@ -116,7 +116,7 @@ function formatPeriodLabel(
   return `${startBit} – ${endBit}`;
 }
 
-type DatePreset = 'today' | 'yesterday' | '2_days_ago' | '3_days_ago' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'last_2_months' | 'last_3_months';
+type DatePreset = 'today' | 'yesterday' | '2_days_ago' | '3_days_ago' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'last_2_months' | 'last_3_months' | 'this_quarter' | 'last_quarter' | 'this_year';
 
 type DraftSelectionId = DatePreset | 'all_time' | 'custom' | null;
 
@@ -129,7 +129,7 @@ function getActiveDraftSelectionId(
   if (draftPeriodAllTime) return 'all_time';
   if (!draftStart && !draftEnd) return null;
   if (!draftStart || !draftEnd) return 'custom';
-  const presets: DatePreset[] = ['today', 'this_month', 'yesterday', '2_days_ago', '3_days_ago', 'this_week', 'last_week', 'last_month', 'last_2_months', 'last_3_months'];
+  const presets: DatePreset[] = ['today', 'this_month', 'yesterday', '2_days_ago', '3_days_ago', 'this_week', 'last_week', 'last_month', 'last_2_months', 'last_3_months', 'this_quarter', 'last_quarter', 'this_year'];
   for (const p of presets) {
     const { startDate, endDate } = getPresetRange(p);
     if (draftStart === startDate && draftEnd === endDate) return p;
@@ -200,6 +200,25 @@ function getPresetRange(preset: DatePreset): { startDate: string; endDate: strin
       const first = new Date(now.getFullYear(), now.getMonth() - 3, 1);
       const last = new Date(now.getFullYear(), now.getMonth(), 0);
       return { startDate: toYMD(first), endDate: toYMD(last) };
+    }
+    case 'this_quarter': {
+      // Quarter start month (0, 3, 6, 9) → today.
+      const q = Math.floor(now.getMonth() / 3);
+      const first = new Date(now.getFullYear(), q * 3, 1);
+      return { startDate: toYMD(first), endDate: today };
+    }
+    case 'last_quarter': {
+      // Previous whole quarter (handles year rollover for Q1 → prev-year Q4).
+      const q = Math.floor(now.getMonth() / 3);
+      const lastQ = q === 0 ? 3 : q - 1;
+      const year = q === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const first = new Date(year, lastQ * 3, 1);
+      const last = new Date(year, lastQ * 3 + 3, 0);
+      return { startDate: toYMD(first), endDate: toYMD(last) };
+    }
+    case 'this_year': {
+      const first = new Date(now.getFullYear(), 0, 1);
+      return { startDate: toYMD(first), endDate: today };
     }
     default:
       return { startDate: today, endDate: today };
@@ -408,6 +427,9 @@ export function DateFilterBar({
                     { id: 'last_month' as const, label: 'Last month' },
                     { id: 'last_2_months' as const, label: 'Last 2 months' },
                     { id: 'last_3_months' as const, label: 'Last 3 months' },
+                    { id: 'this_quarter' as const, label: 'This quarter' },
+                    { id: 'last_quarter' as const, label: 'Last quarter' },
+                    { id: 'this_year' as const, label: 'This year' },
                     { id: 'all_time' as const, label: 'All time' },
                   ] as const
                 ).map(({ id, label }) => {
