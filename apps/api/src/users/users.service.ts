@@ -1229,6 +1229,16 @@ export class UsersService {
       }
     }
 
+    // SUPER_ADMIN (the system owner) is hidden from HR_MANAGER in every user list.
+    // HR manages staff — ADMIN, SUPPORT, and all other roles stay visible; only the
+    // system owner is suppressed. Applied in both modes so the roster table and the
+    // KPI-strip counts stay in lockstep. Admins/SuperAdmin/other viewers are
+    // unaffected. Combined via and(...), so an HR user URL-forcing role=SUPER_ADMIN
+    // yields role=SUPER_ADMIN AND role!=SUPER_ADMIN → empty, which is intended.
+    if (actor?.role === 'HR_MANAGER') {
+      conditions.push(ne(schema.users.role, 'SUPER_ADMIN'));
+    }
+
     if (input.supervisorOnly === true) {
       conditions.push(eq(schema.users.isTeamSupervisor, true));
     }

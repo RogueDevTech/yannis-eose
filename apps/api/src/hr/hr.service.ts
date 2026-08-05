@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, desc, gte, lte, isNull, isNotNull, count, sum, inArray, sql, exists } from 'drizzle-orm';
+import { eq, ne, and, or, desc, gte, lte, isNull, isNotNull, count, sum, inArray, sql, exists } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -224,8 +224,12 @@ export class HrService {
     const periodStart = new Date(input.periodStart);
     const periodEnd = new Date(input.periodEnd);
 
-    // Get all active staff members, scoped to the active branch group when set
-    const staffConditions: Parameters<typeof and>[0][] = [eq(schema.users.status, 'ACTIVE')];
+    // Get all active staff members, scoped to the active branch group when set.
+    // SUPER_ADMIN is never on payroll and must never receive a generated payout.
+    const staffConditions: Parameters<typeof and>[0][] = [
+      eq(schema.users.status, 'ACTIVE'),
+      ne(schema.users.role, 'SUPER_ADMIN'),
+    ];
     if (effectiveBranchIds?.length) {
       staffConditions.push(
         exists(

@@ -14,7 +14,7 @@ import {
   USER_WRITE_ACTION_TIMEOUT_MS,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
-import { canEditUser, isAdminLevel } from '~/lib/rbac';
+import { canEditUser, isAdminLevel, isSuperAdminOnly } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { UserDetailPage } from '~/features/users/UserDetailPage';
 import { UserDetailShellSkeleton } from '~/features/users/UserDetailShellSkeleton';
@@ -119,7 +119,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     });
     const canEditLimited = editAccessLevel === 'limited';
 
-    const showOnboardingTab = !isAdminLevel({ role: user.role });
+    // ADMIN (and SUPPORT) are real staff on payroll — show their onboarding/payroll
+    // tab so HR can view and edit it. Only SUPER_ADMIN (system owner, never on
+    // payroll) has the tab hidden. Mirrors hr.router.ts showOnboardingTab.
+    const showOnboardingTab = !isSuperAdminOnly({ role: user.role });
     const permsSetForOnboarding = new Set(
       (currentUser?.permissions ?? []).map((c) => canonicalPermissionCode(c)),
     );
