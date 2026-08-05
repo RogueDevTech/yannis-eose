@@ -181,6 +181,15 @@ export interface CompactTableProps<T> {
    * (e.g. staff directories) where default `py-[5px]` still feels tall.
    */
   density?: 'default' | 'dense';
+  /**
+   * Desktop horizontal-scroll wrapper. Defaults to `true` (wraps the table in an
+   * `overflow-x-auto` div so wide tables scroll sideways). Set `false` for tables
+   * that fit desktop width but are very long: the `overflow-x-auto` box computes
+   * to `overflow-y: auto` too (CSS spec), which under a height-constraining
+   * ancestor turns into a phantom INNER vertical scrollbar. Dropping the wrapper
+   * lets the table sit in normal page flow, so the whole page scrolls as one.
+   */
+  scrollX?: boolean;
 }
 
 const ALIGN_CLASS: Record<CompactTableAlign, string> = {
@@ -463,6 +472,7 @@ export function CompactTable<T>({
   columnVisibilityKey,
   toolbarLeading,
   density = 'default',
+  scrollX = true,
 }: CompactTableProps<T>) {
   const navigate = useNavigate();
   const hasRows = rows.length > 0;
@@ -572,7 +582,7 @@ export function CompactTable<T>({
     return (
       <>
         {/* Desktop skeleton */}
-        <div className={['hidden md:block overflow-x-auto', className].filter(Boolean).join(' ')}>
+        <div className={['hidden md:block', scrollX ? 'overflow-x-auto' : '', className].filter(Boolean).join(' ')}>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-app-border bg-app-hover">
@@ -802,7 +812,7 @@ export function CompactTable<T>({
           ) : null}
         </div>
       )}
-      <div className="overflow-x-auto">
+      <div className={scrollX ? 'overflow-x-auto' : ''}>
       <table className="w-full text-sm">
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead className="border-b border-app-border bg-app-elevated">

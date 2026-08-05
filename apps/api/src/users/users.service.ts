@@ -1204,6 +1204,13 @@ export class UsersService {
   ): SQL[] {
     const conditions: SQL[] = [];
 
+    // Cross-boundary always-visible users. SUPER_ADMIN and SUPPORT transcend
+    // every branch AND company boundary — they stay visible even when a branch
+    // or a company they were not invited to is selected. This is deliberately
+    // role-based, NOT scope_global: ADMIN is also scope_global but must remain
+    // company-bound, so it is excluded here (CEO 2026-08-05).
+    const crossBoundaryVisible = inArray(schema.users.role, ['SUPER_ADMIN', 'SUPPORT']);
+
     if (mode === 'list') {
       if (input.userIds && input.userIds.length > 0) {
         conditions.push(inArray(schema.users.id, input.userIds));
@@ -1291,6 +1298,7 @@ export class UsersService {
       // Company-wide list but group-scoped: users in the active company via
       // user_branches OR primary_branch_id. Primary-only memberships used to be
       // dropped when user_branches rows were missing, under-counting CS Closers.
+      // SUPER_ADMIN/SUPPORT transcend company boundaries — always included.
       conditions.push(
         or(
           inArray(
@@ -1301,9 +1309,15 @@ export class UsersService {
               .where(inArray(schema.userBranches.branchId, effectiveBranchIds!)),
           ),
           inArray(schema.users.primaryBranchId, effectiveBranchIds!),
+          crossBoundaryVisible,
         )!,
       );
     } else if (branchFilter) {
+      // A specific branch is selected (a within-company narrowing). Org-wide
+      // admin-class users are unbranched, so they stay visible when a branch is
+      // selected: scope_global covers ADMIN (visible within its own company) as
+      // well as SUPER_ADMIN/SUPPORT. Company crossing is handled by the
+      // group-scoped paths above, which stay SUPER_ADMIN/SUPPORT-only.
       conditions.push(
         or(
           sql<boolean>`EXISTS (
@@ -1313,6 +1327,7 @@ export class UsersService {
               AND ub.branch_id = ${branchFilter}
           )`,
           eq(schema.users.primaryBranchId, branchFilter),
+          eq(schema.users.scopeGlobal, true),
         )!,
       );
     } else if (
@@ -1323,7 +1338,7 @@ export class UsersService {
     ) {
       // Company-group isolation: user has no specific branch selected but is
       // scoped to a set of branches via effectiveBranchIds. Include primary
-      // branch as well as user_branches membership.
+      // branch as well as user_branches membership, plus cross-boundary admins.
       conditions.push(
         or(
           inArray(
@@ -1334,6 +1349,7 @@ export class UsersService {
               .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
           ),
           inArray(schema.users.primaryBranchId, effectiveBranchIds),
+          crossBoundaryVisible,
         )!,
       );
     } else if (
