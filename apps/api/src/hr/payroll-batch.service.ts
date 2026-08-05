@@ -160,8 +160,9 @@ export function getManageableRolesForViewer(viewer: { role: string }): string[] 
 
 /** True when this user is allowed to prepare a DRAFT batch by role-only policy. */
 function canPrepareDeptByRole(user: SessionUser, branchId: string, dept: PayrollDepartment): boolean {
-  // SuperAdmin always; otherwise anyone holding hr.write (admin via ALL_PERMISSION_CODES, HR_MANAGER) prepares any.
-  if (user.role === 'SUPER_ADMIN') return true;
+  // SuperAdmin/Support always (platform-level actors, full admin parity on payroll);
+  // otherwise anyone holding hr.write (admin via ALL_PERMISSION_CODES, HR_MANAGER) prepares any.
+  if (user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') return true;
   const perms = user.permissions ?? [];
   if (perms.includes('hr.write')) return true;
   if (user.role !== DEPARTMENT_OWNER_ROLE[dept]) return false;
@@ -169,9 +170,11 @@ function canPrepareDeptByRole(user: SessionUser, branchId: string, dept: Payroll
   return !!user.currentBranchId && user.currentBranchId === branchId;
 }
 
-/** HR review stage gate — anyone with hr.write (HR_MANAGER, admin) or SuperAdmin. */
+/** HR review stage gate — anyone with hr.write (HR_MANAGER, admin) or SuperAdmin/Support. */
 function canReviewBatch(user: SessionUser): boolean {
-  if (user.role === 'SUPER_ADMIN') return true;
+  // SUPER_ADMIN and SUPPORT are platform-level actors (they bypass permissionProcedure)
+  // and act as full admins on payroll — same parity as canProcessBatch / assertBatchInScope.
+  if (user.role === 'SUPER_ADMIN' || user.role === 'SUPPORT') return true;
   return (user.permissions ?? []).includes('hr.write');
 }
 
@@ -341,11 +344,20 @@ export class PayrollBatchService {
     // Null-scope batch (no department): only HR/admin (hr.write) may prepare, except
     // a branch-pinned contractor batch which a Head of that branch may also prepare.
     if (!dept) {
-      if (user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('hr.write')) return true;
+      if (
+        user.role === 'SUPER_ADMIN' ||
+        user.role === 'SUPPORT' ||
+        (user.permissions ?? []).includes('hr.write')
+      )
+        return true;
       return !!branchId && user.currentBranchId === branchId;
     }
     if (!branchId) {
-      return user.role === 'SUPER_ADMIN' || (user.permissions ?? []).includes('hr.write');
+      return (
+        user.role === 'SUPER_ADMIN' ||
+        user.role === 'SUPPORT' ||
+        (user.permissions ?? []).includes('hr.write')
+      );
     }
     if (canPrepareDeptByRole(user, branchId, dept)) return true;
     // HR Manager is an org-wide role (CEO directive 2026-05-10) — they
@@ -354,6 +366,35 @@ export class PayrollBatchService {
     // here so a future tweak to that helper can't accidentally lock HR out.
     if (user.role === 'HR_MANAGER') return true;
     return this.isBranchTeamSupervisorForDept(user.id, branchId, dept);
+  }
+
+  /**
+   * Serialize concurrent regenerations of the SAME payroll slot.
+   *
+   * generateBatch / generateNullScopeBatch look up an existing batch then
+   * INSERT-if-absent. Because the lookup and the insert are separate statements,
+   * two regenerate calls that race (a double-click, or a retry) can both find no
+   * row and both INSERT — producing duplicate batches in one slot that every later
+   * regenerate then only half-updates. A plain `SELECT ... FOR UPDATE` can't help:
+   * it can't lock a row that doesn't exist yet (no phantom protection).
+   *
+   * `pg_advisory_xact_lock` takes a transaction-scoped lock keyed on the slot
+   * identity, so the second caller BLOCKS until the first commits, then sees the
+   * committed row and takes the UPDATE (regenerate-in-place) path. Different slots
+   * hash to different keys and never contend. The lock auto-releases on commit or
+   * rollback — no manual unlock. Combined with the partial unique indexes
+   * (uq_payroll_batch_dept_slot / uq_payroll_batch_null_scope) the slot can hold at
+   * most one batch even under concurrency.
+   *
+   * The key is a single 64-bit bigint from `hashtextextended` (Postgres >= 11),
+   * fed to the `pg_advisory_xact_lock(bigint)` overload — no int splitting, so no
+   * signed-overflow concerns.
+   */
+  private async lockPayrollSlot(
+    tx: TxLike,
+    slotKey: string,
+  ): Promise<void> {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${slotKey}, 0))`);
   }
 
   // ============================================
@@ -401,6 +442,11 @@ export class PayrollBatchService {
     const { periodStart, periodEnd } = nigeriaMonthWindow(input.periodMonth);
 
     return withActorAndBranch(this.db, { id: actor.id, currentBranchId: branchId }, async (tx) => {
+      // Serialize concurrent regenerations of this exact slot before the
+      // lookup-then-insert below — otherwise a race inserts a duplicate batch.
+      // Key mirrors the classic-staff slot (branch × month × department).
+      await this.lockPayrollSlot(tx, `dept:${branchId}:${input.periodMonth}:${department}`);
+
       // Look up existing batch in this slot
       const existing = (
         await tx
@@ -524,7 +570,9 @@ export class PayrollBatchService {
     // Authz: org-wide (no branch) requires hr.write; a branch-pinned CONTRACTORS
     // batch is allowed to that branch's preparers (Heads) too.
     const hasHrWrite =
-      actor.role === 'SUPER_ADMIN' || (actor.permissions ?? []).includes('hr.write');
+      actor.role === 'SUPER_ADMIN' ||
+      actor.role === 'SUPPORT' ||
+      (actor.permissions ?? []).includes('hr.write');
     if (!branchId) {
       if (!hasHrWrite) {
         throw new TRPCError({
@@ -543,6 +591,15 @@ export class PayrollBatchService {
     const scopeBranchIds = branchId ? [branchId] : null;
 
     return withActorAndBranch(this.db, { id: actor.id, currentBranchId: branchId }, async (tx) => {
+      // Serialize concurrent regenerations of this exact null-scope slot before the
+      // lookup-then-insert below. Key mirrors uq_payroll_batch_null_scope
+      // (scope_type × month × coalesced branch × coalesced run_label).
+      const nullScopeBranch = branchId ?? '00000000-0000-0000-0000-000000000000';
+      await this.lockPayrollSlot(
+        tx,
+        `null:${scopeType}:${input.periodMonth}:${nullScopeBranch}:${input.runLabel ?? ''}`,
+      );
+
       // Dedup on (scope_type, month, branch, run_label) — mirrors the partial index.
       const existing = (
         await tx
@@ -735,6 +792,10 @@ export class PayrollBatchService {
           this.db,
           { id: actor.id, currentBranchId: branchId },
           async (tx) => {
+            // Serialize this slot before lookup-then-insert (same race guard as
+            // generateBatch). Key mirrors the classic-staff slot.
+            await this.lockPayrollSlot(tx, `dept:${branchId}:${input.periodMonth}:${department}`);
+
             const existing = (
               await tx
                 .select()
@@ -3581,6 +3642,7 @@ export class PayrollBatchService {
 
     const viewerHasFullHr =
       viewer.role === 'SUPER_ADMIN' ||
+      viewer.role === 'SUPPORT' ||
       (viewer.permissions ?? []).includes('hr.write');
     if (viewerHasFullHr) {
       (Object.keys(DEPARTMENT_OWNER_ROLE) as PayrollDepartment[]).forEach((d) => departments.add(d));
@@ -3673,6 +3735,7 @@ export class PayrollBatchService {
     // to a branch (CEO 2026-05-19) loses cross-branch — they see only their branch's batches.
     const cross =
       viewer.role === 'SUPER_ADMIN' ||
+      viewer.role === 'SUPPORT' ||
       ((viewer.permissions ?? []).includes('hr.write') && viewer.currentBranchId == null);
     const orgWideHeadNullSession =
       isOrgWideDepartmentHead(viewer) && viewer.currentBranchId == null;
@@ -3682,7 +3745,9 @@ export class PayrollBatchService {
     // branch-scoped viewers only ever see them via a branch-pinned contractor batch,
     // which passes the normal branch filters below.
     const canSeeOrgWide =
-      viewer.role === 'SUPER_ADMIN' || (viewer.permissions ?? []).includes('hr.write');
+      viewer.role === 'SUPER_ADMIN' ||
+      viewer.role === 'SUPPORT' ||
+      (viewer.permissions ?? []).includes('hr.write');
     const orgWideBatch = and(
       isNull(schema.payrollBatches.branchId),
       inArray(schema.payrollBatches.scopeType, ['CONTRACTORS', 'ALL']),
