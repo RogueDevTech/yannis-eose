@@ -128,11 +128,6 @@ function parseBonusLines(breakdown: unknown): Array<{ label: string; amount: num
     .filter((x): x is { label: string; amount: number } => x != null);
 }
 
-function moneyOrDash(amount: number): ReactNode {
-  if (!Number.isFinite(amount) || amount === 0) return 'N/A';
-  return <NairaPrice amount={amount} />;
-}
-
 /**
  * Compact role tag for the payouts table. Renders the system role as a colored
  * chip (or a neutral "Contractor" chip when the payout line has no staff role —
@@ -377,84 +372,45 @@ export function PayoutDetailSections({
     !!payout.payoutAccountName ||
     !!payout.payoutAccountNumber;
 
-  const summaryItems: DescriptionItem[] = [
-    { label: 'Staff', value: payout.staffName },
-    {
-      label: 'Role',
-      value: payout.staffRole ? (
-        <RoleBadge role={payout.staffRole} size="sm" variant="chip" />
-      ) : (
-        <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-2xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-          Contractor
-        </span>
-      ),
-    },
-    {
-      label: 'Pay role',
-      value: payout.payRoleName?.trim() || 'N/A',
-    },
-    { label: 'Line status', value: <StatusBadge status={payout.lineStatus ?? payout.status} /> },
-    { label: 'Payout status', value: <StatusBadge status={payout.status} /> },
-  ];
+  // Money figures. Earnings build UP to gross; statutory/deduction lines pull it
+  // DOWN to net. Split into two groups so the breakdown reads as a flow rather
+  // than an undifferentiated list.
+  const baseSalary = Number(payout.baseSalary);
+  const performanceBonus = Number(payout.performanceBonus);
+  const allowances = Number(payout.allowancesTotal ?? 0);
+  const addOns = Number(payout.addOnsTotal);
+  const deductions = Number(payout.deductionsTotal);
+  const grossPay = Number(payout.grossPay ?? payout.totalPayout);
+  const payeTax = Number(payout.payeTax ?? 0);
+  const employerSubsidy = Number(payout.employerPayeSubsidy ?? 0);
+  const netPay = Number(payout.netPay ?? payout.totalPayout);
 
-  const payItems: DescriptionItem[] = [
-    { label: 'Base salary', value: <NairaPrice amount={Number(payout.baseSalary)} /> },
-    ...(proration
-      ? [
-          {
-            label: 'Prorated',
-            value: (
-              <span className="text-warning-700 dark:text-warning-300">
-                {proration.activeDays} of {proration.periodDays} days worked
-              </span>
-            ),
-          } as DescriptionItem,
-        ]
-      : []),
-    { label: 'Performance bonus', value: moneyOrDash(Number(payout.performanceBonus)) },
-    { label: 'Allowances', value: moneyOrDash(Number(payout.allowancesTotal ?? 0)) },
-    { label: 'Add-ons', value: moneyOrDash(Number(payout.addOnsTotal)) },
+  const earningLines: { label: string; amount: number; hint?: ReactNode }[] = [
     {
-      label: 'Deductions',
-      value:
-        Number(payout.deductionsTotal) > 0 ? (
-          <>
-            {'\u2212'}
-            <NairaPrice amount={Number(payout.deductionsTotal)} />
-          </>
-        ) : (
-          'N/A'
-        ),
-    },
-    {
-      label: 'Gross pay',
-      value: <NairaPrice amount={Number(payout.grossPay ?? payout.totalPayout)} />,
-    },
-    {
-      label: 'PAYE tax',
-      value:
-        Number(payout.payeTax ?? 0) > 0 ? (
-          <>
-            {'\u2212'}
-            <NairaPrice amount={Number(payout.payeTax)} />
-          </>
-        ) : (
-          'N/A'
-        ),
-    },
-    {
-      label: 'Employer PAYE subsidy',
-      value: moneyOrDash(Number(payout.employerPayeSubsidy ?? 0)),
-    },
-    {
-      label: 'Net pay',
-      value: (
-        <span className="font-semibold text-app-fg">
-          <NairaPrice amount={Number(payout.netPay ?? payout.totalPayout)} />
+      label: 'Base salary',
+      amount: baseSalary,
+      hint: proration ? (
+        <span className="text-warning-700 dark:text-warning-300">
+          Prorated: {proration.activeDays} of {proration.periodDays} days
         </span>
-      ),
+      ) : undefined,
     },
-  ];
+    { label: 'Performance bonus', amount: performanceBonus },
+    { label: 'Allowances', amount: allowances },
+    { label: 'Add-ons', amount: addOns },
+  ].filter((l) => l.amount !== 0 || l.label === 'Base salary');
+
+  const deductionLines: { label: string; amount: number; hint?: ReactNode }[] = [
+    { label: 'Deductions', amount: deductions },
+    { label: 'PAYE tax', amount: payeTax },
+  ].filter((l) => l.amount !== 0);
+
+  const staffInitials = payout.staffName
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
 
   const bankItems: DescriptionItem[] = hasBank
     ? [
@@ -481,15 +437,117 @@ export function PayoutDetailSections({
 
   return (
     <div className="space-y-4">
+      {/* Identity header \u2014 avatar + name + role + statuses, in one dense row. */}
+      <div className="card flex flex-wrap items-center gap-x-4 gap-y-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-500/10 text-sm font-semibold text-brand-600 dark:text-brand-300">
+            {staffInitials || '?'}
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold text-app-fg">{payout.staffName}</p>
+            <p className="truncate text-xs text-app-fg-muted">
+              {payout.payRoleName?.trim() || 'No pay role'}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+          {payout.staffRole ? (
+            <RoleBadge role={payout.staffRole} size="sm" variant="chip" />
+          ) : (
+            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-2xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              Contractor
+            </span>
+          )}
+          <StatusBadge status={payout.status} />
+          {payout.lineStatus && payout.lineStatus !== 'OK' ? (
+            <StatusBadge status={payout.lineStatus} />
+          ) : null}
+        </div>
+      </div>
+
+      {/* Net-pay hero \u2014 the headline figure, with the gross \u2192 deductions flow. */}
+      <div className="card bg-gradient-to-br from-brand-500/[0.07] to-transparent">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Net pay</p>
+            <p className="mt-1 text-3xl font-bold tabular-nums text-app-fg">
+              <NairaPrice amount={netPay} />
+            </p>
+          </div>
+          <div className="flex items-center gap-4 text-sm">
+            <div className="text-right">
+              <p className="text-2xs uppercase tracking-wide text-app-fg-muted">Gross</p>
+              <p className="tabular-nums font-medium text-app-fg">
+                <NairaPrice amount={grossPay} />
+              </p>
+            </div>
+            <span className="text-app-fg-muted">{'\u2212'}</span>
+            <div className="text-right">
+              <p className="text-2xs uppercase tracking-wide text-app-fg-muted">Deducted</p>
+              <p className="tabular-nums font-medium text-danger-600 dark:text-danger-400">
+                <NairaPrice amount={Math.max(0, grossPay - netPay)} />
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Earnings (build to gross) and deductions (pull to net), side by side. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
-        <div className="card space-y-1">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Staff</h4>
-          <DescriptionList items={summaryItems} layout="stacked" divided />
+        <div className="card space-y-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Earnings</h4>
+          <ul className="space-y-2.5">
+            {earningLines.map((l) => (
+              <li key={l.label} className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="text-app-fg-muted">
+                  {l.label}
+                  {l.hint ? <span className="ml-2 text-2xs">{l.hint}</span> : null}
+                </span>
+                <span className="tabular-nums font-medium text-app-fg">
+                  <NairaPrice amount={l.amount} />
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex items-baseline justify-between gap-3 border-t border-app-border pt-2.5 text-sm">
+            <span className="font-semibold text-app-fg">Gross pay</span>
+            <span className="tabular-nums font-semibold text-app-fg">
+              <NairaPrice amount={grossPay} />
+            </span>
+          </div>
         </div>
 
-        <div className="card space-y-1">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Pay breakdown</h4>
-          <DescriptionList items={payItems} layout="stacked" divided />
+        <div className="card space-y-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
+            Deductions &amp; tax
+          </h4>
+          {deductionLines.length > 0 ? (
+            <ul className="space-y-2.5">
+              {deductionLines.map((l) => (
+                <li key={l.label} className="flex items-baseline justify-between gap-3 text-sm">
+                  <span className="text-app-fg-muted">{l.label}</span>
+                  <span className="tabular-nums font-medium text-danger-600 dark:text-danger-400">
+                    {'\u2212'}
+                    <NairaPrice amount={l.amount} />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-app-fg-muted">No deductions on this payout.</p>
+          )}
+          {employerSubsidy > 0 ? (
+            <p className="text-2xs text-app-fg-muted">
+              Employer PAYE subsidy of <NairaPrice amount={employerSubsidy} /> is paid by the company
+              and does not reduce net pay.
+            </p>
+          ) : null}
+          <div className="flex items-baseline justify-between gap-3 border-t border-app-border pt-2.5 text-sm">
+            <span className="font-semibold text-app-fg">Net pay</span>
+            <span className="tabular-nums font-semibold text-success-600 dark:text-success-400">
+              <NairaPrice amount={netPay} />
+            </span>
+          </div>
         </div>
       </div>
 
