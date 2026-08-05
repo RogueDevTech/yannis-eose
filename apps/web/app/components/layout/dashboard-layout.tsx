@@ -123,6 +123,15 @@ const navStructure: NavGroupDef[] = [
     group: 'MARKETING',
     items: [
       {
+        label: 'Analytics',
+        href: '/admin/marketing/analytics',
+        icon: SidebarIcons.trendUp,
+        // MB sees own form analytics; HoM/admin see the branch; marketing team
+        // supervisors see their team (enforced server-side in formAnalyticsPageBundle).
+        permission: 'marketing.teamOverview',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'],
+      },
+      {
         label: 'Live Activities',
         labelShort: 'Marketing',
         href: '/admin/marketing/overview',
