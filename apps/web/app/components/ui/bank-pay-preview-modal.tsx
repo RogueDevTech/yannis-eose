@@ -24,7 +24,7 @@ export function BankPayPreviewModal({
     <Modal
       open
       onClose={onClose}
-      maxWidth="max-w-5xl"
+      maxWidth="max-w-7xl"
       backdropBlur
       contentClassName="p-0 flex flex-col max-h-[92dvh] overflow-hidden border border-app-border bg-app-elevated shadow-xl"
       aria-labelledby="bank-pay-preview-title"

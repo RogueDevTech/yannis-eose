@@ -214,10 +214,10 @@ async function buildBankPayPdf(input: BankPayPdfInput): Promise<jsPDF> {
     doc.rect(margin, y - 3.5, pageWidth - 2 * margin, 7, 'F');
     doc.setFontSize(8);
     doc.setTextColor(80, 80, 80);
-    doc.text('Beneficiary', col.name, y);
+    doc.text('Account name', col.name, y);
     doc.text('Bank', col.bank, y);
     doc.text('Bank code', col.code, y);
-    doc.text('Account', col.account, y);
+    doc.text('Account number', col.account, y);
     doc.text('Amount', col.amount + 26, y, { align: 'right' });
     doc.text('Narration', col.ref, y);
     y += 6;

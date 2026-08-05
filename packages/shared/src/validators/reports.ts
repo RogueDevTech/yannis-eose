@@ -541,3 +541,23 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
 
 export type ExportReportInput = z.infer<typeof exportReportSchema>;
 
+/**
+ * Input for the on-screen report data procedures in the Reports module
+ * (Admin → Reports). Date range comes from the shared DateFilterBar (ISO
+ * `YYYY-MM-DD`, optionally time-refined); branchId narrows to one branch,
+ * otherwise the actor's effectiveBranchIds scope applies. Access is enforced
+ * server-side (admin-level only) in the service.
+ */
+export const reportDataInputSchema = z.object({
+  startDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/)
+    .optional(),
+  endDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/)
+    .optional(),
+  branchId: z.string().uuid().nullish(),
+});
+export type ReportDataInput = z.infer<typeof reportDataInputSchema>;
+
