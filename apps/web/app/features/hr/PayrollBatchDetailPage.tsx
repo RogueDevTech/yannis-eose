@@ -70,6 +70,7 @@ export interface BatchDetail {
     category: string;
     reason: string;
     createdAt: string;
+    periodMonth?: string | null;
   }>;
   allowedTransitions: string[];
 }
@@ -291,18 +292,71 @@ function buildBatchPayoutColumns(args: {
   return cols;
 }
 
+const ADJUSTMENT_CATEGORY_OPTIONS = [
+  { value: 'BONUS', label: 'Bonus' },
+  { value: 'EXTRA_SHIFT', label: 'Extra shift' },
+  { value: 'PERFORMANCE', label: 'Performance' },
+  { value: 'DEDUCTION', label: 'Deduction' },
+  { value: 'CLAWBACK', label: 'Clawback' },
+  { value: 'OTHER', label: 'Other' },
+];
+
 /**
  * Full payout breakdown — staff/role, pay math, bonus lines, adjustments, and
  * bank details. Rendered as page sections on the payout detail route (formerly
- * a modal). Pure presentation; the route supplies the payout + its adjustments.
+ * a modal). The route supplies the payout + its adjustments; when
+ * `canEditAdjustments` is set, each adjustment row can be edited or removed
+ * inline (both recompute the payout's net server-side).
  */
 export function PayoutDetailSections({
   payout,
   adjustments,
+  canEditAdjustments = false,
 }: {
   payout: BatchPayoutLine;
   adjustments: BatchAdjustment[];
+  canEditAdjustments?: boolean;
 }) {
+  const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const [editTarget, setEditTarget] = useState<BatchAdjustment | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<BatchAdjustment | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editCategory, setEditCategory] = useState('BONUS');
+  const [editReason, setEditReason] = useState('');
+  const submitting = fetcher.state !== 'idle';
+
+  useFetcherToast(fetcher.data, { successMessage: 'Adjustment updated. Net pay recalculated.' });
+  useCloseOnFetcherSuccess(fetcher, () => {
+    setEditTarget(null);
+    setRemoveTarget(null);
+  });
+
+  const openEdit = useCallback((a: BatchAdjustment) => {
+    setEditAmount(String(Math.abs(Number(a.amount))));
+    setEditCategory(a.category);
+    setEditReason(a.reason);
+    setEditTarget(a);
+  }, []);
+
+  const submitEdit = useCallback(() => {
+    if (!editTarget) return;
+    const fd = new FormData();
+    fd.set('intent', 'updateAdjustment');
+    fd.set('adjustmentId', editTarget.id);
+    fd.set('amount', editAmount);
+    fd.set('category', editCategory);
+    fd.set('reason', editReason);
+    fetcher.submit(fd, { method: 'post' });
+  }, [editTarget, editAmount, editCategory, editReason, fetcher]);
+
+  const submitRemove = useCallback(() => {
+    if (!removeTarget) return;
+    const fd = new FormData();
+    fd.set('intent', 'deleteAdjustment');
+    fd.set('adjustmentId', removeTarget.id);
+    fetcher.submit(fd, { method: 'post' });
+  }, [removeTarget, fetcher]);
+
   const bonusLines = parseBonusLines(payout.bonusBreakdown);
   const proration = (() => {
     const snap = payout.metricsSnapshot as { proration?: { activeDays: number; periodDays: number } } | null;
@@ -419,71 +473,199 @@ export function PayoutDetailSections({
     : [];
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
-      <div className="card space-y-1">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Staff</h4>
-        <DescriptionList items={summaryItems} layout="stacked" divided />
-      </div>
-
-      <div className="card space-y-1">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Pay breakdown</h4>
-        <DescriptionList items={payItems} layout="stacked" divided />
-      </div>
-
-      {bonusLines.length > 0 ? (
-        <div className="card space-y-2">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
-            Bonus lines
-          </h4>
-          <ul className="space-y-1.5">
-            {bonusLines.map((line, idx) => (
-              <li key={`${line.label}-${idx}`} className="flex justify-between gap-3 text-sm">
-                <span className="text-app-fg-muted">{line.label}</span>
-                <span className="tabular-nums text-app-fg">
-                  <NairaPrice amount={line.amount} />
-                </span>
-              </li>
-            ))}
-          </ul>
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+        <div className="card space-y-1">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Staff</h4>
+          <DescriptionList items={summaryItems} layout="stacked" divided />
         </div>
-      ) : null}
+
+        <div className="card space-y-1">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Pay breakdown</h4>
+          <DescriptionList items={payItems} layout="stacked" divided />
+        </div>
+      </div>
 
       {adjustments.length > 0 ? (
-        <div className="card space-y-2">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
-            Adjustments
-          </h4>
-          <ul className="space-y-2">
-            {adjustments.map((a) => (
-              <li key={a.id} className="text-sm">
-                <div className="flex justify-between gap-3">
-                  <span className="font-medium text-app-fg">{a.category}</span>
-                  <span
-                    className={`tabular-nums ${
-                      Number(a.amount) < 0
-                        ? 'text-danger-600 dark:text-danger-400'
-                        : 'text-success-600 dark:text-success-400'
-                    }`}
-                  >
-                    {Number(a.amount) < 0 ? '\u2212' : '+'}
-                    <NairaPrice amount={Math.abs(Number(a.amount))} />
-                  </span>
-                </div>
-                <p className="mt-0.5 text-xs text-app-fg-muted">{a.reason}</p>
-              </li>
-            ))}
+        <div className="card space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
+              Adjustments
+            </h4>
+            <span className="text-2xs text-app-fg-muted">
+              {adjustments.length} {adjustments.length === 1 ? 'record' : 'records'}
+            </span>
+          </div>
+          <ul className="divide-y divide-app-border">
+            {adjustments.map((a) => {
+              const negative = Number(a.amount) < 0;
+              const ts = formatOrderTimestampShort(a.createdAt);
+              return (
+                <li
+                  key={a.id}
+                  className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge status={a.category} />
+                      <span
+                        className={`text-sm font-semibold tabular-nums ${
+                          negative
+                            ? 'text-danger-600 dark:text-danger-400'
+                            : 'text-success-600 dark:text-success-400'
+                        }`}
+                      >
+                        {negative ? '\u2212' : '+'}
+                        <NairaPrice amount={Math.abs(Number(a.amount))} />
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-app-fg-muted">{a.reason}</p>
+                    {ts && ts !== '\u2014' ? (
+                      <p className="mt-0.5 text-2xs text-app-fg-muted">Added {ts}</p>
+                    ) : null}
+                  </div>
+                  {canEditAdjustments ? (
+                    <div className="flex shrink-0 items-center gap-1.5 sm:justify-end">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={submitting}
+                        onClick={() => openEdit(a)}
+                      >
+                        Adjust
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        disabled={submitting}
+                        onClick={() => setRemoveTarget(a)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
+          {canEditAdjustments ? (
+            <p className="text-2xs text-app-fg-muted">
+              Editing or removing an adjustment recalculates this payout's net pay automatically.
+            </p>
+          ) : null}
         </div>
       ) : null}
 
-      {hasBank ? (
-        <div className="card space-y-1">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
-            Bank details
-          </h4>
-          <DescriptionList items={bankItems} layout="stacked" divided />
+      {(bonusLines.length > 0 || hasBank) ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+          {bonusLines.length > 0 ? (
+            <div className="card space-y-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
+                Bonus lines
+              </h4>
+              <ul className="space-y-1.5">
+                {bonusLines.map((line, idx) => (
+                  <li key={`${line.label}-${idx}`} className="flex justify-between gap-3 text-sm">
+                    <span className="text-app-fg-muted">{line.label}</span>
+                    <span className="tabular-nums text-app-fg">
+                      <NairaPrice amount={line.amount} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {hasBank ? (
+            <div className="card space-y-1">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
+                Bank details
+              </h4>
+              <DescriptionList items={bankItems} layout="stacked" divided />
+            </div>
+          ) : null}
         </div>
       ) : null}
+
+      {/* Edit an adjustment inline. Amount is entered as a magnitude; the server
+          re-signs it by category (deductions negative). */}
+      <Modal
+        open={!!editTarget}
+        onClose={() => (submitting ? undefined : setEditTarget(null))}
+        maxWidth="max-w-md"
+        contentClassName="p-5"
+      >
+        <div className="space-y-3">
+          <h3 className="text-base font-semibold text-app-fg">Adjust record</h3>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-app-fg-muted">Category</label>
+            <FormSelect
+              value={editCategory}
+              onChange={(e) => setEditCategory(e.target.value)}
+              options={ADJUSTMENT_CATEGORY_OPTIONS}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-app-fg-muted">Amount</label>
+            <AmountInput value={editAmount} onChange={setEditAmount} />
+            <p className="mt-1 text-2xs text-app-fg-muted">
+              Enter a positive amount: deduction categories are subtracted automatically.
+            </p>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-app-fg-muted">Reason</label>
+            <Textarea
+              value={editReason}
+              onChange={(e) => setEditReason(e.target.value)}
+              rows={2}
+              minLength={5}
+              placeholder="Reason (min 5 chars)"
+            />
+          </div>
+          <ModalFetcherInlineError message={(fetcher.data as { error?: string } | undefined)?.error ?? null} />
+          <div className="flex gap-2 pt-1">
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              loading={submitting}
+              loadingText="Saving..."
+              onClick={submitEdit}
+            >
+              Save changes
+            </Button>
+            <Button type="button" variant="ghost" size="sm" disabled={submitting} onClick={() => setEditTarget(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <ConfirmActionModal
+        open={!!removeTarget}
+        onClose={() => (submitting ? undefined : setRemoveTarget(null))}
+        title="Remove adjustment"
+        description="This removes the adjustment from this payout and recalculates net pay. This cannot be undone."
+        details={
+          removeTarget ? (
+            <ul className="space-y-0.5">
+              <li>
+                {removeTarget.category}:{' '}
+                {Number(removeTarget.amount) < 0 ? '\u2212' : '+'}
+                <NairaPrice amount={Math.abs(Number(removeTarget.amount))} />
+              </li>
+              <li className="text-app-fg-muted">{removeTarget.reason}</li>
+            </ul>
+          ) : null
+        }
+        confirmLabel="Remove"
+        variant="danger"
+        loading={submitting}
+        error={(fetcher.data as { error?: string } | undefined)?.error ?? null}
+        onConfirm={submitRemove}
+      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { defer } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
@@ -10,7 +10,9 @@ import {
   getCurrentUser,
   getSessionCookie,
   requirePermissionOrRoles,
+  safeStatus,
 } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import {
   PayoutDetailSections,
   type BatchDetail,
@@ -31,6 +33,16 @@ const PAYROLL_VIEWER_ROLES = [
   'HEAD_OF_MARKETING',
   'HEAD_OF_LOGISTICS',
 ];
+
+// Roles that may edit/remove an adjustment (mirrors the server's HR edit window).
+const ADJUSTMENT_EDITOR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER'];
+// Server allows adjustment edit/delete only while the batch is DRAFT or PENDING_HR
+// (loadCorrectableAdjustment locks PENDING_FINANCE + PAID). Gate the UI to match.
+const ADJUSTMENT_EDITABLE_BATCH_STATUSES = ['DRAFT', 'PENDING_HR'];
+
+function extractError(res: { data: unknown }, fallback: string): string {
+  return extractApiErrorMessage(res.data, fallback);
+}
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
@@ -57,6 +69,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       payout: null as BatchPayoutLine | null,
       adjustments: [] as BatchAdjustment[],
       periodLabel: '',
+      canEditAdjustments: false,
     };
     try {
       const batchRes = await apiRequest<unknown>(
@@ -70,12 +83,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       const payout = detail.payouts.find((p) => p.id === payoutId) ?? null;
       const adjustments = detail.adjustments.filter((a) => a.payoutId === payoutId);
       const periodLabel = detail.batch.periodMonth ?? '';
+      // The batch must be HR-editable AND the viewer an HR/admin editor for the
+      // Adjust/Remove controls to show. The server is still the final authority
+      // (it returns a clean CONFLICT if the window has since closed).
+      const canEditAdjustments =
+        ADJUSTMENT_EDITOR_ROLES.includes(user.role) &&
+        ADJUSTMENT_EDITABLE_BATCH_STATUSES.includes(detail.batch.status);
 
       return {
         batchId,
         payout: payout as BatchPayoutLine | null,
         adjustments: adjustments as BatchAdjustment[],
         periodLabel,
+        canEditAdjustments,
       };
     } catch {
       return empty;
@@ -83,6 +103,54 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   })();
 
   return defer({ pageData });
+}
+
+/**
+ * Edit / remove an individual adjustment straight from the payslip. Both
+ * mutations recompute the linked payout's net server-side
+ * (recomputeForAdjustment), so the reloaded page shows the updated figures.
+ */
+export async function action({ request }: ActionFunctionArgs) {
+  const user = await getCurrentUser(request);
+  if (!user) throw new Response('Not authenticated', { status: 401 });
+  await requirePermissionOrRoles(request, {
+    roles: ADJUSTMENT_EDITOR_ROLES,
+    permission: ['hr.write'],
+  });
+  const cookie = getSessionCookie(request);
+  const formData = await request.formData();
+  const intent = formData.get('intent')?.toString();
+
+  if (intent === 'deleteAdjustment') {
+    const res = await apiRequest<unknown>('/trpc/hr.deleteAdjustment', {
+      method: 'POST',
+      cookie,
+      body: { adjustmentId: formData.get('adjustmentId')?.toString() ?? '' },
+    });
+    if (!res.ok) {
+      return json({ error: extractError(res, 'Failed to remove adjustment') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'updateAdjustment') {
+    const res = await apiRequest<unknown>('/trpc/hr.updateAdjustment', {
+      method: 'POST',
+      cookie,
+      body: {
+        adjustmentId: formData.get('adjustmentId')?.toString() ?? '',
+        amount: formData.get('amount')?.toString() ?? '',
+        category: formData.get('category')?.toString() ?? '',
+        reason: formData.get('reason')?.toString() ?? '',
+      },
+    });
+    if (!res.ok) {
+      return json({ error: extractError(res, 'Failed to update adjustment') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  return json({ error: 'Unknown action' }, { status: 400 });
 }
 
 export const clientLoader = cachedClientLoader;
@@ -112,7 +180,11 @@ export default function PayrollPayoutDetailRoute() {
             backTo={`/hr/payroll-batch/${data.batchId}`}
           />
           {data.payout ? (
-            <PayoutDetailSections payout={data.payout} adjustments={data.adjustments} />
+            <PayoutDetailSections
+              payout={data.payout}
+              adjustments={data.adjustments}
+              canEditAdjustments={data.canEditAdjustments}
+            />
           ) : (
             <EmptyState
               title="Payout not found"
