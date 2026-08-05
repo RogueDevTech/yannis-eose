@@ -23,6 +23,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -40,6 +41,36 @@ import { hasFinanceAccess, isAdminLevel } from '~/lib/rbac';
 
 const ADJ_ADDON_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
 const ADJ_DEDUCT_CATEGORIES = ['DEDUCTION', 'CLAWBACK'];
+const ADJ_ALL_CATEGORIES = [...ADJ_ADDON_CATEGORIES, ...ADJ_DEDUCT_CATEGORIES];
+
+/**
+ * Human-readable month for an adjustment's target batch (e.g. "Aug 2026").
+ * `periodMonth` may be a full date ("2026-08-01") or a "YYYY-MM" prefix; both
+ * are handled. Returns null when the adjustment is not earmarked for a month
+ * (floating — absorbed by the next open batch).
+ */
+function adjustmentPeriodLabel(periodMonth?: string | null): string | null {
+  if (!periodMonth) return null;
+  const m = /^(\d{4})-(\d{2})/.exec(periodMonth);
+  if (!m) return null;
+  return new Date(`${m[1]}-${m[2]}-01T00:00:00Z`).toLocaleDateString('en-NG', {
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/** Short, human label for the linked batch's status (null when floating). */
+function adjustmentBatchStatusLabel(batchStatus?: string | null): string | null {
+  if (!batchStatus) return null;
+  const map: Record<string, string> = {
+    DRAFT: 'Draft',
+    PENDING_HR: 'Pending HR',
+    PENDING_FINANCE: 'Pending Finance',
+    PAID: 'Paid',
+  };
+  return map[batchStatus] ?? batchStatus.replace(/_/g, ' ');
+}
 
 /**
  * HR & Payroll landing page.
@@ -68,6 +99,13 @@ export function HRPage({
   const fetcher = useFetcher();
   const hrSurface = useFetcherActionSurface(fetcher);
   const [activeTab, setActiveTab] = useState<'monthly' | 'adjustments'>('monthly');
+  // Adjustments tab filters. Search matches staff/contractor name + reason;
+  // category / status / period narrow the list. All client-side over the already
+  // loaded adjustments (the tab is a small HR inbox, not a paginated feed).
+  const [adjustmentSearch, setAdjustmentSearch] = useState('');
+  const [adjustmentCategoryFilter, setAdjustmentCategoryFilter] = useState('');
+  const [adjustmentStatusFilter, setAdjustmentStatusFilter] = useState('');
+  const [adjustmentPeriodFilter, setAdjustmentPeriodFilter] = useState('');
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
   // Which kind of adjustment the modal is creating. Deciding this up front (via
   // two distinct buttons) removes the old ambiguity where a positive amount in a
@@ -538,6 +576,52 @@ export function HRPage({
                   if (!adj.staffId) return 'Unknown';
                   return resolvedUsers.find((u: HRUser) => u.id === adj.staffId)?.name ?? adj.staffId.slice(0, 8) + '...';
                 };
+
+                // Distinct target periods present in the data, for the period filter.
+                // 'floating' is a synthetic key for adjustments not earmarked to a month.
+                const periodOptions = (() => {
+                  const seen = new Map<string, string>();
+                  let hasFloating = false;
+                  for (const adj of overlaidAdjustments) {
+                    const label = adjustmentPeriodLabel(adj.periodMonth);
+                    if (!label) {
+                      hasFloating = true;
+                      continue;
+                    }
+                    const key = String(adj.periodMonth).slice(0, 7);
+                    if (!seen.has(key)) seen.set(key, label);
+                  }
+                  const opts = [...seen.entries()]
+                    .sort((a, b) => b[0].localeCompare(a[0])) // newest month first
+                    .map(([value, label]) => ({ value, label }));
+                  if (hasFloating) opts.push({ value: 'floating', label: 'Unassigned (next batch)' });
+                  return opts;
+                })();
+
+                const searchQ = adjustmentSearch.toLowerCase().trim();
+                const filteredAdjustments = overlaidAdjustments.filter((adj) => {
+                  if (searchQ) {
+                    const haystack = `${getPartyName(adj)} ${adj.reason ?? ''}`.toLowerCase();
+                    if (!haystack.includes(searchQ)) return false;
+                  }
+                  if (adjustmentCategoryFilter && adj.category !== adjustmentCategoryFilter) return false;
+                  if (adjustmentStatusFilter) {
+                    const isApproved = !!adj.approvedBy;
+                    if (adjustmentStatusFilter === 'APPROVED' && !isApproved) return false;
+                    if (adjustmentStatusFilter === 'PENDING' && isApproved) return false;
+                  }
+                  if (adjustmentPeriodFilter) {
+                    const key = adj.periodMonth ? String(adj.periodMonth).slice(0, 7) : 'floating';
+                    if (key !== adjustmentPeriodFilter) return false;
+                  }
+                  return true;
+                });
+                const hasActiveAdjustmentFilter =
+                  !!searchQ ||
+                  !!adjustmentCategoryFilter ||
+                  !!adjustmentStatusFilter ||
+                  !!adjustmentPeriodFilter;
+
                 const adjustmentColumns: CompactTableColumn<Adjustment>[] = [
                   {
                     key: 'staff',
@@ -550,6 +634,32 @@ export function HRPage({
                     key: 'category',
                     header: 'Category',
                     render: (adj) => <StatusBadge status={adj.category} />,
+                  },
+                  {
+                    key: 'period',
+                    header: 'Batch',
+                    render: (adj) => {
+                      const periodLabel = adjustmentPeriodLabel(adj.periodMonth);
+                      const statusLabel = adjustmentBatchStatusLabel(adj.batchStatus);
+                      if (!periodLabel) {
+                        return (
+                          <span
+                            className="text-xs text-app-fg-muted"
+                            title="Not tied to a batch yet: the next open batch for this month will absorb it."
+                          >
+                            Unassigned
+                          </span>
+                        );
+                      }
+                      return (
+                        <div className="flex flex-col leading-tight">
+                          <span className="text-sm text-app-fg">{periodLabel}</span>
+                          {statusLabel ? (
+                            <span className="text-2xs text-app-fg-muted">{statusLabel}</span>
+                          ) : null}
+                        </div>
+                      );
+                    },
                   },
                   {
                     key: 'amount',
@@ -634,14 +744,71 @@ export function HRPage({
                 ];
                 return (
                   <div className="list-panel">
+                    <div className="flex flex-col gap-2 border-b border-app-border p-3 sm:flex-row sm:items-center">
+                      <SearchInput
+                        value={adjustmentSearch}
+                        onChange={setAdjustmentSearch}
+                        debounceMs={200}
+                        placeholder="Search name or reason"
+                        className="w-full sm:max-w-xs"
+                      />
+                      <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex sm:items-center">
+                        <FormSelect
+                          value={adjustmentCategoryFilter}
+                          onChange={(e) => setAdjustmentCategoryFilter(e.target.value)}
+                          placeholder="All categories"
+                          options={[
+                            { value: '', label: 'All categories' },
+                            ...ADJ_ALL_CATEGORIES.map((c) => ({
+                              value: c,
+                              label: c.replace(/_/g, ' '),
+                            })),
+                          ]}
+                        />
+                        <FormSelect
+                          value={adjustmentStatusFilter}
+                          onChange={(e) => setAdjustmentStatusFilter(e.target.value)}
+                          placeholder="All statuses"
+                          options={[
+                            { value: '', label: 'All statuses' },
+                            { value: 'APPROVED', label: 'Approved' },
+                            { value: 'PENDING', label: 'Pending' },
+                          ]}
+                        />
+                        <FormSelect
+                          value={adjustmentPeriodFilter}
+                          onChange={(e) => setAdjustmentPeriodFilter(e.target.value)}
+                          placeholder="All batches"
+                          options={[{ value: '', label: 'All batches' }, ...periodOptions]}
+                        />
+                        {hasActiveAdjustmentFilter ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => {
+                              setAdjustmentSearch('');
+                              setAdjustmentCategoryFilter('');
+                              setAdjustmentStatusFilter('');
+                              setAdjustmentPeriodFilter('');
+                            }}
+                          >
+                            Clear
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
                     <CompactTable
                       withCard={false}
                       columns={adjustmentColumns}
-                      rows={overlaidAdjustments}
+                      rows={filteredAdjustments}
                       rowKey={(adj) => adj.id}
                       rowClassName={(adj) => (isOptimisticPatched(adjustmentApprovalPatches, adj.id) ? 'opacity-60' : '')}
-                      emptyTitle="No earnings adjustments yet"
-                      emptyDescription="Add an adjustment to get started."
+                      emptyTitle={hasActiveAdjustmentFilter ? 'No matching adjustments' : 'No earnings adjustments yet'}
+                      emptyDescription={
+                        hasActiveAdjustmentFilter
+                          ? 'Try clearing the search or filters.'
+                          : 'Add an adjustment to get started.'
+                      }
                       renderMobileCard={(adj) => (
                         <div className="p-4 space-y-3">
                           <div className="flex items-center justify-between">
@@ -664,6 +831,16 @@ export function HRPage({
                             <StatusBadge status={adj.approvedBy ? 'APPROVED' : 'PENDING'} />
                           </div>
                           <p className="text-xs text-app-fg-muted">{adj.reason}</p>
+                          <p className="text-2xs text-app-fg-muted">
+                            Batch:{' '}
+                            {adjustmentPeriodLabel(adj.periodMonth)
+                              ? `${adjustmentPeriodLabel(adj.periodMonth)}${
+                                  adjustmentBatchStatusLabel(adj.batchStatus)
+                                    ? ` · ${adjustmentBatchStatusLabel(adj.batchStatus)}`
+                                    : ''
+                                }`
+                              : 'Unassigned (next batch)'}
+                          </p>
                           {!adj.approvedBy && adj.category !== 'CLAWBACK' && (
                             <TableActionButton
                               type="button"

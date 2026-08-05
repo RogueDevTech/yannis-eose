@@ -611,8 +611,13 @@ export function PayrollBatchDetailPage({
   const branchName = batchBranchLabel(branchNameProp, batch.branchId, batch.scopeType);
   const payouts = useMemo(() => {
     const q = payoutSearch.toLowerCase().trim();
-    if (!q) return allPayouts;
-    return allPayouts.filter((p) => (p.staffName ?? '').toLowerCase().includes(q));
+    const rows = q
+      ? allPayouts.filter((p) => (p.staffName ?? '').toLowerCase().includes(q))
+      : allPayouts;
+    // Always list staff alphabetically by name (case-insensitive).
+    return [...rows].sort((a, b) =>
+      (a.staffName ?? '').localeCompare(b.staffName ?? '', undefined, { sensitivity: 'base' }),
+    );
   }, [allPayouts, payoutSearch]);
 
   const submitRegenerate = useCallback(() => {
@@ -1257,7 +1262,11 @@ export function PayrollBatchDetailPage({
         title="Export payout lines"
         description="Choose format and columns for this batch's staff payouts."
         filenamePrefix={`payroll-${batchScopeLabel(batch.department, batch.scopeType).toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${batch.periodMonth.slice(0, 7)}`}
-        rows={allPayouts.map((p) => ({
+        rows={[...allPayouts]
+          .sort((a, b) =>
+            (a.staffName ?? '').localeCompare(b.staffName ?? '', undefined, { sensitivity: 'base' }),
+          )
+          .map((p) => ({
           staff: p.staffName,
           role: p.staffRole ? formatRole(p.staffRole) : (p.payRoleName?.trim() || 'Contractor'),
           base: Number(p.baseSalary),
