@@ -908,6 +908,7 @@ export function PayrollBatchDetailPage({
         ) : (
           <CompactTable
             withCard={false}
+            scrollX={false}
             columns={payoutColumns}
             rows={payouts}
             rowKey={(p) => p.id}
