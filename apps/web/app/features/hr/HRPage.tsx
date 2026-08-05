@@ -22,7 +22,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { FormSelect } from '~/components/ui/form-select';
-import { SearchInput } from '~/components/ui/search-input';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
@@ -585,12 +585,11 @@ export function HRPage({
                 return (
                   <div className={`list-panel ${adjustmentsFetching ? 'opacity-60' : ''}`}>
                     <div className="flex flex-col gap-2 border-b border-app-border p-3 sm:flex-row sm:items-center">
-                      <SearchInput
+                      <PageSearchControl
                         value={adjustmentSearch}
-                        onChange={setAdjustmentSearch}
-                        debounceMs={200}
+                        onApply={setAdjustmentSearch}
                         placeholder="Search name or reason"
-                        className="w-full sm:max-w-xs"
+                        title="Search adjustments"
                       />
                       <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex sm:items-center">
                         <FormSelect
