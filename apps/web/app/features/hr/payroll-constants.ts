@@ -25,7 +25,10 @@ export const DEPT_OWNER_ROLE: Record<PayrollDepartment, string> = {
   SUPPORT: 'SUPER_ADMIN',
 };
 
-export const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
+// SUPPORT is a platform-level actor (bypasses permissionProcedure) and acts as a
+// full admin on payroll — parity with the backend canReviewBatch / canPrepareDept
+// gates. Without it, SUPPORT sees batches but can't Adjust/Remove/Regenerate/Delete.
+export const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SUPPORT']);
 
 /**
  * Human label for a batch's department, tolerant of null-scope batches
