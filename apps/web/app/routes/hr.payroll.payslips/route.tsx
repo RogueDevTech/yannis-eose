@@ -58,7 +58,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const branchId = url.searchParams.get('branchId') || undefined;
   const search = url.searchParams.get('search') || undefined;
 
-  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  // Default to All time: on a fresh visit (no period + no explicit date range in
+  // the URL) show every period, not just the current month. An explicit
+  // `?period=all_time` or a chosen `startDate`/`endDate` range still wins.
+  const hasExplicitRange =
+    !!url.searchParams.get('startDate') || !!url.searchParams.get('endDate');
+  const periodAllTime =
+    url.searchParams.get('period') === 'all_time' ||
+    (!url.searchParams.get('period') && !hasExplicitRange);
   const defaults = currentMonthRange();
   const startDate = url.searchParams.get('startDate') || defaults.startDate;
   const endDate = url.searchParams.get('endDate') || defaults.endDate;

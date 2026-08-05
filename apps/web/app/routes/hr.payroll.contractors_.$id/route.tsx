@@ -51,7 +51,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!contractorId) throw new Response('Contractor ID required', { status: 400 });
 
   const url = new URL(request.url);
-  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  // Default to All time: on a fresh visit (no period + no explicit date range)
+  // show every paid period, not just the current month — otherwise a contractor
+  // paid in a prior month shows "No payments in this period" by default. Mirrors
+  // the payslips / reports loaders. An explicit range or period still wins.
+  const hasExplicitRange =
+    !!url.searchParams.get('startDate') || !!url.searchParams.get('endDate');
+  const periodAllTime =
+    url.searchParams.get('period') === 'all_time' ||
+    (!url.searchParams.get('period') && !hasExplicitRange);
   const defaults = currentMonthRange();
   const startDate = url.searchParams.get('startDate') || defaults.startDate;
   const endDate = url.searchParams.get('endDate') || defaults.endDate;

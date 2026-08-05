@@ -90,10 +90,39 @@ Status: APPROVED SPEC, ready to build. Author: pairing session 2026-08-05.
 - Verification so far: `apps/api tsc --noEmit` = 0 errors; `apps/web remix vite:build` passes; both procedures mounted (`reports.*`). NOT yet run against live data (needs running stack + login).
 - ⏳ Milestone PENDING: live render + numbers reconcile with Marketing/Finance dashboards. Sign-off gate before Phase C.
 
-**Phase C — Wire existing-data categories (bulk)**
-- MB Performance (marketing.leaderboard), CS Performance (orders.csLeaderboard), Logistics Manager + Delivery Agent (logistics.listProviders/listLocations), Marketing Reports (marketing.overviewPageBundle), Order Reports (orders.list/statusCounts), Order Category (group orders by product/category), Staff Performance (payroll-metrics), Payroll (existing register), Product Stock (inventory), Finance (profitReport / GL statements).
-- Each = one registry entry + one thin flatten procedure (or reuse existing export key).
+**Phase C — Wire existing-data categories (bulk) — ✅ DONE (2026-08-05, build-verified)**
+All 11 remaining categories flipped to `status: 'live'`. Each = one `reports.*` query (reports.router.ts) → one thin method in reports.service.ts that reuses a canonical service call and flattens to table rows + one registry entry (columns/defaults) + one REPORT_FETCHERS mapping. Backend returns were confirmed against a service-shape audit (field names verified, no silent blank cells).
+- **media-buyer-performance** → `MarketingService.getMediaBuyerLeaderboard` (name, totalOrders, deliveredOrders, deliveredRevenue, CR, DR, cpa, trueRoas).
+- **cs-performance** → `OrdersService.getCSCloserLeaderboard` (agentName→name, ordersEngaged/Confirmed/Delivered/Cancelled, callsMade, CR, DR, avgCallSeconds).
+- **logistics-manager-performance** → `LogisticsService.getLogisticsProviderPerformance` (per provider: assigned/delivered/returned/inTransit/dispatched, DR, delinquencyRate, unitsDelivered, remitted/pending, availableStock). includeInactive=true so the full roster shows.
+- **delivery-agent-performance** → `LogisticsService.getLogisticsLocationPerformance` (per location; same metric family). Location = delivery point (no per-rider table exists; open question resolved to per-location).
+- **orders** → `OrdersService.getStatusCounts` (marketing funnel scope) rendered one row per lifecycle status.
+- **order-category** → `OrdersService.getProductPerformanceCounts` (per product: total/confirmed/delivered/returned + CR/DR). Resolves the category ambiguity to per-product; reconciles with Product Performance.
+- **product-stock** → `InventoryService.listLevelsSummary` aggregated per product + names from `ProductsService.list`. Point-in-time (date bar ignored).
+- **staff-performance** → payout register (`HrService.listPayouts`) rolled up per staff (base/bonus/deductions/total, payout-line count).
+- **payroll** → same payout register, per payout line (staff, period, base, bonus, add-ons, deductions, total, status). Mirrors the existing payroll CSV export collection.
+- **finance** → `FinanceService.getProfitReport` top-level totals as metric/value rows (revenue, landedCost, deliveryFee, adSpend, commission, operationalLoss, trueProfit, margin, orderCount).
+- **marketing** → `MarketingService.getPerformanceMetrics` as metric/value rows (orders, revenue, approved/pending spend, cpa, trueRoas, CR, DR).
+- All admin-gated via `ensureReportsAccess` (isAdminLevel); branch scope via `ctx.effectiveBranchIds`; company isolation via `ctx.activeGroupId` on the inventory/logistics reports.
 - ✅ Milestone: all 13 categories live.
+
+**Phase D — Polish & verify — ✅ DONE (2026-08-05)**
+- Shared `ReportShell` already provides: sortable columns, column picker, empty state, mobile card treatment (CompactTable mobileLabel), LocalExportModal export (CSV/PDF/XLSX) with picked-columns parity.
+- Number consistency: every report reuses a canonical dashboard procedure (no recomputed SQL) — CR/DR/CPA/profit come from the same methods the dashboards call.
+- Field-key audit: registry column keys diffed against backend return keys for all 13 — exact match, no blank cells.
+- Verification: `apps/api tsc --noEmit` = 0 errors; `apps/web tsc` = no new errors (6 pre-existing unrelated); full `remix vite:build` passes; `reports.*` router mounted (13 procedures).
+- ⏳ Remaining (non-blocking): live-data render + numbers-reconcile spot check against Marketing/Finance/Logistics dashboards (needs running stack + login).
+
+**Phase D.1 — Adversarial bug review + fixes (2026-08-05)**
+Ran a full correctness audit (every downstream service body read, not assumed). Fixed:
+- **[SEV-1, company-isolation leak] payroll + staff reports** — `collectPayoutsWithStaff` called `listPayouts` with no viewer/effectiveBranchIds, so a group-scoped viewer saw EVERY company's payroll. Now threads `user` + `effectiveBranchIds` (payrollReport/staffPerformance take + pass effectiveBranchIds; router passes ctx.effectiveBranchIds). listPayouts applies its documented group filter again.
+- **[SEV-2, wrong period] mediaBuyer/cs/marketing reports** — `reportPeriod()` returned 'this_month' when EITHER date was set, but downstreams only honour a range when BOTH are set, so a one-sided range silently showed current month. Now requires both dates (else 'all_time'), matching the downstream `startDate && endDate` gate. Both-dates path (normal preset) was already correct.
+- **[SEV-3, silent truncation] payroll/staff** — `collectPayoutsWithStaff` had no max-page throw; >5000 payout lines truncated silently and understated staff totals. Now throws at EXPORT_MAX_PAGES like exportPayroll.
+- **[SEV-4, name truncation] product-stock** — product-name lookup capped at 1000; now paginates so catalogs >1000 don't fall back to truncated UUIDs.
+- **[cosmetic] finance + marketing reports** — were metric/value rows with one column format, so `Margin %` rendered as "₦45.2". Restructured to a single typed row (one column per metric) with correct per-field formats (money/percent/number).
+- Left as-is (pre-existing, shared-method, low sev): `listLevelsSummary` group filter lacks `OR group_id IS NULL`, so product-stock excludes NULL-group/legacy-depot stock — same behavior as the existing inventory page; changing it would alter that page too, so deferred as a separate cross-cutting decision.
+- Verified NOT bugs: effectiveBranchIds threading on all order/finance/logistics reports; listPayouts param names; orderReport status-key lookup + no double-emit; no NaN leaks; all mapped fields exist on their source.
+- Re-verified: apps/api tsc 0 errors, 119/119 tests pass, apps/web no new errors, full remix build passes.
 
 **Phase D — Polish & verify**
 - Sortable columns, empty states, loading skeletons, mobile cards (per CLAUDE.md mobile rules), number-consistency check (report totals must match source dashboards — reuse SAME procedures, never recompute), export parity check (screen columns == exported columns).

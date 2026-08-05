@@ -140,6 +140,9 @@ describe('createCommissionPlanSchema', () => {
 
 describe('createAdjustmentSchema', () => {
   const VALID_UUID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+  // periodMonth is REQUIRED on every adjustment now — supply a valid one in the
+  // happy-path cases so they exercise the field they no longer default.
+  const VALID_MONTH = '2026-07-01';
 
   it('accepts valid bonus adjustment', () => {
     expect(() =>
@@ -148,6 +151,7 @@ describe('createAdjustmentSchema', () => {
         amount: 5000,
         category: 'BONUS',
         reason: 'Performance bonus for Q1',
+        periodMonth: VALID_MONTH,
       }),
     ).not.toThrow();
   });
@@ -159,6 +163,7 @@ describe('createAdjustmentSchema', () => {
         amount: 3000,
         category: 'DEDUCTION',
         reason: 'Damaged equipment recovery',
+        periodMonth: VALID_MONTH,
       }),
     ).not.toThrow();
   });
@@ -191,6 +196,7 @@ describe('createAdjustmentSchema', () => {
       amount: -500,
       category: 'BONUS',
       reason: 'Performance bonus',
+      periodMonth: VALID_MONTH,
     });
     expect(result.amount).toBe(500);
   });
@@ -201,6 +207,7 @@ describe('createAdjustmentSchema', () => {
       amount: 500,
       category: 'DEDUCTION',
       reason: 'Uniform cost recovery',
+      periodMonth: VALID_MONTH,
     });
     expect(result.amount).toBe(-500);
   });
@@ -227,7 +234,7 @@ describe('createAdjustmentSchema', () => {
     ).toThrow();
   });
 
-  it('accepts an optional periodMonth in YYYY-MM-01 form', () => {
+  it('accepts a periodMonth in YYYY-MM-01 form', () => {
     const result = createAdjustmentSchema.parse({
       staffId: VALID_UUID,
       amount: 5000,
@@ -238,14 +245,15 @@ describe('createAdjustmentSchema', () => {
     expect(result.periodMonth).toBe('2026-08-01');
   });
 
-  it('omits periodMonth when not provided (legacy next-batch behavior)', () => {
-    const result = createAdjustmentSchema.parse({
-      staffId: VALID_UUID,
-      amount: 5000,
-      category: 'BONUS',
-      reason: 'No month earmark',
-    });
-    expect(result.periodMonth).toBeUndefined();
+  it('rejects when periodMonth is missing (now required)', () => {
+    expect(() =>
+      createAdjustmentSchema.parse({
+        staffId: VALID_UUID,
+        amount: 5000,
+        category: 'BONUS',
+        reason: 'No month earmark',
+      }),
+    ).toThrow();
   });
 
   it('rejects a periodMonth that is not the first of the month', () => {
@@ -278,6 +286,7 @@ describe('createAdjustmentSchema', () => {
         amount: 2000,
         category: 'CLAWBACK',
         reason: 'Order returned by customer',
+        periodMonth: VALID_MONTH,
       }),
     ).not.toThrow();
   });
@@ -288,6 +297,7 @@ describe('createAdjustmentSchema', () => {
       amount: '5000',
       category: 'BONUS',
       reason: 'Performance bonus for Q1',
+      periodMonth: VALID_MONTH,
     });
     expect(typeof result.amount).toBe('number');
   });

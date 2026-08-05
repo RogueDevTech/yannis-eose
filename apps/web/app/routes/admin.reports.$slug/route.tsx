@@ -18,6 +18,17 @@ const REPORT_FETCHERS: Record<
 > = {
   'product-performance': 'reports.productPerformance',
   'customer-acquisition-funnel': 'reports.customerAcquisitionFunnel',
+  'media-buyer-performance': 'reports.mediaBuyerPerformance',
+  'cs-performance': 'reports.csPerformance',
+  'logistics-manager-performance': 'reports.logisticsManagerPerformance',
+  'delivery-agent-performance': 'reports.deliveryAgentPerformance',
+  orders: 'reports.orderReport',
+  'order-category': 'reports.orderCategoryReport',
+  'product-stock': 'reports.productStock',
+  'staff-performance': 'reports.staffPerformance',
+  payroll: 'reports.payrollReport',
+  finance: 'reports.financeReport',
+  marketing: 'reports.marketingReport',
 };
 
 async function fetchReportRows(

@@ -38,12 +38,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const url = new URL(request.url);
-  const periodAllTime = url.searchParams.get('period') === 'all_time';
   const startDate = url.searchParams.get('startDate') ?? '';
   const endDate = url.searchParams.get('endDate') ?? '';
   // Legacy month params still accepted for old bookmarks.
   const legacyFrom = url.searchParams.get('fromMonth') ?? '';
   const legacyTo = url.searchParams.get('toMonth') ?? '';
+  // Default to All time: a fresh visit (no period + no explicit date range /
+  // legacy month) shows every period, and the filter bar reflects "All time".
+  // An explicit `?period=all_time` or any chosen range still wins.
+  const hasExplicitRange = !!startDate || !!endDate || !!legacyFrom || !!legacyTo;
+  const periodAllTime =
+    url.searchParams.get('period') === 'all_time' ||
+    (!url.searchParams.get('period') && !hasExplicitRange);
   const statusParam = url.searchParams.get('status') ?? 'ALL';
   const departmentParam = url.searchParams.get('department') ?? '';
   const branchIdParam = url.searchParams.get('branchId') ?? '';

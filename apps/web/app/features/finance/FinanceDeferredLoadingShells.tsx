@@ -21,12 +21,23 @@ import { PageSearchControl } from '~/components/ui/page-search-control';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { getPeriodMonthLabel } from './finance-overview-pulse';
 
 function CashRemittanceSectionShell() {
+  const [searchParams] = useSearchParams();
+  // Mirror the loaded card's dynamic month label so the skeleton and loaded
+  // states stay aligned (e.g. "Awaiting: July 2026").
+  const periodLabel = getPeriodMonthLabel(
+    searchParams.get('startDate'),
+    searchParams.get('endDate'),
+  );
   const tiles = [
     { title: 'Total delivered', subtitle: 'All orders' },
     { title: 'Remitted', subtitle: 'Batches received' },
-    { title: 'Awaiting: This period', subtitle: 'Due this period' },
+    {
+      title: `Awaiting: ${periodLabel}`,
+      subtitle: periodLabel === 'This period' ? 'Due this period' : `Due in ${periodLabel}`,
+    },
     { title: 'Awaiting: All time', subtitle: 'Not on a remittance' },
     { title: 'Pending batches', subtitle: 'Batches SENT' },
     { title: 'Disputed', subtitle: 'Needs attention' },

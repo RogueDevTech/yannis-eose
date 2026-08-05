@@ -142,13 +142,13 @@ export function MonthlyPayrollsLoadingShell() {
               <div className="flex items-center gap-2 flex-wrap">
                 <PageRefreshButton />
                 <Button variant="primary" size="sm" disabled className="opacity-60">
-                  Add-on
+                  Generate Monthly Batch
                 </Button>
               </div>
             }
             sheet={
               <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
-                Add-on
+                Generate Monthly Batch
               </Button>
             }
           />

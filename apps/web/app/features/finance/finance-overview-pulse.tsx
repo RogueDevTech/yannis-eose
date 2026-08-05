@@ -12,6 +12,27 @@ import type {
   RemittanceBreakdownRow,
 } from './types';
 
+/**
+ * Human month label for the "this period" figures. Returns e.g. "July 2026" when
+ * the range is exactly one calendar month; otherwise "This period" (custom
+ * multi-month range, partial range, or no dates set). The awaitingPeriod figures
+ * are always month-scoped on the backend, so a single-month range names it.
+ */
+export function getPeriodMonthLabel(startDate: string | null, endDate: string | null): string {
+  if (!startDate || !endDate) return 'This period';
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 'This period';
+  // Same calendar month + year, spanning from the 1st to the month's last day.
+  const sameMonth =
+    start.getUTCFullYear() === end.getUTCFullYear() && start.getUTCMonth() === end.getUTCMonth();
+  const lastOfMonth = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
+  if (sameMonth && start.getUTCDate() === 1 && end.getUTCDate() === lastOfMonth) {
+    return start.toLocaleDateString('en-NG', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  }
+  return 'This period';
+}
+
 export function FinanceCashRemittanceSection({
   pulse,
   byProduct = [],
@@ -25,7 +46,15 @@ export function FinanceCashRemittanceSection({
 }) {
   const [infoModal, setInfoModal] = useState<string | null>(null);
   const [dateScopeModalOpen, setDateScopeModalOpen] = useState(false);
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Label the "this period" figures with the actual month when the selected
+  // range is a single calendar month (e.g. "July 2026"); fall back to "This
+  // period" for custom multi-month ranges or when no dates are set.
+  const periodLabel = getPeriodMonthLabel(
+    searchParams.get('startDate'),
+    searchParams.get('endDate'),
+  );
 
   // Use gross delivered amount to match the Cash Remittances page
   const totalDelivered = pulse.deliveredAmount ?? pulse.deliveredNetAmount ?? (pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount);
@@ -82,14 +111,14 @@ export function FinanceCashRemittanceSection({
             className="rounded-lg border border-app-border bg-app-hover/60 p-3 transition-colors hover:bg-app-hover"
           >
             <p className="text-xs font-medium text-app-fg-muted flex items-center">
-              Awaiting: This period
+              Awaiting: {periodLabel}
               <InfoIcon onClick={() => setInfoModal('awaitingPeriod')} />
             </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-warning-600 dark:text-warning-400">
               {formatNaira(Math.round(pulse.awaitingPeriodCash))}
             </p>
             <p className="text-xs text-app-fg-muted mt-0.5">
-              {pulse.awaitingPeriodOrderCount} order(s) due this period
+              {pulse.awaitingPeriodOrderCount} order(s) due{periodLabel === 'This period' ? ' this period' : ` in ${periodLabel}`}
             </p>
           </Link>
           <Link
@@ -218,10 +247,10 @@ export function FinanceCashRemittanceSection({
         <FormulaBreakdownModal
           open={infoModal === 'awaitingPeriod'}
           onClose={() => setInfoModal(null)}
-          title="Awaiting: This period"
+          title={`Awaiting: ${periodLabel}`}
           description="Gross value of delivered orders in the selected period (this month by default) that are not yet on any remittance batch. This is what is due for the current period."
           lines={[
-            { label: 'Delivered this period, not on any batch (gross)', amount: pulse.awaitingPeriodCash, type: 'value', count: pulse.awaitingPeriodOrderCount },
+            { label: `Delivered ${periodLabel === 'This period' ? 'this period' : `in ${periodLabel}`}, not on any batch (gross)`, amount: pulse.awaitingPeriodCash, type: 'value', count: pulse.awaitingPeriodOrderCount },
           ]}
         />
         <FormulaBreakdownModal

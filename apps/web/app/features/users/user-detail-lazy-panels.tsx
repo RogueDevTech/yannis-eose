@@ -3,6 +3,7 @@ import { formatActivityDescription } from '~/lib/format-activity';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
+import { PayrollFormulaRulesExplanation } from '~/features/hr/PayrollFormulaRulesExplanation';
 import type { StaffPayoutEstimate, UserAuditEntry } from './types';
 
 const MONTH_NAMES = [
@@ -118,6 +119,17 @@ export function UserDetailEarningsOutlookCard({
               Carry-over deliveries are included in the bonus basis. Delivery rate uses orders
               generated this period only.
             </p>
+            {preview.formula ? (
+              <details className="group rounded-lg border border-app-border">
+                <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm font-medium text-app-fg select-none">
+                  <span>How your pay is calculated</span>
+                  <span className="text-app-fg-muted transition-transform group-open:rotate-180">▾</span>
+                </summary>
+                <div className="border-t border-app-border p-3">
+                  <PayrollFormulaRulesExplanation formula={preview.formula} />
+                </div>
+              </details>
+            ) : null}
           </div>
         )}
       </div>

@@ -37,5 +37,71 @@ export const reportsRouter = router({
     .query(async ({ input, ctx }) => {
       return getReportsService().customerAcquisitionFunnel(input, ctx.user, ctx.effectiveBranchIds);
     }),
+
+  mediaBuyerPerformance: authedProcedure
+    .input(reportDataInputSchema)
+    .query(async ({ input, ctx }) => {
+      return getReportsService().mediaBuyerPerformance(input, ctx.user, ctx.effectiveBranchIds);
+    }),
+
+  csPerformance: authedProcedure
+    .input(reportDataInputSchema)
+    .query(async ({ input, ctx }) => {
+      return getReportsService().csPerformance(input, ctx.user, ctx.effectiveBranchIds);
+    }),
+
+  logisticsManagerPerformance: authedProcedure
+    .input(reportDataInputSchema)
+    .query(async ({ input, ctx }) => {
+      return getReportsService().logisticsManagerPerformance(input, ctx.user, ctx.effectiveBranchIds, ctx.activeGroupId);
+    }),
+
+  deliveryAgentPerformance: authedProcedure
+    .input(reportDataInputSchema)
+    .query(async ({ input, ctx }) => {
+      return getReportsService().deliveryAgentPerformance(input, ctx.user, ctx.effectiveBranchIds, ctx.activeGroupId);
+    }),
+
+  orderReport: authedProcedure
+    .input(reportDataInputSchema)
+    .query(async ({ input, ctx }) => {
+      return getReportsService().orderReport(input, ctx.user, ctx.effectiveBranchIds);
+    }),
+
+  orderCategoryReport: authedProcedure
+    .input(reportDataInputSchema)
+    .query(async ({ input, ctx }) => {
+      return getReportsService().orderCategoryReport(input, ctx.user, ctx.effectiveBranchIds);
+    }),
+
+  productStock: authedProcedure
+    .input(reportDataInputSchema)
+    .query(async ({ ctx }) => {
+      return getReportsService().productStock(ctx.user, ctx.activeGroupId);
+    }),
+
+  financeReport: authedProcedure
+    .input(reportDataInputSchema)
+    .query(async ({ input, ctx }) => {
+      return getReportsService().financeReport(input, ctx.user, ctx.effectiveBranchIds);
+    }),
+
+  marketingReport: authedProcedure
+    .input(reportDataInputSchema)
+    .query(async ({ input, ctx }) => {
+      return getReportsService().marketingReport(input, ctx.user, ctx.effectiveBranchIds);
+    }),
+
+  payrollReport: authedProcedure
+    .input(reportDataInputSchema)
+    .query(async ({ input, ctx }) => {
+      return getReportsService().payrollReport(input, ctx.user, ctx.effectiveBranchIds);
+    }),
+
+  staffPerformance: authedProcedure
+    .input(reportDataInputSchema)
+    .query(async ({ input, ctx }) => {
+      return getReportsService().staffPerformance(input, ctx.user, ctx.effectiveBranchIds);
+    }),
 });
 

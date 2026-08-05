@@ -1566,4 +1566,647 @@ export class ReportsService {
       };
     });
   }
+
+  /**
+   * Resolve the leaderboard/metrics `period` discriminator from an explicit date
+   * window. The downstream services only honour a custom range when BOTH
+   * startDate AND endDate are present (`if (startDate && endDate)`), falling back
+   * to `period` otherwise. So we return 'this_month' only when both are present
+   * (the range then wins downstream); with one or neither we return 'all_time' so
+   * a partial range never silently collapses to the current month. The date
+   * bar always sends both together, so 'this_month' + range is the normal path.
+   */
+  private reportPeriod(input: { startDate?: string; endDate?: string }): 'this_month' | 'all_time' {
+    return input.startDate && input.endDate ? 'this_month' : 'all_time';
+  }
+
+  /**
+   * Media Buyer Performance — one row per active media buyer with the same
+   * metrics the Marketing team page shows. Reuses
+   * MarketingService.getMediaBuyerLeaderboard so orders / CPA / ROAS / rates
+   * reconcile with the Marketing dashboards.
+   */
+  async mediaBuyerPerformance(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      name: string;
+      totalOrders: number;
+      deliveredOrders: number;
+      deliveredRevenue: number;
+      confirmationRate: number;
+      deliveryRate: number;
+      cpa: number;
+      trueRoas: number;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+    const leaderboard = await this.marketingService.getMediaBuyerLeaderboard(
+      this.reportPeriod(input),
+      input.startDate,
+      input.endDate,
+      input.branchId ?? null,
+      undefined,
+      effectiveBranchIds,
+    );
+    return leaderboard.map((l) => ({
+      name: l.name,
+      totalOrders: l.totalOrders ?? 0,
+      deliveredOrders: l.deliveredOrders ?? 0,
+      deliveredRevenue: l.deliveredRevenue ?? 0,
+      confirmationRate: l.confirmationRate ?? 0,
+      deliveryRate: l.deliveryRate ?? 0,
+      cpa: l.cpa ?? 0,
+      trueRoas: l.trueRoas ?? 0,
+    }));
+  }
+
+  /**
+   * Customer Service Performance — one row per closer with assigned / confirmed
+   * / delivered counts, calls, and rates. Reuses
+   * OrdersService.getCSCloserLeaderboard so numbers reconcile with the CS team
+   * page.
+   */
+  async csPerformance(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      name: string;
+      ordersEngaged: number;
+      ordersConfirmed: number;
+      ordersDelivered: number;
+      ordersCancelled: number;
+      callsMade: number;
+      confirmationRate: number;
+      deliveryRate: number;
+      avgCallSeconds: number;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+    const leaderboard = await this.ordersService.getCSCloserLeaderboard(
+      this.reportPeriod(input),
+      input.startDate,
+      input.endDate,
+      input.branchId ?? null,
+      effectiveBranchIds,
+    );
+    return leaderboard.map((l) => ({
+      name: l.agentName,
+      ordersEngaged: l.ordersEngaged ?? 0,
+      ordersConfirmed: l.ordersConfirmed ?? 0,
+      ordersDelivered: l.ordersDelivered ?? 0,
+      ordersCancelled: l.ordersCancelled ?? 0,
+      callsMade: l.callsMade ?? 0,
+      confirmationRate: l.confirmationRate ?? 0,
+      deliveryRate: l.deliveryRate ?? 0,
+      avgCallSeconds: Math.round(l.avgCallDurationSeconds ?? 0),
+    }));
+  }
+
+  /**
+   * Logistics Manager Performance — one row per provider (3PL company) with
+   * assignment / delivery / delinquency / remittance metrics for the window.
+   * Reuses LogisticsService.getLogisticsProviderPerformance so the numbers match
+   * the Logistics dashboard.
+   */
+  async logisticsManagerPerformance(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+    activeGroupId?: string | null,
+  ): Promise<
+    Array<{
+      providerName: string;
+      status: string;
+      locationCount: number;
+      totalAssigned: number;
+      delivered: number;
+      returned: number;
+      inTransit: number;
+      dispatched: number;
+      deliveryRate: number;
+      delinquencyRate: number;
+      unitsDelivered: number;
+      remittedAmount: number;
+      pendingRemittanceAmount: number;
+      availableStock: number;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+    const rows = await this.logisticsService.getLogisticsProviderPerformance(
+      input.startDate,
+      input.endDate,
+      input.branchId ?? null,
+      effectiveBranchIds,
+      undefined,
+      true, // includeInactive — show every provider in the roster
+      activeGroupId ?? null,
+    );
+    return rows.map((r) => ({
+      providerName: r.providerName,
+      status: r.status,
+      locationCount: r.locationCount ?? 0,
+      totalAssigned: r.totalAssigned ?? 0,
+      delivered: r.delivered ?? 0,
+      returned: r.returned ?? 0,
+      inTransit: r.inTransit ?? 0,
+      dispatched: r.dispatched ?? 0,
+      deliveryRate: r.deliveryRate ?? 0,
+      delinquencyRate: r.delinquencyRate ?? 0,
+      unitsDelivered: r.unitsDelivered ?? 0,
+      remittedAmount: Number(r.remittedAmount ?? 0),
+      pendingRemittanceAmount: Number(r.pendingRemittanceAmount ?? 0),
+      availableStock: r.availableStock ?? 0,
+    }));
+  }
+
+  /**
+   * Delivery Agent Performance — one row per delivery location (depot / drop
+   * point) with its delivery, delinquency, and remittance metrics for the
+   * window. Reuses LogisticsService.getLogisticsLocationPerformance.
+   */
+  async deliveryAgentPerformance(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+    activeGroupId?: string | null,
+  ): Promise<
+    Array<{
+      locationName: string;
+      providerName: string;
+      status: string;
+      totalAssigned: number;
+      delivered: number;
+      returned: number;
+      inTransit: number;
+      dispatched: number;
+      deliveryRate: number;
+      delinquencyRate: number;
+      unitsDelivered: number;
+      remittedAmount: number;
+      pendingRemittanceAmount: number;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+    const rows = await this.logisticsService.getLogisticsLocationPerformance(
+      input.startDate,
+      input.endDate,
+      input.branchId ?? null,
+      effectiveBranchIds,
+      undefined,
+      activeGroupId ?? null,
+    );
+    return rows.map((r) => ({
+      locationName: r.locationName,
+      providerName: r.providerName ?? 'N/A',
+      status: r.status,
+      totalAssigned: r.totalAssigned ?? 0,
+      delivered: r.delivered ?? 0,
+      returned: r.returned ?? 0,
+      inTransit: r.inTransit ?? 0,
+      dispatched: r.dispatched ?? 0,
+      deliveryRate: r.deliveryRate ?? 0,
+      delinquencyRate: r.delinquencyRate ?? 0,
+      unitsDelivered: r.unitsDelivered ?? 0,
+      remittedAmount: Number(r.remittedAmount ?? 0),
+      pendingRemittanceAmount: Number(r.pendingRemittanceAmount ?? 0),
+    }));
+  }
+
+  /**
+   * Order Reports — one row per order status for the window, with the funnel
+   * count in each. Reuses OrdersService.getStatusCounts with the canonical
+   * marketing-funnel scope so the totals reconcile with the dashboards.
+   */
+  async orderReport(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<Array<{ status: string; count: number }>> {
+    this.ensureReportsAccess(user);
+    const counts = await this.ordersService.getStatusCounts(
+      undefined,
+      input.startDate,
+      input.endDate,
+      undefined,
+      undefined,
+      input.branchId ?? null,
+      undefined,
+      undefined,
+      'marketing',
+      effectiveBranchIds,
+      false, // isFollowUp=false
+      'include-imports',
+      true, // excludeGraduated
+      true, // excludeCartGraduated
+    );
+    // getStatusCounts returns a Record<status, number>. Emit a stable, ordered
+    // row per lifecycle status so the table reads top-to-bottom as the funnel.
+    const ORDER_STATUS_SEQUENCE = [
+      'UNPROCESSED',
+      'CS_ASSIGNED',
+      'CS_ENGAGED',
+      'CONFIRMED',
+      'AGENT_ASSIGNED',
+      'DISPATCHED',
+      'IN_TRANSIT',
+      'DELIVERED',
+      'REMITTED',
+      'RETURNED',
+      'DELETED',
+    ];
+    const record = counts as unknown as Record<string, number>;
+    const seen = new Set<string>();
+    const rows: Array<{ status: string; count: number }> = [];
+    for (const status of ORDER_STATUS_SEQUENCE) {
+      seen.add(status);
+      rows.push({ status: this.humanizeStatus(status), count: record[status] ?? 0 });
+    }
+    // Any status the sequence didn't enumerate (defensive) still shows up.
+    for (const [status, count] of Object.entries(record)) {
+      if (!seen.has(status) && typeof count === 'number') {
+        rows.push({ status: this.humanizeStatus(status), count });
+      }
+    }
+    return rows;
+  }
+
+  private humanizeStatus(status: string): string {
+    return status
+      .split('_')
+      .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+      .join(' ');
+  }
+
+  /**
+   * Order Category Report — orders grouped by product for the window, with
+   * total / confirmed / delivered / returned counts and derived rates. Reuses
+   * OrdersService.getProductPerformanceCounts (the same query behind Product
+   * Performance) so the two reports reconcile.
+   */
+  async orderCategoryReport(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      productName: string;
+      totalOrders: number;
+      confirmedOrders: number;
+      deliveredOrders: number;
+      returnedOrders: number;
+      confirmationRate: number;
+      deliveryRate: number;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+    const counts = await this.ordersService.getProductPerformanceCounts(
+      input.startDate,
+      input.endDate,
+      input.branchId ?? null,
+      effectiveBranchIds,
+    );
+    return counts
+      .map((c) => ({
+        productName: c.productName,
+        totalOrders: c.totalOrders,
+        confirmedOrders: c.confirmedOrders,
+        deliveredOrders: c.deliveredOrders,
+        returnedOrders: c.returnedOrders,
+        confirmationRate: c.totalOrders > 0 ? (c.confirmedOrders / c.totalOrders) * 100 : 0,
+        deliveryRate: c.totalOrders > 0 ? (c.deliveredOrders / c.totalOrders) * 100 : 0,
+      }))
+      .sort((a, b) => b.totalOrders - a.totalOrders);
+  }
+
+  /**
+   * Product Stock Reports — current stock by product across all locations.
+   * Aggregates InventoryService.listLevelsSummary (per product x location) up to
+   * one row per product, enriching names from ProductsService.list. Company
+   * isolation via the active group id. Stock is point-in-time, so this report is
+   * period-independent (the date bar is ignored).
+   */
+  async productStock(
+    user: SessionUser,
+    activeGroupId?: string | null,
+  ): Promise<
+    Array<{
+      productName: string;
+      stockCount: number;
+      reservedCount: number;
+      availableCount: number;
+      locationCount: number;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+    const levels = await this.inventoryService.listLevelsSummary(activeGroupId ?? null, null);
+
+    // Resolve product names. listProductsSchema caps limit at 1000, so paginate
+    // to cover companies with more than 1000 products (otherwise names past the
+    // first page silently fall back to a truncated id).
+    const nameById = new Map<string, string>();
+    for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
+      const productList = await this.productsService.list(
+        listProductsSchema.parse({ page, limit: 1000, sortBy: 'name', sortOrder: 'asc' }),
+        user.id,
+        user.role,
+        activeGroupId ?? null,
+      );
+      const products = productList.products ?? [];
+      for (const p of products) nameById.set(p.id, p.name);
+      if (products.length < 1000) break;
+    }
+
+    const byProduct = new Map<
+      string,
+      { stockCount: number; reservedCount: number; locationCount: number }
+    >();
+    for (const l of levels) {
+      const agg = byProduct.get(l.productId) ?? { stockCount: 0, reservedCount: 0, locationCount: 0 };
+      agg.stockCount += l.stockCount;
+      agg.reservedCount += l.reservedCount;
+      // Count only locations that actually hold stock for this product.
+      if (l.stockCount > 0 || l.reservedCount > 0) agg.locationCount += 1;
+      byProduct.set(l.productId, agg);
+    }
+
+    return [...byProduct.entries()]
+      .map(([productId, agg]) => ({
+        productName: nameById.get(productId) ?? productId.slice(0, 8),
+        stockCount: agg.stockCount,
+        reservedCount: agg.reservedCount,
+        availableCount: agg.stockCount - agg.reservedCount,
+        locationCount: agg.locationCount,
+      }))
+      .sort((a, b) => b.availableCount - a.availableCount);
+  }
+
+  /**
+   * Finance Reports — the finance dashboard's headline numbers for the window as
+   * a single typed row (one column per metric). Reuses
+   * FinanceService.getProfitReport so revenue, landed COGS, ad spend, and true
+   * (FIFO) profit match the dashboard. A single row (not metric/value pairs) so
+   * each figure keeps its own format: money for currency, percent for margin,
+   * number for the order count.
+   */
+  async financeReport(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      revenue: number;
+      landedCogs: number;
+      deliveryFees: number;
+      adSpend: number;
+      commission: number;
+      operationalLoss: number;
+      trueProfit: number;
+      marginPct: number;
+      deliveredOrders: number;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+    const profit = await this.financeService.getProfitReport(
+      {
+        groupBy: 'product',
+        ...(input.startDate ? { startDate: input.startDate } : {}),
+        ...(input.endDate ? { endDate: input.endDate } : {}),
+        ...(input.branchId ? { branchId: input.branchId } : {}),
+      },
+      effectiveBranchIds,
+    );
+    return [
+      {
+        revenue: profit.revenue ?? 0,
+        landedCogs: profit.landedCost ?? 0,
+        deliveryFees: profit.deliveryFee ?? 0,
+        adSpend: profit.adSpend ?? 0,
+        commission: profit.commission ?? 0,
+        operationalLoss: profit.operationalLoss ?? 0,
+        trueProfit: profit.trueProfit ?? 0,
+        marginPct: profit.margin ?? 0,
+        deliveredOrders: profit.orderCount ?? 0,
+      },
+    ];
+  }
+
+  /**
+   * Marketing Reports — the marketing overview's headline metrics for the window
+   * as a single typed row. Reuses MarketingService.getPerformanceMetrics so
+   * spend / CPA / ROAS / rates reconcile with the Marketing dashboard. Single row
+   * so money, count, and rate columns each format correctly.
+   */
+  async marketingReport(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      totalOrders: number;
+      confirmedOrders: number;
+      deliveredOrders: number;
+      deliveredRevenue: number;
+      approvedAdSpend: number;
+      pendingAdSpend: number;
+      cpa: number;
+      trueRoas: number;
+      confirmationRate: number;
+      deliveryRate: number;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+    const m = await this.marketingService.getPerformanceMetrics(
+      undefined,
+      this.reportPeriod(input),
+      input.startDate,
+      input.endDate,
+      input.branchId ?? null,
+      undefined,
+      undefined,
+      effectiveBranchIds,
+      'marketing',
+    );
+    return [
+      {
+        totalOrders: m.totalOrders ?? 0,
+        confirmedOrders: m.confirmedOrders ?? 0,
+        deliveredOrders: m.deliveredOrders ?? 0,
+        deliveredRevenue: m.deliveredRevenue ?? 0,
+        approvedAdSpend: m.approvedSpend ?? 0,
+        pendingAdSpend: m.pendingSpend ?? 0,
+        cpa: m.cpa ?? 0,
+        trueRoas: m.trueRoas ?? 0,
+        confirmationRate: m.confirmationRate ?? 0,
+        deliveryRate: m.deliveryRate ?? 0,
+      },
+    ];
+  }
+
+  /**
+   * Collect payout register rows for the window, enriched with staff name/role.
+   * Shared by the Payroll (per-line) and Staff Performance (per-staff rollup)
+   * reports. Mirrors the existing exportPayroll collection so the numbers match.
+   */
+  private async collectPayoutsWithStaff(
+    input: { startDate?: string; endDate?: string },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      staffId: string;
+      staffName: string;
+      role: string;
+      periodStart: string | null;
+      periodEnd: string | null;
+      baseSalary: number;
+      performanceBonus: number;
+      addOns: number;
+      deductions: number;
+      totalPayout: number;
+      status: string;
+    }>
+  > {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const all: any[] = [];
+    for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
+      const parsed = listPayoutsSchema.parse({
+        page,
+        limit: EXPORT_PAGE_LIMIT,
+        ...(input.startDate ? { periodStart: input.startDate } : {}),
+        ...(input.endDate ? { periodEnd: input.endDate } : {}),
+      });
+      // Pass viewer + effectiveBranchIds so payouts stay company-scoped — without
+      // effectiveBranchIds, listPayouts returns EVERY company's payroll (its own
+      // doc warns of this). Report picks up the same isolation as the pages.
+      const result = await this.hrService.listPayouts(parsed, user, effectiveBranchIds ?? null);
+      const batch = result.payouts ?? [];
+      all.push(...batch);
+      if (batch.length < EXPORT_PAGE_LIMIT) break;
+      // Match the export path: refuse to silently truncate. Without this, a window
+      // with >5000 payout lines would stop at exactly 5000 and staffPerformance
+      // would report understated per-staff totals with no signal.
+      if (page === EXPORT_MAX_PAGES) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Payroll report is limited to ${EXPORT_MAX_PAGES * EXPORT_PAGE_LIMIT} payout lines. Narrow the date range and try again.`,
+        });
+      }
+    }
+
+    const staffIds = [...new Set(all.map((p) => p.staffId).filter(Boolean))];
+    const staffMap = new Map<string, string>();
+    const roleMap = new Map<string, string>();
+    if (staffIds.length > 0) {
+      const usersResult = await this.usersService.list(
+        listUsersSchema.parse({ page: 1, limit: 500, sortBy: 'name', sortOrder: 'asc' }),
+        user,
+        null,
+      );
+      for (const u of usersResult.users ?? []) {
+        staffMap.set(u.id, u.name);
+        roleMap.set(u.id, u.role);
+      }
+    }
+
+    return all.map((p) => ({
+      staffId: p.staffId,
+      staffName: staffMap.get(p.staffId) ?? p.staffId,
+      role: (roleMap.get(p.staffId) ?? '').replace(/_/g, ' '),
+      periodStart: p.periodStart ? new Date(p.periodStart).toLocaleDateString('en-NG') : null,
+      periodEnd: p.periodEnd ? new Date(p.periodEnd).toLocaleDateString('en-NG') : null,
+      baseSalary: Number(p.baseSalary ?? 0),
+      performanceBonus: Number(p.performanceBonus ?? 0),
+      addOns: Number(p.addOnsTotal ?? 0),
+      deductions: Number(p.deductionsTotal ?? 0),
+      totalPayout: Number(p.totalPayout ?? 0),
+      status: p.status,
+    }));
+  }
+
+  /**
+   * Payroll Reports — one row per payout line for the window (staff, period,
+   * base, bonus, add-ons, deductions, total, status). Reuses the same payout
+   * collection as the existing payroll CSV export.
+   */
+  async payrollReport(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      staffName: string;
+      role: string;
+      periodStart: string | null;
+      periodEnd: string | null;
+      baseSalary: number;
+      performanceBonus: number;
+      addOns: number;
+      deductions: number;
+      totalPayout: number;
+      status: string;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+    const payouts = await this.collectPayoutsWithStaff(input, user, effectiveBranchIds);
+    return payouts.map(({ staffId: _staffId, ...row }) => row);
+  }
+
+  /**
+   * Staff Performance — payout register rolled up per staff member across the
+   * window: total earned, base, bonus, and payout-line count. Same source as the
+   * Payroll report, aggregated by staff.
+   */
+  async staffPerformance(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      staffName: string;
+      role: string;
+      payoutCount: number;
+      baseSalary: number;
+      performanceBonus: number;
+      deductions: number;
+      totalPayout: number;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+    const payouts = await this.collectPayoutsWithStaff(input, user, effectiveBranchIds);
+    const byStaff = new Map<
+      string,
+      {
+        staffName: string;
+        role: string;
+        payoutCount: number;
+        baseSalary: number;
+        performanceBonus: number;
+        deductions: number;
+        totalPayout: number;
+      }
+    >();
+    for (const p of payouts) {
+      const agg = byStaff.get(p.staffId) ?? {
+        staffName: p.staffName,
+        role: p.role,
+        payoutCount: 0,
+        baseSalary: 0,
+        performanceBonus: 0,
+        deductions: 0,
+        totalPayout: 0,
+      };
+      agg.payoutCount += 1;
+      agg.baseSalary += p.baseSalary;
+      agg.performanceBonus += p.performanceBonus;
+      agg.deductions += p.deductions;
+      agg.totalPayout += p.totalPayout;
+      byStaff.set(p.staffId, agg);
+    }
+    return [...byStaff.values()].sort((a, b) => b.totalPayout - a.totalPayout);
+  }
 }

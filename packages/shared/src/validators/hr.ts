@@ -115,8 +115,12 @@ export type ApprovePayoutInput = z.infer<typeof approvePayoutSchema>;
 export const listPayoutsSchema = z.object({
   staffId: z.string().uuid().optional(),
   status: z.enum(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PAID', 'REJECTED']).optional(),
-  periodStart: z.string().date().optional(),
-  periodEnd: z.string().date().optional(),
+  // Accept a plain calendar date (YYYY-MM-DD) OR a full ISO datetime. Callers
+  // scoping to a timezone-anchored month (e.g. Lagos) must pass the exact
+  // instant: a bare date is read as UTC midnight and would exclude a period
+  // stored at 2026-06-30T23:00Z (= 2026-07-01 00:00 +01:00).
+  periodStart: z.union([z.string().date(), z.string().datetime()]).optional(),
+  periodEnd: z.union([z.string().date(), z.string().datetime()]).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(1000).default(20),
 });
@@ -139,12 +143,13 @@ export const createAdjustmentSchema = z
     amount: z.coerce.number().multipleOf(0.01),
     category: z.enum(['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'DEDUCTION', 'CLAWBACK', 'OTHER']),
     reason: z.string().min(5).max(500),
-    // Target payroll month (YYYY-MM-01). Omit to attach to the next batch for this
-    // party regardless of month; set to earmark for a specific month's batch.
+    // Target payroll month (YYYY-MM-01). REQUIRED: every adjustment must name the
+    // month whose batch it belongs to, so it can never silently float into an
+    // unrelated batch (which previously zeroed out unrelated staff). The prior
+    // "omit to attach to the next batch" behaviour is retired.
     periodMonth: z
       .string()
-      .regex(/^\d{4}-\d{2}-01$/, 'periodMonth must be YYYY-MM-01')
-      .optional(),
+      .regex(/^\d{4}-\d{2}-01$/, 'Select the target payroll month'),
     periodStart: z.string().date().optional(),
     periodEnd: z.string().date().optional(),
   })
