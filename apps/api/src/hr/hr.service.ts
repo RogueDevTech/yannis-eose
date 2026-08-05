@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { eq, ne, and, or, desc, gte, lte, isNull, isNotNull, count, sum, inArray, sql, exists, ilike } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema } from '@yannis/shared';
+import { db as schema, resolveFormulaFromRules, type PayrollFormula } from '@yannis/shared';
 import type {
   CreateCommissionPlanInput,
   UpdateCommissionPlanInput,
@@ -843,6 +843,30 @@ export class HrService {
     const clawbackTotal = Math.abs(Number(pendingClawbacks[0]?.total ?? 0));
     const addOnsTotal = Number(bonusRows[0]?.total ?? 0) + Number(otherAddOnRows[0]?.total ?? 0);
 
+    // Resolve the pay-role formula rules so the staff-facing Earnings Outlook can
+    // show HOW their pay is computed (base tiers, bonus tiers, penalties,
+    // allowances), not just the resulting numbers. Same resolution the compute
+    // path uses, so the rules shown match what produced the estimate above.
+    let formula: PayrollFormula | null = null;
+    try {
+      const plan = await this.payrollCompute.resolvePlanForMemberPublic(
+        this.db,
+        {
+          id: user.id,
+          role: user.role,
+          commissionPlanId: user.commissionPlanId ?? null,
+          payRoleId: user.payRoleId ?? null,
+        },
+        start,
+        end,
+      );
+      if (plan?.rules) {
+        formula = resolveFormulaFromRules(plan.rules as PayrollFormula);
+      }
+    } catch {
+      formula = null;
+    }
+
     const deductionsTotal = penalties + clawbackTotal;
     const totalPayout = Math.max(
       0,
@@ -870,6 +894,8 @@ export class HrService {
       clawbacks: clawbackTotal,
       deductionsTotal,
       totalPayout,
+      /** Resolved pay-role formula rules (null when no plan is linked). */
+      formula,
     };
   }
 

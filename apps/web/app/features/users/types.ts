@@ -1,3 +1,5 @@
+import type { PayrollFormula } from '@yannis/shared';
+
 export interface UserBranchMembership {
   branchId: string;
   branchName: string;
@@ -241,6 +243,8 @@ export interface StaffPayoutEstimate {
   clawbacks: number;
   deductionsTotal: number;
   totalPayout: number;
+  /** Resolved pay-role formula rules for the "how your pay is calculated" view. */
+  formula?: PayrollFormula | null;
 }
 
 /** Narrow shape for last paid row on the earnings outlook card (from `hr.listPayouts`). */
