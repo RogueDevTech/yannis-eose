@@ -61,7 +61,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import type { TrpcContext } from '../context';
-import { canAccessStaffHrUserDetail, canMirror, isAdminLevel } from '../../common/authz';
+import { canAccessStaffHrUserDetail, canMirror, isSuperAdminOnly } from '../../common/authz';
 import { resolveRoleTemplateBaselineCodes } from '../../permissions/role-template-baseline';
 import { computeEffectivePermissionsLegacyUnion } from '../../permissions/permissions.service';
 import { HrService } from '../../hr/hr.service';
@@ -772,7 +772,10 @@ export const hrRouter = router({
       const isSuperAdminProfile = profileUser.role === 'SUPER_ADMIN';
       const isMarketingRole =
         profileUser.role === 'MEDIA_BUYER' || profileUser.role === 'HEAD_OF_MARKETING';
-      const showOnboardingTab = !isAdminLevel({ role: profileUser.role });
+      // ADMIN (and SUPPORT) are real staff on payroll — HR must see and edit their
+      // payroll/onboarding profile. Only SUPER_ADMIN (system owner, never on payroll)
+      // has the onboarding tab hidden.
+      const showOnboardingTab = !isSuperAdminOnly({ role: profileUser.role });
 
       // ── 4. Parallel fan-out for all sub-slices ──
       const db = getPermissionsDb();

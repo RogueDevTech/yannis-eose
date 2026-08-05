@@ -106,7 +106,12 @@ function isNullScopeBatch(batch: { scopeType?: string | null }): boolean {
  *
  * HR is the catch-all for staff who don't sit under a Head of Department:
  * HR Manager themselves, the Heads (their own pay can't be in their own batch),
- * Branch Admins, and the Finance Officer. SuperAdmin / Admin are not on payroll.
+ * Branch Admins, and the Finance Officer.
+ *
+ * ADMIN is a real staff role on payroll (OPERATIONS). SUPER_ADMIN is the system
+ * owner and is NEVER on payroll — it is intentionally absent from every department
+ * here, and the generation roster additionally hard-excludes it (see
+ * `synthesizeDraftBatchContent`) so no scope (including ALL) can ever pay it.
  *
  * Exported because plan creation (`HrService.createCommissionPlan`) and listing reuse the
  * same dept↔role mapping to scope what each Head can see + edit.
@@ -116,7 +121,7 @@ export const DEPARTMENT_ROLES: Record<PayrollDepartment, readonly string[]> = {
   MARKETING: ['MEDIA_BUYER', 'HEAD_OF_MARKETING'],
   LOGISTICS: ['HEAD_OF_LOGISTICS', 'TPL_MANAGER', 'STOCK_MANAGER'],
   HR: ['HR_MANAGER', 'BRANCH_ADMIN'],
-  OPERATIONS: ['SUPER_ADMIN', 'ADMIN'],
+  OPERATIONS: ['ADMIN'],
   FINANCE: ['FINANCE_OFFICER', 'AUDITOR'],
   SUPPORT: ['SUPPORT'],
 } as const;
@@ -847,6 +852,10 @@ export class PayrollBatchService {
               and(
                 branchPredicate,
                 inArray(schema.users.role, targetRoles as unknown as typeof schema.users.$inferSelect['role'][]),
+                // Hard guardrail: SUPER_ADMIN is never on payroll and must never be
+                // generated into a batch, regardless of scope (incl. ALL). Belt-and-
+                // suspenders over DEPARTMENT_ROLES so a future edit can't reintroduce it.
+                ne(schema.users.role, 'SUPER_ADMIN'),
                 or(
                   eq(schema.users.status, 'ACTIVE'),
                   and(
@@ -1502,6 +1511,10 @@ export class PayrollBatchService {
               and(
                 branchPredicate,
                 inArray(schema.users.role, targetRoles as unknown as typeof schema.users.$inferSelect['role'][]),
+                // Hard guardrail: SUPER_ADMIN is never on payroll and must never be
+                // generated into a batch, regardless of scope (incl. ALL). Belt-and-
+                // suspenders over DEPARTMENT_ROLES so a future edit can't reintroduce it.
+                ne(schema.users.role, 'SUPER_ADMIN'),
                 or(
                   eq(schema.users.status, 'ACTIVE'),
                   and(
