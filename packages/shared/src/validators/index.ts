@@ -530,6 +530,7 @@ export {
   exportDateRangeSchema,
   reportColumnsByKey,
   exportReportSchema,
+  reportDataInputSchema,
 } from './reports';
 
 export type {
@@ -537,6 +538,7 @@ export type {
   ExportDatePreset,
   ExportDateRange,
   ExportReportInput,
+  ReportDataInput,
 } from './reports';
 
 // HR & Payroll validators

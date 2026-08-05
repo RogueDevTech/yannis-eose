@@ -7763,6 +7763,133 @@ export class OrdersService {
   }
 
   /**
+   * Per-product order counts for the Product Performance report (Admin →
+   * Reports). Groups orders by their line product and returns, for the date
+   * window, the funnel counts needed to compute confirmation rate, delivery
+   * rate, returns, and carry-over per product.
+   *
+   * Scoping deliberately MIRRORS the marketing funnel counts in
+   * `getStatusCounts(isFollowUp=false, excludeOffline='include-imports',
+   * excludeGraduated, excludeCartGraduated)` so a product's totals reconcile
+   * with the funnel and dashboard numbers (CLAUDE.md consistency rule):
+   *   - soft-deleted rows only count under DELETED (excluded from every rate).
+   *   - follow-up + delivered_follow_up + cart-graduated excluded.
+   *   - branch scope on servicing_branch_id (P&L / fulfilment branch).
+   *
+   * Counting semantics (same cohort logic as getCSCloserLeaderboard):
+   *   - totalOrders / confirmed / delivered / returned count by `created_at`
+   *     in the window, so delivery/confirmation rates stay bounded by 100%.
+   *   - carryOver counts orders DELIVERED/REMITTED in the window's final month
+   *     but CREATED before that month began (nigeriaCarryOverMonthStart) — the
+   *     same definition as the overall carry-over metric.
+   *
+   * An order with multiple line products contributes to each product it
+   * contains (COUNT(DISTINCT orders.id) per product), matching how
+   * getDeliveriesByProduct attributes per line.
+   */
+  async getProductPerformanceCounts(
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      productId: string;
+      productName: string;
+      totalOrders: number;
+      confirmedOrders: number;
+      deliveredOrders: number;
+      returnedOrders: number;
+      carryOver: number;
+    }>
+  > {
+    // Funnel scope — identical predicates to getStatusCounts' marketing funnel.
+    const conditions: Parameters<typeof and>[0][] = [
+      // Soft-deleted rows only ever count under DELETED (never a rate bucket).
+      sql`(${schema.orders.deletedAt} IS NULL OR ${schema.orders.status} IN ('DELETED', 'CANCELLED'))`,
+      // Exclude graduated follow-ups + delivered/graduated follow-up copies.
+      eq(schema.orders.isFollowUp, false),
+      sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up' AND ${schema.orders.orderSource} IS DISTINCT FROM 'graduated_follow_up')`,
+      // Exclude cart-graduated orders (they have their own strip).
+      sql`NOT (${schema.orders.orderSource} = 'online' OR (${schema.orders.orderSource} IS NULL AND ${schema.orders.cartId} IS NOT NULL AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`,
+      // Funnel source set: edge-form + imports (exclude manual offline).
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'import')`,
+    ];
+    const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    if (bCond) conditions.push(bCond);
+    if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
+
+    // Per-status predicates (same lists as getCSCloserLeaderboard).
+    const confirmedOrBeyond = sql`${schema.orders.status} IN ('CONFIRMED','AGENT_ASSIGNED','DISPATCHED','IN_TRANSIT','DELIVERED','PARTIALLY_DELIVERED','REMITTED','RETURNED','RESTOCKED','WRITTEN_OFF')`;
+    const notDeleted = sql`${schema.orders.status} <> 'DELETED'`;
+    const deliveredOrRemitted = sql`${schema.orders.status} IN ('DELIVERED','REMITTED')`;
+    const returned = sql`${schema.orders.status} = 'RETURNED'`;
+
+    // Carry-over: delivered in the window's final month, created before it.
+    // Only meaningful with a bounded window; for all-time it is 0 (no anchor).
+    const carryOverStart = endDate ? nigeriaCarryOverMonthStart(nigeriaDayEnd(endDate)) : null;
+    const carryOverPredicate =
+      carryOverStart != null
+        ? sql`(${deliveredOrRemitted} AND ${schema.orders.deliveredAt} >= ${carryOverStart.toISOString()}::timestamptz AND ${schema.orders.createdAt} < ${carryOverStart.toISOString()}::timestamptz)`
+        : sql`false`;
+
+    // Carry-over deliveries are, by definition, created BEFORE the window, so
+    // the created_at window filter would exclude them. Run carry-over as a
+    // separate grouped query without the created_at lower bound.
+    const baseConditions = conditions.filter(Boolean);
+    const carryOverConditions: Parameters<typeof and>[0][] = [
+      sql`(${schema.orders.deletedAt} IS NULL OR ${schema.orders.status} IN ('DELETED', 'CANCELLED'))`,
+      eq(schema.orders.isFollowUp, false),
+      sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up' AND ${schema.orders.orderSource} IS DISTINCT FROM 'graduated_follow_up')`,
+      sql`NOT (${schema.orders.orderSource} = 'online' OR (${schema.orders.orderSource} IS NULL AND ${schema.orders.cartId} IS NOT NULL AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`,
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'import')`,
+    ];
+    if (bCond) carryOverConditions.push(bCond);
+
+    const [mainRows, carryRows] = await Promise.all([
+      this.db
+        .select({
+          productId: schema.orderItems.productId,
+          productName: schema.products.name,
+          totalOrders: sql<number>`COUNT(DISTINCT ${schema.orders.id}) FILTER (WHERE ${notDeleted})::int`,
+          confirmedOrders: sql<number>`COUNT(DISTINCT ${schema.orders.id}) FILTER (WHERE ${confirmedOrBeyond})::int`,
+          deliveredOrders: sql<number>`COUNT(DISTINCT ${schema.orders.id}) FILTER (WHERE ${deliveredOrRemitted})::int`,
+          returnedOrders: sql<number>`COUNT(DISTINCT ${schema.orders.id}) FILTER (WHERE ${returned})::int`,
+        })
+        .from(schema.orderItems)
+        .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
+        .innerJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+        .where(and(...baseConditions))
+        .groupBy(schema.orderItems.productId, schema.products.name),
+      carryOverStart != null
+        ? this.db
+            .select({
+              productId: schema.orderItems.productId,
+              carryOver: sql<number>`COUNT(DISTINCT ${schema.orders.id}) FILTER (WHERE ${carryOverPredicate})::int`,
+            })
+            .from(schema.orderItems)
+            .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
+            .where(and(...carryOverConditions))
+            .groupBy(schema.orderItems.productId)
+        : Promise.resolve([] as Array<{ productId: string; carryOver: number }>),
+    ]);
+
+    const carryByProduct = new Map<string, number>();
+    for (const r of carryRows) carryByProduct.set(r.productId, r.carryOver ?? 0);
+
+    return mainRows.map((r) => ({
+      productId: r.productId,
+      productName: r.productName,
+      totalOrders: r.totalOrders ?? 0,
+      confirmedOrders: r.confirmedOrders ?? 0,
+      deliveredOrders: r.deliveredOrders ?? 0,
+      returnedOrders: r.returnedOrders ?? 0,
+      carryOver: carryByProduct.get(r.productId) ?? 0,
+    }));
+  }
+
+  /**
    * Revenue breakdown by day/week/month — CEO dashboard hero stat.
    * Bounded to current month for index-friendly scans; CASE expressions
    * compute the narrower today/week buckets within that range.

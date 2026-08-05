@@ -8,12 +8,13 @@ import { UsersModule } from '../users/users.module';
 import { LogisticsModule } from '../logistics/logistics.module';
 import { BranchesModule } from '../branches/branches.module';
 import { CartOrdersModule } from '../cart-orders/cart-orders.module';
+import { CartModule } from '../cart/cart.module';
 import { HrModule } from '../hr/hr.module';
 import { ProductsModule } from '../products/products.module';
 import { ReportsService } from './reports.service';
 
 @Module({
-  imports: [OrdersModule, MarketingModule, InventoryModule, FinanceModule, LedgerModule, UsersModule, LogisticsModule, BranchesModule, CartOrdersModule, HrModule, ProductsModule],
+  imports: [OrdersModule, MarketingModule, InventoryModule, FinanceModule, LedgerModule, UsersModule, LogisticsModule, BranchesModule, CartOrdersModule, CartModule, HrModule, ProductsModule],
   providers: [ReportsService],
   exports: [ReportsService],
 })

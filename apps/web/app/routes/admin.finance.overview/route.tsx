@@ -30,6 +30,8 @@ const emptyProfit: ProfitReport = {
 const emptyPulse: FinanceOverviewPulse = {
   awaitingCash: 0,
   awaitingOrderCount: 0,
+  awaitingPeriodCash: 0,
+  awaitingPeriodOrderCount: 0,
   pendingRemittanceAmount: 0,
   pendingRemittanceBatchCount: 0,
   disputedRemittanceBatchCount: 0,
@@ -149,6 +151,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...emptyPulse,
       awaitingCash: Number(remSummary?.awaitingGrossAmount ?? remSummary?.awaitingAmount ?? 0),
       awaitingOrderCount: Number(remSummary?.awaitingCount ?? 0),
+      // Period-scoped awaiting (follows the page date filter; this month by default).
+      awaitingPeriodCash: Number(remSummary?.awaitingPeriodGrossAmount ?? remSummary?.awaitingPeriodAmount ?? 0),
+      awaitingPeriodOrderCount: Number(remSummary?.awaitingPeriodCount ?? 0),
       pendingRemittanceAmount: Number(remSummary?.pendingGrossAmount ?? remSummary?.pendingAmount ?? 0),
       pendingRemittanceBatchCount: Number(remSummary?.pendingCount ?? 0),
       disputedRemittanceBatchCount: Number(remSummary?.disputedCount ?? 0),

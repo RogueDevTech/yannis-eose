@@ -8,11 +8,11 @@
 import { toCsv, downloadCsv } from './csv-export';
 import { bankPayNarration, type BankPayPdfInput } from './bank-pay-pdf';
 
-// Exact bank-mandated column labels. Order matters for most bank templates.
+// Bank-upload column labels. Order matters for most bank templates.
 const BANK_UPLOAD_COLUMNS: Array<{ key: string; label: string }> = [
-  { key: 'bankCode', label: 'Beneficiary Bank Code' },
-  { key: 'accountNumber', label: 'Beneficiary Account Number' },
-  { key: 'beneficiaryName', label: 'Beneficiary Name' },
+  { key: 'bankCode', label: 'Bank Code' },
+  { key: 'accountNumber', label: 'Account Number' },
+  { key: 'beneficiaryName', label: 'Account Name' },
   { key: 'amount', label: 'Net Amount Payable' },
   { key: 'narration', label: 'Narration' },
 ];

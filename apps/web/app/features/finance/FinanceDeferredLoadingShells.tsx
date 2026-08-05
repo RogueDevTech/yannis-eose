@@ -26,7 +26,8 @@ function CashRemittanceSectionShell() {
   const tiles = [
     { title: 'Total delivered', subtitle: 'All orders' },
     { title: 'Remitted', subtitle: 'Batches received' },
-    { title: 'Awaiting batch', subtitle: 'Not on a remittance' },
+    { title: 'Awaiting: This period', subtitle: 'Due this period' },
+    { title: 'Awaiting: All time', subtitle: 'Not on a remittance' },
     { title: 'Pending batches', subtitle: 'Batches SENT' },
     { title: 'Disputed', subtitle: 'Needs attention' },
   ];
@@ -37,7 +38,7 @@ function CashRemittanceSectionShell() {
         description="Delivered orders and remittance status."
       />
       <CardBody className="-mt-2 space-y-4">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {tiles.map((t) => (
             <div
               key={t.title}

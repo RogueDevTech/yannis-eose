@@ -1204,12 +1204,16 @@ export class UsersService {
   ): SQL[] {
     const conditions: SQL[] = [];
 
-    // Cross-boundary always-visible users. SUPER_ADMIN and SUPPORT transcend
-    // every branch AND company boundary — they stay visible even when a branch
-    // or a company they were not invited to is selected. This is deliberately
-    // role-based, NOT scope_global: ADMIN is also scope_global but must remain
-    // company-bound, so it is excluded here (CEO 2026-08-05).
-    const crossBoundaryVisible = inArray(schema.users.role, ['SUPER_ADMIN', 'SUPPORT']);
+    // Org-wide admin-class users (scope_global = ADMIN / SUPER_ADMIN / SUPPORT)
+    // are UNBRANCHED: no user_branches rows and NULL primary_branch_id. Every
+    // branch/company-scoped path below matches users by branch IDs, which would
+    // silently drop these users from the roster. Each scoped path therefore adds
+    // `OR users.scope_global = true` so admins always appear. SUPER_ADMIN is
+    // additionally hidden from HR_MANAGER by a dedicated guard below, applied via
+    // the outer and(), so widening here does not re-expose it to HR.
+    // (CEO 2026-08-05: SUPER_ADMIN/SUPPORT cross every boundary; ADMIN is org-wide
+    // and, absent a companies table, also unbranched — so scope_global is the
+    // correct, working predicate today.)
 
     if (mode === 'list') {
       if (input.userIds && input.userIds.length > 0) {
@@ -1284,8 +1288,11 @@ export class UsersService {
     const orgWideOnlyAllowed =
       input.orgWideOnly === true && this.actorMayListCompanyWideUserRoster(actor, currentBranchId);
     if (emptyGroupScope) {
-      // Company selected but no branches resolved — return zero results.
-      conditions.push(sql`false`);
+      // Company selected but no branches resolved (stale session / new company).
+      // Return no branch-scoped users to prevent a cross-company leak, but still
+      // surface org-wide admin-class users (scope_global) — they belong to no
+      // branch, so hiding them here is what zeroed out the HR roster entirely.
+      conditions.push(eq(schema.users.scopeGlobal, true));
     } else if (orgWideOnlyAllowed) {
       conditions.push(
         sql<boolean>`NOT EXISTS (
@@ -1298,7 +1305,12 @@ export class UsersService {
       // Company-wide list but group-scoped: users in the active company via
       // user_branches OR primary_branch_id. Primary-only memberships used to be
       // dropped when user_branches rows were missing, under-counting CS Closers.
-      // SUPER_ADMIN/SUPPORT transcend company boundaries — always included.
+      // Org-wide admin-class users (scope_global) are UNBRANCHED — no
+      // user_branches rows and NULL primary_branch_id — so they can't be matched
+      // by branch IDs and would vanish from a company-scoped roster. Include them
+      // explicitly (this is what makes ADMIN visible to HR). SUPER_ADMIN/SUPPORT
+      // are covered by scope_global too; the SUPER_ADMIN-hidden-from-HR guard
+      // above still removes SUPER_ADMIN for HR via the outer and().
       conditions.push(
         or(
           inArray(
@@ -1309,7 +1321,7 @@ export class UsersService {
               .where(inArray(schema.userBranches.branchId, effectiveBranchIds!)),
           ),
           inArray(schema.users.primaryBranchId, effectiveBranchIds!),
-          crossBoundaryVisible,
+          eq(schema.users.scopeGlobal, true),
         )!,
       );
     } else if (branchFilter) {
@@ -1338,7 +1350,9 @@ export class UsersService {
     ) {
       // Company-group isolation: user has no specific branch selected but is
       // scoped to a set of branches via effectiveBranchIds. Include primary
-      // branch as well as user_branches membership, plus cross-boundary admins.
+      // branch as well as user_branches membership. Org-wide admin-class users
+      // (scope_global) are unbranched and can't be matched by branch IDs, so
+      // include them explicitly or they vanish from the company roster.
       conditions.push(
         or(
           inArray(
@@ -1349,7 +1363,7 @@ export class UsersService {
               .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
           ),
           inArray(schema.users.primaryBranchId, effectiveBranchIds),
-          crossBoundaryVisible,
+          eq(schema.users.scopeGlobal, true),
         )!,
       );
     } else if (
@@ -2029,12 +2043,12 @@ export class UsersService {
       // trigger because their triggering fields are all undefined for team-lead callers.
     }
 
-    // HR-edits-admin → SuperAdmin approval queue (CEO directive 2026-05-11).
-    // HR_MANAGER reaches the edit form for admin-class targets (see canEditUser),
-    // but any submitted change is intercepted here and queued as a ROLE_CHANGE
-    // permission_request so SuperAdmin signs off. We inject the target's current
-    // role into the payload so the approval handler's `if (!payload.role)` guard
-    // is satisfied even when HR didn't touch the role field.
+    // HR-edits-admin (CEO directive 2026-08-05, supersedes the 2026-05-11
+    // approval-queue flow). HR_MANAGER may edit an admin-class account's PROFILE
+    // fields directly (name, email, phone, capacity, status, branches, etc.), but
+    // may NEVER touch role, permissions, or access scope on an admin — those are
+    // hard-rejected here. SUPER_ADMIN is not editable by HR at all (and is hidden
+    // from HR lists), so an admin-class target reaching this point is ADMIN/SUPPORT.
     if (actor.role === 'HR_MANAGER' && ADMIN_LEVEL_ROLES.has(beforeRow.role)) {
       if (input.userId === actor.id) {
         throw new TRPCError({
@@ -2042,55 +2056,39 @@ export class UsersService {
           message: 'Cannot edit your own account here.',
         });
       }
-      if (input.role === 'SUPER_ADMIN') {
+      if (beforeRow.role === 'SUPER_ADMIN') {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Only the current SuperAdmin can transfer the SUPER_ADMIN role.',
+          message: 'HR cannot edit the SUPER_ADMIN account.',
         });
       }
-      if (input.phone) {
-        const phoneConflictRows = await this.selectStaffPhoneConflictRows(input.phone, input.userId);
-        this.throwIfStaffPhoneConflictRows(phoneConflictRows);
-      }
-      const duplicatePending = await this.selectPendingRoleChangeRequestDuplicate(input.userId);
-      if (duplicatePending) {
+      // Block every role / permission / access-scope field. HR keeps profile
+      // edits but can never escalate an admin's access.
+      const attemptsRoleChange = input.role !== undefined && input.role !== beforeRow.role;
+      const attemptsPrivilegeChange =
+        attemptsRoleChange ||
+        input.roleTemplateId !== undefined ||
+        input.permissionOverrides !== undefined ||
+        input.scopeGlobal !== undefined ||
+        input.scopeOrgWideHead !== undefined ||
+        input.scopeTeamSupervisor !== undefined;
+      if (attemptsPrivilegeChange) {
         throw new TRPCError({
-          code: 'CONFLICT',
-          message: 'A pending edit approval request already exists for this user.',
+          code: 'FORBIDDEN',
+          message:
+            'HR can edit an admin profile but cannot change their role, permissions, or access scope.',
         });
       }
-      const queuedPayload: UpdateStaffInput = {
+      // Strip role/permission/scope from the payload so the downstream direct
+      // update only ever writes profile fields, then fall through to apply it.
+      input = {
         ...input,
-        role: input.role ?? (beforeRow.role as UpdateStaffInput['role']),
-      };
-      const [req] = await withActor(this.db, actor, async (tx) =>
-        tx
-          .insert(schema.permissionRequests)
-          .values({
-            type: 'ROLE_CHANGE',
-            status: 'PENDING',
-            requesterId: actor.id,
-            targetUserId: input.userId,
-            requestedRole: queuedPayload.role,
-            reason: `HR requested edit on admin-class account (${beforeRow.role}).`,
-            payload: queuedPayload as unknown as Record<string, unknown>,
-          })
-          .returning({ id: schema.permissionRequests.id }),
-      );
-
-      if (req?.id) {
-        this.notificationsService.enqueueCreateForRole('SUPER_ADMIN', {
-          type: 'approval:permission_request',
-          title: 'HR edit on admin pending',
-          body: `HR requested changes on ${beforeRow.name ?? 'an admin account'}.`,
-          data: { requestId: req.id, type: 'ROLE_CHANGE', targetUserId: input.userId },
-        });
-      }
-
-      return {
-        requiresApproval: true,
-        requestId: req?.id,
-        message: 'Edit submitted for SuperAdmin approval.',
+        role: undefined,
+        roleTemplateId: undefined,
+        permissionOverrides: undefined,
+        scopeGlobal: undefined,
+        scopeOrgWideHead: undefined,
+        scopeTeamSupervisor: undefined,
       };
     }
 

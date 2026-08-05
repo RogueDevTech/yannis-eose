@@ -30,6 +30,7 @@ import { ExpenseSubmissionService } from '../finance/expense-submission.service'
 import { UsersService } from '../users/users.service';
 import { LogisticsService } from '../logistics/logistics.service';
 import { CartOrdersService } from '../cart-orders/cart-orders.service';
+import { CartService } from '../cart/cart.service';
 import { HrService } from '../hr/hr.service';
 import { ProductsService } from '../products/products.service';
 
@@ -116,6 +117,7 @@ export class ReportsService {
     private readonly usersService: UsersService,
     private readonly logisticsService: LogisticsService,
     private readonly cartOrdersService: CartOrdersService,
+    private readonly cartService: CartService,
     private readonly hrService: HrService,
     private readonly productsService: ProductsService,
   ) {}
@@ -1348,5 +1350,220 @@ export class ReportsService {
       { key: 'created', label: 'Created' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
     return { filename: `shipments-${date}.csv`, csvContent: toCsv(rows, columns) };
+  }
+
+  // ============================================
+  // Reports module (Admin → Reports) — on-screen report data
+  // ============================================
+
+  /**
+   * Admin-only gate for the Reports module. The whole module is SUPER_ADMIN /
+   * ADMIN / SUPPORT (route loader enforces the same set); this is the
+   * server-side backstop so the procedures can't be reached by URL by a
+   * non-admin role.
+   */
+  private ensureReportsAccess(user: SessionUser): void {
+    if (!isAdminLevel(user)) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Reports are restricted to admin-level users.' });
+    }
+  }
+
+  /**
+   * Product Performance report — every product with its funnel counts, rates,
+   * revenue, ad spend, and FIFO-based profit for the selected window.
+   *
+   * Numbers reuse the canonical queries so they reconcile with the dashboards:
+   *   - revenue / adSpend / landed-COGS profit  → FinanceService.getProfitReport
+   *     ({ groupBy:'product', includeProductBreakdown:true }).byProduct
+   *   - totalOrders / confirmed / delivered / returned / carryOver
+   *     → OrdersService.getProductPerformanceCounts (funnel-scoped, by created_at)
+   *
+   * confirmationRate = confirmed / totalOrders, deliveryRate = delivered /
+   * totalOrders (same funnel denominator as the marketing metrics), avgCpa =
+   * adSpend / totalOrders.
+   */
+  async productPerformance(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      productId: string;
+      productName: string;
+      totalOrders: number;
+      ordersConfirmed: number;
+      confirmationRate: number;
+      deliveredOrders: number;
+      deliveryRate: number;
+      avgCpa: number;
+      revenue: number;
+      adSpend: number;
+      profit: number;
+      returns: number;
+      carryOver: number;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+
+    const [profit, counts] = await Promise.all([
+      this.financeService.getProfitReport(
+        {
+          groupBy: 'product',
+          includeProductBreakdown: true,
+          ...(input.startDate ? { startDate: input.startDate } : {}),
+          ...(input.endDate ? { endDate: input.endDate } : {}),
+          ...(input.branchId ? { branchId: input.branchId } : {}),
+        },
+        effectiveBranchIds,
+      ),
+      this.ordersService.getProductPerformanceCounts(
+        input.startDate,
+        input.endDate,
+        input.branchId ?? null,
+        effectiveBranchIds,
+      ),
+    ]);
+
+    // Money side keyed by product (revenue, ad spend, FIFO profit).
+    const money = new Map<string, { productName: string; revenue: number; adSpend: number; profit: number }>();
+    for (const p of profit.byProduct ?? []) {
+      money.set(p.productId, {
+        productName: p.productName,
+        revenue: p.revenue,
+        adSpend: p.adSpend,
+        profit: p.contribution,
+      });
+    }
+
+    // Union of products seen on either side (a product can have orders in the
+    // window with zero delivered revenue, or vice versa).
+    const productIds = new Set<string>([...money.keys(), ...counts.map((c) => c.productId)]);
+    const countByProduct = new Map(counts.map((c) => [c.productId, c]));
+
+    const rows = [...productIds].map((productId) => {
+      const m = money.get(productId);
+      const c = countByProduct.get(productId);
+      const totalOrders = c?.totalOrders ?? 0;
+      const ordersConfirmed = c?.confirmedOrders ?? 0;
+      const deliveredOrders = c?.deliveredOrders ?? 0;
+      const adSpend = m?.adSpend ?? 0;
+      return {
+        productId,
+        productName: m?.productName ?? c?.productName ?? productId.slice(0, 8),
+        totalOrders,
+        ordersConfirmed,
+        confirmationRate: totalOrders > 0 ? (ordersConfirmed / totalOrders) * 100 : 0,
+        deliveredOrders,
+        deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0,
+        avgCpa: totalOrders > 0 ? adSpend / totalOrders : 0,
+        revenue: m?.revenue ?? 0,
+        adSpend,
+        profit: m?.profit ?? 0,
+        returns: c?.returnedOrders ?? 0,
+        carryOver: c?.carryOver ?? 0,
+      };
+    });
+
+    // Highest revenue first — most-important products at the top by default.
+    rows.sort((a, b) => b.revenue - a.revenue);
+    return rows;
+  }
+
+  /**
+   * Customer Acquisition & Order Funnel report — one row per funnel stage for
+   * the selected window, with each stage's count and its conversion rate both
+   * from the previous stage and from the top (Leads).
+   *
+   * Stages:
+   *   Leads Generated  = orders created in period + abandoned carts in period
+   *                      (both are edge-form submissions; abandoned = filled the
+   *                      form but did not complete an order).
+   *   Orders Created   = MarketingService.getPerformanceMetrics.totalOrders
+   *   Orders Confirmed = .confirmedOrders
+   *   Orders Delivered = .deliveredOrders
+   *   Returned Orders  = OrdersService.getStatusCounts RETURNED bucket
+   *
+   * Reuses the canonical funnel metrics so counts reconcile with the Marketing
+   * overview and dashboards.
+   */
+  async customerAcquisitionFunnel(
+    input: { startDate?: string; endDate?: string; branchId?: string | null },
+    user: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      stage: string;
+      count: number;
+      conversionFromPrevious: number;
+      conversionFromCreated: number;
+    }>
+  > {
+    this.ensureReportsAccess(user);
+
+    const [metrics, abandonedCarts, statusCounts] = await Promise.all([
+      this.marketingService.getPerformanceMetrics(
+        undefined,
+        'this_month',
+        input.startDate,
+        input.endDate,
+        input.branchId ?? null,
+        undefined,
+        undefined,
+        effectiveBranchIds,
+        'marketing',
+      ),
+      this.cartService.countAllCarts({
+        branchId: input.branchId ?? null,
+        effectiveBranchIds,
+        startDate: input.startDate ?? null,
+        endDate: input.endDate ?? null,
+      }),
+      this.ordersService.getStatusCounts(
+        undefined,
+        input.startDate,
+        input.endDate,
+        undefined,
+        undefined,
+        input.branchId ?? null,
+        undefined,
+        undefined,
+        'marketing',
+        effectiveBranchIds,
+        false, // isFollowUp=false
+        'include-imports', // exclude manual offline, keep edge-form + imports
+        true, // excludeGraduated
+        true, // excludeCartGraduated
+      ),
+    ]);
+
+    const ordersCreated = metrics.totalOrders ?? 0;
+    const ordersConfirmed = metrics.confirmedOrders ?? 0;
+    const ordersDelivered = metrics.deliveredOrders ?? 0;
+    const returnedOrders = statusCounts['RETURNED'] ?? 0;
+    const leadsGenerated = ordersCreated + abandonedCarts;
+
+    // Ordered funnel stages. Conversion-from-previous divides each stage by the
+    // one above it; conversion-from-created anchors every stage to Orders
+    // Created (the marketing funnel entry that every rate on the dashboards
+    // uses as denominator), so the rates read the same as elsewhere.
+    const stages: Array<{ stage: string; count: number }> = [
+      { stage: 'Leads Generated', count: leadsGenerated },
+      { stage: 'Orders Created', count: ordersCreated },
+      { stage: 'Orders Confirmed', count: ordersConfirmed },
+      { stage: 'Orders Delivered', count: ordersDelivered },
+      { stage: 'Returned Orders', count: returnedOrders },
+    ];
+
+    const pct = (num: number, den: number) => (den > 0 ? (num / den) * 100 : 0);
+
+    return stages.map((s, i) => {
+      const prev = i > 0 ? stages[i - 1]!.count : s.count;
+      return {
+        stage: s.stage,
+        count: s.count,
+        conversionFromPrevious: i === 0 ? 100 : pct(s.count, prev),
+        conversionFromCreated: pct(s.count, ordersCreated),
+      };
+    });
   }
 }

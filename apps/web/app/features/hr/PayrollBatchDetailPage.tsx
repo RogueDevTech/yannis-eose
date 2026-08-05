@@ -171,13 +171,14 @@ function StaffRoleTag({
 
 function buildBatchPayoutColumns(args: {
   batch: BatchDetail['batch'];
-  viewer: ViewerInfo;
   canEditLines: boolean;
   onAdjust: (payoutId: string, staffName: string, currentTotal: number) => void;
   onRemove: (payoutId: string, staffName: string) => void;
 }): CompactTableColumn<BatchPayoutLine>[] {
-  const { batch, viewer, canEditLines, onAdjust, onRemove } = args;
-  const canAdjust = batch.status === 'PENDING_HR' && canReview(viewer);
+  const { batch, canEditLines, onAdjust, onRemove } = args;
+  // Add-ons/deductions follow the same window as line removal: open until the
+  // batch is marked paid (DRAFT preparer, or PENDING_HR/PENDING_FINANCE HR/admin).
+  const canAdjust = canEditLines;
   const cols: CompactTableColumn<BatchPayoutLine>[] = [
     {
       key: 'staff',
@@ -629,16 +630,16 @@ export function PayrollBatchDetailPage({
     fetcher.submit(fd, { method: 'post' });
   }, [batch.branchId, batch.department, batch.scopeType, batch.periodMonth, fetcher]);
 
-  // A payout line can be pulled from the batch while it's still open: the owning
-  // department head on a DRAFT, or HR/admins during PENDING_HR review. Mirrors the
-  // server gate on hr.removePayoutLine. Frozen once it reaches Finance.
+  // The HR edit window: add-ons/deductions, remove line, override, regenerate.
+  // Open until Finance marks the batch paid (CEO 2026-08-05). Mirrors the server
+  // gate `isBatchOpenForHrEdit`: DRAFT for the owning department head, or
+  // PENDING_HR / PENDING_FINANCE for HR/admins only. Frozen once PAID.
   const canEditLines =
     (batch.status === 'DRAFT' && canPrepareDept(viewer, batch.department, batch.branchId)) ||
-    (batch.status === 'PENDING_HR' && canReview(viewer));
+    ((batch.status === 'PENDING_HR' || batch.status === 'PENDING_FINANCE') && canReview(viewer));
 
   const payoutColumns = buildBatchPayoutColumns({
     batch,
-    viewer,
     canEditLines,
     onAdjust: (payoutId, staffName, currentTotal) => {
       setAdjustAmount('');
@@ -659,12 +660,14 @@ export function PayrollBatchDetailPage({
     [payouts],
   );
 
-  const canRegenerateDraft =
-    batch.status === 'DRAFT' && canPrepareDept(viewer, batch.department, batch.branchId);
+  // Regenerate follows the same HR edit window as adjustments/removals: DRAFT for
+  // the owning head, or PENDING_HR/PENDING_FINANCE for HR/admins, until Finance
+  // marks the batch paid (CEO 2026-08-05).
+  const canRegenerate = canEditLines;
 
   /** All workflow actions live in the top-right header now (desktop inline + mobile sheet). */
   const showHeaderWorkflowActions =
-    allowedTransitions.length > 0 || canRegenerateDraft;
+    allowedTransitions.length > 0 || canRegenerate;
 
   const headerWorkflowActions = (
     <>
@@ -694,7 +697,7 @@ export function PayrollBatchDetailPage({
           Reject & send back
         </Button>
       )}
-      {canRegenerateDraft && (
+      {canRegenerate && (
         <Button
           type="button"
           variant="secondary"
@@ -798,7 +801,7 @@ export function PayrollBatchDetailPage({
                         Reject & send back
                       </Button>
                     )}
-                    {canRegenerateDraft && (
+                    {canRegenerate && (
                       <Button
                         type="button"
                         variant="secondary"
@@ -1154,7 +1157,7 @@ export function PayrollBatchDetailPage({
           description={
             <>
               <p>
-                This replaces all draft payouts in this batch with fresh numbers from the latest
+                This replaces all payout lines in this batch with fresh numbers from the latest
                 payroll rules, delivered orders, and staff pay profiles.
               </p>
               <p className="mt-2 text-app-fg-muted">
@@ -1164,9 +1167,9 @@ export function PayrollBatchDetailPage({
           }
           details={
             <ul className="list-disc pl-4 space-y-1 text-sm">
-              <li>Current draft payout lines will be wiped</li>
-              <li>Manual adjustments on this draft will be lost</li>
-              <li>Only allowed while the batch is still in Draft</li>
+              <li>Current payout lines will be wiped and rebuilt</li>
+              <li>Add-ons and deductions re-apply automatically; manual line overrides are lost</li>
+              <li>Allowed until Finance marks the batch paid</li>
             </ul>
           }
           confirmLabel="Re-generate"

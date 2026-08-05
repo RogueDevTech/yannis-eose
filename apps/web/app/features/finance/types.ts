@@ -44,8 +44,12 @@ export interface ProfitReport {
 
 /** Live ops counts for the finance overview rail (not tied to profit date range). */
 export interface FinanceOverviewPulse {
+  /** All-time awaiting (delivered, not on any remittance) — date-independent. */
   awaitingCash: number;
   awaitingOrderCount: number;
+  /** Awaiting scoped to the selected date range (this month by default). */
+  awaitingPeriodCash: number;
+  awaitingPeriodOrderCount: number;
   pendingRemittanceAmount: number;
   pendingRemittanceBatchCount: number;
   disputedRemittanceBatchCount: number;

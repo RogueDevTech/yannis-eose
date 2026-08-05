@@ -52,7 +52,7 @@ export function FinanceCashRemittanceSection({
       />
       <CardBody className="-mt-2 space-y-4">
         {/* Headline totals */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
             <p className="text-xs font-medium text-app-fg-muted flex items-center">
               Total delivered
@@ -82,7 +82,22 @@ export function FinanceCashRemittanceSection({
             className="rounded-lg border border-app-border bg-app-hover/60 p-3 transition-colors hover:bg-app-hover"
           >
             <p className="text-xs font-medium text-app-fg-muted flex items-center">
-              Awaiting batch
+              Awaiting: This period
+              <InfoIcon onClick={() => setInfoModal('awaitingPeriod')} />
+            </p>
+            <p className="mt-1 text-lg font-semibold tabular-nums text-warning-600 dark:text-warning-400">
+              {formatNaira(Math.round(pulse.awaitingPeriodCash))}
+            </p>
+            <p className="text-xs text-app-fg-muted mt-0.5">
+              {pulse.awaitingPeriodOrderCount} order(s) due this period
+            </p>
+          </Link>
+          <Link
+            to="/admin/finance/delivery-remittances"
+            className="rounded-lg border border-app-border bg-app-hover/60 p-3 transition-colors hover:bg-app-hover"
+          >
+            <p className="text-xs font-medium text-app-fg-muted flex items-center">
+              Awaiting: All time
               <InfoIcon onClick={() => setInfoModal('awaiting')} />
             </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-warning-600 dark:text-warning-400">
@@ -201,12 +216,23 @@ export function FinanceCashRemittanceSection({
           ]}
         />
         <FormulaBreakdownModal
+          open={infoModal === 'awaitingPeriod'}
+          onClose={() => setInfoModal(null)}
+          title="Awaiting: This period"
+          description="Gross value of delivered orders in the selected period (this month by default) that are not yet on any remittance batch. This is what is due for the current period."
+          lines={[
+            { label: 'Delivered this period, not on any batch (gross)', amount: pulse.awaitingPeriodCash, type: 'value', count: pulse.awaitingPeriodOrderCount },
+          ]}
+        />
+        <FormulaBreakdownModal
           open={infoModal === 'awaiting'}
           onClose={() => setInfoModal(null)}
-          title="Awaiting Batch"
-          description="Gross value of delivered orders that have not been placed on any remittance batch yet. These orders are waiting for an accountant to create a remittance."
+          title="Awaiting: All time"
+          description="Gross value of every delivered order not on any remittance batch, across all periods. Larger than This period because it includes unremitted funds carried over from earlier months."
           lines={[
-            { label: 'Delivered orders not on any batch (gross)', amount: pulse.awaitingCash, type: 'value', count: pulse.awaitingOrderCount },
+            { label: 'This period (gross)', amount: pulse.awaitingPeriodCash, type: 'value', count: pulse.awaitingPeriodOrderCount },
+            { label: 'Carried over from earlier periods (gross)', amount: Math.max(0, pulse.awaitingCash - pulse.awaitingPeriodCash), type: 'value', count: Math.max(0, pulse.awaitingOrderCount - pulse.awaitingPeriodOrderCount) },
+            { label: 'All time unremitted (gross)', amount: pulse.awaitingCash, type: 'result', count: pulse.awaitingOrderCount },
           ]}
         />
         <FormulaBreakdownModal

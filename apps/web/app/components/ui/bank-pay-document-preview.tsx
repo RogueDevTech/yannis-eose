@@ -63,7 +63,7 @@ export function BankPayDocumentPreview({ doc }: { doc: BankPayPdfInput }) {
                   <thead>
                     <tr style={{ backgroundColor: 'rgb(245, 245, 245)' }}>
                       <th className="px-1.5 py-2 text-left font-bold" style={{ color: 'rgb(80, 80, 80)' }}>
-                        Beneficiary
+                        Account name
                       </th>
                       <th className="px-1.5 py-2 text-left font-bold" style={{ color: 'rgb(80, 80, 80)' }}>
                         Bank
@@ -72,7 +72,7 @@ export function BankPayDocumentPreview({ doc }: { doc: BankPayPdfInput }) {
                         Bank code
                       </th>
                       <th className="px-1.5 py-2 text-left font-bold" style={{ color: 'rgb(80, 80, 80)' }}>
-                        Account
+                        Account number
                       </th>
                       <th className="px-1.5 py-2 text-right font-bold" style={{ color: 'rgb(80, 80, 80)' }}>
                         Amount
