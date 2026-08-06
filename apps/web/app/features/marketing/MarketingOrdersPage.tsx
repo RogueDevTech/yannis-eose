@@ -17,6 +17,7 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { PageSearchControl } from '~/components/ui/page-search-control';
@@ -637,6 +638,7 @@ export function MarketingOrdersPage({
                     startTime={dateFilters.startTime}
                     endTime={dateFilters.endTime}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
+                <CompareButton source="marketing-orders" />
                 <Button
                   type="button"
                   variant="secondary"

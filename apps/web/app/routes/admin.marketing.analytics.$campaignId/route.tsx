@@ -92,6 +92,9 @@ export default function MarketingFormAnalyticsRoute() {
       fallback={<MarketingAnalyticsLoadingShell filters={analyticsShell.filters} detail />}
       loaderShell={{ analyticsShell }}
       deferredKey="analyticsData"
+      // Live page: revalidates on a silent interval + socket events. The LIVE
+      // indicator already signals the refresh, so don't dim the whole page each tick.
+      dimOnRefresh={false}
     >
       {(payload) => (
         <MarketingAnalyticsPage

@@ -45,6 +45,7 @@ export function CachedAwait<T>({
   errorElement,
   loaderShell,
   deferredKey,
+  dimOnRefresh = true,
 }: {
   resolve: Promise<T> | T;
   fallback: ReactNode;
@@ -72,6 +73,17 @@ export function CachedAwait<T>({
    * writes `{ ...loaderShell, [deferredKey]: <resolved> }` to the full cache.
    */
   deferredKey?: string;
+  /**
+   * When true (default), cached content dims to opacity-60 while a revalidation
+   * is in flight — the right cue for user-initiated refetches (filter/page changes).
+   *
+   * Set false for live-updating pages that revalidate on a silent background
+   * interval (Form Analytics, live dashboards). There, a LIVE indicator already
+   * signals the refresh, and CachedAwait is stale-while-revalidate: content stays
+   * put and only the changed numbers animate. Dimming the whole page every poll
+   * tick reads as a full-page flash, which is exactly what those pages avoid.
+   */
+  dimOnRefresh?: boolean;
 }) {
   const location = useLocation();
   const revalidator = useRevalidator();
@@ -185,7 +197,7 @@ export function CachedAwait<T>({
   if (resolved !== null) {
     // When showing cached data while revalidating, apply a subtle opacity
     // transition so users know numbers are refreshing.
-    const isRefreshing = revalidator.state === 'loading' && cachedRef.current !== null;
+    const isRefreshing = dimOnRefresh && revalidator.state === 'loading' && cachedRef.current !== null;
     return (
       <div className={isRefreshing ? 'opacity-60 transition-opacity duration-300' : 'transition-opacity duration-300'}>
         {children(resolved)}
