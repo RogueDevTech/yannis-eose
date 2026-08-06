@@ -587,13 +587,33 @@ export interface FormAnalytics {
     attributionCoverage: number;
   };
   funnel: {
-    landed: number;
+    formViews: number;
     startedCart: number;
     ordered: number;
+    confirmed: number;
     delivered: number;
   };
   timeSeries: Array<{ date: string; viewsRaw: number; viewsUnique: number }>;
   topForms: Array<{ campaignId: string; label: string; count: number }>;
+  /** Per-form rows for the clickable forms table. */
+  forms: Array<{
+    campaignId: string;
+    label: string;
+    views: number;
+    rawViews: number;
+    avgDwellMs: number | null;
+    converted: number;
+    conversionRate: number;
+  }>;
+  /** Cross-funnel attempt stats (same phone+product via different MBs). */
+  crossFunnel: {
+    totalAttempts: number;
+    uniqueCustomers: number;
+    resubmissions: number;
+    sameMb: number;
+    crossFunnel: number;
+    perProduct: Array<{ productId: string | null; productName: string | null; attempts: number }>;
+  };
 }
 
 export interface FundingLedgerLoaderData {

@@ -8,10 +8,8 @@ import { MarketingAnalyticsPage } from '~/features/marketing/MarketingAnalyticsP
 import { MarketingAnalyticsLoadingShell } from '~/features/marketing/MarketingAnalyticsLoadingShell';
 import type { FormAnalytics } from '~/features/marketing/types';
 
-export const meta: MetaFunction = () => [{ title: 'Analytics — Yannis EOSE' }];
+export const meta: MetaFunction = () => [{ title: 'Form Analytics — Yannis EOSE' }];
 
-// Live events that should refetch the analytics bundle. `form:view` is emitted by
-// the edge beacon on every landing/dwell; `order:new` covers conversions.
 const ANALYTICS_LIVE_EVENTS = ['form:view', 'order:new'] as const;
 
 const EMPTY_ANALYTICS: FormAnalytics = {
@@ -23,15 +21,14 @@ const EMPTY_ANALYTICS: FormAnalytics = {
   crossFunnel: { totalAttempts: 0, uniqueCustomers: 0, resubmissions: 0, sameMb: 0, crossFunnel: 0, perProduct: [] },
 };
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  // MB sees own forms; HoM/admin see the branch; marketing team supervisors see
-  // their team. Server-side (formAnalyticsPageBundle) re-enforces the exact scope.
+export async function loader({ request, params }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'],
     permission: 'marketing.teamOverview',
     orMarketingTeamSupervisorOnBranch: true,
   });
   const cookie = getSessionCookie(request);
+  const campaignId = params.campaignId ?? '';
 
   const url = new URL(request.url);
   let startDate = url.searchParams.get('startDate') ?? undefined;
@@ -50,6 +47,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const bundleInput = encodeURIComponent(
     JSON.stringify({
+      campaignId,
       ...(startDate && { startDate }),
       ...(endDate && { endDate }),
     }),
@@ -61,10 +59,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const data = res.ok
       ? ((res.data as { result?: { data?: FormAnalytics } })?.result?.data ?? null)
       : null;
-    return { analytics: data ?? EMPTY_ANALYTICS };
+    const analytics = data ?? EMPTY_ANALYTICS;
+    // The form's label: the campaign's own row is the only form in this scoped bundle.
+    const formLabel =
+      analytics.forms[0]?.label ?? analytics.topForms[0]?.label ?? 'Form';
+    return { analytics, formLabel };
   });
 
   const analyticsShell = {
+    campaignId,
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
@@ -78,24 +81,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
-export default function MarketingAnalyticsRoute() {
+export default function MarketingFormAnalyticsRoute() {
   const { analyticsShell, analyticsData } = useLoaderData<typeof loader>();
-  // Live: refetch on form:view / order:new socket events; poll as a fallback when
-  // the socket is down (background tabs, PWA waking).
   usePageRefreshOnEvent([...ANALYTICS_LIVE_EVENTS]);
   usePollingFallback(20_000);
   return (
     <CachedAwait
       resolve={analyticsData}
-      fallback={<MarketingAnalyticsLoadingShell filters={analyticsShell.filters} />}
+      fallback={<MarketingAnalyticsLoadingShell filters={analyticsShell.filters} detail />}
       loaderShell={{ analyticsShell }}
       deferredKey="analyticsData"
     >
       {(payload) => (
         <MarketingAnalyticsPage
-          {...payload}
+          analytics={payload.analytics}
           filters={analyticsShell.filters}
           liveEvents={[...ANALYTICS_LIVE_EVENTS]}
+          detail={{ campaignId: analyticsShell.campaignId, formLabel: payload.formLabel }}
         />
       )}
     </CachedAwait>

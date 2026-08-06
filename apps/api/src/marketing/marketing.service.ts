@@ -7339,6 +7339,13 @@ export class MarketingService {
         userAgent: input.userAgent ?? null,
         country: input.country ?? null,
       });
+
+      // Live Analytics page ping (best-effort; safeEmit swallows any failure).
+      this.events.emitFormView({
+        campaignId: input.campaignId,
+        mediaBuyerId: campaign.mediaBuyerId ?? null,
+        branchId: campaign.branchId ?? null,
+      });
     } catch (err) {
       this.logger.debug(`recordFormView swallowed error: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -7392,9 +7399,12 @@ export class MarketingService {
     branchId: string | null | undefined,
     supervisorScope: OrdersAggregateSupervisorScope | undefined,
     effectiveBranchIds: string[] | null | undefined,
+    /** When set, narrows EVERY query to a single campaign (per-form detail page). */
+    opts?: { campaignId?: string },
   ) {
     const periodStart = startDate ? nigeriaDayStart(startDate) : null;
     const periodEnd = endDate ? nigeriaDayEnd(endDate) : null;
+    const campaignId = opts?.campaignId;
 
     // ── Scope builders, one per table, mirroring getPerformanceMetrics ──
     // Views scope (media_buyer_id / branch_id live on campaign_views directly).
@@ -7407,6 +7417,9 @@ export class MarketingService {
       const bCond = branchScopeCondition(schema.campaignViews.branchId, branchId, effectiveBranchIds);
       if (bCond) viewConditions.push(bCond);
     }
+    // Per-form detail: narrow to one campaign ON TOP of the role scope (so a user
+    // can only drill into a form the scope already permits).
+    if (campaignId) viewConditions.push(eq(schema.campaignViews.campaignId, campaignId));
     if (periodStart) viewConditions.push(gte(schema.campaignViews.viewedAt, periodStart));
     if (periodEnd) viewConditions.push(lte(schema.campaignViews.viewedAt, periodEnd));
     const viewWhere = viewConditions.length ? and(...viewConditions) : undefined;
@@ -7421,6 +7434,7 @@ export class MarketingService {
       const bCond = branchScopeCondition(schema.orders.branchId, branchId, effectiveBranchIds);
       if (bCond) orderConditions.push(bCond);
     }
+    if (campaignId) orderConditions.push(eq(schema.orders.campaignId, campaignId));
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
     if (periodEnd) orderConditions.push(lte(schema.orders.createdAt, periodEnd));
     const orderWhere = and(...orderConditions);
@@ -7445,6 +7459,7 @@ export class MarketingService {
         );
       }
     }
+    if (campaignId) cartConditions.push(eq(schema.cartAbandonments.campaignId, campaignId));
     if (periodStart) cartConditions.push(gte(schema.cartAbandonments.createdAt, periodStart));
     if (periodEnd) cartConditions.push(lte(schema.cartAbandonments.createdAt, periodEnd));
     const cartWhere = cartConditions.length ? and(...cartConditions) : undefined;
@@ -7458,6 +7473,8 @@ export class MarketingService {
       topFormRows,
       matchedOrdersRow,
       totalOrdersRow,
+      formRows,
+      perCampaignMatchedRows,
     ] = await Promise.all([
       // Landings + dwell.
       this.db
@@ -7477,10 +7494,13 @@ export class MarketingService {
         .select({ startedCart: sql<number>`COUNT(DISTINCT ${schema.cartAbandonments.sessionId})` })
         .from(schema.cartAbandonments)
         .where(cartWhere),
-      // Ordered + Delivered from orders.
+      // Ordered + Confirmed(or beyond) + Delivered from orders. Confirmed mirrors the
+      // confirmation-rate status set (CONFIRMED..REMITTED) so the funnel's Confirmed
+      // stage matches the confirmation-rate metric marketing already tracks.
       this.db
         .select({
           ordered: count(),
+          confirmed: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.status} IN ('CONFIRMED','AGENT_ASSIGNED','DISPATCHED','IN_TRANSIT','DELIVERED','PARTIALLY_DELIVERED','RETURNED','RESTOCKED','WRITTEN_OFF','REMITTED'))`,
           delivered: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.status} IN ('DELIVERED','REMITTED'))`,
         })
         .from(schema.orders)
@@ -7510,7 +7530,7 @@ export class MarketingService {
         .where(viewWhere)
         .groupBy(schema.campaignViews.campaignId)
         .orderBy(sql`COUNT(DISTINCT ${schema.campaignViews.sessionId}) DESC`)
-        .limit(10),
+        .limit(25),
       // Attribution coverage numerator: orders whose session_id matches a view IN THE
       // SAME SCOPE. The matched set is restricted to session_ids from the scoped view
       // query (viewWhere) — never all campaign_views globally — so an order can't be
@@ -7533,6 +7553,43 @@ export class MarketingService {
         ),
       // Attribution coverage denominator: total orders in scope.
       this.db.select({ total: count() }).from(schema.orders).where(orderWhere),
+      // Per-form rows for the clickable forms table: unique views + avg dwell per
+      // campaign. Conversion is joined in below from a matched-orders-per-campaign map.
+      this.db
+        .select({
+          campaignId: schema.campaignViews.campaignId,
+          name: sql<string | null>`MAX(${schema.campaigns.name})`,
+          views: sql<number>`COUNT(DISTINCT ${schema.campaignViews.sessionId})`,
+          rawViews: count(),
+          avgDwellMs: sql<number | null>`AVG(${schema.campaignViews.dwellMs}) FILTER (WHERE ${schema.campaignViews.dwellMs} IS NOT NULL)`,
+        })
+        .from(schema.campaignViews)
+        .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.campaignViews.campaignId))
+        .where(viewWhere)
+        .groupBy(schema.campaignViews.campaignId)
+        .orderBy(sql`COUNT(DISTINCT ${schema.campaignViews.sessionId}) DESC`),
+      // Matched orders per campaign (scoped view sessions) — the conversion numerator
+      // per form. Keyed by campaign_id for the join below.
+      this.db
+        .select({
+          campaignId: schema.orders.campaignId,
+          matched: count(),
+        })
+        .from(schema.orders)
+        .where(
+          and(
+            orderWhere,
+            isNotNull(schema.orders.sessionId),
+            inArray(
+              schema.orders.sessionId,
+              this.db
+                .select({ sessionId: schema.campaignViews.sessionId })
+                .from(schema.campaignViews)
+                .where(viewWhere),
+            ),
+          ),
+        )
+        .groupBy(schema.orders.campaignId),
     ]);
 
     const rawLandings = Number(landingRow[0]?.rawLandings ?? 0);
@@ -7540,6 +7597,7 @@ export class MarketingService {
     const avgDwellMs = landingRow[0]?.avgDwellMs != null ? Math.round(Number(landingRow[0].avgDwellMs)) : null;
     const startedCart = Number(funnelStartedRow[0]?.startedCart ?? 0);
     const ordered = Number(funnelOrderedRow[0]?.ordered ?? 0);
+    const confirmed = Number(funnelOrderedRow[0]?.confirmed ?? 0);
     const delivered = Number(funnelOrderedRow[0]?.delivered ?? 0);
     const matchedOrders = Number(matchedOrdersRow[0]?.matched ?? 0);
     const totalOrders = Number(totalOrdersRow[0]?.total ?? 0);
@@ -7555,7 +7613,7 @@ export class MarketingService {
         conversionRate,
         attributionCoverage,
       },
-      funnel: { landed: uniqueLandings, startedCart, ordered, delivered },
+      funnel: { formViews: uniqueLandings, startedCart, ordered, confirmed, delivered },
       timeSeries: trendRows.map((r) => ({
         date: r.day,
         viewsRaw: Number(r.viewsRaw),
@@ -7566,6 +7624,25 @@ export class MarketingService {
         label: r.name ?? 'Unknown form',
         count: Number(r.landings),
       })),
+      forms: (() => {
+        const matchedByCampaign = new Map<string, number>();
+        for (const r of perCampaignMatchedRows) {
+          if (r.campaignId) matchedByCampaign.set(r.campaignId, Number(r.matched));
+        }
+        return formRows.map((r) => {
+          const views = Number(r.views);
+          const converted = matchedByCampaign.get(r.campaignId) ?? 0;
+          return {
+            campaignId: r.campaignId,
+            label: r.name ?? 'Unknown form',
+            views,
+            rawViews: Number(r.rawViews),
+            avgDwellMs: r.avgDwellMs != null ? Math.round(Number(r.avgDwellMs)) : null,
+            converted,
+            conversionRate: views > 0 ? converted / views : 0,
+          };
+        });
+      })(),
     };
   }
 

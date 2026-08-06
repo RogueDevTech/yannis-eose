@@ -25,10 +25,19 @@ export class ChannelRegistryService {
     return this.byChannel[channel];
   }
 
-  /** Channels whose credentials are present (usable right now). */
+  /**
+   * Channels whose credentials are present (usable right now). A provider's
+   * `isConfigured()` is a pure env read and shouldn't throw, but we guard each
+   * one so a single misbehaving provider can never break the automation page or
+   * the create/test paths — it just reports that channel as unconfigured.
+   */
   configuredChannels(): AutomationChannel[] {
-    return (Object.keys(this.byChannel) as AutomationChannel[]).filter((c) =>
-      this.byChannel[c].isConfigured(),
-    );
+    return (Object.keys(this.byChannel) as AutomationChannel[]).filter((c) => {
+      try {
+        return this.byChannel[c].isConfigured();
+      } catch {
+        return false;
+      }
+    });
   }
 }

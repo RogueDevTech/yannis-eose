@@ -47,9 +47,9 @@ export function NewAutomationPage({ configuredChannels }: { configuredChannels: 
 
       {noChannelsReady && (
         <div className="list-panel p-4 text-sm text-app-fg-muted">
-          No sending channel is configured yet. Email turns on once SendGrid credentials are set; SMS and
-          WhatsApp arrive in a later phase. You can still fill this in, but a rule can only be saved on a channel
-          that can actually send.
+          No sending channel is configured yet. Email turns on with SendGrid credentials, SMS with Africa&apos;s
+          Talking keys, and WhatsApp with Termii keys. You can still fill this in, but a rule can only be saved on
+          a channel that can actually send.
         </div>
       )}
 

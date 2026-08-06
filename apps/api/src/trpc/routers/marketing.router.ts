@@ -762,67 +762,66 @@ export const marketingRouter = router({
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
         personalOnly: z.boolean().optional(),
+        /** When set, returns per-form detail scoped to a single campaign (drill-in page). */
+        campaignId: z.string().uuid().optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
-      let mediaBuyerId = input.mediaBuyerId;
+      // Resolve the caller's scope ONCE (mirrors the `metrics` procedure), then run a
+      // single getFormAnalytics call + cross-funnel stats. MB sees own; promoted
+      // supervisor sees team; HoM/admin see branch.
+      let scopedMediaBuyerId = input.mediaBuyerId;
+      let supervisorScope: Awaited<ReturnType<typeof narrowOrdersAggregateFiltersForViewer>>['supervisorScope'];
 
       if (ctx.user.role === 'MEDIA_BUYER') {
         if (input.mediaBuyerId && input.mediaBuyerId !== ctx.user.id) {
           throw new TRPCError({ code: 'FORBIDDEN', message: 'Cannot query another media buyer.' });
         }
-        // Promoted-to-supervisor MB gets the team-aggregated view (own + supervised peers).
         const supervisorBranch = ctx.currentBranchId ?? (ctx.user.branchIds?.[0] ?? null);
-        if (
-          !input.personalOnly &&
-          ctx.user.isMarketingTeamSupervisorOnActiveBranch === true &&
-          supervisorBranch
-        ) {
+        if (!input.personalOnly && ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && supervisorBranch) {
           const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, supervisorBranch, {
             mediaBuyerId: ctx.user.id,
             startDate: input.startDate,
             endDate: input.endDate,
           });
-          return getMarketingService().getFormAnalytics(
-            narrowed.mediaBuyerId,
-            input.startDate,
-            input.endDate,
-            ctx.currentBranchId,
-            narrowed.supervisorScope,
-            ctx.effectiveBranchIds,
-          );
+          scopedMediaBuyerId = narrowed.mediaBuyerId;
+          supervisorScope = narrowed.supervisorScope;
+        } else {
+          scopedMediaBuyerId = ctx.user.id;
         }
-        mediaBuyerId = ctx.user.id;
       } else if (!isAdminLevel(ctx.user) && !seesFullMarketingTeamSurfaces(ctx.user)) {
-        // Non-MB, non-admin without full marketing team access — only a marketing
-        // team supervisor may reach this surface, scoped to their team.
         const supervisorBranch = ctx.currentBranchId ?? (ctx.user.branchIds?.[0] ?? null);
         if (ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && supervisorBranch) {
           const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, supervisorBranch, {
             startDate: input.startDate,
             endDate: input.endDate,
           });
-          return getMarketingService().getFormAnalytics(
-            narrowed.mediaBuyerId,
-            input.startDate,
-            input.endDate,
-            ctx.currentBranchId,
-            narrowed.supervisorScope,
-            ctx.effectiveBranchIds,
-          );
+          scopedMediaBuyerId = narrowed.mediaBuyerId;
+          supervisorScope = narrowed.supervisorScope;
+        } else {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Missing marketing analytics access.' });
         }
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Missing marketing analytics access.' });
       }
 
-      // HoM / admin (or an MB scoped to self above) → branch-wide.
-      return getMarketingService().getFormAnalytics(
-        mediaBuyerId,
-        input.startDate,
-        input.endDate,
-        ctx.currentBranchId,
-        undefined,
-        ctx.effectiveBranchIds,
-      );
+      const [analytics, crossFunnel] = await Promise.all([
+        getMarketingService().getFormAnalytics(
+          scopedMediaBuyerId,
+          input.startDate,
+          input.endDate,
+          ctx.currentBranchId,
+          supervisorScope,
+          ctx.effectiveBranchIds,
+          input.campaignId ? { campaignId: input.campaignId } : undefined,
+        ),
+        getMarketingService().crossFunnelStats(
+          ctx.user,
+          { startDate: input.startDate, endDate: input.endDate },
+          ctx.currentBranchId,
+          ctx.effectiveBranchIds,
+        ),
+      ]);
+
+      return { ...analytics, crossFunnel };
     }),
 
   /** Org-wide profitability config (target ROAS + green/red threshold). Drives the

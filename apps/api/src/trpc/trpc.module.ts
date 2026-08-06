@@ -109,6 +109,7 @@ import { setAiAssistantService, setAiAssistantToolServices } from './routers/ai-
 import { AutomationModule } from '../automation/automation.module';
 import { AutomationService } from '../automation/automation.service';
 import { setAutomationService } from './routers/automation.router';
+import { setAutomationHookService } from '../automation/automation-hooks';
 
 @Module({
   imports: [
@@ -203,6 +204,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setPayrollMetricsService(this.payrollMetricsService);
     setNotificationsService(this.notificationsService);
     setAutomationService(this.automationService);
+    setAutomationHookService(this.automationService);
     setPushSchedulerService(this.pushSchedulerService);
     setAuditService(this.auditService);
     setImportHistoryService(this.importHistoryService);

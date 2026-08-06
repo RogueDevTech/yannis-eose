@@ -95,13 +95,26 @@ export type {
 export {
   marketingAutomationRuleKindSchema,
   marketingAutomationChannelSchema,
+  marketingAutomationEventSchema,
+  automationTriggerSchema,
+  AUTOMATION_EVENTS,
   createMarketingAutomationRuleSchema,
   listMarketingAutomationRulesSchema,
+  updateMarketingAutomationRuleSchema,
+  automationRuleIdSchema,
+  toggleMarketingAutomationRuleSchema,
+  testMarketingAutomationRuleSchema,
 } from './automation';
 
 export type {
   CreateMarketingAutomationRuleInput,
   ListMarketingAutomationRulesInput,
+  MarketingAutomationEvent,
+  AutomationTrigger,
+  UpdateMarketingAutomationRuleInput,
+  AutomationRuleIdInput,
+  ToggleMarketingAutomationRuleInput,
+  TestMarketingAutomationRuleInput,
 } from './automation';
 
 // User validators
