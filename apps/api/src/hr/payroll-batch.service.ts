@@ -2777,6 +2777,7 @@ export class PayrollBatchService {
       staffId?: string;
       batchId?: string;
       department?: string;
+      scopeType?: string;
       fromMonth?: string;
       toMonth?: string;
       branchId?: string;
@@ -2795,6 +2796,9 @@ export class PayrollBatchService {
     if (input.staffId) conditions.push(eq(schema.payoutRecords.staffId, input.staffId));
     if (input.batchId) conditions.push(eq(schema.payoutRecords.batchId, input.batchId));
     if (input.department) conditions.push(eq(schema.payrollBatches.department, input.department as 'CS' | 'MARKETING' | 'LOGISTICS' | 'HR' | 'OPERATIONS' | 'FINANCE' | 'SUPPORT'));
+    // Scope filter for org-wide batches (CONTRACTORS / ALL), which carry a NULL
+    // department. Mutually exclusive with `department` in the UI dropdown.
+    if (input.scopeType) conditions.push(eq(schema.payrollBatches.scopeType, input.scopeType as 'ALL_BRANCHES' | 'BRANCHES' | 'EMPLOYEES' | 'DEPARTMENT' | 'CONTRACTORS' | 'ALL'));
     // Org-wide (CONTRACTORS / ALL) batches carry branch_id = NULL, so a plain
     // `branch_id IN (companyBranches)` filter silently drops them — that hid a
     // fully-PAID "All staff & contractors" batch (and its payslips) whenever a
@@ -2838,7 +2842,12 @@ export class PayrollBatchService {
       .where(and(...conditions));
     const total = countResult[0]?.count ?? 0;
 
-    return { items: rows, page, limit, total };
+    // Attach per-payout deduction reasons (DEDUCTION / CLAWBACK adjustments) so
+    // the list table + payslip can show them itemized, not just a lump total.
+    const deductionMap = await this.getDeductionLinesByPayout(rows.map((r) => r.payout.id));
+    const items = rows.map((r) => ({ ...r, deductionLines: deductionMap.get(r.payout.id) ?? [] }));
+
+    return { items, page, limit, total };
   }
 
   async payrollRegister(
@@ -3273,6 +3282,43 @@ export class PayrollBatchService {
     return { batches };
   }
 
+  /**
+   * Per-payout deduction reasons for payslips. `deductionsTotal` on a payout is a
+   * single collapsed number; the human-readable reasons live in
+   * `earnings_adjustments` (category DEDUCTION / CLAWBACK, linked by payout_id).
+   * Returns a map keyed by payoutId so both getPayslip (one) and listPayslips
+   * (many) can attach itemized deduction lines without an N+1 per row.
+   */
+  private async getDeductionLinesByPayout(
+    payoutIds: string[],
+  ): Promise<Map<string, Array<{ category: string; reason: string; amount: string }>>> {
+    const map = new Map<string, Array<{ category: string; reason: string; amount: string }>>();
+    if (!payoutIds.length) return map;
+    const rows = await this.db
+      .select({
+        payoutId: schema.earningsAdjustments.payoutId,
+        category: schema.earningsAdjustments.category,
+        reason: schema.earningsAdjustments.reason,
+        amount: schema.earningsAdjustments.amount,
+      })
+      .from(schema.earningsAdjustments)
+      .where(
+        and(
+          inArray(schema.earningsAdjustments.payoutId, payoutIds),
+          inArray(schema.earningsAdjustments.category, ['DEDUCTION', 'CLAWBACK']),
+        ),
+      )
+      .orderBy(desc(schema.earningsAdjustments.createdAt));
+    for (const r of rows) {
+      if (!r.payoutId) continue;
+      const list = map.get(r.payoutId) ?? [];
+      // Store the magnitude; the sign is implied by "deduction".
+      list.push({ category: r.category, reason: r.reason, amount: String(Math.abs(Number(r.amount))) });
+      map.set(r.payoutId, list);
+    }
+    return map;
+  }
+
   async getPayslip(payoutId: string, viewer: SessionUser) {
     const payoutRows = await this.db
       .select({
@@ -3341,12 +3387,15 @@ export class PayrollBatchService {
       }
     }
 
+    const deductionLines = (await this.getDeductionLinesByPayout([row.payout.id])).get(row.payout.id) ?? [];
+
     return {
       payout: row.payout,
       batch: row.batch,
       staffName: row.staffName ?? row.contractorName ?? row.payout.payRoleName ?? 'Staff',
       staffRole: row.staffRole,
       branchName: row.branchName,
+      deductionLines,
     };
   }
 

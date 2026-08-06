@@ -141,7 +141,7 @@ export function FinanceCashRemittanceSection({
             className="rounded-lg border border-app-border bg-app-hover/60 p-3 transition-colors hover:bg-app-hover"
           >
             <p className="text-xs font-medium text-app-fg-muted flex items-center">
-              Pending
+              Pending Batches
               <InfoIcon onClick={() => setInfoModal('pending')} />
             </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-warning-600 dark:text-warning-400">
@@ -267,7 +267,7 @@ export function FinanceCashRemittanceSection({
         <FormulaBreakdownModal
           open={infoModal === 'pending'}
           onClose={() => setInfoModal(null)}
-          title="Pending"
+          title="Pending Batches"
           description="Gross value of orders on remittance batches that have been sent but not yet marked as received by Finance."
           lines={[
             { label: 'Orders on SENT batches (gross)', amount: pulse.pendingRemittanceAmount, type: 'value', count: pulse.pendingRemittanceBatchCount },

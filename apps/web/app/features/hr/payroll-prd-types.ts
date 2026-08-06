@@ -107,6 +107,12 @@ export type PayslipListItem = {
   staffName: string | null;
   /** System user role (e.g. CS_CLOSER); null for contractors. */
   staffRole: string | null;
+  /**
+   * Itemized deduction reasons (DEDUCTION / CLAWBACK adjustments) for this
+   * payout, so the table + payslip show the reason, not just the lump total.
+   * `amount` is a positive magnitude.
+   */
+  deductionLines?: Array<{ category: string; reason: string; amount: string }>;
 };
 
 export type PayrollRegisterRow = {

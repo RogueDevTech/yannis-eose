@@ -33,6 +33,12 @@ export type PayslipApiRow = {
   /** System role from users.role when staff-linked. */
   staffRole?: string | null;
   branchName?: string | null;
+  /**
+   * Itemized deduction reasons (DEDUCTION / CLAWBACK earnings_adjustments) so the
+   * payslip can show the reason behind "Other deductions", not just a lump total.
+   * `amount` is a positive magnitude. Empty/absent when there are none.
+   */
+  deductionLines?: Array<{ category: string; reason: string; amount: string | number }>;
 };
 
 /** Prefer disbursement → finance marked paid → payout created. */
@@ -105,8 +111,18 @@ export function toPayslipPdfInput(row: PayslipApiRow): PayslipPdfInput {
     // Cash to bank (after clawbacks); falls back to netPay when totalPayout unset.
     netPay: Number(row.payout.totalPayout ?? row.payout.netPay),
     bonusLines: parseBonusLines(row.payout.bonusBreakdown),
+    deductionLines: (row.deductionLines ?? [])
+      .map((d) => ({ label: deductionLineLabel(d.category, d.reason), amount: Number(d.amount) }))
+      .filter((d) => Number.isFinite(d.amount) && d.amount > 0),
     prorationNote: resolveProrationNote(row.payout.metricsSnapshot),
   };
+}
+
+/** "Clawback: overpayment" — category prefix + the HR-entered reason. */
+export function deductionLineLabel(category: string, reason: string): string {
+  const cat = category === 'CLAWBACK' ? 'Clawback' : 'Deduction';
+  const r = reason?.trim();
+  return r ? `${cat}: ${r}` : cat;
 }
 
 export function payslipFilename(row: PayslipApiRow): string {
