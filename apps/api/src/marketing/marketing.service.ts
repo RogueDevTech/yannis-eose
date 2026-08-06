@@ -25,6 +25,7 @@ import {
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, canonicalPermissionCode } from '@yannis/shared';
+import { uuidv7 } from 'uuidv7';
 import type {
   CreateFundingInput,
   VerifyFundingInput,
@@ -7291,6 +7292,357 @@ export class MarketingService {
         deliveryStateOptions?: string[];
         preferredDeliveryDateOptions?: string[];
       } | null,
+    };
+  }
+
+  /**
+   * Form Analytics ingestion — record one form-landing telemetry row.
+   *
+   * Called (fire-and-forget) by the edge worker's /track-view beacon on form load.
+   * NON-temporal telemetry: a bare insert (no withActor) is intentional — this is
+   * not an auditable business write and must stay off the intake hot path's cost
+   * profile. media_buyer_id / branch_id are resolved from the campaign so reporting
+   * can scope without a join.
+   *
+   * NEVER throws: any failure (bad campaignId, DB down) is swallowed and logged at
+   * debug. This method is called adjacent to the frozen intake surface; it must not
+   * be able to surface an error to the worker.
+   */
+  async recordFormView(input: {
+    sessionId: string;
+    campaignId: string;
+    mediaBuyerId?: string | null;
+    deploymentType?: string | null;
+    referrer?: string | null;
+    userAgent?: string | null;
+    country?: string | null;
+  }): Promise<void> {
+    try {
+      // Authoritative branch/MB from the campaign (client-supplied values are hints
+      // only and never trusted for scoping).
+      const [campaign] = await this.db
+        .select({ mediaBuyerId: schema.campaigns.mediaBuyerId, branchId: schema.campaigns.branchId })
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.id, input.campaignId))
+        .limit(1);
+      if (!campaign) return; // unknown campaign — drop silently
+
+      await this.db.insert(schema.campaignViews).values({
+        id: uuidv7(),
+        campaignId: input.campaignId,
+        mediaBuyerId: campaign.mediaBuyerId ?? null,
+        branchId: campaign.branchId ?? null,
+        sessionId: input.sessionId,
+        dwellMs: null,
+        deploymentType: input.deploymentType ?? null,
+        referrer: input.referrer ?? null,
+        userAgent: input.userAgent ?? null,
+        country: input.country ?? null,
+      });
+
+      // Live Analytics page ping (best-effort; safeEmit swallows any failure).
+      this.events.emitFormView({
+        campaignId: input.campaignId,
+        mediaBuyerId: campaign.mediaBuyerId ?? null,
+        branchId: campaign.branchId ?? null,
+      });
+    } catch (err) {
+      this.logger.debug(`recordFormView swallowed error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Form Analytics ingestion — enrich a view row with dwell time on leave.
+   *
+   * Called (fire-and-forget) by the leave-beacon (visibilitychange/pagehide).
+   * Updates the open landing row for this session (dwell_ms IS NULL). If the
+   * landing beacon was lost, this no-ops — dwell is best-effort. NEVER throws.
+   */
+  async recordFormDwell(sessionId: string, dwellMs: number): Promise<void> {
+    try {
+      // Stamp ONLY the latest open (dwell_ms IS NULL) landing row for this session.
+      // A refresh creates multiple rows with the same session_id; updating all of them
+      // would multiply this one visit's dwell into AVG(dwell_ms). Target the newest by id
+      // (uuidv7 is time-ordered) so exactly one row is enriched.
+      const [latest] = await this.db
+        .select({ id: schema.campaignViews.id })
+        .from(schema.campaignViews)
+        .where(and(eq(schema.campaignViews.sessionId, sessionId), isNull(schema.campaignViews.dwellMs)))
+        .orderBy(desc(schema.campaignViews.id))
+        .limit(1);
+      if (!latest) return;
+      await this.db
+        .update(schema.campaignViews)
+        .set({ dwellMs, updatedAt: new Date() })
+        .where(eq(schema.campaignViews.id, latest.id));
+    } catch (err) {
+      this.logger.debug(`recordFormDwell swallowed error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Form Analytics reporting — landings, dwell, funnel, conversion, trend, top forms.
+   *
+   * Reuses the exact scoping model of getPerformanceMetrics: a concrete
+   * `mediaBuyerId` scopes to one buyer (MB sees own); `supervisorScope.mediaBuyerIds`
+   * scopes to a team (supervisor); otherwise `branchId` / `effectiveBranchIds` scope
+   * branch-wide (HoM / admin). campaign_views carries media_buyer_id + branch_id so
+   * it scopes the same way as orders without a join.
+   *
+   * Attribution is a READ-TIME join on session_id (views ↔ orders / carts) — no
+   * write-back into the intake path.
+   */
+  async getFormAnalytics(
+    mediaBuyerId: string | undefined,
+    startDate: string | undefined,
+    endDate: string | undefined,
+    branchId: string | null | undefined,
+    supervisorScope: OrdersAggregateSupervisorScope | undefined,
+    effectiveBranchIds: string[] | null | undefined,
+    /** When set, narrows EVERY query to a single campaign (per-form detail page). */
+    opts?: { campaignId?: string },
+  ) {
+    const periodStart = startDate ? nigeriaDayStart(startDate) : null;
+    const periodEnd = endDate ? nigeriaDayEnd(endDate) : null;
+    const campaignId = opts?.campaignId;
+
+    // ── Scope builders, one per table, mirroring getPerformanceMetrics ──
+    // Views scope (media_buyer_id / branch_id live on campaign_views directly).
+    const viewConditions: Parameters<typeof and>[0][] = [];
+    if (mediaBuyerId) {
+      viewConditions.push(eq(schema.campaignViews.mediaBuyerId, mediaBuyerId));
+    } else if (supervisorScope?.mediaBuyerIds?.length) {
+      viewConditions.push(inArray(schema.campaignViews.mediaBuyerId, supervisorScope.mediaBuyerIds));
+    } else {
+      const bCond = branchScopeCondition(schema.campaignViews.branchId, branchId, effectiveBranchIds);
+      if (bCond) viewConditions.push(bCond);
+    }
+    // Per-form detail: narrow to one campaign ON TOP of the role scope (so a user
+    // can only drill into a form the scope already permits).
+    if (campaignId) viewConditions.push(eq(schema.campaignViews.campaignId, campaignId));
+    if (periodStart) viewConditions.push(gte(schema.campaignViews.viewedAt, periodStart));
+    if (periodEnd) viewConditions.push(lte(schema.campaignViews.viewedAt, periodEnd));
+    const viewWhere = viewConditions.length ? and(...viewConditions) : undefined;
+
+    // Orders scope (marketing branch column — Form Analytics is a marketing surface).
+    const orderConditions: Parameters<typeof and>[0][] = [sql`${schema.orders.status} != 'DELETED'`];
+    if (mediaBuyerId) {
+      orderConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
+    } else if (supervisorScope?.mediaBuyerIds?.length) {
+      orderConditions.push(inArray(schema.orders.mediaBuyerId, supervisorScope.mediaBuyerIds));
+    } else {
+      const bCond = branchScopeCondition(schema.orders.branchId, branchId, effectiveBranchIds);
+      if (bCond) orderConditions.push(bCond);
+    }
+    if (campaignId) orderConditions.push(eq(schema.orders.campaignId, campaignId));
+    if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
+    if (periodEnd) orderConditions.push(lte(schema.orders.createdAt, periodEnd));
+    const orderWhere = and(...orderConditions);
+
+    // Carts scope (cart_abandonments carries media_buyer_id; branch via campaign — but
+    // media_buyer_id + branch parity holds, so scope by media_buyer_id / campaign branch).
+    const cartConditions: Parameters<typeof and>[0][] = [];
+    if (mediaBuyerId) {
+      cartConditions.push(eq(schema.cartAbandonments.mediaBuyerId, mediaBuyerId));
+    } else if (supervisorScope?.mediaBuyerIds?.length) {
+      cartConditions.push(inArray(schema.cartAbandonments.mediaBuyerId, supervisorScope.mediaBuyerIds));
+    }
+    // For branch-wide (HoM/admin) with no MB filter, restrict carts to the branch's
+    // campaigns so a company switch stays isolated.
+    if (!mediaBuyerId && !supervisorScope?.mediaBuyerIds?.length) {
+      const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
+      if (branchCampaignIds) {
+        cartConditions.push(
+          branchCampaignIds.length
+            ? inArray(schema.cartAbandonments.campaignId, branchCampaignIds)
+            : sql`false`,
+        );
+      }
+    }
+    if (campaignId) cartConditions.push(eq(schema.cartAbandonments.campaignId, campaignId));
+    if (periodStart) cartConditions.push(gte(schema.cartAbandonments.createdAt, periodStart));
+    if (periodEnd) cartConditions.push(lte(schema.cartAbandonments.createdAt, periodEnd));
+    const cartWhere = cartConditions.length ? and(...cartConditions) : undefined;
+
+    // ── Aggregates (all independent → Promise.all) ──
+    const [
+      landingRow,
+      funnelStartedRow,
+      funnelOrderedRow,
+      trendRows,
+      topFormRows,
+      matchedOrdersRow,
+      totalOrdersRow,
+      formRows,
+      perCampaignMatchedRows,
+    ] = await Promise.all([
+      // Landings + dwell.
+      this.db
+        .select({
+          rawLandings: count(),
+          uniqueLandings: sql<number>`COUNT(DISTINCT ${schema.campaignViews.sessionId})`,
+          avgDwellMs: sql<number | null>`AVG(${schema.campaignViews.dwellMs}) FILTER (WHERE ${schema.campaignViews.dwellMs} IS NOT NULL)`,
+        })
+        .from(schema.campaignViews)
+        .where(viewWhere),
+      // Started cart = distinct sessions that reached cart_abandonments. Counted on
+      // DISTINCT session_id so the funnel stays on the same unit as Landed (distinct
+      // sessions) — raw row counts would let Started exceed Landed and invert the funnel.
+      // Carts without a tracked session_id (beacon blocked) still can't inflate above
+      // the visitors we actually saw, since only sessions with a value are counted.
+      this.db
+        .select({ startedCart: sql<number>`COUNT(DISTINCT ${schema.cartAbandonments.sessionId})` })
+        .from(schema.cartAbandonments)
+        .where(cartWhere),
+      // Ordered + Confirmed(or beyond) + Delivered from orders. Confirmed mirrors the
+      // confirmation-rate status set (CONFIRMED..REMITTED) so the funnel's Confirmed
+      // stage matches the confirmation-rate metric marketing already tracks.
+      this.db
+        .select({
+          ordered: count(),
+          confirmed: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.status} IN ('CONFIRMED','AGENT_ASSIGNED','DISPATCHED','IN_TRANSIT','DELIVERED','PARTIALLY_DELIVERED','RETURNED','RESTOCKED','WRITTEN_OFF','REMITTED'))`,
+          delivered: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.status} IN ('DELIVERED','REMITTED'))`,
+        })
+        .from(schema.orders)
+        .where(orderWhere),
+      // Daily trend (views/day, raw + unique).
+      this.db
+        .select({
+          day: sql<string>`to_char(date_trunc('day', ${schema.campaignViews.viewedAt}), 'YYYY-MM-DD')`,
+          viewsRaw: count(),
+          viewsUnique: sql<number>`COUNT(DISTINCT ${schema.campaignViews.sessionId})`,
+        })
+        .from(schema.campaignViews)
+        .where(viewWhere)
+        .groupBy(sql`date_trunc('day', ${schema.campaignViews.viewedAt})`)
+        .orderBy(sql`date_trunc('day', ${schema.campaignViews.viewedAt})`),
+      // Top forms by unique landings. Group by campaignId ONLY (it already determines
+      // the name) and take MAX(name) so a renamed campaign can't split into two bars and
+      // a deleted campaign (NULL-joined name) can't create a phantom sibling grouping.
+      this.db
+        .select({
+          campaignId: schema.campaignViews.campaignId,
+          name: sql<string | null>`MAX(${schema.campaigns.name})`,
+          landings: sql<number>`COUNT(DISTINCT ${schema.campaignViews.sessionId})`,
+        })
+        .from(schema.campaignViews)
+        .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.campaignViews.campaignId))
+        .where(viewWhere)
+        .groupBy(schema.campaignViews.campaignId)
+        .orderBy(sql`COUNT(DISTINCT ${schema.campaignViews.sessionId}) DESC`)
+        .limit(25),
+      // Attribution coverage numerator: orders whose session_id matches a view IN THE
+      // SAME SCOPE. The matched set is restricted to session_ids from the scoped view
+      // query (viewWhere) — never all campaign_views globally — so an order can't be
+      // counted as matched against a view in another branch/company.
+      this.db
+        .select({ matched: count() })
+        .from(schema.orders)
+        .where(
+          and(
+            orderWhere,
+            isNotNull(schema.orders.sessionId),
+            inArray(
+              schema.orders.sessionId,
+              this.db
+                .select({ sessionId: schema.campaignViews.sessionId })
+                .from(schema.campaignViews)
+                .where(viewWhere),
+            ),
+          ),
+        ),
+      // Attribution coverage denominator: total orders in scope.
+      this.db.select({ total: count() }).from(schema.orders).where(orderWhere),
+      // Per-form rows for the clickable forms table: unique views + avg dwell per
+      // campaign. Conversion is joined in below from a matched-orders-per-campaign map.
+      this.db
+        .select({
+          campaignId: schema.campaignViews.campaignId,
+          name: sql<string | null>`MAX(${schema.campaigns.name})`,
+          views: sql<number>`COUNT(DISTINCT ${schema.campaignViews.sessionId})`,
+          rawViews: count(),
+          avgDwellMs: sql<number | null>`AVG(${schema.campaignViews.dwellMs}) FILTER (WHERE ${schema.campaignViews.dwellMs} IS NOT NULL)`,
+        })
+        .from(schema.campaignViews)
+        .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.campaignViews.campaignId))
+        .where(viewWhere)
+        .groupBy(schema.campaignViews.campaignId)
+        .orderBy(sql`COUNT(DISTINCT ${schema.campaignViews.sessionId}) DESC`),
+      // Matched orders per campaign (scoped view sessions) — the conversion numerator
+      // per form. Keyed by campaign_id for the join below.
+      this.db
+        .select({
+          campaignId: schema.orders.campaignId,
+          matched: count(),
+        })
+        .from(schema.orders)
+        .where(
+          and(
+            orderWhere,
+            isNotNull(schema.orders.sessionId),
+            inArray(
+              schema.orders.sessionId,
+              this.db
+                .select({ sessionId: schema.campaignViews.sessionId })
+                .from(schema.campaignViews)
+                .where(viewWhere),
+            ),
+          ),
+        )
+        .groupBy(schema.orders.campaignId),
+    ]);
+
+    const rawLandings = Number(landingRow[0]?.rawLandings ?? 0);
+    const uniqueLandings = Number(landingRow[0]?.uniqueLandings ?? 0);
+    const avgDwellMs = landingRow[0]?.avgDwellMs != null ? Math.round(Number(landingRow[0].avgDwellMs)) : null;
+    const startedCart = Number(funnelStartedRow[0]?.startedCart ?? 0);
+    const ordered = Number(funnelOrderedRow[0]?.ordered ?? 0);
+    const confirmed = Number(funnelOrderedRow[0]?.confirmed ?? 0);
+    const delivered = Number(funnelOrderedRow[0]?.delivered ?? 0);
+    const matchedOrders = Number(matchedOrdersRow[0]?.matched ?? 0);
+    const totalOrders = Number(totalOrdersRow[0]?.total ?? 0);
+
+    const conversionRate = uniqueLandings > 0 ? ordered / uniqueLandings : 0;
+    const attributionCoverage = totalOrders > 0 ? matchedOrders / totalOrders : 0;
+
+    return {
+      statStrip: {
+        rawLandings,
+        uniqueLandings,
+        avgDwellMs,
+        conversionRate,
+        attributionCoverage,
+      },
+      funnel: { formViews: uniqueLandings, startedCart, ordered, confirmed, delivered },
+      timeSeries: trendRows.map((r) => ({
+        date: r.day,
+        viewsRaw: Number(r.viewsRaw),
+        viewsUnique: Number(r.viewsUnique),
+      })),
+      topForms: topFormRows.map((r) => ({
+        campaignId: r.campaignId,
+        label: r.name ?? 'Unknown form',
+        count: Number(r.landings),
+      })),
+      forms: (() => {
+        const matchedByCampaign = new Map<string, number>();
+        for (const r of perCampaignMatchedRows) {
+          if (r.campaignId) matchedByCampaign.set(r.campaignId, Number(r.matched));
+        }
+        return formRows.map((r) => {
+          const views = Number(r.views);
+          const converted = matchedByCampaign.get(r.campaignId) ?? 0;
+          return {
+            campaignId: r.campaignId,
+            label: r.name ?? 'Unknown form',
+            views,
+            rawViews: Number(r.rawViews),
+            avgDwellMs: r.avgDwellMs != null ? Math.round(Number(r.avgDwellMs)) : null,
+            converted,
+            conversionRate: views > 0 ? converted / views : 0,
+          };
+        });
+      })(),
     };
   }
 

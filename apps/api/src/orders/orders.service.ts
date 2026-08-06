@@ -32,6 +32,7 @@ import { hasFinanceAccess, hasFinanceWriteAccess } from '../common/utils/strip-f
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { EventsService } from '../events/events.service';
+import { emitOrderAutomationEvents } from '../automation/automation-hooks';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -5735,6 +5736,17 @@ export class OrdersService {
       riderId: updated.riderId,
       branchId: updated.branchId ?? null,
       servicingBranchId: updated.servicingBranchId ?? null,
+    });
+
+    // Marketing automation: fire EVENT rules for this status transition. This is
+    // a NON-FROZEN path (status change, not intake), so it's safe to hook. Uses
+    // the module-singleton (set at boot) to avoid an orders↔automation import
+    // cycle; fire-and-forget so a marketing failure never breaks the order flow.
+    void emitOrderAutomationEvents({
+      orderId: order.id,
+      newStatus,
+      customerPhoneHash: order.customerPhoneHash ?? updated.customerPhoneHash ?? null,
+      branchId: updated.branchId ?? null,
     });
 
     // Persistent notifications for logistics flow

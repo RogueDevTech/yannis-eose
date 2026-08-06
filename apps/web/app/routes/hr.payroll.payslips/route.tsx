@@ -54,7 +54,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const pageRaw = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
-  const department = url.searchParams.get('department') || undefined;
+  // A single dropdown carries both real departments (e.g. "CS") and batch scopes
+  // for org-wide batches, sent as "scope:CONTRACTORS" / "scope:ALL". Split them
+  // so `department` and `scopeType` reach the backend as distinct filters.
+  const deptParamRaw = url.searchParams.get('department') || '';
+  const scopeType = deptParamRaw.startsWith('scope:') ? deptParamRaw.slice('scope:'.length) : undefined;
+  const department = deptParamRaw && !scopeType ? deptParamRaw : undefined;
   const branchId = url.searchParams.get('branchId') || undefined;
   const search = url.searchParams.get('search') || undefined;
 
@@ -79,6 +84,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (url.searchParams.get('export') === '1') {
     const input: Record<string, unknown> = { page: 1, limit: 1000 };
     if (department) input.department = department;
+    if (scopeType) input.scopeType = scopeType;
     if (branchId) input.branchId = branchId;
     if (fromMonth) input.fromMonth = fromMonth;
     if (toMonth) input.toMonth = toMonth;
@@ -97,6 +103,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const pageData = (async () => {
     const input: Record<string, unknown> = { page, limit: PAGE_SIZE };
     if (department) input.department = department;
+    if (scopeType) input.scopeType = scopeType;
     if (branchId) input.branchId = branchId;
     if (fromMonth) input.fromMonth = fromMonth;
     if (toMonth) input.toMonth = toMonth;
@@ -125,7 +132,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       limit: payload?.limit ?? PAGE_SIZE,
       total: payload?.total ?? 0,
       branches,
-      filters: { department, branchId, startDate, endDate, periodAllTime, search },
+      // Preserve the raw dropdown value (department key OR "scope:...") so the
+      // select stays on the chosen option.
+      filters: { department: deptParamRaw || undefined, branchId, startDate, endDate, periodAllTime, search },
     };
   })();
 

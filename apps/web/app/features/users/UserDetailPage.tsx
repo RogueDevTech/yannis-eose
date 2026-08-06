@@ -15,7 +15,9 @@ import {
   useNavigate,
   useNavigation,
   useRouteLoaderData,
+  useSearchParams,
 } from '@remix-run/react';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Button } from '~/components/ui/button';
@@ -386,6 +388,19 @@ export function UserDetailPage({
   const [viewingPayslipId, setViewingPayslipId] = useState<string | null>(null);
   const [downloadingPayslipId, setDownloadingPayslipId] = useState<string | null>(null);
 
+  // Marketing Performance modal date filter — driven by the global DateFilterBar,
+  // which writes startDate/endDate (or period=all_time) to the URL. null =
+  // all-time (the default). A range re-fetches metrics through the resource route
+  // (bypassing the all-time page bundle) so the modal reflects the picked window.
+  const [searchParams] = useSearchParams();
+  const urlStartDate = searchParams.get('startDate') ?? '';
+  const urlEndDate = searchParams.get('endDate') ?? '';
+  const urlPeriodAllTime = searchParams.get('period') === 'all_time';
+  const marketingRange = useMemo<{ startDate: string; endDate: string } | null>(
+    () => (!urlPeriodAllTime && urlStartDate && urlEndDate ? { startDate: urlStartDate, endDate: urlEndDate } : null),
+    [urlPeriodAllTime, urlStartDate, urlEndDate],
+  );
+
   // When page-bundle data is available, skip client-side resource route fetchers.
   const hasBundleCore = !!(bundleProducts || bundleRoleTemplates || bundleLocations || bundlePlans);
   const hasBundleMarketing = bundleMarketingMetrics !== undefined || bundleFundingBalance !== undefined;
@@ -409,9 +424,14 @@ export function UserDetailPage({
 
   useEffect(() => {
     if (!isMarketingRole) return;
-    if (hasBundleMarketing) return; // Bundle provides marketing data
-    void marketingFetcher.load(`/api/hr-user-detail-marketing/${user.id}`);
-  }, [isMarketingRole, user.id, hasBundleMarketing]);
+    // All-time with a bundle available → the bundle already has it, no fetch.
+    // A picked range must always go through the fetcher (the bundle is all-time).
+    if (hasBundleMarketing && !marketingRange) return;
+    const qs = marketingRange
+      ? `?startDate=${marketingRange.startDate}&endDate=${marketingRange.endDate}`
+      : '';
+    void marketingFetcher.load(`/api/hr-user-detail-marketing/${user.id}${qs}`);
+  }, [isMarketingRole, user.id, hasBundleMarketing, marketingRange]);
 
   useEffect(() => {
     if (openModal !== 'activity' && openModal !== 'finance') return;
@@ -589,7 +609,9 @@ export function UserDetailPage({
   // ── Resolved marketing data — prefer bundle, fall back to fetcher ──
   // Wraps both sources into the same shape so downstream JSX stays unchanged.
   const resolvedMarketingData = useMemo(() => {
-    if (hasBundleMarketing) {
+    // With a picked date range, the fetcher (range-scoped) is the source of
+    // truth — never the all-time bundle.
+    if (hasBundleMarketing && !marketingRange) {
       return {
         ok: true as const,
         marketingMetrics: bundleMarketingMetrics ?? null,
@@ -599,10 +621,10 @@ export function UserDetailPage({
     if (marketingFetcher.data?.ok === true) return marketingFetcher.data;
     if (marketingFetcher.data?.ok === false) return marketingFetcher.data;
     return null;
-  }, [hasBundleMarketing, bundleMarketingMetrics, bundleFundingBalance, marketingFetcher.data]);
+  }, [hasBundleMarketing, marketingRange, bundleMarketingMetrics, bundleFundingBalance, marketingFetcher.data]);
 
   const marketingDataLoading =
-    !hasBundleMarketing &&
+    (!hasBundleMarketing || !!marketingRange) &&
     (marketingFetcher.state === 'loading' ||
       (marketingFetcher.state === 'idle' && marketingFetcher.data == null));
 
@@ -1239,6 +1261,14 @@ export function UserDetailPage({
               >
                 ×
               </button>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <DateFilterBar
+                startDate={urlStartDate}
+                endDate={urlEndDate}
+                periodAllTime={urlPeriodAllTime}
+                chrome="pill"
+              />
             </div>
             {marketingDataLoading ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 animate-pulse">

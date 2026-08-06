@@ -103,7 +103,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const url = new URL(request.url);
-  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  // Default to All time: on a fresh visit (no period + no explicit date range)
+  // show every payout/adjustment, not just the current month — otherwise a staff
+  // member paid in a prior month shows "No payout records" by default. Mirrors
+  // the contractor detail / payslips loaders. An explicit range or period wins.
+  const hasExplicitRange =
+    !!url.searchParams.get('startDate') || !!url.searchParams.get('endDate');
+  const periodAllTime =
+    url.searchParams.get('period') === 'all_time' ||
+    (!url.searchParams.get('period') && !hasExplicitRange);
   const defaults = currentMonthRange();
   const startDate = url.searchParams.get('startDate') || defaults.startDate;
   const endDate = url.searchParams.get('endDate') || defaults.endDate;

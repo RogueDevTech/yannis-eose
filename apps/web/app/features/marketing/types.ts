@@ -574,6 +574,48 @@ export interface FundingLedgerEntry {
   counterpartyName: string | null;
 }
 
+/** Form Analytics (landings / dwell / funnel / conversion) — from marketing.formAnalyticsPageBundle. */
+export interface FormAnalytics {
+  statStrip: {
+    rawLandings: number;
+    uniqueLandings: number;
+    /** Average time on form in milliseconds; null when no dwell data recorded yet. */
+    avgDwellMs: number | null;
+    /** Orders ÷ unique landings (0..1). */
+    conversionRate: number;
+    /** Orders matched to a form view ÷ total orders (0..1). */
+    attributionCoverage: number;
+  };
+  funnel: {
+    formViews: number;
+    startedCart: number;
+    ordered: number;
+    confirmed: number;
+    delivered: number;
+  };
+  timeSeries: Array<{ date: string; viewsRaw: number; viewsUnique: number }>;
+  topForms: Array<{ campaignId: string; label: string; count: number }>;
+  /** Per-form rows for the clickable forms table. */
+  forms: Array<{
+    campaignId: string;
+    label: string;
+    views: number;
+    rawViews: number;
+    avgDwellMs: number | null;
+    converted: number;
+    conversionRate: number;
+  }>;
+  /** Cross-funnel attempt stats (same phone+product via different MBs). */
+  crossFunnel: {
+    totalAttempts: number;
+    uniqueCustomers: number;
+    resubmissions: number;
+    sameMb: number;
+    crossFunnel: number;
+    perProduct: Array<{ productId: string | null; productName: string | null; attempts: number }>;
+  };
+}
+
 export interface FundingLedgerLoaderData {
   entries: FundingLedgerEntry[];
   total: number;

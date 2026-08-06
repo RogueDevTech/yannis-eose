@@ -99,6 +99,8 @@ interface SubmissionPayload {
   cartId?: string;
   /** Form-builder responses, keyed by `customField.id`. */
   customFields?: Record<string, CustomFieldValue>;
+  /** Form Analytics attribution key (optional). Links the order back to a form view. */
+  sessionId?: string;
 }
 
 interface OrderCreatePayload {
@@ -129,6 +131,8 @@ interface OrderCreatePayload {
   cartId?: string;
   /** Form-builder responses, keyed by `customField.id`. Persisted to `orders.custom_fields` JSONB. */
   customFields?: Record<string, CustomFieldValue>;
+  /** Form Analytics attribution key (optional). Persisted to `orders.session_id`. */
+  sessionId?: string;
 }
 
 /**
@@ -147,6 +151,8 @@ interface ProgressiveCartFields {
   paymentMethod?: string;
   quantity?: number;
   customFieldValues?: Record<string, CustomFieldValue>;
+  /** Form Analytics attribution key (optional). Persisted to `cart_abandonments.session_id`. */
+  sessionId?: string;
 }
 
 /** Validated cart form data (has raw customerPhone from form) */
@@ -455,6 +461,7 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
       totalAmount: typeof b['totalAmount'] === 'string' ? b['totalAmount'] : typeof b['totalAmount'] === 'number' ? String(b['totalAmount']) : undefined,
       cartId: typeof b['cartId'] === 'string' ? b['cartId'] : undefined,
       customFields,
+      sessionId: typeof b['sessionId'] === 'string' ? b['sessionId'] : undefined,
     },
   };
 }
@@ -1154,6 +1161,36 @@ function getFormScript(
   const endpointBase = formMode === 'embedded' ? workerUrl : '';
   return `
     (function() {
+      // ── Form Analytics beacon (fire-and-forget) ──────────────────────────
+      // Records a form landing + dwell time. FULLY isolated from the form: the
+      // entire block is wrapped in try/catch, uses navigator.sendBeacon (never
+      // fetch/await, so it cannot block or delay render or submit), and its
+      // response is ignored. If crypto/sendBeacon is missing or anything throws,
+      // it is skipped and the form behaves exactly as before. The generated
+      // sessionId is stashed on window so /cart and /submit can (optionally) carry
+      // it for view→order attribution; if it stays undefined, submission is
+      // unaffected. This must NEVER be able to break the frozen intake path.
+      try {
+        var __yid = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : null;
+        var __ystart = Date.now();
+        window.__yannisSessionId = __yid || undefined;
+        if (__yid && navigator.sendBeacon) {
+          navigator.sendBeacon(${JSON.stringify(endpointBase)} + '/track-view',
+            JSON.stringify({ sessionId: __yid, campaignId: ${campaignIdJson}, mediaBuyerId: ${mediaBuyerIdJson}, deploymentType: ${JSON.stringify(formMode)} }));
+        }
+        var __ysent = false;
+        var __yleave = function() {
+          if (__ysent || !__yid || !navigator.sendBeacon) return;
+          __ysent = true;
+          try {
+            navigator.sendBeacon(${JSON.stringify(endpointBase)} + '/track-view',
+              JSON.stringify({ sessionId: __yid, dwellMs: Date.now() - __ystart }));
+          } catch (e) {}
+        };
+        document.addEventListener('visibilitychange', function() { if (document.visibilityState === 'hidden') __yleave(); });
+        window.addEventListener('pagehide', __yleave);
+      } catch (e) { /* tracking must never break the form */ }
+
       var form = document.getElementById('yannisOrderForm');
       var msg = document.getElementById('yannisMsg');
       var btn = document.getElementById('yannisSubmitBtn');
@@ -1465,6 +1502,8 @@ function getFormScript(
           }
           var cfv = readCustomFieldValues();
           if (cfv) payload.customFieldValues = cfv;
+          // Form Analytics attribution — optional. Can't throw; if unset the API strips it.
+          if (window.__yannisSessionId) payload.sessionId = window.__yannisSessionId;
           // Dedup: skip the network call if the payload is identical to the last
           // successful save. Avoids redundant /cart hits on progressive-capture
           // re-fires where nothing actually changed.
@@ -1900,7 +1939,9 @@ function getFormScript(
           items: [{ productId: selectedProduct, quantity: selectedOffer.qty, unitPrice: selectedOffer.price, offerLabel: selectedOffer.label }],
           cartId: savedCartId || undefined,
           totalAmount: selectedOffer.price.toString(),
-          customFields: Object.keys(customFields).length > 0 ? customFields : undefined
+          customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
+          // Form Analytics attribution — optional. If unset, the API strips it; order is unaffected.
+          sessionId: window.__yannisSessionId || undefined
         };
 
         if (!isOnline) {
@@ -2680,7 +2721,7 @@ function resolveWorkerUrl(request: Request, url: URL, env: Env): string {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     // Normalize double slashes in pathname
     url.pathname = url.pathname.replace(/\/\/+/g, '/');
@@ -2748,6 +2789,10 @@ export default {
     }
 
     // ── Cart save (name + phone before submit) ─────────────────
+    if (url.pathname === '/track-view' && request.method === 'POST') {
+      return handleTrackView(request, env, ctx);
+    }
+
     if (url.pathname === '/cart' && request.method === 'POST') {
       return handleCart(request, env);
     }
@@ -2892,8 +2937,69 @@ function validateCart(body: unknown): { valid: true; data: CartFormData } | { va
       paymentMethod: strField('paymentMethod'),
       quantity: numField('quantity'),
       customFieldValues: cfv && Object.keys(cfv).length > 0 ? cfv : undefined,
+      sessionId: typeof b['sessionId'] === 'string' ? b['sessionId'] : undefined,
     },
   };
+}
+
+/**
+ * Form Analytics beacon endpoint — records form landings + dwell time.
+ *
+ * FULLY ISOLATED from the frozen intake path: this handler shares NO code with
+ * handleSubmission / handleCart. It ALWAYS returns 204 immediately (even on
+ * invalid JSON or a downstream failure) and forwards to the API inside
+ * ctx.waitUntil(...).catch(() => {}), so a slow/broken/absent API can never delay
+ * or fail anything. A dropped view is acceptable; a dropped order is not — which
+ * is exactly why this lives on its own endpoint and never blocks a response.
+ */
+async function handleTrackView(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const noContent = new Response(null, { status: 204, headers: CORS_HEADERS });
+  try {
+    const forward = (async () => {
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return; // unparseable beacon — drop silently
+      }
+      const b = body as Record<string, unknown>;
+      const sessionId = typeof b['sessionId'] === 'string' ? b['sessionId'] : null;
+      if (!sessionId) return; // sessionId is the only hard requirement
+
+      const payload: Record<string, unknown> = { sessionId };
+      if (typeof b['dwellMs'] === 'number') payload['dwellMs'] = b['dwellMs'];
+      if (typeof b['campaignId'] === 'string') payload['campaignId'] = b['campaignId'];
+      if (typeof b['mediaBuyerId'] === 'string') payload['mediaBuyerId'] = b['mediaBuyerId'];
+      if (typeof b['deploymentType'] === 'string') payload['deploymentType'] = b['deploymentType'];
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), getApiTimeoutMs(env.API_URL));
+      try {
+        // Forward CF geo/referrer so the API can enrich the view row. Uses the same
+        // edge-key header helper as orders.create / cart.save.
+        const headers = apiForwardHeaders(env);
+        const referer = request.headers.get('Referer');
+        const country = request.headers.get('CF-IPCountry');
+        const ua = request.headers.get('User-Agent');
+        if (referer) headers['Referer'] = referer;
+        if (country) headers['CF-IPCountry'] = country;
+        if (ua) headers['User-Agent'] = ua;
+        await fetch(`${env.API_URL}/trpc/marketing.trackView`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    })();
+    // Never await on the response path — let it run after the 204 is returned.
+    ctx.waitUntil(forward.catch(() => {}));
+  } catch {
+    // Absolutely nothing here may affect the response.
+  }
+  return noContent;
 }
 
 async function handleCart(request: Request, env: Env): Promise<Response> {
@@ -2930,6 +3036,7 @@ async function handleCart(request: Request, env: Env): Promise<Response> {
     paymentMethod: data.paymentMethod,
     quantity: data.quantity,
     customFieldValues: data.customFieldValues,
+    sessionId: data.sessionId,
   };
 
   const result = await forwardCartToApi(payload, env);
@@ -3035,6 +3142,7 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     source: 'edge-form',
     cartId: data.cartId,
     customFields: data.customFields,
+    sessionId: data.sessionId,
   };
 
   // 8. Forward to API: PAY_ONLINE → prepare Paystack (no order yet); else → orders.create

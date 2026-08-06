@@ -95,6 +95,13 @@ export const orders = pgTable('orders', {
    * "Recovered from cart". Migration 0142.
    */
   cartId: uuid('cart_id'),
+  /**
+   * Form-analytics attribution key. The edge form beacon generates a session_id
+   * on load and threads it (optionally) into the submit payload, so a delivered
+   * order can be matched back to the form view that produced it. NULL when the
+   * visitor's browser blocked the beacon or for non-edge-form orders. Migration 0296.
+   */
+  sessionId: text('session_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),

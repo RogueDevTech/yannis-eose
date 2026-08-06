@@ -26,7 +26,7 @@ import type { PayslipListItem } from './payroll-prd-types';
 import type { BranchOption } from './types';
 import { formatRole } from '~/features/users/types';
 import { DEPT_LABEL, batchScopeLabel } from './payroll-constants';
-import { payslipFilename, toPayslipPdfInput } from './payslip-mappers';
+import { deductionLineLabel, payslipFilename, toPayslipPdfInput } from './payslip-mappers';
 
 interface PayrollPayslipsPageProps {
   items: PayslipListItem[];
@@ -50,9 +50,15 @@ function formatPeriod(month: string): string {
   return d.toLocaleDateString('en-NG', { month: 'long', year: 'numeric' });
 }
 
+// One dropdown covers real departments plus the two org-wide batch scopes
+// (Contractors / All staff & contractors), whose batches carry a NULL
+// department. Scope values are prefixed "scope:" so the loader can route them to
+// the scopeType filter instead of department.
 const DEPARTMENT_OPTIONS = [
-  { value: '', label: 'All departments' },
+  { value: '', label: 'All departments & scopes' },
   ...Object.entries(DEPT_LABEL).map(([value, label]) => ({ value, label })),
+  { value: 'scope:CONTRACTORS', label: 'Contractors' },
+  { value: 'scope:ALL', label: 'All staff & contractors' },
 ];
 
 
@@ -200,6 +206,28 @@ export function PayrollPayslipsPage({ items, page, limit, total, branches, filte
             <NairaPrice amount={Number(row.payout.netPay)} />
           </span>
         ),
+      },
+      {
+        key: 'deductions',
+        header: 'Deductions',
+        render: (row) => {
+          const lines = (row.deductionLines ?? []).filter((d) => Number(d.amount) > 0);
+          if (lines.length === 0) return <span className="text-app-fg-muted">{'—'}</span>;
+          return (
+            <div className="space-y-0.5">
+              {lines.map((d, i) => (
+                <div key={`${d.category}-${i}`} className="flex items-baseline gap-2 text-xs">
+                  <span className="text-app-fg-muted truncate max-w-[16rem]" title={deductionLineLabel(d.category, d.reason)}>
+                    {deductionLineLabel(d.category, d.reason)}
+                  </span>
+                  <span className="text-danger-600 dark:text-danger-400 tabular-nums whitespace-nowrap">
+                    {'−'}<NairaPrice amount={Number(d.amount)} />
+                  </span>
+                </div>
+              ))}
+            </div>
+          );
+        },
       },
       {
         key: 'actions',
