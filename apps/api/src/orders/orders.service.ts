@@ -2194,6 +2194,10 @@ export class OrdersService {
           // Back-link to the originating cart so HoCS can filter "Recovered from
           // cart" on /admin/sales/orders (migration 0142). NULL for direct orders.
           cartId: cartId ?? null,
+          // Form Analytics attribution: links this order to the form view that
+          // produced it (funnel Ordered/Confirmed/Delivered stages). NULL when the
+          // beacon was blocked or for non-edge-form orders.
+          sessionId: orderInput.sessionId ?? null,
           // Cart-recovered orders are follow-up from birth — never appear in main CS queue.
           ...(opts?.isFollowUp ? { isFollowUp: true } : {}),
         })

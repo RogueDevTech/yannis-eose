@@ -343,9 +343,11 @@ export function useLivePoll(intervalMs = 15_000): void {
   useEffect(() => {
     const tick = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      if (typeof window !== 'undefined') {
-        invalidateCachedLoader(window.location.pathname);
-      }
+      // NOTE: deliberately do NOT invalidateCachedLoader here. CachedAwait is
+      // stale-while-revalidate — revalidate() re-runs the loader and swaps in fresh
+      // data IN PLACE, keeping the current content visible (only the changed number
+      // animates). Clearing the cache first would drop to the "no cache" path and
+      // flash the whole loading shell on every tick.
       runSafeRevalidate(() => revalidateRef.current());
     };
     const id = setInterval(tick, intervalMs);
