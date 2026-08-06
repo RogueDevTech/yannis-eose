@@ -7617,6 +7617,12 @@ export class MarketingService {
     const conversionRate = uniqueLandings > 0 ? Math.min(1, ordered / uniqueLandings) : 0;
     const attributionCoverage = totalOrders > 0 ? matchedOrders / totalOrders : 0;
 
+    // Product label per form (single-product forms only; else "Mixed"/null) for
+    // the forms table — so you can see which product each form is driving.
+    const productNameByCampaign = await this.resolveCampaignProductNames(
+      formRows.map((r) => r.campaignId).filter((id): id is string => !!id),
+    );
+
     return {
       statStrip: {
         rawLandings,
@@ -7647,6 +7653,7 @@ export class MarketingService {
           return {
             campaignId: r.campaignId,
             label: r.name ?? 'Unknown form',
+            productName: productNameByCampaign.get(r.campaignId) ?? null,
             views,
             rawViews: Number(r.rawViews),
             avgDwellMs: r.avgDwellMs != null ? Math.round(Number(r.avgDwellMs)) : null,
@@ -7656,6 +7663,55 @@ export class MarketingService {
         });
       })(),
     };
+  }
+
+  /**
+   * Resolve the product label shown per form in the analytics forms table.
+   * A campaign carries product_ids (jsonb array). Per the CEO decision, we only
+   * name the product for SINGLE-product forms; a form advertising more than one
+   * product shows "Mixed", and a form with none shows null (rendered as "—").
+   */
+  private async resolveCampaignProductNames(
+    campaignIds: string[],
+  ): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (campaignIds.length === 0) return out;
+
+    const rows = await this.db
+      .select({ id: schema.campaigns.id, productIds: schema.campaigns.productIds })
+      .from(schema.campaigns)
+      .where(inArray(schema.campaigns.id, campaignIds));
+
+    // Collect the single product id per single-product campaign; batch-resolve names.
+    const singleProductByCampaign = new Map<string, string>();
+    const productIdSet = new Set<string>();
+    for (const r of rows) {
+      const ids = Array.isArray(r.productIds)
+        ? (r.productIds as unknown[]).filter((x): x is string => typeof x === 'string')
+        : [];
+      if (ids.length === 1) {
+        const pid = ids[0]!;
+        singleProductByCampaign.set(r.id, pid);
+        productIdSet.add(pid);
+      } else if (ids.length > 1) {
+        out.set(r.id, 'Mixed');
+      }
+      // ids.length === 0 → leave unset (null → "—")
+    }
+
+    if (productIdSet.size > 0) {
+      const productRows = await this.db
+        .select({ id: schema.products.id, name: schema.products.name })
+        .from(schema.products)
+        .where(inArray(schema.products.id, [...productIdSet]));
+      const nameById = new Map(productRows.map((p) => [p.id, p.name]));
+      for (const [campaignId, pid] of singleProductByCampaign) {
+        const name = nameById.get(pid);
+        if (name) out.set(campaignId, name);
+      }
+    }
+
+    return out;
   }
 
   async listCampaigns(input: ListCampaignsInput, branchId?: string | null, opts?: { enrichProductIds?: boolean; callerId?: string; effectiveBranchIds?: string[] | null }) {

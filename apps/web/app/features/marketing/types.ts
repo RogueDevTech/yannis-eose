@@ -599,6 +599,9 @@ export interface FormAnalytics {
   forms: Array<{
     campaignId: string;
     label: string;
+    /** Product the form advertises: the product name for single-product forms,
+     *  "Mixed" for multi-product forms, null when the form has no product. */
+    productName: string | null;
     views: number;
     rawViews: number;
     avgDwellMs: number | null;
