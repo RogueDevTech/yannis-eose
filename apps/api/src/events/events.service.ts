@@ -112,6 +112,28 @@ export class EventsService {
   }
 
   /**
+   * Form Analytics — a customer landed on an MB form (from the edge beacon).
+   * Drives the live Analytics page. Branch-scoped to marketing rooms + the owning
+   * MB's personal room, mirroring emitNewOrder's routing. Best-effort (safeEmit
+   * swallows failures) — never affects the fire-and-forget view-record path.
+   */
+  emitFormView(data: {
+    campaignId: string;
+    mediaBuyerId?: string | null;
+    branchId?: string | null;
+    /** Present on the leave beacon (dwell enrichment), absent on a landing. */
+    dwellMs?: number | null;
+  }) {
+    const event = 'form:view';
+    const payload = { ...data, timestamp: new Date().toISOString() };
+    this.safeEmit('admin', event, payload, data.branchId);
+    this.safeEmit('marketing-all', event, payload, data.branchId);
+    if (data.mediaBuyerId) {
+      this.safeEmit(`marketing-${data.mediaBuyerId}`, event, payload);
+    }
+  }
+
+  /**
    * Financial approval required — notify finance dashboard.
    */
   emitFinanceApproval(data: { type: string; referenceId: string; amount: string; requestedBy: string; branchId?: string | null }) {

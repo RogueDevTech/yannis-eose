@@ -44,6 +44,11 @@ export const cartAbandonments = pgTable('cart_abandonments', {
   quantity: integer('quantity'),
   /** Form-builder custom fields — keys/values defined by the campaign's form schema. */
   customFieldValues: jsonb('custom_field_values'),
+  /**
+   * Form-analytics attribution key, mirrors orders.session_id. Threaded from the
+   * edge form beacon so a started-cart can be matched to the form view. Migration 0296.
+   */
+  sessionId: text('session_id'),
   /** Why the auto-pull cron skipped this cart. NULL = not yet evaluated or successfully pulled. */
   skipReason: text('skip_reason'),
   /** FK to the duplicate order that blocked recovery. */

@@ -32,9 +32,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const opt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
 
+  // Optional date window for the Marketing Performance modal filter. Absent =
+  // all-time (the modal's default). marketing.metrics honours a range only when
+  // BOTH bounds are present, so forward them only as a pair.
+  const url = new URL(request.url);
+  const startDate = url.searchParams.get('startDate') || undefined;
+  const endDate = url.searchParams.get('endDate') || undefined;
+  const dateRange = startDate && endDate ? { startDate, endDate } : {};
+
   const [marketingRes, fundingRes] = await Promise.all([
     apiRequest<unknown>(
-      `/trpc/marketing.metrics?input=${encodeURIComponent(JSON.stringify({ mediaBuyerId: userId }))}`,
+      `/trpc/marketing.metrics?input=${encodeURIComponent(JSON.stringify({ mediaBuyerId: userId, ...dateRange }))}`,
       opt,
     ),
     apiRequest<unknown>(

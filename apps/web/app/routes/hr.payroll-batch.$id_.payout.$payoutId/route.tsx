@@ -165,9 +165,18 @@ export default function PayrollPayoutDetailRoute() {
       fallback={
         <div className="space-y-4">
           <PageHeader title="Payout details" description="Payout breakdown for this batch" />
+          {/* Mirror the loaded layout: identity row, net-pay hero, two breakdown cards. */}
+          <div className="card flex items-center gap-3">
+            <div className="h-11 w-11 shrink-0 rounded-full bg-app-hover animate-pulse" />
+            <div className="flex-1 space-y-2">
+              <div className="h-4 w-40 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-24 rounded bg-app-hover animate-pulse" />
+            </div>
+          </div>
+          <div className="card h-24 animate-pulse" />
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="card h-48 animate-pulse" />
-            <div className="card h-48 animate-pulse" />
+            <div className="card h-44 animate-pulse" />
+            <div className="card h-44 animate-pulse" />
           </div>
         </div>
       }

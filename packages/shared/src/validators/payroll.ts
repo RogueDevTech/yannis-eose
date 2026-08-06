@@ -371,6 +371,9 @@ export const listPayslipsSchema = z.object({
   staffId: z.string().uuid().optional(),
   batchId: z.string().uuid().optional(),
   department: z.string().optional(),
+  // Filter by batch scope for org-wide batches (Contractors / All staff &
+  // contractors), which have a NULL department. UI-exclusive with `department`.
+  scopeType: z.enum(['CONTRACTORS', 'ALL']).optional(),
   fromMonth: z.string().regex(/^\d{4}-\d{2}-01$/).optional(),
   toMonth: z.string().regex(/^\d{4}-\d{2}-01$/).optional(),
   branchId: z.string().uuid().optional(),

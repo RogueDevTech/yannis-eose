@@ -44,7 +44,7 @@ import {
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { router, publicProcedure, authedProcedure, permissionProcedure } from '../trpc';
+import { router, publicProcedure, authedProcedure, permissionProcedure, edgeProcedure } from '../trpc';
 import { MarketingService } from '../../marketing/marketing.service';
 import { getBranchTeamsService, listBranchesForUser } from './branches.router';
 import {
@@ -743,6 +743,85 @@ export const marketingRouter = router({
         ctx.effectiveBranchIds,
         orderBranchScope,
       );
+    }),
+
+  /**
+   * Form Analytics page bundle for `/admin/marketing/analytics`.
+   *
+   * Landings (unique + raw), avg time on form, funnel (Landed → Started cart →
+   * Ordered → Delivered), conversion, attribution coverage, daily trend, top forms.
+   *
+   * Scope mirrors `metrics` exactly: a plain MEDIA_BUYER sees their OWN forms; a
+   * marketing team supervisor sees their TEAM; HoM / admin see the branch. This is
+   * why MEDIA_BUYER is allowed here (unlike the team-only overview bundle).
+   */
+  formAnalyticsPageBundle: authedProcedure
+    .input(
+      z.object({
+        mediaBuyerId: z.string().uuid().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        personalOnly: z.boolean().optional(),
+        /** When set, returns per-form detail scoped to a single campaign (drill-in page). */
+        campaignId: z.string().uuid().optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      // Resolve the caller's scope ONCE (mirrors the `metrics` procedure), then run a
+      // single getFormAnalytics call + cross-funnel stats. MB sees own; promoted
+      // supervisor sees team; HoM/admin see branch.
+      let scopedMediaBuyerId = input.mediaBuyerId;
+      let supervisorScope: Awaited<ReturnType<typeof narrowOrdersAggregateFiltersForViewer>>['supervisorScope'];
+
+      if (ctx.user.role === 'MEDIA_BUYER') {
+        if (input.mediaBuyerId && input.mediaBuyerId !== ctx.user.id) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Cannot query another media buyer.' });
+        }
+        const supervisorBranch = ctx.currentBranchId ?? (ctx.user.branchIds?.[0] ?? null);
+        if (!input.personalOnly && ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && supervisorBranch) {
+          const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, supervisorBranch, {
+            mediaBuyerId: ctx.user.id,
+            startDate: input.startDate,
+            endDate: input.endDate,
+          });
+          scopedMediaBuyerId = narrowed.mediaBuyerId;
+          supervisorScope = narrowed.supervisorScope;
+        } else {
+          scopedMediaBuyerId = ctx.user.id;
+        }
+      } else if (!isAdminLevel(ctx.user) && !seesFullMarketingTeamSurfaces(ctx.user)) {
+        const supervisorBranch = ctx.currentBranchId ?? (ctx.user.branchIds?.[0] ?? null);
+        if (ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && supervisorBranch) {
+          const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, supervisorBranch, {
+            startDate: input.startDate,
+            endDate: input.endDate,
+          });
+          scopedMediaBuyerId = narrowed.mediaBuyerId;
+          supervisorScope = narrowed.supervisorScope;
+        } else {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Missing marketing analytics access.' });
+        }
+      }
+
+      const [analytics, crossFunnel] = await Promise.all([
+        getMarketingService().getFormAnalytics(
+          scopedMediaBuyerId,
+          input.startDate,
+          input.endDate,
+          ctx.currentBranchId,
+          supervisorScope,
+          ctx.effectiveBranchIds,
+          input.campaignId ? { campaignId: input.campaignId } : undefined,
+        ),
+        getMarketingService().crossFunnelStats(
+          ctx.user,
+          { startDate: input.startDate, endDate: input.endDate },
+          ctx.currentBranchId,
+          ctx.effectiveBranchIds,
+        ),
+      ]);
+
+      return { ...analytics, crossFunnel };
     }),
 
   /** Org-wide profitability config (target ROAS + green/red threshold). Drives the
@@ -2146,6 +2225,52 @@ export const marketingRouter = router({
     .input(z.object({ campaignId: z.string().uuid() }))
     .query(async ({ input }) => {
       return getMarketingService().getPublicCampaign(input.campaignId);
+    }),
+
+  /**
+   * Form Analytics ingestion — form-landing + dwell telemetry from the edge form.
+   *
+   * Called (fire-and-forget) by the edge worker's /track-view beacon. Uses
+   * edgeProcedure to match the intake-write convention (orders.create / cart.save):
+   * the worker attaches X-Edge-Api-Key. Input is deliberately lenient and the body
+   * ALWAYS resolves to { ok: true } — a landing/dwell that fails to record must
+   * never surface an error to the worker, which sits on the frozen revenue surface.
+   * Two shapes: landing (campaignId, no dwellMs) and leave (sessionId + dwellMs).
+   */
+  trackView: edgeProcedure
+    .input(
+      z.object({
+        sessionId: z.string().min(1).max(128),
+        campaignId: z.string().uuid().optional(),
+        mediaBuyerId: z.string().uuid().optional(),
+        deploymentType: z.string().max(32).optional(),
+        dwellMs: z.number().int().nonnegative().max(86_400_000).optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      try {
+        if (typeof input.dwellMs === 'number') {
+          // Leave beacon — enrich the open landing row with dwell time.
+          await getMarketingService().recordFormDwell(input.sessionId, input.dwellMs);
+        } else if (input.campaignId) {
+          // Landing beacon — record the view. Referrer / UA / country from CF edge headers.
+          const headers = ctx.req.headers;
+          const headerStr = (v: string | string[] | undefined): string | null =>
+            Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
+          await getMarketingService().recordFormView({
+            sessionId: input.sessionId,
+            campaignId: input.campaignId,
+            mediaBuyerId: input.mediaBuyerId ?? null,
+            deploymentType: input.deploymentType ?? null,
+            referrer: headerStr(headers['referer']),
+            userAgent: headerStr(headers['user-agent']),
+            country: headerStr(headers['cf-ipcountry']),
+          });
+        }
+      } catch {
+        // Telemetry must never fail the caller.
+      }
+      return { ok: true as const };
     }),
 
   // ── MB Fund Transfers ─────────────────────────────────────────────────

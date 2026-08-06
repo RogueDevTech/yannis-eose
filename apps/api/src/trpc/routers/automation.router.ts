@@ -1,6 +1,10 @@
 import {
   createMarketingAutomationRuleSchema,
   listMarketingAutomationRulesSchema,
+  updateMarketingAutomationRuleSchema,
+  toggleMarketingAutomationRuleSchema,
+  automationRuleIdSchema,
+  testMarketingAutomationRuleSchema,
 } from '@yannis/shared';
 import { router, permissionProcedure } from '../trpc';
 import type { AutomationService } from '../../automation/automation.service';
@@ -39,5 +43,37 @@ export const automationRouter = router({
     .input(createMarketingAutomationRuleSchema)
     .mutation(async ({ input, ctx }) => {
       return getAutomationService().create(input, ctx.user, ctx.activeGroupId);
+    }),
+
+  update: permissionProcedure('marketing.automation.manage')
+    .input(updateMarketingAutomationRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getAutomationService().update(input, ctx.user, ctx.activeGroupId);
+    }),
+
+  toggle: permissionProcedure('marketing.automation.manage')
+    .input(toggleMarketingAutomationRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getAutomationService().setEnabled(input.ruleId, input.enabled, ctx.user, ctx.activeGroupId);
+    }),
+
+  remove: permissionProcedure('marketing.automation.manage')
+    .input(automationRuleIdSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getAutomationService().remove(input.ruleId, ctx.user, ctx.activeGroupId);
+    }),
+
+  /** On-demand fire of a SEGMENT broadcast. */
+  runNow: permissionProcedure('marketing.automation.manage')
+    .input(automationRuleIdSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getAutomationService().runNow(input.ruleId, ctx.activeGroupId);
+    }),
+
+  /** Send a one-off test message on a chosen channel to a chosen address. */
+  testSend: permissionProcedure('marketing.automation.manage')
+    .input(testMarketingAutomationRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getAutomationService().testSend(input, ctx.activeGroupId);
     }),
 });

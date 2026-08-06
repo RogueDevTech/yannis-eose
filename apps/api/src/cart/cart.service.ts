@@ -4,6 +4,7 @@ import { eq, and, lt, gte, lte, desc, count, inArray, ilike, isNull, sql, type S
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared';
+import { emitCartAbandonedAutomationEvent } from '../automation/automation-hooks';
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { withActor } from '../common/db/with-actor';
@@ -395,7 +396,11 @@ export class CartService {
             lt(schema.cartAbandonments.updatedAt, threshold),
           ),
         )
-        .returning({ id: schema.cartAbandonments.id, campaignId: schema.cartAbandonments.campaignId });
+        .returning({
+          id: schema.cartAbandonments.id,
+          campaignId: schema.cartAbandonments.campaignId,
+          customerPhoneHash: schema.cartAbandonments.customerPhoneHash,
+        });
 
     const result = actorId
       ? await withActor(this.db, { id: actorId }, (tx) => run(tx))
@@ -406,6 +411,16 @@ export class CartService {
       for (const campaignId of campaignIds) {
         const info = await this.getCampaignInfo(campaignId);
         this.emitCartUpdated(info.branchId, info.mediaBuyerId);
+        // Marketing automation: fire cart:abandoned EVENT rules for each cart
+        // newly flagged under this campaign. Fire-and-forget via the decoupled
+        // hook (no cart↔automation import cycle); never breaks the recovery path.
+        for (const row of result.filter((r) => r.campaignId === campaignId)) {
+          emitCartAbandonedAutomationEvent({
+            cartId: row.id,
+            customerPhoneHash: row.customerPhoneHash,
+            branchId: info.branchId ?? null,
+          });
+        }
       }
     }
     return result.length;

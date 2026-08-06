@@ -254,3 +254,58 @@ export const mbFundTransfers = pgTable('mb_fund_transfers', {
   receiverStatusIdx: index('mb_ft_receiver_status_idx').on(table.receiverMbId, table.status),
   branchStatusIdx: index('mb_ft_branch_status_idx').on(table.branchId, table.status),
 }));
+
+/**
+ * Table: campaign_views — form-landing telemetry (Form Analytics).
+ *
+ * One row per public-form load, written by the edge worker's fire-and-forget
+ * `/track-view` beacon. Append-mostly: the only mutation is a single dwell_ms
+ * enrichment when the visitor leaves. Intentionally NON-temporal — this is
+ * high-cardinality analytics telemetry, not an auditable business record, so it
+ * carries no temporalColumns and is deliberately excluded from the history-capture
+ * trigger loop (see migration 0296 header). A "unique visitor" = distinct
+ * session_id, deduped at READ time (COUNT DISTINCT); there is no write-time
+ * unique constraint because a legitimate reload creates a new row.
+ *
+ * media_buyer_id + branch_id are copied from the campaign at view time so
+ * reporting can scope (branchScopeCondition / mediaBuyerId / supervisorScope)
+ * without joining campaigns, and so counts survive later campaign edits.
+ */
+export const campaignViews = pgTable(
+  'campaign_views',
+  {
+    id: uuidv7Pk(),
+    campaignId: uuid('campaign_id')
+      .notNull()
+      .references(() => campaigns.id),
+    /** Copied from the campaign at view time (nullable defensively). */
+    mediaBuyerId: uuid('media_buyer_id').references(() => users.id),
+    /** Copied from the campaign at view time; enables direct branch scoping. */
+    branchId: uuid('branch_id').references(() => branches.id),
+    /** Client-generated UUID (crypto.randomUUID). Dedupe key + attribution join to orders/carts. */
+    sessionId: text('session_id').notNull(),
+    viewedAt: timestamp('viewed_at', { withTimezone: true }).defaultNow().notNull(),
+    /** Filled by the leave-beacon (visibilitychange/pagehide). NULL until then. */
+    dwellMs: integer('dwell_ms'),
+    /**
+     * Which render path served the form: 'hosted' | 'iframe' | 'embedded' | 'fallback'.
+     * Plain text (not the deployment_type enum) — the worker's formMode strings are
+     * lowercase and include 'fallback', which the enum does not model. Telemetry, so
+     * we store the raw string rather than risk an enum-mismatch insert failure.
+     */
+    deploymentType: text('deployment_type'),
+    referrer: text('referrer'),
+    userAgent: text('user_agent'),
+    /** From Cloudflare's cf-ipcountry header. */
+    country: text('country'),
+    ...timestampColumns,
+  },
+  (table) => ({
+    campaignIdx: index('campaign_views_campaign_idx').on(table.campaignId),
+    viewedAtIdx: index('campaign_views_viewed_at_idx').on(table.viewedAt),
+    sessionIdx: index('campaign_views_session_idx').on(table.sessionId),
+    branchIdx: index('campaign_views_branch_idx').on(table.branchId),
+    mbIdx: index('campaign_views_mb_idx').on(table.mediaBuyerId),
+    campaignViewedIdx: index('campaign_views_campaign_viewed_idx').on(table.campaignId, table.viewedAt),
+  }),
+);

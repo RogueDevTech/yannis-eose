@@ -107,6 +107,12 @@ export interface PayslipPdfInput {
   netPay: number;
   bankLast4?: string;
   bonusLines?: Array<{ label: string; amount: number }>;
+  /**
+   * Itemized deduction reasons (DEDUCTION / CLAWBACK), each a positive magnitude.
+   * When present they replace the lump "Other deductions" line; any deduction
+   * total not covered by these still shows as a residual "Other deductions".
+   */
+  deductionLines?: Array<{ label: string; amount: number }>;
   /** Period month ISO date used for the "Period:" line. */
   periodMonth?: string;
   /** Partial-month note, e.g. "Prorated: 15 of 31 days worked". Shown under base salary. */
@@ -169,8 +175,16 @@ export function buildPayslipLines(input: PayslipPdfInput): {
   if (input.payeTax > 0) {
     deductionLines.push({ label: 'PAYE tax', amount: input.payeTax, deduction: true });
   }
-  if (otherDeductions > 0) {
-    deductionLines.push({ label: 'Other deductions', amount: otherDeductions, deduction: true });
+  // Itemize the reasons behind "Other deductions" when we have them. Anything
+  // left over (deductions not sourced from an adjustment) shows as a residual.
+  const itemized = (input.deductionLines ?? []).filter((d) => d.amount > 0);
+  const itemizedSum = Math.round(itemized.reduce((s, d) => s + d.amount, 0) * 100) / 100;
+  for (const d of itemized) {
+    deductionLines.push({ label: d.label, amount: d.amount, deduction: true });
+  }
+  const residual = Math.round((otherDeductions - itemizedSum) * 100) / 100;
+  if (residual > 0.009) {
+    deductionLines.push({ label: 'Other deductions', amount: residual, deduction: true });
   }
 
   return { earningLines, deductionLines };
