@@ -44,7 +44,7 @@ import {
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { router, publicProcedure, authedProcedure, permissionProcedure, edgeProcedure } from '../trpc';
+import { router, publicProcedure, authedProcedure, permissionProcedure } from '../trpc';
 import { MarketingService } from '../../marketing/marketing.service';
 import { getBranchTeamsService, listBranchesForUser } from './branches.router';
 import {
@@ -2231,13 +2231,16 @@ export const marketingRouter = router({
    * Form Analytics ingestion — form-landing + dwell telemetry from the edge form.
    *
    * Called (fire-and-forget) by the edge worker's /track-view beacon. Uses
-   * edgeProcedure to match the intake-write convention (orders.create / cart.save):
-   * the worker attaches X-Edge-Api-Key. Input is deliberately lenient and the body
-   * ALWAYS resolves to { ok: true } — a landing/dwell that fails to record must
-   * never surface an error to the worker, which sits on the frozen revenue surface.
-   * Two shapes: landing (campaignId, no dwellMs) and leave (sessionId + dwellMs).
+   * publicProcedure to MATCH cart.save (the proven intake-write path) — the worker's
+   * forward does not carry X-Edge-Api-Key, so edgeProcedure would 401 every view when
+   * EDGE_API_KEY is set on prod. This is anonymous telemetry (a random session id, no
+   * PII), so a public write is appropriate and consistent with cart.save. Input is
+   * deliberately lenient and the body ALWAYS resolves to { ok: true } — a landing/dwell
+   * that fails to record must never surface an error to the worker, which sits on the
+   * frozen revenue surface. Two shapes: landing (campaignId, no dwellMs) and leave
+   * (sessionId + dwellMs).
    */
-  trackView: edgeProcedure
+  trackView: publicProcedure
     .input(
       z.object({
         sessionId: z.string().min(1).max(128),
