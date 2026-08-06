@@ -166,10 +166,14 @@ export function ToolbarFiltersCollapsible({
               // controls carry for the (now-retired) inline desktop strip.
               '[&>*]:w-full [&>*]:shrink-0',
               '[&_[data-toolbar-filter]]:!w-full',
-              // Force control wrappers (FormSelect/SearchableSelect/SortMenu) to
-              // fill the modal width regardless of their inline width classes.
-              '[&_.relative]:!w-full',
-              '[&_[data-toolbar-filter]>*]:!w-full [&_[data-toolbar-filter]>*]:!max-w-none',
+              // Full-width the control wrappers (including any nested `.relative`
+              // container), but NOT absolutely-positioned children like
+              // FilterDismiss (the small red ✕ badge) — that keeps its own size
+              // and stays pinned to the wrapper's top-right corner.
+              '[&_[data-toolbar-filter]>*:not(.absolute)]:!w-full [&_[data-toolbar-filter]>*:not(.absolute)]:!max-w-none',
+              '[&_[data-toolbar-filter]_.relative]:!w-full',
+              // Taller controls to match the roomy modal spacing.
+              '[&_[data-toolbar-filter]_button[aria-haspopup]]:!min-h-[2.75rem]',
             ].join(' ')}
           >
             {modalBody}

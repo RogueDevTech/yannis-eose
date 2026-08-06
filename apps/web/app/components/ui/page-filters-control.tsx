@@ -91,8 +91,11 @@ export function PageFiltersControl({
             bodyMaxHeightClassName,
             '[&>*]:w-full [&>*]:shrink-0',
             '[&_[data-toolbar-filter]]:!w-full',
-            '[&_.relative]:!w-full',
-            '[&_[data-toolbar-filter]>*]:!w-full [&_[data-toolbar-filter]>*]:!max-w-none',
+            // Full-width the control wrappers (incl. nested `.relative`), but NOT
+            // absolutely-positioned children like FilterDismiss (the red ✕ badge).
+            '[&_[data-toolbar-filter]>*:not(.absolute)]:!w-full [&_[data-toolbar-filter]>*:not(.absolute)]:!max-w-none',
+            '[&_[data-toolbar-filter]_.relative]:!w-full',
+            '[&_[data-toolbar-filter]_button[aria-haspopup]]:!min-h-[2.75rem]',
           ].join(' ')}
         >
           {children}
