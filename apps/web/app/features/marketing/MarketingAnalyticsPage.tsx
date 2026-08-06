@@ -82,14 +82,14 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
 
   const statItems: OverviewStatStripItem[] = [
     {
-      label: 'Form views',
+      label: 'Unique form views',
       value: <AnimatedCount value={statStrip.uniqueLandings} />,
-      title: `${statStrip.rawLandings.toLocaleString()} total loads (incl. refreshes)`,
+      title: 'Distinct visitors: each person counts once, no matter how many times they reopen the form.',
     },
     {
-      label: 'Total loads',
+      label: 'All form views',
       value: <AnimatedCount value={statStrip.rawLandings} />,
-      title: 'Every form open, including refreshes by the same visitor.',
+      title: 'Every time the form was opened, including the same visitor refreshing or returning. Always >= Unique form views.',
     },
     {
       label: 'Avg time on form',
@@ -110,7 +110,7 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
 
   // Funnel with drop-off between stages.
   const funnelStages = [
-    { stage: 'Form views', count: funnel.formViews },
+    { stage: 'Form views', count: funnel.formViews }, // unique visitors (funnel basis)
     { stage: 'Started cart', count: funnel.startedCart },
     { stage: 'Ordered', count: funnel.ordered },
     { stage: 'Confirmed', count: funnel.confirmed },
@@ -156,17 +156,12 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
         title={isDetail ? detail!.formLabel : 'Analytics'}
         {...(isDetail ? { backTo: '/admin/marketing/analytics' } : {})}
         mobileInlineActions
-        description={isDetail ? 'Analytics for this form.' : 'Form landings, traffic by form, and conversion.'}
+        description={isDetail ? 'Analytics for this form.' : 'Form views, traffic by form, and conversion.'}
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Filters"
-            triggerAriaLabel="Analytics filters"
+            sheetTitle="Actions"
+            triggerAriaLabel="Analytics actions"
             saveFilterKey
-            mobileLeading={
-              liveEvents != null && liveEvents.length > 0 ? (
-                <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
-              ) : null
-            }
             desktop={
               <>
                 {liveEvents != null && liveEvents.length > 0 && (
@@ -184,6 +179,24 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                   </Button>
                 )}
               </>
+            }
+            sheet={
+              hasData
+                ? ({ closeSheet }) => (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-12 w-full justify-center"
+                      onClick={() => {
+                        setShowData((v) => !v);
+                        closeSheet();
+                      }}
+                    >
+                      {showData ? 'View charts' : 'View as data'}
+                    </Button>
+                  )
+                : undefined
             }
           />
         }
@@ -214,17 +227,20 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
         />
       ) : (
         <>
-          {/* Views over time — raw + unique. Leads the page: traffic trend first. */}
+          {/* Views over time — all + unique. Leads the page: traffic trend first. */}
           <div className="card overflow-hidden">
-            <h3 className="text-base font-semibold text-app-fg mb-3">Landings over time</h3>
+            <h3 className="text-base font-semibold text-app-fg mb-3">Form views over time</h3>
             {trendData.length === 0 ? (
               <EmptyState
                 title="No daily breakdown"
-                description="Pick a date range to see landings per day."
+                description="Pick a date range to see form views per day."
               />
             ) : (
               <ClientOnly fallback={chartSkeleton}>
-                <ResponsiveContainer width="100%" height={300}>
+                {/* Fixed-height wrapper: ResponsiveContainer collapses to 0px on
+                    mobile without a definite-height parent (blank chart). */}
+                <div style={{ height: 300 }}>
+                <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={trendData} margin={{ top: 8, right: 16, left: 4, bottom: 4 }}>
                     <defs>
                       <linearGradient id={`${chartUid}-raw`} x1="0" y1="0" x2="0" y2="1">
@@ -242,14 +258,14 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                     <Tooltip
                       formatter={(value, name) => [
                         Number(value).toLocaleString(),
-                        name === 'viewsUnique' ? 'Unique visitors' : 'Total loads',
+                        name === 'viewsUnique' ? 'Unique form views' : 'All form views',
                       ]}
                     />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
                     <Area
                       type="monotone"
                       dataKey="viewsRaw"
-                      name="Total loads"
+                      name="All form views"
                       stroke={RAW_VIEWS_COLOR}
                       strokeWidth={2}
                       fill={`url(#${chartUid}-raw)`}
@@ -259,7 +275,7 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                     <Area
                       type="monotone"
                       dataKey="viewsUnique"
-                      name="Unique visitors"
+                      name="Unique form views"
                       stroke={UNIQUE_VIEWS_COLOR}
                       strokeWidth={2}
                       fill={`url(#${chartUid}-unique)`}
@@ -268,6 +284,7 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                     />
                   </AreaChart>
                 </ResponsiveContainer>
+                </div>
               </ClientOnly>
             )}
           </div>
@@ -277,10 +294,11 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
             <div className="card overflow-hidden">
               <h3 className="text-sm font-semibold text-app-fg mb-1">Conversion funnel</h3>
               <p className="text-xs text-app-fg-muted mb-3">
-                Landed to delivered. Hover a bar for the drop-off from the prior stage.
+                Unique form views to delivered. Hover a bar for the drop-off from the prior stage.
               </p>
               <ClientOnly fallback={chartSkeleton}>
-                <ResponsiveContainer width="100%" height={300}>
+                <div style={{ height: 300 }}>
+                <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={funnelStages} margin={{ top: 24, right: 8, left: 4, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.2)" />
                     <XAxis dataKey="stage" tick={{ fontSize: 11 }} interval={0} />
@@ -301,6 +319,7 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
+                </div>
               </ClientOnly>
             </div>
 
@@ -309,14 +328,15 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                 ranking lives in the list, not a wrapping legend. */}
             <div className="card overflow-hidden">
               <h3 className="text-sm font-semibold text-app-fg mb-1">Top forms by traffic</h3>
-              <p className="text-xs text-app-fg-muted mb-3">Share of landings across your busiest forms.</p>
+              <p className="text-xs text-app-fg-muted mb-3">Share of unique form views across your busiest forms.</p>
               {donutData.length === 0 ? (
-                <EmptyState title="No forms with traffic" description="Landings by form will appear here." />
+                <EmptyState title="No forms with traffic" description="Form views by form will appear here." />
               ) : (
                 <div className="flex flex-col sm:flex-row items-center gap-4">
                   <div className="w-full sm:w-[46%] shrink-0">
                     <ClientOnly fallback={<div className="h-56 w-full animate-pulse rounded bg-app-hover" />}>
-                      <ResponsiveContainer width="100%" height={224}>
+                      <div style={{ height: 224 }}>
+                      <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <Pie
                             data={donutSlices}
@@ -340,6 +360,7 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                           />
                         </PieChart>
                       </ResponsiveContainer>
+                      </div>
                     </ClientOnly>
                   </div>
                   {/* Ranked list — every form, scrolls when there are many. */}
@@ -435,7 +456,7 @@ function AnalyticsDataView({
             <thead>
               <tr>
                 <th className={th}>Form</th>
-                <th className={th}>Landings</th>
+                <th className={th}>Unique form views</th>
                 <th className={th}>Share</th>
               </tr>
             </thead>
@@ -456,13 +477,13 @@ function AnalyticsDataView({
 
       {/* Daily trend table */}
       <div className="card overflow-x-auto">
-        <h3 className="text-sm font-semibold text-app-fg mb-3">Landings over time</h3>
+        <h3 className="text-sm font-semibold text-app-fg mb-3">Form views over time</h3>
         <table className="min-w-full">
           <thead>
             <tr>
               <th className={th}>Date</th>
-              <th className={th}>Total loads</th>
-              <th className={th}>Unique visitors</th>
+              <th className={th}>All form views</th>
+              <th className={th}>Unique form views</th>
             </tr>
           </thead>
           <tbody>
@@ -489,11 +510,11 @@ function AnalyticsDataView({
         <table className="min-w-full">
           <tbody>
             <tr className="border-t border-app-border">
-              <td className={td}>Unique landings</td>
+              <td className={td}>Unique form views</td>
               <td className={td}>{statStrip.uniqueLandings.toLocaleString()}</td>
             </tr>
             <tr className="border-t border-app-border">
-              <td className={td}>Total loads</td>
+              <td className={td}>All form views</td>
               <td className={td}>{statStrip.rawLandings.toLocaleString()}</td>
             </tr>
             <tr className="border-t border-app-border">
@@ -553,7 +574,7 @@ function FormsTable({
         </Link>
       ),
     },
-    { key: 'views', header: 'Views', align: 'right', nowrap: true, render: (r) => r.views.toLocaleString() },
+    { key: 'views', header: 'Unique views', align: 'right', nowrap: true, render: (r) => r.views.toLocaleString() },
     { key: 'orders', header: 'Orders', align: 'right', nowrap: true, render: (r) => r.converted.toLocaleString() },
     { key: 'conversion', header: 'Conversion', align: 'right', nowrap: true, render: (r) => formatPct(r.conversionRate) },
     { key: 'avgTime', header: 'Avg time', align: 'right', nowrap: true, render: (r) => formatDwell(r.avgDwellMs) },

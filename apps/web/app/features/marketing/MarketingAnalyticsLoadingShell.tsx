@@ -11,7 +11,7 @@ export interface MarketingAnalyticsLoadingShellProps {
   detail?: boolean;
 }
 
-const STAT_LABELS = ['Form views', 'Total loads', 'Avg time on form', 'Conversion', 'Matched to a view'];
+const STAT_LABELS = ['Unique form views', 'All form views', 'Avg time on form', 'Conversion', 'Matched to a view'];
 
 function Pulse({ className }: { className: string }) {
   return <div className={`rounded bg-app-hover animate-pulse ${className}`} />;
