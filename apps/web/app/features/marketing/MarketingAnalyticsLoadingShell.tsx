@@ -72,12 +72,6 @@ export function MarketingAnalyticsLoadingShell({ filters, detail = false }: Mark
 
       <OverviewStatStripSkeleton count={STAT_LABELS.length} labels={STAT_LABELS} />
 
-      {/* Trend card — full width, leads the page. */}
-      <div className="card overflow-hidden">
-        <Pulse className="h-5 w-40 mb-3" />
-        <Pulse className="h-72 w-full" />
-      </div>
-
       {/* Funnel + top-forms donut grid. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card overflow-hidden">
@@ -99,28 +93,13 @@ export function MarketingAnalyticsLoadingShell({ filters, detail = false }: Mark
         </div>
       </div>
 
-      {/* Global-only sections: all-forms table + cross-funnel. */}
+      {/* Global-only section: all-forms table skeleton. */}
       {!detail && (
-        <>
-          <div className="space-y-2">
-            <Pulse className="h-4 w-24" />
-            <Pulse className="h-3 w-48" />
-            <TableSkeleton rows={5} />
-          </div>
-
-          <div className="card overflow-hidden">
-            <Pulse className="h-4 w-44 mb-1" />
-            <Pulse className="h-3 w-72 mb-3" />
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="rounded-lg border border-app-border bg-app-elevated p-3">
-                  <Pulse className="h-3 w-20 mb-2" />
-                  <Pulse className="h-6 w-12" />
-                </div>
-              ))}
-            </div>
-          </div>
-        </>
+        <div className="space-y-2">
+          <Pulse className="h-4 w-24" />
+          <Pulse className="h-3 w-48" />
+          <TableSkeleton rows={5} />
+        </div>
       )}
     </div>
   );

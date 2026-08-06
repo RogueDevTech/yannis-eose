@@ -3,16 +3,13 @@ import { defer, type LoaderFunctionArgs, type MetaFunction } from '@remix-run/no
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { usePageRefreshOnEvent, usePollingFallback, useLivePoll } from '~/hooks/useSocket';
-import { MarketingAnalyticsPage } from '~/features/marketing/MarketingAnalyticsPage';
-import { MarketingAnalyticsLoadingShell } from '~/features/marketing/MarketingAnalyticsLoadingShell';
+import { PageHeader } from '~/components/ui/page-header';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
+import { FormsTable } from '~/features/marketing/MarketingAnalyticsPage';
 import type { FormAnalytics } from '~/features/marketing/types';
 
-export const meta: MetaFunction = () => [{ title: 'Analytics — Yannis EOSE' }];
-
-// Live events that should refetch the analytics bundle. `form:view` is emitted by
-// the edge beacon on every landing/dwell; `order:new` covers conversions.
-const ANALYTICS_LIVE_EVENTS = ['form:view', 'order:new'] as const;
+export const meta: MetaFunction = () => [{ title: 'All forms — Analytics — Yannis EOSE' }];
 
 const EMPTY_ANALYTICS: FormAnalytics = {
   statStrip: { rawLandings: 0, uniqueLandings: 0, avgDwellMs: null, conversionRate: 0, attributionCoverage: 0 },
@@ -24,8 +21,7 @@ const EMPTY_ANALYTICS: FormAnalytics = {
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  // MB sees own forms; HoM/admin see the branch; marketing team supervisors see
-  // their team. Server-side (formAnalyticsPageBundle) re-enforces the exact scope.
+  // Same scope as the analytics overview — the bundle re-enforces it server-side.
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'],
     permission: 'marketing.teamOverview',
@@ -61,49 +57,66 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const data = res.ok
       ? ((res.data as { result?: { data?: FormAnalytics } })?.result?.data ?? null)
       : null;
-    return { analytics: data ?? EMPTY_ANALYTICS };
+    return { forms: (data ?? EMPTY_ANALYTICS).forms };
   });
 
-  const analyticsShell = {
-    filters: {
-      startDate: startDate ?? '',
-      endDate: endDate ?? '',
-      periodAllTime,
-    },
+  const filters = {
+    startDate: startDate ?? '',
+    endDate: endDate ?? '',
+    periodAllTime,
   };
 
-  return defer({ analyticsShell, analyticsData });
+  return defer({ filters, analyticsData });
 }
 
 export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
-export default function MarketingAnalyticsRoute() {
-  const { analyticsShell, analyticsData } = useLoaderData<typeof loader>();
-  // Live: refetch on form:view / order:new socket events; poll as a fallback when
-  // the socket is down (background tabs, PWA waking).
-  usePageRefreshOnEvent([...ANALYTICS_LIVE_EVENTS]);
-  usePollingFallback(20_000);
-  // Always-on refresh: guarantees the live page updates even if a socket event is
-  // missed (connected-but-event-not-delivered), independent of socket state.
-  useLivePoll(15_000);
+export default function AllFormsRoute() {
+  const { filters, analyticsData } = useLoaderData<typeof loader>();
+
+  const backHref = (() => {
+    const params = new URLSearchParams();
+    if (filters.periodAllTime) params.set('period', 'all_time');
+    else {
+      if (filters.startDate) params.set('startDate', filters.startDate);
+      if (filters.endDate) params.set('endDate', filters.endDate);
+    }
+    const qs = params.toString();
+    return `/admin/marketing/analytics${qs ? `?${qs}` : ''}`;
+  })();
+
   return (
-    <CachedAwait
-      resolve={analyticsData}
-      fallback={<MarketingAnalyticsLoadingShell filters={analyticsShell.filters} />}
-      loaderShell={{ analyticsShell }}
-      deferredKey="analyticsData"
-      // Live page: revalidates on a silent interval + socket events. The LIVE
-      // indicator already signals the refresh, so don't dim the whole page each tick.
-      dimOnRefresh={false}
-    >
-      {(payload) => (
-        <MarketingAnalyticsPage
-          {...payload}
-          filters={analyticsShell.filters}
-          liveEvents={[...ANALYTICS_LIVE_EVENTS]}
-        />
-      )}
-    </CachedAwait>
+    <div className="space-y-4">
+      <PageHeader
+        title="All forms"
+        description="Every form with its views, conversion, and average time. Tap a form for its own analytics."
+        backTo={backHref}
+        mobileInlineActions
+        actions={
+          <DateFilterBar
+            startDate={filters.startDate}
+            endDate={filters.endDate}
+            periodAllTime={filters.periodAllTime}
+            chrome="pill"
+          />
+        }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
+      />
+
+      <CachedAwait
+        resolve={analyticsData}
+        deferredKey="analyticsData"
+        loaderShell={{ filters }}
+        fallback={<div className="card h-64 animate-pulse" />}
+      >
+        {(data) => <FormsTable forms={data.forms} filters={filters} />}
+      </CachedAwait>
+    </div>
   );
 }
