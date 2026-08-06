@@ -8,37 +8,71 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
-  AreaChart,
-  Area,
   Cell,
   PieChart,
   Pie,
   LabelList,
+  AreaChart,
+  Area,
+  Legend,
 } from 'recharts';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { EmptyState } from '~/components/ui/empty-state';
-import { Button } from '~/components/ui/button';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { AnimatedCount } from '~/components/ui/animated-count';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { PageSearchControl } from '~/components/ui/page-search-control';
 import { useLiveIndicator } from '~/hooks/useSocket';
+import { useIsMobile } from '~/hooks/useIsMobile';
 import type { FormAnalytics } from './types';
 
-/** Funnel stage colors — descending indigo→green, same vocabulary as the CEO funnel. */
-const FUNNEL_COLORS = ['#6366f1', '#0284c7', '#4f46e5', '#0ea5e9', '#059669'] as const;
-const RAW_VIEWS_COLOR = '#6366f1';
-const UNIQUE_VIEWS_COLOR = '#059669';
-/** Donut slice palette for Top forms — 10 distinct hues assigned in fixed order. */
-const FORM_COLORS = [
-  '#6366f1', '#0284c7', '#059669', '#d97706', '#dc2626',
-  '#7c3aed', '#0ea5e9', '#16a34a', '#ea580c', '#db2777',
-] as const;
+const TOP_FORMS_LIMIT = 6;
+
+/** Funnel stage colors — descending indigo→green (6 stages: All views, Unique views,
+ *  Started cart, Ordered, Confirmed, Delivered). Same vocabulary as the CEO funnel. */
+// Stage 0 = All views, 1 = Unique views — distinct hues (indigo vs amber) so the
+// two view series are easy to tell apart. Green stays reserved for Delivered.
+const FUNNEL_COLORS = ['#6366f1', '#f59e0b', '#0284c7', '#4f46e5', '#0ea5e9', '#059669'] as const;
+// All vs Unique views: clearly different hues. Green is reserved for Delivered
+// (funnel end-state), so views never use it.
+const RAW_VIEWS_COLOR = '#6366f1'; // indigo — all views
+const UNIQUE_VIEWS_COLOR = '#f59e0b'; // amber — unique views
+
+// Theme-aware Recharts tooltip: Recharts renders a hardcoded white card by
+// default, which ignores the app theme (stays white in dark/soft). These map the
+// tooltip surface, border, and text to the app's CSS vars so it follows the theme.
+const TOOLTIP_CONTENT_STYLE = {
+  backgroundColor: 'rgb(var(--app-elevated))',
+  border: '1px solid rgb(var(--app-border))',
+  borderRadius: '8px',
+  color: 'rgb(var(--app-fg))',
+  boxShadow: '0 4px 12px rgb(0 0 0 / 0.12)',
+  // Compact card: tight padding + small type so it stays unobtrusive on mobile.
+  padding: '6px 10px',
+  fontSize: '12px',
+  lineHeight: 1.3,
+} as const;
+const TOOLTIP_LABEL_STYLE = { color: 'rgb(var(--app-fg))', fontWeight: 600, marginBottom: '2px', fontSize: '12px' } as const;
+const TOOLTIP_ITEM_STYLE = { color: 'rgb(var(--app-fg-muted))', padding: 0, fontSize: '12px' } as const;
+
+/** Funnel X-axis props: on mobile the 6 stage labels don't fit horizontally, so
+ *  slant them (+ extra bottom room) instead of truncating. Shared by both funnel charts. */
+function funnelAxisFor(isMobile: boolean) {
+  return {
+    xAxisProps: isMobile
+      ? { angle: -35, textAnchor: 'end' as const, height: 56, tick: { fontSize: 10 } }
+      : { tick: { fontSize: 11 } },
+    chartMargin: isMobile
+      ? { top: 24, right: 4, left: 0, bottom: 8 }
+      : { top: 24, right: 4, left: 0, bottom: 4 },
+  };
+}
 
 /** Render children only after first client paint — Recharts warns on 0×0 during SSR. */
 function ClientOnly({ children, fallback }: { children: ReactNode; fallback?: ReactNode }) {
@@ -72,11 +106,13 @@ interface Props {
 
 export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail }: Props) {
   const chartUid = useId().replace(/:/g, '');
-  const { statStrip, funnel, timeSeries, topForms, forms, crossFunnel } = analytics;
+  const { statStrip, funnel, topForms, forms, crossFunnel } = analytics;
   // Default to the data (table) view; the toggle switches to charts.
-  const [showData, setShowData] = useState(true);
+  // Overview vs All forms tab (global page only; detail page has no tabs).
   const liveState = useLiveIndicator(liveEvents ?? []);
+  const isMobile = useIsMobile();
   const isDetail = detail != null;
+  const { xAxisProps: funnelXAxisProps, chartMargin: funnelChartMargin } = funnelAxisFor(isMobile);
 
   const hasData = statStrip.rawLandings > 0;
 
@@ -102,51 +138,43 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
       title: 'Orders divided by unique form views.',
     },
     {
-      label: 'Matched to a view',
+      label: 'Attribution rate',
       value: <AnimatedCount value={statStrip.attributionCoverage} format={formatPct} />,
-      title: 'Share of orders that could be linked back to a tracked form view. Untracked visitors (blocked beacons) lower this.',
+      title: 'Share of orders we could link back to a tracked form view. Offline or imported orders and blocked beacons lower this.',
     },
   ];
 
-  // Funnel with drop-off between stages.
+  // Funnel with drop-off between stages. Starts with All form views (every load),
+  // then Unique form views (dedup by visitor), then the conversion stages.
+  // `short` is the compact axis label for the chart; `stage` is the full name used
+  // in the tooltip + data table.
   const funnelStages = [
-    { stage: 'Form views', count: funnel.formViews }, // unique visitors (funnel basis)
-    { stage: 'Started cart', count: funnel.startedCart },
-    { stage: 'Ordered', count: funnel.ordered },
-    { stage: 'Confirmed', count: funnel.confirmed },
-    { stage: 'Delivered', count: funnel.delivered },
+    { stage: 'All form views', short: 'All views', count: statStrip.rawLandings },
+    { stage: 'Unique form views', short: 'Unique', count: funnel.formViews },
+    { stage: 'Started cart', short: 'Started cart', count: funnel.startedCart },
+    { stage: 'Ordered', short: 'Ordered', count: funnel.ordered },
+    { stage: 'Confirmed', short: 'Confirmed', count: funnel.confirmed },
+    { stage: 'Delivered', short: 'Delivered', count: funnel.delivered },
   ].map((s, i, arr) => {
-    const prev = i === 0 ? null : (arr[i - 1]?.count ?? null);
-    // Clamp at 0: a stage should never show a negative drop-off. Started-cart counts
-    // sessions that may lack a tracked view, so it can slightly exceed the prior stage.
+    // Drop-off is the % lost from the PRIOR stage — but only meaningful within the
+    // real conversion funnel. "All form views" has no prior; "Unique form views" is
+    // just All deduped by visitor (refresh rate, not a funnel loss), so both show --.
+    // Drop-off starts being real from "Started cart" onward.
+    const prev = i <= 1 ? null : (arr[i - 1]?.count ?? null);
     const dropPct = prev && prev > 0 ? Math.max(0, ((prev - s.count) / prev) * 100) : null;
     return { ...s, fill: FUNNEL_COLORS[i], dropPct };
   });
 
-  const trendData = timeSeries.map((d) => ({
-    date: d.date,
+  // Daily views trend (all vs unique) for the Overview + detail charts.
+  const trendData = analytics.timeSeries.map((d) => ({
     viewsRaw: d.viewsRaw,
     viewsUnique: d.viewsUnique,
-    label: new Date(`${d.date}T00:00:00Z`).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-    }),
+    label: new Date(`${d.date}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
   }));
 
+  // Top forms by traffic — top 5 for the Overview table (full ranking is on the All forms tab).
   const topFormsTotal = topForms.reduce((sum, f) => sum + f.count, 0);
-  // Full ranked list (every form the backend returned), each with a stable color.
-  const donutData = topForms.map((f, i) => ({ ...f, fill: FORM_COLORS[i % FORM_COLORS.length] }));
-  // Donut slices: keep the top 6 distinct, roll the rest into a single "Other" slice so
-  // the chart stays legible no matter how many forms exist. The full ranking is in the list.
-  const DONUT_TOP = 6;
-  const donutSlices = (() => {
-    if (donutData.length <= DONUT_TOP + 1) {
-      return donutData.map((f) => ({ key: f.campaignId, label: f.label, count: f.count, fill: f.fill }));
-    }
-    const head = donutData.slice(0, DONUT_TOP).map((f) => ({ key: f.campaignId, label: f.label, count: f.count, fill: f.fill }));
-    const otherCount = donutData.slice(DONUT_TOP).reduce((sum, f) => sum + f.count, 0);
-    return [...head, { key: '__other__', label: 'Other', count: otherCount, fill: '#94a3b8' }];
-  })();
+  const topFive = topForms.slice(0, TOP_FORMS_LIMIT);
 
   const chartSkeleton = <div className="h-72 w-full animate-pulse rounded bg-app-hover" />;
 
@@ -173,30 +201,8 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                   periodAllTime={filters?.periodAllTime ?? false}
                   chrome="pill"
                 />
-                {hasData && (
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowData((v) => !v)}>
-                    {showData ? 'View charts' : 'View as data'}
-                  </Button>
-                )}
+                {!isDetail && <CompareButton source="marketing-analytics" />}
               </>
-            }
-            sheet={
-              hasData
-                ? ({ closeSheet }) => (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="h-12 w-full justify-center"
-                      onClick={() => {
-                        setShowData((v) => !v);
-                        closeSheet();
-                      }}
-                    >
-                      {showData ? 'View charts' : 'View as data'}
-                    </Button>
-                  )
-                : undefined
             }
           />
         }
@@ -208,8 +214,21 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
         periodAllTime={filters?.periodAllTime ?? false}
       />
 
-      <OverviewStatStrip mobileGrid items={statItems} />
+      {!isDetail && <OverviewStatStrip mobileGrid items={statItems} />}
 
+      {/* ── PER-FORM DETAIL BODY ── meta + funnel + trend (no top-forms / summary) */}
+      {isDetail && (
+        <FormDetailBody
+          analytics={analytics}
+          funnelStages={funnelStages}
+          chartUid={chartUid}
+        />
+      )}
+
+      {/* ── OVERVIEW (global page) ── funnel + trend + top forms. The full
+          searchable forms list lives on its own page (View all forms). */}
+      {!isDetail && (
+      <>
       {!hasData ? (
         <div className="card">
           <EmptyState
@@ -217,98 +236,35 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
             description="Once visitors start landing on your forms, their traffic, time on form, and conversion will appear here."
           />
         </div>
-      ) : showData ? (
-        <AnalyticsDataView
-          statStrip={statStrip}
-          funnelStages={funnelStages}
-          trendData={trendData}
-          topForms={topForms}
-          topFormsTotal={topFormsTotal}
-        />
       ) : (
         <>
-          {/* Views over time — all + unique. Leads the page: traffic trend first. */}
-          <div className="card overflow-hidden">
-            <h3 className="text-base font-semibold text-app-fg mb-3">Form views over time</h3>
-            {trendData.length === 0 ? (
-              <EmptyState
-                title="No daily breakdown"
-                description="Pick a date range to see form views per day."
-              />
-            ) : (
-              <ClientOnly fallback={chartSkeleton}>
-                {/* Fixed-height wrapper: ResponsiveContainer collapses to 0px on
-                    mobile without a definite-height parent (blank chart). */}
-                <div style={{ height: 300 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={trendData} margin={{ top: 8, right: 16, left: 4, bottom: 4 }}>
-                    <defs>
-                      <linearGradient id={`${chartUid}-raw`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={RAW_VIEWS_COLOR} stopOpacity={0.35} />
-                        <stop offset="100%" stopColor={RAW_VIEWS_COLOR} stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id={`${chartUid}-unique`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={UNIQUE_VIEWS_COLOR} stopOpacity={0.35} />
-                        <stop offset="100%" stopColor={UNIQUE_VIEWS_COLOR} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
-                    <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" minTickGap={24} />
-                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={40} />
-                    <Tooltip
-                      formatter={(value, name) => [
-                        Number(value).toLocaleString(),
-                        name === 'viewsUnique' ? 'Unique form views' : 'All form views',
-                      ]}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Area
-                      type="monotone"
-                      dataKey="viewsRaw"
-                      name="All form views"
-                      stroke={RAW_VIEWS_COLOR}
-                      strokeWidth={2}
-                      fill={`url(#${chartUid}-raw)`}
-                      dot={trendData.length <= 31 ? { r: 3, fill: RAW_VIEWS_COLOR } : false}
-                      activeDot={{ r: 5 }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="viewsUnique"
-                      name="Unique form views"
-                      stroke={UNIQUE_VIEWS_COLOR}
-                      strokeWidth={2}
-                      fill={`url(#${chartUid}-unique)`}
-                      dot={trendData.length <= 31 ? { r: 3, fill: UNIQUE_VIEWS_COLOR } : false}
-                      activeDot={{ r: 5 }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-                </div>
-              </ClientOnly>
-            )}
-          </div>
-
+          {/* Row 1: Conversion funnel (bars) + Form views over time (area) — like the
+              per-form detail page. Charts-only; the data tables live in the All forms tab. */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Funnel — vertical descending bars (funnel silhouette), counts on top. */}
-            <div className="card overflow-hidden">
-              <h3 className="text-sm font-semibold text-app-fg mb-1">Conversion funnel</h3>
-              <p className="text-xs text-app-fg-muted mb-3">
-                Unique form views to delivered. Hover a bar for the drop-off from the prior stage.
+            <div className="card overflow-hidden px-2 py-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-app-fg mb-1 px-2 sm:px-0">Conversion funnel</h3>
+              <p className="text-xs text-app-fg-muted mb-3 px-2 sm:px-0">
+                All views to delivered. Hover a bar for the drop-off from the prior stage.
               </p>
               <ClientOnly fallback={chartSkeleton}>
                 <div style={{ height: 300 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={funnelStages} margin={{ top: 24, right: 8, left: 4, bottom: 4 }}>
+                  <BarChart data={funnelStages} margin={funnelChartMargin}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.2)" />
-                    <XAxis dataKey="stage" tick={{ fontSize: 11 }} interval={0} />
+                    <XAxis dataKey="short" interval={0} {...funnelXAxisProps} />
                     <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={40} />
                     <Tooltip
                       cursor={{ fill: 'rgba(148,163,184,0.08)' }}
+                      contentStyle={TOOLTIP_CONTENT_STYLE}
+                      labelStyle={TOOLTIP_LABEL_STYLE}
+                      itemStyle={TOOLTIP_ITEM_STYLE}
                       formatter={(value, _name, item) => {
-                        const drop = (item as unknown as { payload?: { dropPct?: number | null } })?.payload?.dropPct;
+                        const payload = (item as unknown as { payload?: { dropPct?: number | null; fill?: string } })?.payload;
                         const base = Number(value).toLocaleString();
-                        return [drop != null ? `${base}  (−${drop.toFixed(0)}% from prev)` : base, 'Count'] as [string, string];
+                        const text = payload?.dropPct != null ? `${base}  (−${payload.dropPct.toFixed(0)}% from prev)` : base;
+                        // Color the label to match the hovered bar's stage color.
+                        return [text, <span key="n" style={{ color: payload?.fill }}>Count</span>];
                       }}
                     />
                     <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={64}>
@@ -323,145 +279,139 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
               </ClientOnly>
             </div>
 
-            {/* Top forms — donut (top slices + "Other") beside a scrollable ranked list.
-                Scales when there are many forms: the donut stays legible and the full
-                ranking lives in the list, not a wrapping legend. */}
-            <div className="card overflow-hidden">
-              <h3 className="text-sm font-semibold text-app-fg mb-1">Top forms by traffic</h3>
-              <p className="text-xs text-app-fg-muted mb-3">Share of unique form views across your busiest forms.</p>
-              {donutData.length === 0 ? (
-                <EmptyState title="No forms with traffic" description="Form views by form will appear here." />
+            {/* Form views over time. */}
+            <div className="card overflow-hidden px-2 py-4 sm:p-5">
+              <h3 className="text-sm font-semibold text-app-fg mb-1 px-2 sm:px-0">Form views over time</h3>
+              <p className="text-xs text-app-fg-muted mb-3 px-2 sm:px-0">Daily all vs unique views.</p>
+              {trendData.length === 0 ? (
+                <EmptyState title="No daily breakdown" description="Pick a date range to see views per day." />
               ) : (
-                <div className="flex flex-col sm:flex-row items-center gap-4">
-                  <div className="w-full sm:w-[46%] shrink-0">
-                    <ClientOnly fallback={<div className="h-56 w-full animate-pulse rounded bg-app-hover" />}>
-                      <div style={{ height: 224 }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={donutSlices}
-                            dataKey="count"
-                            nameKey="label"
-                            innerRadius={52}
-                            outerRadius={88}
-                            paddingAngle={1}
-                          >
-                            {donutSlices.map((d) => (
-                              <Cell key={d.key} fill={d.fill} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(value, _name, item) => {
-                              const label = (item as unknown as { payload?: { label?: string } })?.payload?.label ?? '';
-                              const n = Number(value);
-                              const pct = topFormsTotal > 0 ? ` (${((n / topFormsTotal) * 100).toFixed(0)}%)` : '';
-                              return [`${n.toLocaleString()}${pct}`, label];
-                            }}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                      </div>
-                    </ClientOnly>
+                <ClientOnly fallback={chartSkeleton}>
+                  <div style={{ height: 300 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={trendData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                        <defs>
+                          <linearGradient id={`${chartUid}-oraw`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={RAW_VIEWS_COLOR} stopOpacity={0.35} />
+                            <stop offset="100%" stopColor={RAW_VIEWS_COLOR} stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id={`${chartUid}-ounique`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={UNIQUE_VIEWS_COLOR} stopOpacity={0.35} />
+                            <stop offset="100%" stopColor={UNIQUE_VIEWS_COLOR} stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
+                        <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" minTickGap={24} />
+                        <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={40} />
+                        <Tooltip
+                          // Show "<series name>: <value>" so each row is labelled
+                          // (indigo = all views, amber = unique views).
+                          formatter={(value, name, item) => [
+                            <span key="v" style={{ color: (item as { color?: string })?.color }}>
+                              {String(name)}: {Number(value).toLocaleString()}
+                            </span>,
+                            '',
+                          ]}
+                          contentStyle={TOOLTIP_CONTENT_STYLE}
+                          labelStyle={TOOLTIP_LABEL_STYLE}
+                          itemStyle={TOOLTIP_ITEM_STYLE}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Area type="monotone" dataKey="viewsRaw" name="All form views" stroke={RAW_VIEWS_COLOR} strokeWidth={2} fill={`url(#${chartUid}-oraw)`} />
+                        <Area type="monotone" dataKey="viewsUnique" name="Unique form views" stroke={UNIQUE_VIEWS_COLOR} strokeWidth={2} fill={`url(#${chartUid}-ounique)`} />
+                      </AreaChart>
+                    </ResponsiveContainer>
                   </div>
-                  {/* Ranked list — every form, scrolls when there are many. */}
-                  <ul className="w-full sm:flex-1 min-w-0 space-y-2 max-h-56 overflow-y-auto pr-1">
-                    {donutData.map((f, i) => {
-                      const pct = topFormsTotal > 0 ? (f.count / topFormsTotal) * 100 : 0;
-                      return (
-                        <li key={f.campaignId} className="min-w-0">
-                          <div className="flex items-center gap-2 text-sm">
-                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: f.fill }} />
-                            <span className="truncate text-app-fg flex-1 min-w-0" title={f.label}>
-                              {i + 1}. {f.label}
-                            </span>
-                            <span className="tabular-nums text-app-fg-muted shrink-0">
-                              {f.count.toLocaleString()}
-                            </span>
-                            <span className="tabular-nums text-app-fg-muted shrink-0 w-9 text-right">
-                              {pct.toFixed(0)}%
-                            </span>
-                          </div>
-                          <div className="mt-1 ml-4 h-1 rounded-full bg-app-hover overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: f.fill }} />
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
+                </ClientOnly>
               )}
             </div>
           </div>
+
+          {/* Data tables — funnel (Stage/Count/Drop-off) + top forms — always shown
+              below the charts. */}
+          <FunnelDataTables funnelStages={funnelStages} topForms={topFive} topFormsTotal={topFormsTotal} crossFunnel={crossFunnel} formViews={funnel.formViews} filters={filters} />
+
         </>
       )}
-
-      {/* All forms table (clickable → per-form detail) + cross-funnel — always shown
-          (both chart and data views), global view only (hidden on a form's detail page). */}
-      {hasData && !isDetail && (
-        <>
-          <FormsTable forms={forms} filters={filters} />
-          <CrossFunnelSection crossFunnel={crossFunnel} />
-        </>
+      </>
       )}
     </div>
   );
 }
 
-/** "View as data" — the same numbers as the charts, as plain tables. */
-function AnalyticsDataView({
-  statStrip,
+/** Funnel + Top-forms as plain data tables, shown below the Overview charts. */
+function FunnelDataTables({
   funnelStages,
-  trendData,
   topForms,
   topFormsTotal,
+  crossFunnel,
+  formViews,
+  filters,
 }: {
-  statStrip: FormAnalytics['statStrip'];
-  funnelStages: Array<{ stage: string; count: number; dropPct: number | null }>;
-  trendData: Array<{ date: string; label: string; viewsRaw: number; viewsUnique: number }>;
+  funnelStages: Array<{ stage: string; short: string; count: number; dropPct: number | null }>;
   topForms: FormAnalytics['topForms'];
   topFormsTotal: number;
+  crossFunnel: FormAnalytics['crossFunnel'];
+  /** Denominator (unique form views) for the cross-funnel "% of views" cell. */
+  formViews: number;
+  filters: { startDate: string; endDate: string; periodAllTime: boolean };
 }) {
   const th = 'text-left text-xs font-medium text-app-fg-muted uppercase tracking-wider px-3 py-2';
   const td = 'px-3 py-2 text-sm text-app-fg whitespace-nowrap';
+  const crossPct = formViews > 0 ? (crossFunnel.crossFunnel / formViews) * 100 : null;
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Funnel table */}
-        <div className="card overflow-x-auto">
-          <h3 className="text-sm font-semibold text-app-fg mb-3">Conversion funnel</h3>
-          <table className="min-w-full">
-            <thead>
-              <tr>
-                <th className={th}>Stage</th>
-                <th className={th}>Count</th>
-                <th className={th}>Drop-off</th>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Funnel table (+ a cross-funnel row: traffic that diverted to another MB). */}
+      <div className="card overflow-x-auto">
+        <h3 className="text-sm font-semibold text-app-fg mb-3">Conversion funnel</h3>
+        <table className="min-w-full">
+          <thead>
+            <tr>
+              <th className={th}>Stage</th>
+              <th className={th}>Count</th>
+              <th className={th}>Drop-off</th>
+            </tr>
+          </thead>
+          <tbody>
+            {funnelStages.map((s) => (
+              <tr key={s.stage} className="border-t border-app-border">
+                <td className={td}>{s.stage}</td>
+                <td className={td}>{s.count.toLocaleString()}</td>
+                <td className={td}>{s.dropPct != null ? `−${s.dropPct.toFixed(0)}%` : '--'}</td>
               </tr>
-            </thead>
-            <tbody>
-              {funnelStages.map((s) => (
-                <tr key={s.stage} className="border-t border-app-border">
-                  <td className={td}>{s.stage}</td>
-                  <td className={td}>{s.count.toLocaleString()}</td>
-                  <td className={td}>{s.dropPct != null ? `−${s.dropPct.toFixed(0)}%` : '--'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+            {/* Cross-funnel: same customer reached via a DIFFERENT media buyer — traffic
+                that went to another funnel instead of this order flow. Not a funnel
+                stage, so its 3rd column shows its share of views, not a drop-off. */}
+            <tr className="border-t border-app-border bg-app-hover/40" title="Same customer submitted the same product via a different media buyer.">
+              <td className={`${td} text-app-fg-muted`}>Cross-funnel</td>
+              <td className={`${td} text-app-fg-muted`}>{crossFunnel.crossFunnel.toLocaleString()}</td>
+              <td className={`${td} text-app-fg-muted`}>{crossPct != null ? `${crossPct.toFixed(0)}% of views` : '--'}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-        {/* Top forms table */}
-        <div className="card overflow-x-auto">
-          <h3 className="text-sm font-semibold text-app-fg mb-3">Top forms by traffic</h3>
-          <table className="min-w-full">
-            <thead>
+      {/* Top forms table */}
+      <div className="card overflow-x-auto">
+        <h3 className="text-sm font-semibold text-app-fg mb-3">Top forms by traffic</h3>
+        <table className="min-w-full">
+          <thead>
+            <tr>
+              <th className={th}>Form</th>
+              <th className={th}>Unique form views</th>
+              <th className={th} title="This form's unique views as a percent of your total unique form views across all forms.">
+                % of total views
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {topForms.length === 0 ? (
               <tr>
-                <th className={th}>Form</th>
-                <th className={th}>Unique form views</th>
-                <th className={th}>Share</th>
+                <td className={td} colSpan={3}>No forms with traffic yet.</td>
               </tr>
-            </thead>
-            <tbody>
-              {topForms.map((f) => (
+            ) : (
+              topForms.map((f) => (
                 <tr key={f.campaignId} className="border-t border-app-border">
                   <td className={td}>{f.label}</td>
                   <td className={td}>{f.count.toLocaleString()}</td>
@@ -469,68 +419,160 @@ function AnalyticsDataView({
                     {topFormsTotal > 0 ? `${((f.count / topFormsTotal) * 100).toFixed(0)}%` : '--'}
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Daily trend table */}
-      <div className="card overflow-x-auto">
-        <h3 className="text-sm font-semibold text-app-fg mb-3">Form views over time</h3>
-        <table className="min-w-full">
-          <thead>
-            <tr>
-              <th className={th}>Date</th>
-              <th className={th}>All form views</th>
-              <th className={th}>Unique form views</th>
-            </tr>
-          </thead>
-          <tbody>
-            {trendData.length === 0 ? (
-              <tr>
-                <td className={td} colSpan={3}>No daily breakdown for this range.</td>
-              </tr>
-            ) : (
-              trendData.map((d) => (
-                <tr key={d.date} className="border-t border-app-border">
-                  <td className={td}>{d.label}</td>
-                  <td className={td}>{d.viewsRaw.toLocaleString()}</td>
-                  <td className={td}>{d.viewsUnique.toLocaleString()}</td>
-                </tr>
               ))
             )}
           </tbody>
         </table>
+        <div className="mt-3 flex justify-end">
+          <Link
+            to={allFormsHref(filters)}
+            className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+          >
+            View all forms →
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Link to the standalone All-forms page, preserving the active date range. */
+function allFormsHref(filters: { startDate: string; endDate: string; periodAllTime: boolean }): string {
+  const params = new URLSearchParams();
+  if (filters.periodAllTime) {
+    params.set('period', 'all_time');
+  } else {
+    if (filters.startDate) params.set('startDate', filters.startDate);
+    if (filters.endDate) params.set('endDate', filters.endDate);
+  }
+  const qs = params.toString();
+  return `/admin/marketing/analytics/forms${qs ? `?${qs}` : ''}`;
+}
+
+/** Per-form detail body — this form's meta, conversion funnel, and views trend.
+ *  No "Top forms" (cross-form) or "Summary" (redundant with the funnel) here. */
+function FormDetailBody({
+  analytics,
+  funnelStages,
+  chartUid,
+}: {
+  analytics: FormAnalytics;
+  funnelStages: Array<{ stage: string; short: string; count: number; dropPct: number | null }>;
+  chartUid: string;
+}) {
+  const { statStrip, timeSeries, forms } = analytics;
+  const isMobile = useIsMobile();
+  const { xAxisProps: funnelXAxisProps, chartMargin: funnelChartMargin } = funnelAxisFor(isMobile);
+  const form = forms[0]; // detail bundle is scoped to one campaign
+  const trendData = timeSeries.map((d) => ({
+    viewsRaw: d.viewsRaw,
+    viewsUnique: d.viewsUnique,
+    label: new Date(`${d.date}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+  }));
+
+  const meta: { label: string; value: string }[] = [
+    { label: 'Product', value: form?.productName ?? '—' },
+    { label: 'Unique form views', value: statStrip.uniqueLandings.toLocaleString() },
+    { label: 'All form views', value: statStrip.rawLandings.toLocaleString() },
+    { label: 'Avg time on form', value: formatDwell(statStrip.avgDwellMs) },
+    { label: 'Conversion', value: formatPct(statStrip.conversionRate) },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Meta strip — what this form is + its headline numbers. */}
+      <div className="card">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {meta.map((m) => (
+            <div key={m.label}>
+              <div className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">{m.label}</div>
+              <div className="text-base font-semibold text-app-fg mt-0.5 tabular-nums">{m.value}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Summary stats table */}
-      <div className="card overflow-x-auto">
-        <h3 className="text-sm font-semibold text-app-fg mb-3">Summary</h3>
-        <table className="min-w-full">
-          <tbody>
-            <tr className="border-t border-app-border">
-              <td className={td}>Unique form views</td>
-              <td className={td}>{statStrip.uniqueLandings.toLocaleString()}</td>
-            </tr>
-            <tr className="border-t border-app-border">
-              <td className={td}>All form views</td>
-              <td className={td}>{statStrip.rawLandings.toLocaleString()}</td>
-            </tr>
-            <tr className="border-t border-app-border">
-              <td className={td}>Avg time on form</td>
-              <td className={td}>{formatDwell(statStrip.avgDwellMs)}</td>
-            </tr>
-            <tr className="border-t border-app-border">
-              <td className={td}>Conversion rate</td>
-              <td className={td}>{formatPct(statStrip.conversionRate)}</td>
-            </tr>
-            <tr className="border-t border-app-border">
-              <td className={td}>Orders matched to a view</td>
-              <td className={td}>{formatPct(statStrip.attributionCoverage)}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Conversion funnel for this form. */}
+        <div className="card overflow-hidden px-2 py-4 sm:p-5">
+          <h3 className="text-sm font-semibold text-app-fg mb-1 px-2 sm:px-0">Conversion funnel</h3>
+          <p className="text-xs text-app-fg-muted mb-3 px-2 sm:px-0">All views to delivered for this form.</p>
+          <ClientOnly fallback={<div className="h-72 w-full animate-pulse rounded bg-app-hover" />}>
+            <div style={{ height: 300 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={funnelStages} margin={funnelChartMargin}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.2)" />
+                  <XAxis dataKey="short" interval={0} {...funnelXAxisProps} />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={40} />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(148,163,184,0.08)' }}
+                    contentStyle={TOOLTIP_CONTENT_STYLE}
+                    labelStyle={TOOLTIP_LABEL_STYLE}
+                    itemStyle={TOOLTIP_ITEM_STYLE}
+                    formatter={(value, _name, item) => {
+                      const drop = (item as unknown as { payload?: { dropPct?: number | null } })?.payload?.dropPct;
+                      const base = Number(value).toLocaleString();
+                      return [drop != null ? `${base}  (−${drop.toFixed(0)}% from prev)` : base, 'Count'] as [string, string];
+                    }}
+                  />
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={64}>
+                    <LabelList dataKey="count" position="top" style={{ fontSize: 11, fill: 'var(--color-app-fg, #64748b)' }} />
+                    {funnelStages.map((s, i) => (
+                      <Cell key={s.stage} fill={FUNNEL_COLORS[i]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </ClientOnly>
+        </div>
+
+        {/* Form views over time. */}
+        <div className="card overflow-hidden px-2 py-4 sm:p-5">
+          <h3 className="text-sm font-semibold text-app-fg mb-1 px-2 sm:px-0">Form views over time</h3>
+          <p className="text-xs text-app-fg-muted mb-3 px-2 sm:px-0">Daily all vs unique views for this form.</p>
+          {trendData.length === 0 ? (
+            <EmptyState title="No daily breakdown" description="Pick a date range to see views per day." />
+          ) : (
+            <ClientOnly fallback={<div className="h-72 w-full animate-pulse rounded bg-app-hover" />}>
+              <div style={{ height: 300 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={trendData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                    <defs>
+                      <linearGradient id={`${chartUid}-draw`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={RAW_VIEWS_COLOR} stopOpacity={0.35} />
+                        <stop offset="100%" stopColor={RAW_VIEWS_COLOR} stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id={`${chartUid}-dunique`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={UNIQUE_VIEWS_COLOR} stopOpacity={0.35} />
+                        <stop offset="100%" stopColor={UNIQUE_VIEWS_COLOR} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
+                    <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" minTickGap={24} />
+                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={40} />
+                    <Tooltip
+                      // Show "<series name>: <value>" so each row is labelled
+                      // (indigo = all views, amber = unique views).
+                      formatter={(value, name, item) => [
+                        <span key="v" style={{ color: (item as { color?: string })?.color }}>
+                          {String(name)}: {Number(value).toLocaleString()}
+                        </span>,
+                        '',
+                      ]}
+                      contentStyle={TOOLTIP_CONTENT_STYLE}
+                      labelStyle={TOOLTIP_LABEL_STYLE}
+                      itemStyle={TOOLTIP_ITEM_STYLE}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Area type="monotone" dataKey="viewsRaw" name="All form views" stroke={RAW_VIEWS_COLOR} strokeWidth={2} fill={`url(#${chartUid}-draw)`} />
+                    <Area type="monotone" dataKey="viewsUnique" name="Unique form views" stroke={UNIQUE_VIEWS_COLOR} strokeWidth={2} fill={`url(#${chartUid}-dunique)`} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </ClientOnly>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -552,15 +594,26 @@ function detailHref(
   return `/admin/marketing/analytics/${campaignId}${qs ? `?${qs}` : ''}`;
 }
 
-/** Clickable forms table — every form with views, conversion, avg dwell. Row → detail. */
-function FormsTable({
+type FormRow = FormAnalytics['forms'][number];
+
+/** Clickable forms table — every form with views, conversion, avg dwell. Row → detail.
+ *  Search by name (PageSearchControl) + sort via a FormSelect dropdown. */
+export function FormsTable({
   forms,
   filters,
 }: {
   forms: FormAnalytics['forms'];
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
 }) {
-  type FormRow = FormAnalytics['forms'][number];
+  const [query, setQuery] = useState('');
+
+  const visible = (() => {
+    const q = query.trim().toLowerCase();
+    const filtered = q ? forms.filter((f) => f.label.toLowerCase().includes(q)) : forms;
+    // Sort by unique views, high→low (the default; the sort control was removed).
+    return [...filtered].sort((a, b) => (b.views ?? -1) - (a.views ?? -1));
+  })();
+
   const columns: CompactTableColumn<FormRow>[] = [
     {
       key: 'form',
@@ -589,6 +642,7 @@ function FormsTable({
           <span className="text-app-fg-muted">—</span>
         ),
     },
+    { key: 'allViews', header: 'All views', align: 'right', nowrap: true, render: (r) => r.rawViews.toLocaleString() },
     { key: 'views', header: 'Unique views', align: 'right', nowrap: true, render: (r) => r.views.toLocaleString() },
     { key: 'orders', header: 'Orders', align: 'right', nowrap: true, render: (r) => r.converted.toLocaleString() },
     { key: 'conversion', header: 'Conversion', align: 'right', nowrap: true, render: (r) => formatPct(r.conversionRate) },
@@ -606,69 +660,24 @@ function FormsTable({
     },
   ];
   return (
-    <div className="space-y-2">
-      <div>
-        <h3 className="text-sm font-semibold text-app-fg">All forms</h3>
-        <p className="text-xs text-app-fg-muted">Tap a form to see its own analytics.</p>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <PageSearchControl
+          value={query}
+          onApply={setQuery}
+          placeholder="Search forms"
+          title="Search forms"
+        />
       </div>
       <CompactTable
         columns={columns}
-        rows={forms}
+        rows={visible}
         rowKey={(r) => r.campaignId}
         rowHref={(r) => detailHref(r.campaignId, filters)}
-        emptyTitle="No forms with traffic"
-        emptyDescription="Forms will appear here once they get views."
+        emptyTitle={query ? 'No forms match your search' : 'No forms with traffic'}
+        emptyDescription={query ? 'Try a different name.' : 'Forms will appear here once they get views.'}
       />
     </div>
   );
 }
 
-/** Cross-funnel attempts — same phone+product submitted via different MBs. */
-function CrossFunnelSection({ crossFunnel }: { crossFunnel: FormAnalytics['crossFunnel'] }) {
-  const th = 'text-left text-xs font-medium text-app-fg-muted uppercase tracking-wider px-3 py-2';
-  const td = 'px-3 py-2 text-sm text-app-fg whitespace-nowrap';
-  const cards = [
-    { label: 'Total attempts', value: crossFunnel.totalAttempts, title: 'Duplicate submissions caught (same phone + product).' },
-    { label: 'Unique customers', value: crossFunnel.uniqueCustomers, title: 'Distinct customers behind those attempts.' },
-    { label: 'Cross-funnel', value: crossFunnel.crossFunnel, title: 'Same customer reached via a different media buyer.' },
-    { label: 'Resubmissions', value: crossFunnel.resubmissions, title: 'Same form submitted again by the same customer.' },
-  ];
-  return (
-    <div className="card overflow-hidden">
-      <h3 className="text-sm font-semibold text-app-fg mb-1">Cross-funnel attempts</h3>
-      <p className="text-xs text-app-fg-muted mb-3">
-        Customers who submitted the same phone and product more than once, including via other media buyers.
-      </p>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        {cards.map((c) => (
-          <div key={c.label} className="rounded-lg border border-app-border bg-app-elevated p-3" title={c.title}>
-            <div className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">{c.label}</div>
-            <div className="text-lg md:text-xl font-bold text-app-fg mt-0.5 tabular-nums">
-              {c.value.toLocaleString()}
-            </div>
-          </div>
-        ))}
-      </div>
-      {crossFunnel.perProduct.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead>
-              <tr>
-                <th className={th}>Product</th>
-                <th className={th}>Attempts</th>
-              </tr>
-            </thead>
-            <tbody>
-              {crossFunnel.perProduct.map((p) => (
-                <tr key={p.productId ?? 'unknown'} className="border-t border-app-border">
-                  <td className={td}>{p.productName ?? 'Unknown product'}</td>
-                  <td className={td}>{p.attempts.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
