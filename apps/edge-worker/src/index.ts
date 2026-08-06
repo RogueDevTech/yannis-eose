@@ -1171,7 +1171,22 @@ function getFormScript(
       // it for view→order attribution; if it stays undefined, submission is
       // unaffected. This must NEVER be able to break the frozen intake path.
       try {
-        var __yid = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : null;
+        // Persist the visitor id in localStorage so a refresh/return by the same
+        // person REUSES it: "All form views" (COUNT(*)) still +1 per load, while
+        // "Unique form views" (COUNT DISTINCT session_id) counts that person once.
+        // localStorage access is wrapped — private mode / blocked storage falls back
+        // to a fresh per-load id, which is still valid (just not deduped).
+        var __yid = null;
+        try {
+          __yid = window.localStorage ? localStorage.getItem('yannis_vid') : null;
+          if (!__yid && window.crypto && crypto.randomUUID) {
+            __yid = crypto.randomUUID();
+            if (window.localStorage) localStorage.setItem('yannis_vid', __yid);
+          }
+        } catch (e) {
+          // storage blocked — fall back to a volatile per-load id
+          __yid = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : null;
+        }
         var __ystart = Date.now();
         window.__yannisSessionId = __yid || undefined;
         if (__yid && navigator.sendBeacon) {
@@ -2946,58 +2961,62 @@ function validateCart(body: unknown): { valid: true; data: CartFormData } | { va
  * Form Analytics beacon endpoint — records form landings + dwell time.
  *
  * FULLY ISOLATED from the frozen intake path: this handler shares NO code with
- * handleSubmission / handleCart. It ALWAYS returns 204 immediately (even on
- * invalid JSON or a downstream failure) and forwards to the API inside
- * ctx.waitUntil(...).catch(() => {}), so a slow/broken/absent API can never delay
- * or fail anything. A dropped view is acceptable; a dropped order is not — which
- * is exactly why this lives on its own endpoint and never blocks a response.
+ * handleSubmission / handleCart, and awaiting its forward here CANNOT slow order
+ * submission (that runs on /submit and /cart, separate handlers). It ALWAYS
+ * returns 204 (even on invalid JSON, a slow API, or a downstream failure — all
+ * swallowed).
+ *
+ * Why AWAIT the forward instead of ctx.waitUntil: `waitUntil` work on a
+ * fire-and-forget beacon is unreliable on Cloudflare — when the Worker returns,
+ * the runtime may evict the isolate before the deferred fetch completes, so views
+ * recorded only intermittently. Awaiting the forward before returning 204 makes
+ * recording reliable. The beacon is already async from the browser's side
+ * (navigator.sendBeacon), so this added latency is invisible to the user and only
+ * affects the (ignored) beacon response. Still bounded by the abort timeout so a
+ * hung API can never hold the request open.
  */
-async function handleTrackView(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+async function handleTrackView(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
   const noContent = new Response(null, { status: 204, headers: CORS_HEADERS });
   try {
-    const forward = (async () => {
-      let body: unknown;
-      try {
-        body = await request.json();
-      } catch {
-        return; // unparseable beacon — drop silently
-      }
-      const b = body as Record<string, unknown>;
-      const sessionId = typeof b['sessionId'] === 'string' ? b['sessionId'] : null;
-      if (!sessionId) return; // sessionId is the only hard requirement
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return noContent; // unparseable beacon — drop silently
+    }
+    const b = body as Record<string, unknown>;
+    const sessionId = typeof b['sessionId'] === 'string' ? b['sessionId'] : null;
+    if (!sessionId) return noContent; // sessionId is the only hard requirement
 
-      const payload: Record<string, unknown> = { sessionId };
-      if (typeof b['dwellMs'] === 'number') payload['dwellMs'] = b['dwellMs'];
-      if (typeof b['campaignId'] === 'string') payload['campaignId'] = b['campaignId'];
-      if (typeof b['mediaBuyerId'] === 'string') payload['mediaBuyerId'] = b['mediaBuyerId'];
-      if (typeof b['deploymentType'] === 'string') payload['deploymentType'] = b['deploymentType'];
+    const payload: Record<string, unknown> = { sessionId };
+    if (typeof b['dwellMs'] === 'number') payload['dwellMs'] = b['dwellMs'];
+    if (typeof b['campaignId'] === 'string') payload['campaignId'] = b['campaignId'];
+    if (typeof b['mediaBuyerId'] === 'string') payload['mediaBuyerId'] = b['mediaBuyerId'];
+    if (typeof b['deploymentType'] === 'string') payload['deploymentType'] = b['deploymentType'];
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), getApiTimeoutMs(env.API_URL));
-      try {
-        // Forward CF geo/referrer so the API can enrich the view row. Uses the same
-        // edge-key header helper as orders.create / cart.save.
-        const headers = apiForwardHeaders(env);
-        const referer = request.headers.get('Referer');
-        const country = request.headers.get('CF-IPCountry');
-        const ua = request.headers.get('User-Agent');
-        if (referer) headers['Referer'] = referer;
-        if (country) headers['CF-IPCountry'] = country;
-        if (ua) headers['User-Agent'] = ua;
-        await fetch(`${env.API_URL}/trpc/marketing.trackView`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timeoutId);
-      }
-    })();
-    // Never await on the response path — let it run after the 204 is returned.
-    ctx.waitUntil(forward.catch(() => {}));
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), getApiTimeoutMs(env.API_URL));
+    try {
+      // Forward CF geo/referrer so the API can enrich the view row.
+      const headers = apiForwardHeaders(env);
+      const referer = request.headers.get('Referer');
+      const country = request.headers.get('CF-IPCountry');
+      const ua = request.headers.get('User-Agent');
+      if (referer) headers['Referer'] = referer;
+      if (country) headers['CF-IPCountry'] = country;
+      if (ua) headers['User-Agent'] = ua;
+      // Awaited so the record actually completes before we respond (see docstring).
+      await fetch(`${env.API_URL}/trpc/marketing.trackView`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
   } catch {
-    // Absolutely nothing here may affect the response.
+    // Absolutely nothing here may affect the response — telemetry is best-effort.
   }
   return noContent;
 }
