@@ -32,10 +32,14 @@ export function AnimatedCount({
     if (value === prev) return;
     prevRef.current = value;
     setDisplay(value);
-    // Trigger a fresh roll animation on every change.
-    setRollKey((k) => k + 1);
-    // Green flash only on increase (a landing/order went up).
-    if (value > prev) {
+    // Only celebrate a genuine LIVE increment (a small bump, e.g. a new landing
+    // arriving over the socket). A date-range / filter change swaps the whole
+    // dataset — often a big jump or a drop — and should snap instantly without a
+    // roll or flash, so all tiles update together and never look out of sync.
+    const delta = value - prev;
+    const isLiveIncrement = delta > 0 && delta <= 25;
+    if (isLiveIncrement) {
+      setRollKey((k) => k + 1);
       setFlash('up');
       if (flashTimer.current) clearTimeout(flashTimer.current);
       flashTimer.current = setTimeout(() => setFlash(null), 900);
