@@ -7464,6 +7464,15 @@ export class MarketingService {
     if (periodEnd) cartConditions.push(lte(schema.cartAbandonments.createdAt, periodEnd));
     const cartWhere = cartConditions.length ? and(...cartConditions) : undefined;
 
+    // The set of session_ids from tracked views in scope. The funnel's cart/order/
+    // confirmed/delivered stages restrict to this set so they're a true subset of
+    // Form views (attributed funnel) — otherwise historical orders with no view
+    // swamp the funnel and conversion exceeds 100%.
+    const scopedViewSessionIds = this.db
+      .select({ sessionId: schema.campaignViews.sessionId })
+      .from(schema.campaignViews)
+      .where(viewWhere);
+
     // ── Aggregates (all independent → Promise.all) ──
     const [
       landingRow,
@@ -7485,18 +7494,19 @@ export class MarketingService {
         })
         .from(schema.campaignViews)
         .where(viewWhere),
-      // Started cart = distinct sessions that reached cart_abandonments. Counted on
-      // DISTINCT session_id so the funnel stays on the same unit as Landed (distinct
-      // sessions) — raw row counts would let Started exceed Landed and invert the funnel.
-      // Carts without a tracked session_id (beacon blocked) still can't inflate above
-      // the visitors we actually saw, since only sessions with a value are counted.
+      // Started cart = distinct tracked-view sessions that reached cart_abandonments.
+      // ATTRIBUTED funnel: only carts whose session_id matches a scoped tracked view
+      // count, so every stage is a true subset of Form views (never inverts, and
+      // conversion stays ≤100%). Historical carts with no tracked view are excluded.
       this.db
         .select({ startedCart: sql<number>`COUNT(DISTINCT ${schema.cartAbandonments.sessionId})` })
         .from(schema.cartAbandonments)
-        .where(cartWhere),
-      // Ordered + Confirmed(or beyond) + Delivered from orders. Confirmed mirrors the
-      // confirmation-rate status set (CONFIRMED..REMITTED) so the funnel's Confirmed
-      // stage matches the confirmation-rate metric marketing already tracks.
+        .where(and(cartWhere, inArray(schema.cartAbandonments.sessionId, scopedViewSessionIds))),
+      // Ordered + Confirmed(or beyond) + Delivered — ATTRIBUTED: only orders whose
+      // session_id matches a scoped tracked view. This is what makes the funnel honest:
+      // without it, thousands of pre-tracking historical orders swamp a handful of
+      // views and conversion blows past 100%. Confirmed mirrors the confirmation-rate
+      // status set (CONFIRMED..REMITTED).
       this.db
         .select({
           ordered: count(),
@@ -7504,7 +7514,7 @@ export class MarketingService {
           delivered: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.status} IN ('DELIVERED','REMITTED'))`,
         })
         .from(schema.orders)
-        .where(orderWhere),
+        .where(and(orderWhere, isNotNull(schema.orders.sessionId), inArray(schema.orders.sessionId, scopedViewSessionIds))),
       // Daily trend (views/day, raw + unique).
       this.db
         .select({
@@ -7602,7 +7612,9 @@ export class MarketingService {
     const matchedOrders = Number(matchedOrdersRow[0]?.matched ?? 0);
     const totalOrders = Number(totalOrdersRow[0]?.total ?? 0);
 
-    const conversionRate = uniqueLandings > 0 ? ordered / uniqueLandings : 0;
+    // `ordered` is now attributed (a subset of tracked-view sessions), so this is a
+    // real conversion. Clamp at 1.0 defensively — one session could place >1 order.
+    const conversionRate = uniqueLandings > 0 ? Math.min(1, ordered / uniqueLandings) : 0;
     const attributionCoverage = totalOrders > 0 ? matchedOrders / totalOrders : 0;
 
     return {
