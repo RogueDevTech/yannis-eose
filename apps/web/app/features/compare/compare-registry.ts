@@ -153,10 +153,90 @@ const marketingOrdersSource: CompareSource<MarketingMetricsPayload> = {
   ],
 };
 
+// ── Order status-count sources (Sales + Logistics) ───────────────────────────
+
+/** Raw status-count payload — a flat map of order status → count. */
+type StatusCounts = Record<string, number>;
+
+const n = (d: StatusCounts, k: string) => Number(d[k] ?? 0);
+/** Confirmed-or-beyond roll-up (matches the CS/logistics stat-strip derivation). */
+const confirmedPlus = (d: StatusCounts) =>
+  n(d, 'CONFIRMED') + n(d, 'AGENT_ASSIGNED') + n(d, 'DISPATCHED') + n(d, 'IN_TRANSIT') +
+  n(d, 'DELIVERED') + n(d, 'PARTIALLY_DELIVERED') + n(d, 'REMITTED') + n(d, 'RETURNED') +
+  n(d, 'RESTOCKED') + n(d, 'WRITTEN_OFF');
+const deliveredPlus = (d: StatusCounts) => n(d, 'DELIVERED') + n(d, 'REMITTED');
+/** Total excluding DELETED + category tallies (keys prefixed with `__`). */
+const totalExclDeleted = (d: StatusCounts) =>
+  Object.entries(d).reduce((sum, [k, v]) => (k === 'DELETED' || k.startsWith('__') ? sum : sum + Number(v)), 0);
+
+/**
+ * Sales / Funnel orders (CS servicing scope). Reuses `orders.statusCounts`, which
+ * auto-scopes to the caller's servicing branch (same as the /admin/sales/orders
+ * stat strip). Metric accessors derive the CS funnel + rates from the raw counts.
+ */
+const salesOrdersSource: CompareSource<StatusCounts> = {
+  key: 'sales-orders',
+  label: 'Funnel orders',
+  backTo: '/admin/sales/orders',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_CLOSER'], permission: 'orders.read' },
+  fetchPeriod: async (period, cookie) => {
+    const input = encodeURIComponent(
+      JSON.stringify({ startDate: period.startDate, endDate: period.endDate }),
+    );
+    const res = await apiRequest<unknown>(`/trpc/orders.statusCounts?input=${input}`, { method: 'GET', cookie });
+    return unwrap<StatusCounts>(res);
+  },
+  metrics: [
+    { key: 'total', label: 'Total orders', kind: 'count', funnel: true, value: totalExclDeleted },
+    { key: 'unprocessed', label: 'Unprocessed', kind: 'count', funnel: true, value: (d) => n(d, 'UNPROCESSED') },
+    { key: 'assigned', label: 'CS assigned', kind: 'count', funnel: true, value: (d) => n(d, 'CS_ASSIGNED') },
+    { key: 'confirmed', label: 'Confirmed', kind: 'count', funnel: true, value: confirmedPlus },
+    { key: 'delivered', label: 'Delivered', kind: 'count', funnel: true, value: deliveredPlus },
+    { key: 'remitted', label: 'Remitted', kind: 'count', funnel: true, value: (d) => n(d, 'REMITTED') },
+    { key: 'confirmationRate', label: 'Confirmation rate', kind: 'percent', value: (d) => { const t = totalExclDeleted(d); return t > 0 ? confirmedPlus(d) / t : 0; } },
+    { key: 'deliveryRate', label: 'Delivery rate', kind: 'percent', value: (d) => { const t = totalExclDeleted(d); return t > 0 ? deliveredPlus(d) / t : 0; } },
+  ],
+};
+
+/** Logistics status counts bundle (unions orders + cart + follow-up, servicing-scoped). */
+interface LogisticsBundlePayload {
+  statusCounts: StatusCounts;
+}
+
+/**
+ * Logistics orders. Reuses `logistics.logisticsOrdersPageBundle` (the only exposed
+ * entry for logistics counts), reading `.statusCounts`. Scopes by the caller's
+ * effective branches server-side, like the /admin/logistics/orders stat strip.
+ */
+const logisticsOrdersSource: CompareSource<LogisticsBundlePayload> = {
+  key: 'logistics-orders',
+  label: 'Logistics orders',
+  backTo: '/admin/logistics/orders',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER', 'TPL_MANAGER'], permission: 'logistics.read' },
+  fetchPeriod: async (period, cookie) => {
+    // limit:1 — we only want statusCounts, not the paginated orders.
+    const input = encodeURIComponent(
+      JSON.stringify({ page: 1, limit: 1, startDate: period.startDate, endDate: period.endDate }),
+    );
+    const res = await apiRequest<unknown>(`/trpc/logistics.logisticsOrdersPageBundle?input=${input}`, { method: 'GET', cookie });
+    return unwrap<LogisticsBundlePayload>(res);
+  },
+  metrics: [
+    { key: 'confirmed', label: 'Confirmed', kind: 'count', funnel: true, value: (d) => n(d.statusCounts, 'CONFIRMED') },
+    { key: 'allocated', label: 'Allocated', kind: 'count', funnel: true, value: (d) => n(d.statusCounts, 'AGENT_ASSIGNED') },
+    { key: 'dispatched', label: 'Dispatched', kind: 'count', funnel: true, value: (d) => n(d.statusCounts, 'DISPATCHED') },
+    { key: 'inTransit', label: 'In transit', kind: 'count', funnel: true, value: (d) => n(d.statusCounts, 'IN_TRANSIT') },
+    { key: 'delivered', label: 'Delivered', kind: 'count', funnel: true, value: (d) => n(d.statusCounts, 'DELIVERED') },
+    { key: 'remitted', label: 'Remitted', kind: 'count', funnel: true, value: (d) => n(d.statusCounts, 'REMITTED') },
+  ],
+};
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const SOURCES: Record<string, CompareSource<any>> = {
   [marketingAnalyticsSource.key]: marketingAnalyticsSource,
   [marketingOrdersSource.key]: marketingOrdersSource,
+  [salesOrdersSource.key]: salesOrdersSource,
+  [logisticsOrdersSource.key]: logisticsOrdersSource,
 };
 
 export function getCompareSource(key: string | null | undefined): CompareSource | undefined {

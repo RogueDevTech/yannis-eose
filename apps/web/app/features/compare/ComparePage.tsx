@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { useIsMobile } from '~/hooks/useIsMobile';
 
 /**
@@ -166,10 +167,12 @@ export function ComparePage({
   const td = 'px-3 py-2 text-sm text-app-fg whitespace-nowrap';
   const tdRight = 'px-3 py-2 text-sm whitespace-nowrap text-right tabular-nums';
 
-  // Biggest movers: rank by relative change magnitude, take the top 3 that actually moved.
+  // Biggest movers: rank by relative change magnitude, then by absolute change
+  // size as a deterministic tiebreak (zero-baseline metrics share a capped
+  // magnitude, so this orders them by how big the jump actually was).
   const highlights = [...rows]
     .filter((r) => r.direction !== 'flat')
-    .sort((x, y) => y.changeMagnitude - x.changeMagnitude)
+    .sort((x, y) => y.changeMagnitude - x.changeMagnitude || Math.abs(y.a - y.b) - Math.abs(x.a - x.b))
     .slice(0, 3);
 
   const funnelChartData = funnel.map((s) => ({ stage: s.stage, [periodALabel]: s.a, [periodBLabel]: s.b }));
@@ -185,21 +188,29 @@ export function ComparePage({
         <EmptyState title="Nothing to compare" description="No metrics were selected for these periods." />
       ) : (
         <>
-          {/* Highlights — biggest movers, so the headline changes read at a glance. */}
+          {/* Highlights — biggest movers, using the shared OverviewStatStrip so it
+              matches every dashboard. Each tile: the metric, its change (colored by
+              direction), and the two period values as A → B. */}
           {highlights.length > 0 && (
-            <div className="grid grid-cols-3 gap-2 sm:gap-3">
-              {highlights.map((h) => (
-                <div key={h.label} className="card p-3 sm:p-5">
-                  <p className="text-[11px] sm:text-xs font-medium text-app-fg-muted uppercase tracking-wider truncate" title={h.label}>{h.label}</p>
-                  <p className={`mt-1 text-lg sm:text-2xl font-bold tabular-nums ${toneClass[h.direction]}`}>
-                    {h.changeLabel}
-                  </p>
-                  <p className="mt-0.5 text-[11px] sm:text-xs text-app-fg-muted tabular-nums truncate">
-                    {h.aFormatted} <span className="text-app-fg-muted">vs</span> {h.bFormatted}
-                  </p>
-                </div>
-              ))}
-            </div>
+            <OverviewStatStrip
+              mobileGrid
+              items={highlights.map((h) => ({
+                label: h.label,
+                title: `${periodALabel}: ${h.aFormatted} → ${periodBLabel}: ${h.bFormatted}`,
+                plainValue: true,
+                value: (
+                  <span className="flex flex-col leading-tight">
+                    <span className={`inline-flex items-center gap-1 text-lg md:text-xl font-bold tabular-nums ${toneClass[h.direction]}`}>
+                      {h.direction === 'up' ? '↑' : h.direction === 'down' ? '↓' : ''}
+                      {h.changeLabel}
+                    </span>
+                    <span className="mt-0.5 text-[11px] text-app-fg-muted tabular-nums truncate">
+                      {h.aFormatted} <span className="text-app-fg-muted">→</span> {h.bFormatted}
+                    </span>
+                  </span>
+                ),
+              }))}
+            />
           )}
 
           {/* Funnel comparison — the two periods' stages, grouped side by side. */}

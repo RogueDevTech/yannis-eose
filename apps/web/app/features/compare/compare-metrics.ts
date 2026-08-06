@@ -38,6 +38,26 @@ export const COMPARE_METRIC_OPTIONS: Record<string, CompareMetricOption[]> = {
     { key: 'deliveredRevenue', label: 'Delivered revenue' },
     { key: 'totalSpend', label: 'Ad spend' },
   ],
+  // Keys must match salesOrdersSource.metrics in compare-registry.ts.
+  'sales-orders': [
+    { key: 'total', label: 'Total orders' },
+    { key: 'unprocessed', label: 'Unprocessed' },
+    { key: 'assigned', label: 'CS assigned' },
+    { key: 'confirmed', label: 'Confirmed' },
+    { key: 'delivered', label: 'Delivered' },
+    { key: 'remitted', label: 'Remitted' },
+    { key: 'confirmationRate', label: 'Confirmation rate' },
+    { key: 'deliveryRate', label: 'Delivery rate' },
+  ],
+  // Keys must match logisticsOrdersSource.metrics in compare-registry.ts.
+  'logistics-orders': [
+    { key: 'confirmed', label: 'Confirmed' },
+    { key: 'allocated', label: 'Allocated' },
+    { key: 'dispatched', label: 'Dispatched' },
+    { key: 'inTransit', label: 'In transit' },
+    { key: 'delivered', label: 'Delivered' },
+    { key: 'remitted', label: 'Remitted' },
+  ],
 };
 
 export function getCompareMetricOptions(source: string): CompareMetricOption[] {

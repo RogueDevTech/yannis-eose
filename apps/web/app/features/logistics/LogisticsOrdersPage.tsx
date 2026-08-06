@@ -8,6 +8,7 @@ import { FunnelBreakdownModal } from '~/features/dashboard/funnel-breakdown';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { useFetcherToast } from '~/components/ui/toast';
 import { CsCommentIcon, MobileCommentPreview } from '~/components/ui/cs-comment-icon';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -652,6 +653,7 @@ function LogisticsOrdersPageImpl({
                       startDate={filters.startDate}
                       endDate={filters.endDate}
                       periodAllTime={filters.periodAllTime} chrome="pill" />
+                  <CompareButton source="logistics-orders" />
                   <button
                     type="button"
                     className="btn-secondary btn-sm"

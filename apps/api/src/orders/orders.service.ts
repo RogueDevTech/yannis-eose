@@ -1907,10 +1907,22 @@ export class OrdersService {
 
     if (orderInput.campaignId) {
       const [campaignRow] = await this.db
-        .select({ formConfig: schema.campaigns.formConfig })
+        .select({ formConfig: schema.campaigns.formConfig, mediaBuyerId: schema.campaigns.mediaBuyerId })
         .from(schema.campaigns)
         .where(eq(schema.campaigns.id, orderInput.campaignId))
         .limit(1);
+
+      // GUARANTEE MB ATTRIBUTION — never reject.
+      // The form payload MAY omit mediaBuyerId (tampered/cached/older form, or a
+      // direct API post), but every campaign has a NOT-NULL media_buyer_id. When
+      // the payload doesn't carry one, derive it from the campaign so the order,
+      // its metrics, and any cross-funnel attempt are always attributed. This is
+      // a silent fill-in (same pattern as cart-recovery below) — it must NEVER
+      // block a submission. Freeze-safe: no throw, reuses this existing fetch.
+      if (!orderInput.mediaBuyerId && campaignRow?.mediaBuyerId) {
+        orderInput.mediaBuyerId = campaignRow.mediaBuyerId;
+      }
+
       const customFieldsRaw = (campaignRow?.formConfig as { customFields?: unknown } | null | undefined)?.customFields;
       if (Array.isArray(customFieldsRaw) && customFieldsRaw.length > 0) {
         const parsed = z.array(customFormFieldSchema).safeParse(customFieldsRaw);
@@ -2080,7 +2092,9 @@ export class OrdersService {
       );
       if (winner) {
         // Always record the cross-funnel attempt — even without mediaBuyerId.
-        // Use the winner's MB as fallback so the CFA row is never orphaned.
+        // orderInput.mediaBuyerId is now campaign-derived (see the guarantee
+        // above), so for any campaign submission it is set; winner's MB is a
+        // further fallback so the CFA row is never orphaned.
         const cfaMbId = orderInput.mediaBuyerId ?? winner.mediaBuyerId ?? null;
         if (cfaMbId) {
           try {
@@ -2095,11 +2109,34 @@ export class OrdersService {
               winner: { id: winner.id, mediaBuyerId: winner.mediaBuyerId ?? '' },
             });
           } catch (cfaErr) {
+            // DIAGNOSTIC (Phase 1): the order is still correctly blocked, but the
+            // MB will NOT see this attempt in Cross-funnel. Emit a durable, greppable
+            // event so silent losses are observable instead of guessed at.
             this.logger.error(
-              { err: cfaErr instanceof Error ? cfaErr.message : String(cfaErr) },
-              'cross-funnel attempt insert failed — dedup still blocks the order',
+              {
+                event: 'cfa_insert_failed',
+                err: cfaErr instanceof Error ? cfaErr.message : String(cfaErr),
+                campaignId: orderInput.campaignId ?? null,
+                mediaBuyerId: cfaMbId,
+                winnerId: winner.id,
+              },
+              'cross-funnel attempt insert failed — dedup still blocks the order; MB will not see this attempt',
             );
           }
+        } else {
+          // DIAGNOSTIC (Phase 1): a duplicate was blocked but NO media buyer could
+          // be resolved (no campaign MB, no winner MB) — so no cross-funnel row is
+          // written and the attempt is invisible to any MB. Should be near-zero now
+          // that MB is campaign-derived; if it ever fires, this is the data gap.
+          this.logger.warn(
+            {
+              event: 'cfa_skipped_no_mb',
+              campaignId: orderInput.campaignId ?? null,
+              winnerId: winner.id,
+              orderSource,
+            },
+            'duplicate blocked but no MB resolvable — cross-funnel attempt NOT recorded (invisible to MB)',
+          );
         }
         // Convert the cart so it doesn't linger as an abandonment — the customer
         // did submit, even though the order was a duplicate.

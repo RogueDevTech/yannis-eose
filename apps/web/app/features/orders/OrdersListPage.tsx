@@ -12,6 +12,7 @@ import { formatOrderTimestamp } from '~/lib/format-date';
 import { confirmationRateColorClass, deliveryRateColorClass } from '~/lib/rate-color';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { OverviewStatStrip, OverviewStatStripSkeleton, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { OrdersChartViewShellSkeleton } from '~/components/ui/deferred-skeletons';
@@ -324,6 +325,9 @@ export interface OrdersListPageProps {
   hideOfflineAndCartStats?: boolean;
   /** Teams available for the team filter dropdown. */
   teamsForFilter?: Array<{ id: string; name: string | null; department: string }>;
+  /** When set, shows a "Compare" button that opens /admin/compare for this source
+   *  (e.g. 'sales-orders'). Omit on pages without a compare source. */
+  compareSource?: string;
 }
 
 type OrdersListPageImplProps = Omit<OrdersListPageProps, 'deferredSecondary'> & {
@@ -361,6 +365,7 @@ function OrdersListPageImpl({
   currentUserId = '',
   myWorkload = null,
   liveEvents,
+  compareSource,
   canCreateOffline = false,
   createModalVariant = 'offline',
   canExport = false,
@@ -1951,6 +1956,7 @@ function OrdersListPageImpl({
                     startTime={filters?.startTime ?? ''}
                     endTime={filters?.endTime ?? ''}
                     periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
+                {compareSource && <CompareButton source={compareSource} />}
                 <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
                   {showChartView ? 'View as data' : 'View data in chart'}
                 </Button>
