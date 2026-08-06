@@ -574,6 +574,21 @@ function FormsTable({
         </Link>
       ),
     },
+    {
+      key: 'product',
+      header: 'Product',
+      mobileLabel: 'Product',
+      render: (r) =>
+        r.productName ? (
+          r.productName === 'Mixed' ? (
+            <span className="text-app-fg-muted italic">Mixed</span>
+          ) : (
+            <span className="text-app-fg">{r.productName}</span>
+          )
+        ) : (
+          <span className="text-app-fg-muted">—</span>
+        ),
+    },
     { key: 'views', header: 'Unique views', align: 'right', nowrap: true, render: (r) => r.views.toLocaleString() },
     { key: 'orders', header: 'Orders', align: 'right', nowrap: true, render: (r) => r.converted.toLocaleString() },
     { key: 'conversion', header: 'Conversion', align: 'right', nowrap: true, render: (r) => formatPct(r.conversionRate) },

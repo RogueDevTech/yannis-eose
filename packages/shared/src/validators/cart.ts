@@ -33,6 +33,13 @@ export const saveCartSchema = z.object({
   paymentMethod: z.string().trim().max(40).optional(),
   quantity: z.number().int().min(1).max(999).optional(),
   customFieldValues: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Form Analytics attribution key from the edge beacon. Persisted to
+   * cart_abandonments.session_id so the analytics funnel can match a started cart
+   * back to the form view that produced it. Optional — older beacons / blocked
+   * storage may omit it.
+   */
+  sessionId: z.string().min(1).max(128).optional(),
 });
 
 export type SaveCartInput = z.infer<typeof saveCartSchema>;

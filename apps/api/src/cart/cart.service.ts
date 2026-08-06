@@ -86,6 +86,8 @@ export class CartService {
       paymentMethod?: string;
       quantity?: number;
       customFieldValues?: Record<string, unknown>;
+      /** Form Analytics attribution key from the edge beacon (persisted to session_id). */
+      sessionId?: string;
     },
     actorId?: string | null,
   ) {
@@ -177,6 +179,9 @@ export class CartService {
             paymentMethod: progressive.paymentMethod ?? existingRow.paymentMethod,
             quantity: progressive.quantity ?? existingRow.quantity,
             customFieldValues: progressive.customFieldValues ?? existingRow.customFieldValues,
+            // Attribution: keep the first session_id captured for this cart (a later
+            // debounce shouldn't overwrite it), but backfill if it was missing before.
+            sessionId: existingRow.sessionId ?? input.sessionId ?? null,
             updatedAt: now,
           })
           .where(eq(schema.cartAbandonments.id, existingRow.id));
@@ -204,6 +209,8 @@ export class CartService {
           paymentMethod: progressive.paymentMethod ?? null,
           quantity: progressive.quantity ?? null,
           customFieldValues: progressive.customFieldValues ?? null,
+          // Form Analytics attribution: links this started cart to the form view.
+          sessionId: input.sessionId ?? null,
         })
         .returning({ id: schema.cartAbandonments.id });
 

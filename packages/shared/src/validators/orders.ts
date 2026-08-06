@@ -89,6 +89,12 @@ export const createOrderSchema = z.object({
   customFields: z
     .record(z.union([z.string(), z.number(), z.boolean(), z.array(z.string()).max(50)]))
     .optional(),
+  /**
+   * Form Analytics attribution key from the edge beacon. Persisted to
+   * orders.session_id so the analytics funnel can match a delivered order back to
+   * the form view that produced it. Optional (older beacons / blocked storage).
+   */
+  sessionId: z.string().min(1).max(128).optional(),
 });
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
