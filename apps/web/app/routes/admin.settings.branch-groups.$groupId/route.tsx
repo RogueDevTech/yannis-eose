@@ -165,12 +165,14 @@ function GroupDetailLoadingShell() {
           <PageHeaderMobileTools
             sheetTitle="Group tools"
             triggerAriaLabel="Group toolbar"
-            desktop={
-              <>
-                <PageRefreshButton />
-                <Button variant="secondary" size="sm" disabled className="opacity-60">Edit</Button>
-                <Button variant="primary" size="sm" disabled className="opacity-60">New Branch</Button>
-              </>
+            desktopActions
+            desktopActionsLabel="Actions"
+            desktop={<PageRefreshButton />}
+            sheet={
+              <div className="space-y-2">
+                <Button variant="secondary" size="sm" disabled className="w-full justify-center opacity-60">Edit</Button>
+                <Button variant="primary" size="sm" disabled className="w-full justify-center opacity-60">New Branch</Button>
+              </div>
             }
           />
         }

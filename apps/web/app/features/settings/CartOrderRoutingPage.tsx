@@ -57,11 +57,9 @@ export function CartOrderRoutingPage({ rules, branches, teams = [] }: Props) {
             sheetTitle="Actions"
             triggerAriaLabel="Cart routing actions"
             showMobileRefresh={false}
-            desktop={
-              <Button size="sm" onClick={() => setShowCreate(true)}>
-                Add rule
-              </Button>
-            }
+            desktopActions
+            desktopActionsLabel="Actions"
+            desktop={null}
             sheet={({ closeSheet }) => (
               <Button
                 className="h-12 w-full justify-center"

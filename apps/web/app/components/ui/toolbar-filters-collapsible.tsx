@@ -45,6 +45,19 @@ export interface ToolbarFiltersCollapsibleProps {
   onClearAll?: () => void;
   filtersButtonLabel?: string;
   sheetDoneLabel?: string;
+  /**
+   * Draft-until-Apply support. When provided, the modal footer becomes an
+   * **Apply** button: filter controls stage changes locally (via `useDraftFilters`)
+   * and nothing navigates until Apply is pressed. Wire to the draft hook's `apply`;
+   * `applyDisabled` to `!draft.dirty`.
+   */
+  onApply?: () => void;
+  /** Disables the Apply button (typically `!draft.dirty`). */
+  applyDisabled?: boolean;
+  /** Label for the Apply button. Default "Apply". */
+  applyLabel?: string;
+  /** Called when the Filters modal opens — re-seed the draft. Wire to `draft.reseed`. */
+  onOpen?: () => void;
   /** @deprecated Layout no longer branches on a breakpoint — kept for compatibility. */
   breakpoint?: ToolbarFiltersBreakpoint;
   /** Extra classes on outer `border-b` wrapper. */
@@ -72,11 +85,19 @@ export function ToolbarFiltersCollapsible({
   onClearAll,
   filtersButtonLabel = 'Filters',
   sheetDoneLabel = 'Done',
+  onApply,
+  applyDisabled = false,
+  applyLabel = 'Apply',
+  onOpen,
   className = '',
   sheetBodyMaxHeightClassName = 'max-h-[min(70dvh,480px)]',
 }: ToolbarFiltersCollapsibleProps) {
   const [open, setOpen] = useState(false);
   const titleId = useId();
+  const openModal = () => {
+    onOpen?.();
+    setOpen(true);
+  };
 
   // The modal body: an explicit `sheetFilterBody` wins; otherwise reuse the
   // controls passed as `desktopInlineFilters` (now the single source of truth).
@@ -116,7 +137,7 @@ export function ToolbarFiltersCollapsible({
               ].join(' ')}
               aria-haspopup="dialog"
               aria-expanded={open}
-              onClick={() => setOpen(true)}
+              onClick={openModal}
             >
               <ToolbarFiltersFunnelIcon />
               <span>{filtersButtonLabel}</span>
@@ -179,9 +200,24 @@ export function ToolbarFiltersCollapsible({
             {modalBody}
           </div>
           <div className="border-t border-app-border p-3 pt-2">
-            <Button type="button" variant="primary" className="w-full" onClick={() => setOpen(false)}>
-              {sheetDoneLabel}
-            </Button>
+            {onApply ? (
+              <Button
+                type="button"
+                variant="primary"
+                className="w-full"
+                disabled={applyDisabled}
+                onClick={() => {
+                  onApply();
+                  setOpen(false);
+                }}
+              >
+                {applyLabel}
+              </Button>
+            ) : (
+              <Button type="button" variant="primary" className="w-full" onClick={() => setOpen(false)}>
+                {sheetDoneLabel}
+              </Button>
+            )}
           </div>
         </Modal>
       ) : null}

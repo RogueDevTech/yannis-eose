@@ -58,6 +58,8 @@ export function CSLeaderboardPage({
             sheetTitle="Actions"
             triggerAriaLabel="CS leaderboard date range"
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
@@ -65,9 +67,9 @@ export function CSLeaderboardPage({
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
-                <CompareButton source="sales-leaderboard" />
               </>
             }
+            sheet={<CompareButton source="sales-leaderboard" />}
           />
         }
       />

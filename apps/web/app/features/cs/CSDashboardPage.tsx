@@ -610,17 +610,14 @@ function CSQueueStaticHeader({
                 <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
               ) : null
             }
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
                 <PageRefreshButton />
-                {canCreateOffline && (
-                  <Button variant="primary" size="sm" onClick={onCreateOffline}>
-                    Create offline order
-                  </Button>
-                )}
               </>
             }
             sheet={({ closeSheet }) => (

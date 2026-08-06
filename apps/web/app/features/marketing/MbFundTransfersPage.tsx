@@ -432,6 +432,8 @@ export function PeerTransfersPanel({
           <PageHeaderMobileTools
             sheetTitle="Tools"
             triggerAriaLabel="Transfer tools"
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <DateFilterBar
@@ -441,9 +443,6 @@ export function PeerTransfersPanel({
                   chrome="pill"
                 />
                 <PageRefreshButton />
-                <Button size="sm" onClick={() => setShowCreateModal(true)}>
-                  Send to peer
-                </Button>
               </>
             }
             sheet={

@@ -502,62 +502,17 @@ export function LogisticsProviderDetailPage({
             saveFilterKey
             filtersBadgeCount={shipmentFilter ? 1 : 0}
             onClearFilters={shipmentFilter ? () => handleShipmentFilter('') : undefined}
+            desktopActions
             desktop={
-              <div className="flex flex-wrap items-center gap-2">
+              <>
+                <PageRefreshButton />
                 <DateFilterBar
                   startDate={dateFilters?.startDate ?? undefined}
                   endDate={dateFilters?.endDate ?? undefined}
                   periodAllTime={dateFilters?.periodAllTime}
                   chrome="pill"
                 />
-                <PageRefreshButton />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => {
-                    const totals = {
-                      received: totalReceived,
-                      sold: totalSold,
-                      transferredOut: totalTransferredOut,
-                      adjusted: totalAdjusted,
-                      writtenOff: totalWrittenOff,
-                      dispatched: totalDispatched,
-                      reserved: totalReserved,
-                      available: totalAvailable,
-                      qtyRemitted: locationBreakdown.reduce((a, l) => a + l.qtyRemitted, 0),
-                      qtyPending: locationBreakdown.reduce((a, l) => a + l.qtyPending, 0),
-                      amountRemitted: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountRemitted) || 0), 0)),
-                      amountPending: String(locationBreakdown.reduce((a, l) => a + (parseFloat(l.amountPending) || 0), 0)),
-                      qtyAwaitingRemittance: 0,
-                      amountAwaitingRemittance: '0',
-                    };
-                    setReportModal({ name: `${provider.name} (All Locations)`, row: totals });
-                  }}
-                >
-                  View report
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setShowCashStatementModal(true)}
-                >
-                  Cash statement
-                </Button>
-                {shipments.length > 0 && (
-                  <FormSelect
-                    value={shipmentFilter ?? ''}
-                    onChange={(e) => handleShipmentFilter(e.target.value)}
-                    className="w-56"
-                  >
-                    <option value="">All shipments</option>
-                    {shipments.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        SHIP-{String(s.referenceNumber).padStart(4, '0')}{s.label ? ` · ${s.label}` : ''}{s.destinationName ? ` → ${s.destinationName}` : ''}
-                      </option>
-                    ))}
-                  </FormSelect>
-                )}
-              </div>
+              </>
             }
             filters={
               shipments.length > 0 ? (

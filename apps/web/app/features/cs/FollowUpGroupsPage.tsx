@@ -56,11 +56,10 @@ export function FollowUpGroupsPage({ groups, closers, deferredLoading = false }:
             sheetTitle="Actions"
             triggerAriaLabel="Follow-up tools"
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
-                <Link to="/admin/cs/follow-up" className="btn-secondary btn-sm inline-flex items-center gap-1.5">
-                  Batches
-                </Link>
                 <PageRefreshButton />
               </>
             }

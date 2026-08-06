@@ -137,7 +137,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         options={REVENUE_OPTIONS}
       />
     );
-  const revenueToggle = renderRevenueSelect('header');
 
   /** Build a link with current date filter context. */
   function buildLink(base: string, extra?: Record<string, string>): string {
@@ -231,22 +230,22 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
-            triggerAriaLabel="Dashboard date range"
+            triggerAriaLabel="Dashboard actions"
             saveFilterKey
+            desktopActions
             desktop={
               <>
-                {revenueToggle}
                 <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters?.startDate ?? ''}
                     endDate={filters?.endDate ?? ''}
                     periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
-                <CompareButton source="admin-overview" />
               </>
             }
             sheet={
-              <div className="py-1">
+              <div className="flex flex-col gap-2.5">
                 {renderRevenueSelect('sheet')}
+                <CompareButton source="admin-overview" />
               </div>
             }
           />

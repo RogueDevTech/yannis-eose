@@ -1108,6 +1108,7 @@ export function MarketingAdSpendPage({
                 </>
               );
             })()}
+            desktopActions
             desktop={
               <>
                 <PageRefreshButton />
@@ -1117,18 +1118,11 @@ export function MarketingAdSpendPage({
                     startTime={dateFilters.startTime}
                     endTime={dateFilters.endTime}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
-                <CompareButton source="marketing-expenses" />
-                <BranchScopedLink
-                  to="/admin/marketing/expenses/new"
-                  actionLabel="adding ad spend"
-                  className="btn-primary btn-sm inline-flex items-center justify-center shrink-0"
-                >
-                  Add Expense
-                </BranchScopedLink>
               </>
             }
             sheet={({ closeSheet }) => (
               <>
+                <CompareButton source="marketing-expenses" />
                 <BranchScopedLink
                   to="/admin/marketing/expenses/new"
                   actionLabel="adding ad spend"

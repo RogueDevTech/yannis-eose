@@ -90,12 +90,11 @@ export default function CompanyGroupsPage() {
             sheetTitle="Group tools"
             sheetSubtitle={<span>Manage company groups</span>}
             triggerAriaLabel="Group toolbar"
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
-                <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
-                  New Company Group
-                </Button>
               </>
             }
             sheet={({ closeSheet }) => (

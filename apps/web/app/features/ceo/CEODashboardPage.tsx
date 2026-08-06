@@ -305,46 +305,10 @@ export function CEODashboardPage({
             sheetTitle="Actions"
             triggerAriaLabel="Executive overview toolbar"
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
-              <>
-                <button
-                  type="button"
-                  onClick={() => setShowChartView((v) => !v)}
-                  className="btn-secondary btn-sm"
-                >
-                  {showChartView ? 'View as data' : 'View data in chart'}
-                </button>
-                {/* Refresh — recomputes the finance materialized views (revenue, profit, ad spend,
-                    commission rollups). The page never auto-refreshes. */}
-                <refreshFetcher.Form method="post" className="inline-flex">
-                  <input type="hidden" name="intent" value="refreshExecutiveData" />
-                  <button
-                    type="submit"
-                    disabled={isRefreshing}
-                    className="btn-secondary btn-sm inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
-                    title="Recompute revenue, profit, ad spend, and commission rollups from live data"
-                  >
-                    {isRefreshing ? (
-                      <>
-                        <Spinner size="sm" />
-                        Refreshing…
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-                        </svg>
-                        Refresh data
-                      </>
-                    )}
-                  </button>
-                </refreshFetcher.Form>
-                <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
-                <CompareButton source="ceo-overview" />
-                {showBackToDashboard && (
-                  <Link to="/admin" className="btn-secondary btn-sm">Back to Dashboard</Link>
-                )}
-              </>
+              <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
             }
             sheet={({ closeSheet }) => (
               <>
@@ -360,6 +324,8 @@ export function CEODashboardPage({
                 >
                   {showChartView ? 'View as data' : 'View data in chart'}
                 </Button>
+                {/* Refresh — recomputes the finance materialized views (revenue, profit, ad spend,
+                    commission rollups). The page never auto-refreshes. */}
                 <refreshFetcher.Form method="post" className="block">
                   <input type="hidden" name="intent" value="refreshExecutiveData" />
                   <Button
@@ -368,6 +334,7 @@ export function CEODashboardPage({
                     size="sm"
                     className="h-12 w-full justify-center"
                     disabled={isRefreshing}
+                    title="Recompute revenue, profit, ad spend, and commission rollups from live data"
                   >
                     {isRefreshing ? (
                       <>
@@ -379,6 +346,7 @@ export function CEODashboardPage({
                     )}
                   </Button>
                 </refreshFetcher.Form>
+                <CompareButton source="ceo-overview" />
                 {showBackToDashboard && (
                   <Link to="/admin" className="btn-secondary btn-sm h-12 flex items-center justify-center w-full">
                     Back to Dashboard

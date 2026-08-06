@@ -300,18 +300,11 @@ export function FormsPage({
             saveFilterKey
             filtersBadgeCount={productFilter ? 1 : 0}
             onClearFilters={productFilter ? () => applyProductFilter('') : undefined}
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
-                <BranchScopedLink
-                  to="/admin/marketing/forms/new"
-                  actionLabel="creating a form"
-                  prefetch="intent"
-                >
-                  <Button variant="primary" size="sm">
-                    New Form
-                  </Button>
-                </BranchScopedLink>
               </>
             }
             filters={

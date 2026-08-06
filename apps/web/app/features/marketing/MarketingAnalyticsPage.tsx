@@ -170,14 +170,14 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
 
   const statItems: OverviewStatStripItem[] = [
     {
-      label: 'Unique form views',
-      value: <AnimatedCount value={statStrip.uniqueLandings} />,
-      title: 'Distinct visitors: each person counts once, no matter how many times they reopen the form.',
-    },
-    {
       label: 'All form views',
       value: <AnimatedCount value={statStrip.rawLandings} />,
       title: 'Every time the form was opened, including the same visitor refreshing or returning. Always >= Unique form views.',
+    },
+    {
+      label: 'Unique form views',
+      value: <AnimatedCount value={statStrip.uniqueLandings} />,
+      title: 'Distinct visitors: each person counts once, no matter how many times they reopen the form.',
     },
     {
       label: 'Avg time on form',
@@ -243,6 +243,8 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
             sheetTitle="Actions"
             triggerAriaLabel="Analytics actions"
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 {liveEvents != null && liveEvents.length > 0 && (
@@ -254,9 +256,9 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                   periodAllTime={filters?.periodAllTime ?? false}
                   chrome="pill"
                 />
-                {!isDetail && <CompareButton source="marketing-analytics" />}
               </>
             }
+            sheet={!isDetail ? <CompareButton source="marketing-analytics" /> : undefined}
           />
         }
       />

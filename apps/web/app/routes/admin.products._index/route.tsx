@@ -557,36 +557,11 @@ function ProductsRouteInner(
                 />
               ) : undefined
             }
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
-                {data.canManageOffers ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      startOffersSummaryFetch();
-                      setShowCreateOffer(true);
-                    }}
-                  >
-                    Create offer
-                  </Button>
-                ) : null}
-                {data.canCreateProduct ? (
-                  <ActionDropdown
-                    id="add-product"
-                    trigger="button"
-                    triggerLabel="Add product"
-                    triggerVariant="primary"
-                    openMenuId={openHeaderMenuId}
-                    setOpenMenuId={setOpenHeaderMenuId}
-                    items={[
-                      { label: 'Add manually', to: '/admin/products/new' },
-                      { label: 'Import from Excel', to: '/admin/products/import' },
-                    ]}
-                  />
-                ) : null}
               </div>
             }
             sheet={({ closeSheet }) => (

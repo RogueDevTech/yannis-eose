@@ -386,17 +386,11 @@ function ShipmentsIndexContent(data: {
                 </div>
               </form>
             }
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
-                <Link to="/admin/inventory" prefetch="intent" className="btn-secondary btn-sm">
-                  View inventory
-                </Link>
-                {data.canIntake ? (
-                  <Link to="/admin/shipments/receive" prefetch="intent" className="btn-primary btn-sm">
-                    Receive shipment
-                  </Link>
-                ) : null}
               </div>
             }
             sheet={

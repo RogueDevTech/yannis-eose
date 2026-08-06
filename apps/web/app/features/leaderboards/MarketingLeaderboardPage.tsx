@@ -61,8 +61,9 @@ export function MarketingLeaderboardPage({
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
-            triggerAriaLabel="Marketing leaderboard date range"
+            triggerAriaLabel="Marketing leaderboard actions"
             saveFilterKey
+            desktopActions
             desktop={
               <>
                 <PageRefreshButton />
@@ -70,8 +71,10 @@ export function MarketingLeaderboardPage({
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
-                <CompareButton source="marketing-leaderboard" />
               </>
+            }
+            sheet={
+              <CompareButton source="marketing-leaderboard" />
             }
           />
         }

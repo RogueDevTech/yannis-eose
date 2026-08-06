@@ -59,14 +59,11 @@ export function PayrollTaxBandViewPage({ config, canWrite }: PayrollTaxBandViewP
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Tax band toolbar"
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />
-                {canWrite ? (
-                  <Button variant="primary" size="sm" onClick={() => setShowEdit(true)}>
-                    Edit bands
-                  </Button>
-                ) : null}
               </div>
             }
             sheet={({ closeSheet }) =>

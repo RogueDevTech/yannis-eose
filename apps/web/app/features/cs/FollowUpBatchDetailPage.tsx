@@ -333,27 +333,11 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
             sheetTitle="Actions"
             triggerAriaLabel="Batch tools"
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
-                {selectedItemIds.size > 0 && canAssign && (
-                  <button
-                    type="button"
-                    onClick={() => { setAssignModalOpen(true); setAssignAgentIds(new Set()); }}
-                    className="btn-primary btn-sm inline-flex items-center gap-1.5"
-                  >
-                    Assign {selectedItemIds.size} order{selectedItemIds.size !== 1 ? 's' : ''}
-                  </button>
-                )}
                 <PageRefreshButton />
-                {canDelete && !isReverted && (
-                  <button
-                    type="button"
-                    onClick={() => setDeleteConfirmOpen(true)}
-                    className="btn-danger btn-sm inline-flex items-center gap-1.5"
-                  >
-                    Delete batch
-                  </button>
-                )}
               </>
             }
             sheet={

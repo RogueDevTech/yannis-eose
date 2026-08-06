@@ -418,14 +418,11 @@ export function WarehousesPage({
                 />
               </div>
             }
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />
-                {canManage ? (
-                  <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-                    Add warehouse
-                  </Button>
-                ) : null}
               </div>
             }
             sheet={({ closeSheet }) => (

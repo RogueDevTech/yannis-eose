@@ -495,28 +495,11 @@ export function ChartOfAccountsPage({
                 {filterControls}
               </>
             }
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 <PageRefreshButton />
-                {canWrite && (
-                  <Link to="/admin/accounting/opening-balances" className="btn-secondary btn-sm inline-flex items-center">
-                    {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
-                  </Link>
-                )}
-                {canWrite ? (
-                  <ActionDropdown
-                    id="coa-add-account"
-                    openMenuId={openMenuId}
-                    setOpenMenuId={setOpenMenuId}
-                    trigger="button"
-                    triggerVariant="primary"
-                    triggerLabel="Add Account"
-                    items={[
-                      { label: 'Leaf (postable)', onClick: () => openCreate('leaf') },
-                      { label: 'Group (header)', onClick: () => openCreate('group') },
-                    ]}
-                  />
-                ) : null}
               </div>
             }
             sheet={

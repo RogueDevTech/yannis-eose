@@ -170,6 +170,8 @@ export function JournalEntriesPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Journal entries tools"
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 {filters ? (
@@ -181,11 +183,6 @@ export function JournalEntriesPage({
                   />
                 ) : null}
                 <PageRefreshButton />
-                {canWrite ? (
-                  <Link to="/admin/accounting/journal-entries/new" prefetch="intent">
-                    <Button type="button" size="sm">New Entry</Button>
-                  </Link>
-                ) : null}
               </div>
             }
             sheet={

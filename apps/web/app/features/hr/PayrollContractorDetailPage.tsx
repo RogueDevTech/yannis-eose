@@ -404,6 +404,7 @@ export function PayrollContractorDetailPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Contractor detail toolbar"
+            desktopActions
             desktop={
               <div className="flex items-center gap-2 flex-wrap">
                 <PageRefreshButton />
@@ -414,50 +415,38 @@ export function PayrollContractorDetailPage({
                   chrome="pill"
                 />
                 <StatusBadge status={contractor.active ? 'ACTIVE' : 'INACTIVE'} />
+              </div>
+            }
+            sheet={({ closeSheet }) => (
+              <>
                 {canWrite ? (
                   <>
-                    <Button variant="secondary" size="sm" onClick={() => setShowEdit(true)}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-12 w-full justify-center"
+                      onClick={() => {
+                        closeSheet();
+                        setShowEdit(true);
+                      }}
+                    >
                       Edit
                     </Button>
                     <Button
                       variant={contractor.active ? 'danger' : 'secondary'}
                       size="sm"
-                      onClick={() => setShowActiveConfirm(true)}
+                      className="h-12 w-full justify-center"
+                      onClick={() => {
+                        closeSheet();
+                        setShowActiveConfirm(true);
+                      }}
                     >
                       {contractor.active ? 'Deactivate' : 'Reactivate'}
                     </Button>
                   </>
                 ) : null}
-              </div>
-            }
-            sheet={({ closeSheet }) =>
-              canWrite ? (
-                <>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="h-12 w-full justify-center"
-                    onClick={() => {
-                      closeSheet();
-                      setShowEdit(true);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant={contractor.active ? 'danger' : 'secondary'}
-                    size="sm"
-                    className="h-12 w-full justify-center"
-                    onClick={() => {
-                      closeSheet();
-                      setShowActiveConfirm(true);
-                    }}
-                  >
-                    {contractor.active ? 'Deactivate' : 'Reactivate'}
-                  </Button>
-                </>
-              ) : null
-            }
+              </>
+            )}
           />
         }
       />

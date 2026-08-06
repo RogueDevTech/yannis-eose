@@ -73,32 +73,17 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
             triggerAriaLabel="Finance toolbar and filters"
             saveFilterKey
             filtersBadgeCount={filtersBadgeCount}
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
-                {branches.length > 0 && (
-                  <div className="relative">
-                    {filters.branchId && (
-                      <FilterDismiss onClear={() => setFilter('branchId', '')} />
-                    )}
-                    <SearchableSelect
-                      id="finance-overview-branch"
-                      value={filters.branchId ?? ''}
-                      onChange={(v) => setFilter('branchId', v)}
-                      options={branchOptions}
-                      placeholder="All branches"
-                      searchPlaceholder="Search branches..."
-                      disabled={branchSwitching}
-                    />
-                  </div>
-                )}
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     startTime={filters.startTime ?? ''}
                     endTime={filters.endTime ?? ''}
                     periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
-                <CompareButton source="finance-overview" />
               </>
             }
             filters={
@@ -120,6 +105,28 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
                   />
                 </div>
               ) : undefined
+            }
+            sheet={
+              <>
+                {branches.length > 0 && (
+                  <div className="relative w-full">
+                    {filters.branchId && (
+                      <FilterDismiss onClear={() => setFilter('branchId', '')} />
+                    )}
+                    <SearchableSelect
+                      id="finance-overview-branch"
+                      value={filters.branchId ?? ''}
+                      onChange={(v) => setFilter('branchId', v)}
+                      options={branchOptions}
+                      placeholder="All branches"
+                      searchPlaceholder="Search branches..."
+                      disabled={branchSwitching}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                )}
+                <CompareButton source="finance-overview" />
+              </>
             }
           />
         }

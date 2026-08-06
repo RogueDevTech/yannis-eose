@@ -444,16 +444,14 @@ function ReconciliationDetail({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Reconciliation tools"
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
-                {displayStatus === 'IN_PROGRESS' ? (
-                  <Button type="button" size="sm" onClick={() => setShowCompleteConfirm(true)}>
-                    Complete
-                  </Button>
-                ) : (
+                {displayStatus !== 'IN_PROGRESS' ? (
                   <StatusBadge status="COMPLETED" label="Completed" variant="success" />
-                )}
+                ) : null}
               </div>
             }
             sheet={
@@ -671,12 +669,11 @@ export function BankReconciliationPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Bank reconciliation tools"
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
-                <Button type="button" size="sm" onClick={() => setShowCreate(true)}>
-                  New Reconciliation
-                </Button>
               </div>
             }
             sheet={

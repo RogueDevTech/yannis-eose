@@ -329,12 +329,11 @@ export function ExpenseSubmissionsPage({
         mobileInlineActions
         actions={
           <PageHeaderMobileTools
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
-                <Button type="button" onClick={() => setShowSubmitModal(true)}>
-                  Submit Expense
-                </Button>
               </div>
             }
             sheet={

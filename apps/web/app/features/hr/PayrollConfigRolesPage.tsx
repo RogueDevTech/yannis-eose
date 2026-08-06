@@ -154,18 +154,11 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
                   }
                 : undefined
             }
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
-                {headerAction}
-                {!hideRolesContent && canWrite && (
-                  <Link
-                    to="/hr/payroll/config/rules/new"
-                    className="btn-primary inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg"
-                  >
-                    + Pay Role
-                  </Link>
-                )}
               </div>
             }
             filters={
@@ -186,17 +179,20 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
                 />
               </div>
             }
-            sheet={({ closeSheet }) =>
-              canWrite ? (
-                <Link
-                  to="/hr/payroll/config/rules/new"
-                  onClick={closeSheet}
-                  className="btn-secondary h-12 w-full flex items-center justify-center text-sm font-medium rounded-lg"
-                >
-                  Pay Role
-                </Link>
-              ) : null
-            }
+            sheet={({ closeSheet }) => (
+              <>
+                {headerAction ? <div className="w-full [&>*]:w-full">{headerAction}</div> : null}
+                {!hideRolesContent && canWrite ? (
+                  <Link
+                    to="/hr/payroll/config/rules/new"
+                    onClick={closeSheet}
+                    className="btn-secondary h-12 w-full flex items-center justify-center text-sm font-medium rounded-lg"
+                  >
+                    Pay Role
+                  </Link>
+                ) : null}
+              </>
+            )}
           />
         }
       />

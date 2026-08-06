@@ -159,10 +159,11 @@ export function TaxReturnsPage({
             sheetTitle="Actions"
             triggerAriaLabel="Tax returns toolbar"
             filters={monthInput('vat-month-mobile')}
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
-                {exportButton}
               </>
             }
             sheet={

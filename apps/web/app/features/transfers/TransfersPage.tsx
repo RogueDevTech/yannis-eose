@@ -673,6 +673,8 @@ export function TransfersPage({
             filters={mobileTransferFiltersBody}
             filtersBadgeCount={(fromLocationFilter ? 1 : 0) + (toLocationFilter ? 1 : 0) + (productFilter ? 1 : 0)}
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
@@ -680,16 +682,6 @@ export function TransfersPage({
                     startDate={periodAllTime ? '' : effectiveDateRange.startDate}
                     endDate={periodAllTime ? '' : effectiveDateRange.endDate}
                     periodAllTime={periodAllTime} chrome="pill" />
-                {canInitiate && (
-                  <>
-                    <Button variant="primary" size="sm" onClick={openTransferForm}>
-                      {initiateTransferCta}
-                    </Button>
-                    <Link to="/admin/transfers/import" prefetch="intent" className="btn-secondary btn-sm">
-                      Bulk import
-                    </Link>
-                  </>
-                )}
               </>
             }
             sheet={({ closeSheet }) => (

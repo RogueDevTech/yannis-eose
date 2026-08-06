@@ -450,6 +450,8 @@ export function MarketingOverviewPage({
                 <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
               ) : null
             }
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 {liveEvents != null && liveEvents.length > 0 && (
@@ -460,9 +462,9 @@ export function MarketingOverviewPage({
                     startDate={filters?.startDate ?? ''}
                     endDate={filters?.endDate ?? ''}
                     periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
-                <CompareButton source="marketing-overview" />
               </>
             }
+            sheet={<CompareButton source="marketing-overview" />}
           />
         }
       />

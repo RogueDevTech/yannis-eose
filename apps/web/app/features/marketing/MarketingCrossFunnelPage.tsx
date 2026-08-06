@@ -307,18 +307,23 @@ export function MarketingCrossFunnelPage({
             triggerAriaLabel="Duplicate attempts toolbar"
             saveFilterKey
             filtersBadgeCount={filterBadgeCount}
+            desktopActions
             desktop={
               <>
                 <PageRefreshButton />
                 <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime} chrome="pill" />
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
                 <CompareButton source="marketing-cross-funnel" />
                 {canExport && (
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                  <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" onClick={() => { closeSheet(); setShowExportModal(true); }}>
                     Generate report
                   </Button>
                 )}
               </>
-            }
+            )}
             filters={
               <>
                 {showMbFilter && mediaBuyersForFilter.length > 0 && (
@@ -398,20 +403,6 @@ export function MarketingCrossFunnelPage({
                 )}
               </>
             }
-            sheet={canExport ? ({ closeSheet }) => (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-12 w-full justify-center"
-                onClick={() => {
-                  closeSheet();
-                  setShowExportModal(true);
-                }}
-              >
-                Generate report
-              </Button>
-            ) : undefined}
           />
         }
       />

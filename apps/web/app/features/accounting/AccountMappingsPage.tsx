@@ -338,23 +338,11 @@ export function AccountConfigPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Account config toolbar"
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />
-                {activeTab === 'accounts' && canWrite && (
-                  <ActionDropdown
-                    id="account-config-add-account"
-                    openMenuId={openMenuId}
-                    setOpenMenuId={setOpenMenuId}
-                    trigger="button"
-                    triggerVariant="primary"
-                    triggerLabel="Add Account"
-                    items={[
-                      { label: 'Leaf (postable)', onClick: () => openAccountCreateRef.current?.('leaf') },
-                      { label: 'Group (header)', onClick: () => openAccountCreateRef.current?.('group') },
-                    ]}
-                  />
-                )}
               </div>
             }
             sheet={

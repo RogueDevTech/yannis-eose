@@ -267,6 +267,8 @@ export function HRPage({
             sheetTitle="Actions"
             triggerAriaLabel="HR toolbar"
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex items-center gap-2 flex-wrap">
                 <PageRefreshButton />
@@ -276,16 +278,6 @@ export function HRPage({
                   periodAllTime={filters.periodAllTime}
                   chrome="pill"
                 />
-                {canExportBankPay ? (
-                  <Button variant="secondary" size="sm" onClick={() => setShowBankPayExport(true)}>
-                    Export bank pay
-                  </Button>
-                ) : null}
-                {showGenerateButton ? (
-                  <Button variant="primary" size="sm" onClick={() => navigate('/hr/payroll/generate')}>
-                    Generate Monthly Batch
-                  </Button>
-                ) : null}
               </div>
             }
             sheet={({ closeSheet }) => (

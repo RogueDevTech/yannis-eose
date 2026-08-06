@@ -98,23 +98,10 @@ export function NotificationsPage({
             <PageHeaderMobileTools
               sheetTitle="Actions"
               triggerAriaLabel="Notification actions"
+              desktopActions
+              desktopActionsLabel="Actions"
               desktop={
                 <div className="flex items-center gap-2">
-                  <Link
-                    to={
-                      unreadOnlyFilter
-                        ? buildNotificationsListUrl({}, listRouteSearch, listBasePath)
-                        : buildNotificationsListUrl({ unreadOnly: 'true' }, listRouteSearch, listBasePath)
-                    }
-                    className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
-                  >
-                    {unreadOnlyFilter ? 'Show all' : 'Unread only'}
-                  </Link>
-                  {displayUnreadCount(unreadCount) > 0 && (
-                    <Button type="button" variant="secondary" size="sm" onClick={() => markAllRead()}>
-                      Mark all read
-                    </Button>
-                  )}
                   <PageRefreshButton />
                 </div>
               }
@@ -158,23 +145,10 @@ export function NotificationsPage({
             <PageHeaderMobileTools
               sheetTitle="Actions"
               triggerAriaLabel="Notification actions"
+              desktopActions
+              desktopActionsLabel="Actions"
               desktop={
                 <div className="flex items-center gap-2">
-                  <Link
-                    to={
-                      unreadOnlyFilter
-                        ? buildNotificationsListUrl({}, listRouteSearch, listBasePath)
-                        : buildNotificationsListUrl({ unreadOnly: 'true' }, listRouteSearch, listBasePath)
-                    }
-                    className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
-                  >
-                    {unreadOnlyFilter ? 'Show all' : 'Unread only'}
-                  </Link>
-                  {displayUnreadCount(unreadCount) > 0 && (
-                    <Button type="button" variant="secondary" size="sm" onClick={() => markAllRead()}>
-                      Mark all read
-                    </Button>
-                  )}
                   <PageRefreshButton />
                 </div>
               }

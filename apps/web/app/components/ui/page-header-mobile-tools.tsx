@@ -17,6 +17,15 @@ function FiltersIcon({ className = 'w-4 h-4' }: { className?: string }) {
   );
 }
 
+/** Vertical three-dots — matches the mobile Actions button (MobileDateFilterRow). */
+function KebabVerticalIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+    </svg>
+  );
+}
+
 export interface PageHeaderMobileToolsProps {
   desktop: ReactNode;
   sheet?: ReactNode | PageHeaderMobileToolsSheetRender;
@@ -42,6 +51,22 @@ export interface PageHeaderMobileToolsProps {
   desktopActions?: boolean;
   /** Label for the desktop Actions button. Default "Actions". */
   desktopActionsLabel?: string;
+  /**
+   * Draft-until-Apply support. When provided, the sheet's footer button becomes
+   * an **Apply** action: filter controls stage changes locally (via
+   * `useDraftFilters`) and nothing navigates until the user presses it. Wire this
+   * to the draft hook's `apply`; `applyDisabled` to `!draft.dirty`.
+   */
+  onApply?: () => void;
+  /** Disables the Apply button (typically `!draft.dirty`). */
+  applyDisabled?: boolean;
+  /** Label for the Apply button. Default "Apply". */
+  applyLabel?: string;
+  /**
+   * Called when the sheet/dropdown OPENS — re-seed the draft from the committed
+   * URL so a previously-abandoned draft doesn't linger. Wire to `draft.reseed`.
+   */
+  onSheetOpen?: () => void;
 }
 
 /**
@@ -63,6 +88,10 @@ export function PageHeaderMobileTools({
   saveFilterKey,
   desktopActions = false,
   desktopActionsLabel = 'Actions',
+  onApply,
+  applyDisabled = false,
+  applyLabel = 'Apply',
+  onSheetOpen,
 }: PageHeaderMobileToolsProps) {
   // `openedFrom` tracks the surface that opened the actions: 'desktop' anchors a
   // popover under the Actions button; 'mobile' (via the bridge) shows the full
@@ -71,7 +100,10 @@ export function PageHeaderMobileTools({
   const titleId = useId();
   const closeSheet = useCallback(() => setOpenedFrom(null), []);
   // The mobile-actions bridge calls this — always the mobile sheet.
-  const openSheet = useCallback(() => setOpenedFrom('mobile'), []);
+  const openSheet = useCallback(() => {
+    onSheetOpen?.();
+    setOpenedFrom('mobile');
+  }, [onSheetOpen]);
   const desktopBtnRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [popoverPos, setPopoverPos] = useState({ top: 0, right: 0 });
@@ -145,13 +177,19 @@ export function PageHeaderMobileTools({
             type="button"
             variant="secondary"
             size="sm"
-            onClick={() => setOpenedFrom((v) => (v === 'desktop' ? null : 'desktop'))}
+            onClick={() =>
+              setOpenedFrom((v) => {
+                if (v === 'desktop') return null;
+                onSheetOpen?.();
+                return 'desktop';
+              })
+            }
             aria-label={triggerAriaLabel}
             aria-haspopup="menu"
             aria-expanded={openedFrom === 'desktop'}
           >
             <span className="inline-flex items-center gap-1.5">
-              <FiltersIcon className="w-4 h-4" />
+              <KebabVerticalIcon className="w-4 h-4" />
               {desktopActionsLabel}
               {filtersBadgeCount > 0 && (
                 <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-500 px-1 text-2xs font-semibold text-white">
@@ -262,9 +300,24 @@ export function PageHeaderMobileTools({
             ) : null}
           </div>
           <div className="border-t border-app-border p-3 pt-2">
-            <Button type="button" variant="primary" className="w-full" onClick={() => setOpenedFrom(null)}>
-              {sheetCloseLabel}
-            </Button>
+            {onApply ? (
+              <Button
+                type="button"
+                variant="primary"
+                className="w-full"
+                disabled={applyDisabled}
+                onClick={() => {
+                  onApply();
+                  setOpenedFrom(null);
+                }}
+              >
+                {applyLabel}
+              </Button>
+            ) : (
+              <Button type="button" variant="primary" className="w-full" onClick={() => setOpenedFrom(null)}>
+                {sheetCloseLabel}
+              </Button>
+            )}
           </div>
         </Modal>
       ) : null}

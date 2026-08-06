@@ -33,7 +33,6 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Tabs } from '~/components/ui/tabs';
-import { SearchInput } from '~/components/ui/search-input';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
@@ -188,9 +187,15 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     const search = (pending && navigation.location ? navigation.location.search : location.search) || '';
     return parseSectionTab(search, canDistribute);
   }, [navigation.state, navigation.location, location.search, canDistribute]);
-  // Admin-level viewers are pinned to distribute except Peer transfers.
+  // Admin-level viewers only disburse (never receive), so they're pinned to the
+  // distribute section — EXCEPT for the sections they can legitimately view:
+  // Peer transfers and Recipient balances. Without the `balances` exemption the
+  // pin snapped admins straight back to "Funds Disbursed" when they clicked the
+  // Recipient balances tab.
   const displaySection: FundingSection =
-    isAdminViewer && rawDisplaySection !== 'peer' ? 'distributing' : rawDisplaySection;
+    isAdminViewer && rawDisplaySection !== 'peer' && rawDisplaySection !== 'balances'
+      ? 'distributing'
+      : rawDisplaySection;
 
   // ── Modal state ─────────────────────────────────────────
   const [showSendForm, setShowSendForm] = useState(false);
@@ -942,7 +947,16 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
                 </>
               );
             })()}
-            desktop={renderFundingHeaderToolbar(() => undefined)}
+            desktopActions
+            desktop={
+              <>
+                <PageRefreshButton />
+                <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
+              </>
+            }
             sheet={({ closeSheet }) =>
               renderFundingHeaderToolbar(closeSheet, {
                 showRefresh: false,
@@ -1945,12 +1959,12 @@ function RecipientBalancesPanel({
 
   return (
     <div>
-      <div className="p-3">
-        <SearchInput
+      <div className="flex items-center px-4 py-3 border-b border-app-border">
+        <PageSearchControl
           value={search}
-          onChange={setSearch}
-          onSubmit={() => {}}
           placeholder="Search recipient name..."
+          title="Search recipients"
+          onApply={setSearch}
         />
       </div>
       {/* Desktop */}
