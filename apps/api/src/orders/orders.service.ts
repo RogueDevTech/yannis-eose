@@ -2108,6 +2108,26 @@ export class OrdersService {
               branchId: branchId ?? null,
               winner: { id: winner.id, mediaBuyerId: winner.mediaBuyerId ?? '' },
             });
+            // Notify the runner-up MB that their submission came in but matched an
+            // existing order (so it did NOT become a second order). Without this, the
+            // MB sees "success" on the form but no order in their list and reports the
+            // form "isn't tracking". Fire-and-forget (enqueueCreate never awaits) and
+            // wrapped so it can NEVER throw into the frozen create() path.
+            try {
+              this.notifications.enqueueCreate({
+                userId: cfaMbId,
+                type: 'order:duplicate_blocked',
+                title: 'A submission matched an existing order',
+                body: 'A customer submitted your form, but it matched an order already placed for the same customer and product recently, so no new order was created. See it in Cross-funnel.',
+                data: {
+                  campaignId: orderInput.campaignId ?? null,
+                  winnerOrderId: winner.id,
+                  productId: productIds[0] ?? null,
+                },
+              });
+            } catch {
+              // Notification is best-effort — never let it affect the block.
+            }
           } catch (cfaErr) {
             // DIAGNOSTIC (Phase 1): the order is still correctly blocked, but the
             // MB will NOT see this attempt in Cross-funnel. Emit a durable, greppable

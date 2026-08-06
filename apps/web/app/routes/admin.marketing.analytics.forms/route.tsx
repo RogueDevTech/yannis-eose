@@ -14,6 +14,7 @@ export const meta: MetaFunction = () => [{ title: 'All forms — Analytics — Y
 const EMPTY_ANALYTICS: FormAnalytics = {
   statStrip: { rawLandings: 0, uniqueLandings: 0, avgDwellMs: null, conversionRate: 0, attributionCoverage: 0 },
   funnel: { formViews: 0, startedCart: 0, ordered: 0, confirmed: 0, delivered: 0 },
+  trendUnit: 'day',
   timeSeries: [],
   topForms: [],
   forms: [],
@@ -113,10 +114,53 @@ export default function AllFormsRoute() {
         resolve={analyticsData}
         deferredKey="analyticsData"
         loaderShell={{ filters }}
-        fallback={<div className="card h-64 animate-pulse" />}
+        fallback={<AllFormsSkeleton />}
       >
         {(data) => <FormsTable forms={data.forms} filters={filters} />}
       </CachedAwait>
+    </div>
+  );
+}
+
+/** Skeleton matching the All-forms table (toolbar: heading + sort + search; then rows). */
+function AllFormsSkeleton() {
+  const pulse = (cls: string) => <div className={`rounded bg-app-hover animate-pulse ${cls}`} />;
+  return (
+    <div className="space-y-3" aria-busy="true" aria-live="polite">
+      {/* Toolbar: title/subtitle on the left, sort + search on the right. */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+        <div className="space-y-1.5">
+          {pulse('h-4 w-24')}
+          {pulse('h-3 w-56')}
+        </div>
+        <div className="flex items-center gap-2">
+          {pulse('h-9 w-40')}
+          {pulse('h-9 w-9')}
+        </div>
+      </div>
+      {/* Table: header row + body rows. */}
+      <div className="card p-0 overflow-hidden">
+        <div className="flex items-center gap-4 px-3 py-2 border-b border-app-border">
+          {pulse('h-3 flex-1 max-w-[9rem]')}
+          {pulse('h-3 w-16')}
+          {pulse('h-3 w-14')}
+          {pulse('h-3 w-12')}
+          {pulse('h-3 w-14')}
+          {pulse('h-3 w-14')}
+          {pulse('h-3 w-12')}
+        </div>
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-4 px-3 py-3 border-b border-app-border last:border-0">
+            {pulse('h-4 flex-1 max-w-[9rem]')}
+            {pulse('h-4 w-16')}
+            {pulse('h-4 w-14')}
+            {pulse('h-4 w-12')}
+            {pulse('h-4 w-14')}
+            {pulse('h-4 w-14')}
+            {pulse('h-6 w-14 rounded-md')}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

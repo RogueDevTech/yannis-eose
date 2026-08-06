@@ -220,7 +220,9 @@ export function ComparePage({
               <ClientOnly fallback={<div className="h-72 w-full animate-pulse rounded bg-app-hover" />}>
                 <div style={{ height: 300 }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={funnelChartData} margin={chartMargin}>
+                    {/* barGap=0 → the two period bars sit flush beside each other in
+                        each group; barCategoryGap keeps space BETWEEN metric groups. */}
+                    <BarChart data={funnelChartData} margin={chartMargin} barGap={0} barCategoryGap="28%">
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.2)" />
                       <XAxis dataKey="stage" interval={0} {...xAxisProps} />
                       <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={40} />
@@ -232,8 +234,12 @@ export function ComparePage({
                         formatter={(value, name) => [Number(value).toLocaleString(), String(name)] as [string, string]}
                       />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey={periodALabel} fill={A_COLOR} radius={[4, 4, 0, 0]} maxBarSize={48} />
-                      <Bar dataKey={periodBLabel} fill={B_COLOR} radius={[4, 4, 0, 0]} maxBarSize={48} />
+                      {/* minPointSize=3 → a zero (or near-zero) value still draws a
+                          thin 3px marker at the baseline so the group stays visually
+                          balanced instead of showing nothing. Real values are
+                          unaffected (they're far taller than 3px). */}
+                      <Bar dataKey={periodALabel} fill={A_COLOR} radius={[4, 4, 0, 0]} maxBarSize={48} minPointSize={3} />
+                      <Bar dataKey={periodBLabel} fill={B_COLOR} radius={[4, 4, 0, 0]} maxBarSize={48} minPointSize={3} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

@@ -593,6 +593,9 @@ export interface FormAnalytics {
     confirmed: number;
     delivered: number;
   };
+  /** Time-series bucket unit: 'hour' for a single-day range, else 'day'. Drives
+   *  how the trend chart formats each point's label (hour vs date). */
+  trendUnit: 'hour' | 'day';
   timeSeries: Array<{ date: string; viewsRaw: number; viewsUnique: number }>;
   topForms: Array<{ campaignId: string; label: string; count: number }>;
   /** Per-form rows for the clickable forms table. */

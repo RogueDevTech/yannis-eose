@@ -86,9 +86,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     const rows: CompareRow[] = activeMetrics.map((m) => {
-      const a = m.value(dataA);
-      const b = m.value(dataB);
-      const change = computeCompareChange(a, b, m.kind);
+      const a = m.value(dataA); // first-selected period = baseline ("previous")
+      const b = m.value(dataB); // second-selected period = subject ("later")
+      // Change measures how the LATER period (B) moved relative to the EARLIER (A):
+      // (B − A) / A. So if B is lower than A the change is negative/red — B is not
+      // ahead of the baseline. (now = B, prev = A.)
+      const change = computeCompareChange(b, a, m.kind);
       return {
         label: m.label,
         aFormatted: formatCompareValue(a, m.kind),
@@ -98,14 +101,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         a,
         b,
         kind: m.kind,
-        // Relative change magnitude for ranking the "biggest movers" strip.
-        // When B=0 (no baseline) the ratio is undefined; instead of Infinity —
-        // which ties every "new from zero" metric and always outranks real finite
-        // movers non-deterministically — cap at a finite ceiling so genuine large
+        // Relative change magnitude for ranking the "biggest movers" strip. Baseline
+        // is A (the earlier period). When A=0 (no baseline) the ratio is undefined;
+        // instead of Infinity — which ties every "new from zero" metric and always
+        // outranks real finite movers — cap at a finite ceiling so genuine large
         // changes stay comparable, and let the absolute-value tiebreak order the
         // zero-baseline ones sensibly (bigger jump ranks higher).
         changeMagnitude:
-          b !== 0 ? Math.min(Math.abs((a - b) / b), MAX_CHANGE_MAGNITUDE) : a !== 0 ? MAX_CHANGE_MAGNITUDE : 0,
+          a !== 0 ? Math.min(Math.abs((b - a) / a), MAX_CHANGE_MAGNITUDE) : b !== 0 ? MAX_CHANGE_MAGNITUDE : 0,
       };
     });
 

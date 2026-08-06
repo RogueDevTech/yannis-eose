@@ -7406,6 +7406,17 @@ export class MarketingService {
     const periodEnd = endDate ? nigeriaDayEnd(endDate) : null;
     const campaignId = opts?.campaignId;
 
+    // Trend granularity: a single-day range (start === end) buckets the views
+    // time-series by HOUR so the chart spreads across the day; any wider range
+    // stays daily. Bucketed in Africa/Lagos so hour/day boundaries match the WAT
+    // business day the rest of the analytics uses.
+    const trendUnit: 'hour' | 'day' =
+      startDate && endDate && startDate === endDate ? 'hour' : 'day';
+    const trendTrunc =
+      trendUnit === 'hour'
+        ? sql`date_trunc('hour', ${schema.campaignViews.viewedAt} AT TIME ZONE 'Africa/Lagos')`
+        : sql`date_trunc('day', ${schema.campaignViews.viewedAt} AT TIME ZONE 'Africa/Lagos')`;
+
     // ── Scope builders, one per table, mirroring getPerformanceMetrics ──
     // Views scope (media_buyer_id / branch_id live on campaign_views directly).
     const viewConditions: Parameters<typeof and>[0][] = [];
@@ -7515,17 +7526,19 @@ export class MarketingService {
         })
         .from(schema.orders)
         .where(and(orderWhere, isNotNull(schema.orders.sessionId), inArray(schema.orders.sessionId, scopedViewSessionIds))),
-      // Daily trend (views/day, raw + unique).
+      // Views trend (raw + unique) — bucketed by hour for a single-day range,
+      // else by day. `bucket` carries the full local timestamp so the client can
+      // format it as an hour ("9 AM") or a date ("6 Aug") per `trendUnit`.
       this.db
         .select({
-          day: sql<string>`to_char(date_trunc('day', ${schema.campaignViews.viewedAt}), 'YYYY-MM-DD')`,
+          day: sql<string>`to_char(${trendTrunc}, 'YYYY-MM-DD"T"HH24:MI:SS')`,
           viewsRaw: count(),
           viewsUnique: sql<number>`COUNT(DISTINCT ${schema.campaignViews.sessionId})`,
         })
         .from(schema.campaignViews)
         .where(viewWhere)
-        .groupBy(sql`date_trunc('day', ${schema.campaignViews.viewedAt})`)
-        .orderBy(sql`date_trunc('day', ${schema.campaignViews.viewedAt})`),
+        .groupBy(trendTrunc)
+        .orderBy(trendTrunc),
       // Top forms by unique landings. Group by campaignId ONLY (it already determines
       // the name) and take MAX(name) so a renamed campaign can't split into two bars and
       // a deleted campaign (NULL-joined name) can't create a phantom sibling grouping.
@@ -7632,6 +7645,8 @@ export class MarketingService {
         attributionCoverage,
       },
       funnel: { formViews: uniqueLandings, startedCart, ordered, confirmed, delivered },
+      /** 'hour' for a single-day range (chart labels as hours), else 'day'. */
+      trendUnit,
       timeSeries: trendRows.map((r) => ({
         date: r.day,
         viewsRaw: Number(r.viewsRaw),
