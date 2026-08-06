@@ -626,7 +626,11 @@ export function MarketingOrdersPage({
                 <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
               ) : null
             }
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
+              // Quick actions only — Live, Refresh, and the date filter stay
+              // inline; everything else moves to the Actions sheet (below).
               <>
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
@@ -638,25 +642,6 @@ export function MarketingOrdersPage({
                     startTime={dateFilters.startTime}
                     endTime={dateFilters.endTime}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
-                <CompareButton source="marketing-orders" />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowChartView((v) => !v)}
-                >
-                  {showChartView ? 'View as data' : 'View data in chart'}
-                </Button>
-                {canExport && (
-                  <Button onClick={() => setShowExportModal(true)} variant="secondary" size="sm">
-                    Generate report
-                  </Button>
-                )}
-                {isTestOrdersView && (
-                  <Button variant="danger" size="sm" onClick={() => setPurgeConfirmOpen(true)} disabled={purgeFetcher.state !== 'idle'}>
-                    Delete all test orders
-                  </Button>
-                )}
               </>
             }
             filtersBadgeCount={ordersToolbarFilterBadge}
@@ -774,6 +759,7 @@ export function MarketingOrdersPage({
             }
             sheet={({ closeSheet }) => (
               <>
+                <CompareButton source="marketing-orders" />
                 <Button
                   type="button"
                   variant="secondary"
@@ -797,6 +783,20 @@ export function MarketingOrdersPage({
                     }}
                   >
                     Generate report
+                  </Button>
+                )}
+                {isTestOrdersView && (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    disabled={purgeFetcher.state !== 'idle'}
+                    onClick={() => {
+                      closeSheet();
+                      setPurgeConfirmOpen(true);
+                    }}
+                  >
+                    Delete all test orders
                   </Button>
                 )}
               </>

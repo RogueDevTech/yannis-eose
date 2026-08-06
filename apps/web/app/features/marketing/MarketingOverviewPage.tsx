@@ -8,6 +8,7 @@ import { MediaBuyerBalanceCard } from '~/features/marketing/MediaBuyerBalanceCar
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -459,6 +460,7 @@ export function MarketingOverviewPage({
                     startDate={filters?.startDate ?? ''}
                     endDate={filters?.endDate ?? ''}
                     periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
+                <CompareButton source="marketing-overview" />
               </>
             }
           />

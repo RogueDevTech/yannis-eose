@@ -11,6 +11,7 @@ import { Spinner } from '~/components/ui/spinner';
 import { OrdersChartViewShellSkeleton } from '~/components/ui/deferred-skeletons';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -339,6 +340,7 @@ export function CEODashboardPage({
                   </button>
                 </refreshFetcher.Form>
                 <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
+                <CompareButton source="ceo-overview" />
                 {showBackToDashboard && (
                   <Link to="/admin" className="btn-secondary btn-sm">Back to Dashboard</Link>
                 )}

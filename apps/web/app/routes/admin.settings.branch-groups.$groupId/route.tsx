@@ -311,25 +311,8 @@ function GroupDetailPage({ group }: { group: GroupDetail; allGroups: Array<{ id:
             sheetTitle="Group tools"
             sheetSubtitle={<span>{group.name}</span>}
             triggerAriaLabel="Group toolbar"
-            desktop={
-              <>
-                <PageRefreshButton />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className={group.status === 'ACTIVE' ? '!text-danger-600 !border-danger-300 hover:!bg-danger-50 dark:!text-danger-400 dark:!border-danger-700 dark:hover:!bg-danger-900/20' : ''}
-                  onClick={() => setToggleConfirmOpen(true)}
-                >
-                  {group.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => setEditOpen(true)}>
-                  Edit
-                </Button>
-                <Button variant="primary" size="sm" onClick={() => setCreateBranchOpen(true)}>
-                  New Branch
-                </Button>
-              </>
-            }
+            desktopActions
+            desktop={<PageRefreshButton />}
             sheet={({ closeSheet }) => (
               <div className="space-y-2">
                 <Button

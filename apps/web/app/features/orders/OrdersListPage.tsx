@@ -1944,6 +1944,7 @@ function OrdersListPageImpl({
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 ) : null
               }
+              desktopActions
               desktop={
               <>
                 {liveEvents != null && liveEvents.length > 0 && (
@@ -1956,25 +1957,11 @@ function OrdersListPageImpl({
                     startTime={filters?.startTime ?? ''}
                     endTime={filters?.endTime ?? ''}
                     periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
-                {compareSource && <CompareButton source={compareSource} />}
-                <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
-                  {showChartView ? 'View as data' : 'View data in chart'}
-                </Button>
-                {canCreateOffline && (
-                  <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
-                    <span className="hidden sm:inline">{createModalVariant === 'delivered_follow_up' ? 'Create delivered follow-up' : 'Create offline order'}</span>
-                    <span className="sm:hidden">Order</span>
-                  </Button>
-                )}
-                {isTestOrdersView && (
-                  <Button variant="danger" size="sm" onClick={() => setPurgeConfirmOpen(true)} disabled={purgeFetcher.state !== 'idle'}>
-                    Delete all test orders
-                  </Button>
-                )}
               </>
             }
             sheet={({ closeSheet }) => (
               <>
+                {compareSource && <CompareButton source={compareSource} />}
                 <Button
                   type="button"
                   variant="secondary"
@@ -2415,23 +2402,24 @@ function OrdersListPageImpl({
           hideMobileSheet
           badgeCount={ordersListToolbarFilterBadge}
           searchRow={
-            <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center md:gap-2">
-              <PageSearchControl
-                value={searchFilter || ''}
-                placeholder="Search by order number, customer name, or phone…"
-                title="Search orders"
-                onApply={(query) => {
-                  setSearchParams((p) => {
-                    const next = new URLSearchParams(p);
-                    next.set('page', '1');
-                    if (query) next.set('search', query);
-                    else next.delete('search');
-                    return next;
-                  });
-                }}
-              />
-              <div className="hidden items-center gap-2 md:flex md:flex-wrap">
-                <div className="relative">
+            <PageSearchControl
+              value={searchFilter || ''}
+              placeholder="Search by order number, customer name, or phone…"
+              title="Search orders"
+              onApply={(query) => {
+                setSearchParams((p) => {
+                  const next = new URLSearchParams(p);
+                  next.set('page', '1');
+                  if (query) next.set('search', query);
+                  else next.delete('search');
+                  return next;
+                });
+              }}
+            />
+          }
+          desktopInlineFilters={
+            <>
+                <div className="relative" data-toolbar-filter>
                   {selectedStatus !== 'ALL' && (
                     <FilterDismiss
                       onClear={() => {
@@ -2720,10 +2708,8 @@ function OrdersListPageImpl({
                   />
                 </div>
                 {renderScheduleFilter(false)}
-              </div>
-            </div>
+            </>
           }
-          desktopInlineFilters={null}
           sheetFilterBody={null}
         />
       </div>

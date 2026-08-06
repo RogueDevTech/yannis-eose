@@ -805,58 +805,8 @@ export function InventoryPage(props: InventoryStreamData) {
             filters={
               activeTab === 'levels' && levelsShowToolbar ? levelsFilterControls : undefined
             }
-            desktop={
-              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-                <PageRefreshButton />
-                <button
-                  type="button"
-                  onClick={() => canEditLowStock && setShowThresholdModal(true)}
-                  disabled={!canEditLowStock}
-                  className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-app-border bg-app-elevated transition-colors whitespace-nowrap ${
-                    canEditLowStock
-                      ? 'text-app-fg-muted hover:text-app-fg hover:border-app-border-strong cursor-pointer'
-                      : 'text-app-fg-muted cursor-default'
-                  }`}
-                  title={canEditLowStock ? 'Click to change low-stock alert threshold' : 'Low-stock alert threshold (read-only)'}
-                >
-                  <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
-                    />
-                  </svg>
-                  <span>
-                    <span className="sm:hidden">&lt; <strong className="text-app-fg">{lowStockThreshold}</strong></span>
-                    <span className="hidden sm:inline">Alert &lt; <strong className="text-app-fg">{lowStockThreshold}</strong> units</span>
-                  </span>
-                </button>
-                {canIntake && (
-                  <Link
-                    to="/admin/shipments/receive"
-                    prefetch="intent"
-                    className="btn-primary btn-sm flex-1 sm:flex-initial whitespace-nowrap inline-flex items-center justify-center gap-2"
-                  >
-                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                    <span className="sm:hidden">Shipment</span>
-                    <span className="hidden sm:inline">Receive Shipment</span>
-                  </Link>
-                )}
-                {canExport && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="flex-1 sm:flex-initial whitespace-nowrap"
-                    onClick={() => setShowExportModal(true)}
-                  >
-                    <span className="sm:hidden">Report</span>
-                    <span className="hidden sm:inline">Generate report</span>
-                  </Button>
-                )}
-              </div>
-            }
+            desktopActions
+            desktop={<PageRefreshButton />}
             sheet={({ closeSheet }) => (
               <>
                 <Button

@@ -19,6 +19,7 @@ import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { InlineFilter } from '~/components/ui/inline-filter';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
@@ -797,6 +798,7 @@ export function DeliveryRemittancesPage({
                 )}
               </>
             }
+            desktopActions
             desktop={
               <>
                 <PageRefreshButton />
@@ -815,16 +817,11 @@ export function DeliveryRemittancesPage({
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
-                <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-                  Generate report
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => setShowCashStatementModal(true)}>
-                  Cash statement
-                </Button>
               </>
             }
             sheet={({ closeSheet }) => (
               <>
+                <CompareButton source="delivery-remittances" />
                 <Button
                   variant="secondary"
                   size="sm"
@@ -846,17 +843,6 @@ export function DeliveryRemittancesPage({
                   }}
                 >
                   Cash statement
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="h-12 w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setDateScopeModalOpen(true);
-                  }}
-                >
-                  {(filters.dateScope ?? 'createdAt') === 'createdAt' ? 'By order date' : 'By delivery date'}
                 </Button>
               </>
             )}

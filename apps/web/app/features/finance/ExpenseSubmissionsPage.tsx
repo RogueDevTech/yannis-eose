@@ -23,6 +23,7 @@ import {
 } from '~/hooks/useOptimisticListPatches';
 import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { PageSearchControl } from '~/components/ui/page-search-control';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { DateTimeText } from '~/components/ui/date-time-text';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 
@@ -353,20 +354,29 @@ export function ExpenseSubmissionsPage({
 
       <OverviewStatStrip items={statItems} />
 
-      <div className="flex items-center gap-2">
-        <PageSearchControl
-          value={searchQuery}
-          onApply={handleSearchApply}
-          placeholder="Search by vendor or description..."
-          title="Search Expenses"
-        />
-        <FormSelect
-          value={activeTab}
-          onChange={(e) => handleTabChange(e.target.value)}
-          options={STATUS_TABS.map((t) => ({ value: t.value, label: t.label }))}
-          wrapperClassName="w-36"
-        />
-      </div>
+      <ToolbarFiltersCollapsible
+        className="!border-0 !px-0 !py-0"
+        badgeCount={activeTab !== STATUS_TABS[0]?.value ? 1 : 0}
+        onClearAll={() => handleTabChange(STATUS_TABS[0]?.value ?? '')}
+        searchRow={
+          <PageSearchControl
+            value={searchQuery}
+            onApply={handleSearchApply}
+            placeholder="Search by vendor or description..."
+            title="Search Expenses"
+          />
+        }
+        desktopInlineFilters={
+          <div className="relative" data-toolbar-filter>
+            <FormSelect
+              value={activeTab}
+              onChange={(e) => handleTabChange(e.target.value)}
+              options={STATUS_TABS.map((t) => ({ value: t.value, label: t.label }))}
+              wrapperClassName="w-36"
+            />
+          </div>
+        }
+      />
 
       {filteredExpenses.length === 0 ? (
         <EmptyState

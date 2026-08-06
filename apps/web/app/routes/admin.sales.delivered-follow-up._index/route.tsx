@@ -672,6 +672,7 @@ export default function DeliveredFollowUpRoute() {
       {(d) => (
         <OrdersListPage
           {...d}
+          compareSource="delivered-follow-up"
           userRole={userRole}
           liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
           excludeStatuses={

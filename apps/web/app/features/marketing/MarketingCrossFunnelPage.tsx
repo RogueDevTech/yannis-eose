@@ -7,6 +7,7 @@ import { StatValuePulse } from '~/components/ui/deferred-skeletons';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
@@ -310,6 +311,7 @@ export function MarketingCrossFunnelPage({
               <>
                 <PageRefreshButton />
                 <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime} chrome="pill" />
+                <CompareButton source="marketing-cross-funnel" />
                 {canExport && (
                   <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
                     Generate report

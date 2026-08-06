@@ -7,6 +7,7 @@ import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/ov
 import { FormSelect } from '~/components/ui/form-select';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
@@ -240,6 +241,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                     startDate={filters?.startDate ?? ''}
                     endDate={filters?.endDate ?? ''}
                     periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
+                <CompareButton source="admin-overview" />
               </>
             }
             sheet={

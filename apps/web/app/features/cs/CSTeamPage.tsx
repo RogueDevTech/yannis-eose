@@ -9,6 +9,7 @@ import {
 import { PageHeader } from '~/components/ui/page-header';
 import { formatRoleLabel } from '~/components/ui/role-badge';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { EmptyState } from '~/components/ui/empty-state';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -783,6 +784,7 @@ export function CSTeamPage({
                   </div>
                 </>
               }
+              desktopActions
               desktop={
                 <>
                   <PageRefreshButton />
@@ -790,24 +792,24 @@ export function CSTeamPage({
                       startDate={dateFilters.startDate}
                       endDate={dateFilters.endDate}
                       periodAllTime={dateFilters.periodAllTime} chrome="pill" />
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-                    Generate report
-                  </Button>
                 </>
               }
               sheet={({ closeSheet }) => (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="h-12 w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setShowExportModal(true);
-                  }}
-                >
-                  Generate report
-                </Button>
+                <>
+                  <CompareButton source="sales-team" />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowExportModal(true);
+                    }}
+                  >
+                    Generate report
+                  </Button>
+                </>
               )}
             />
           ) : (

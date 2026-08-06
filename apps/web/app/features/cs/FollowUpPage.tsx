@@ -10,6 +10,7 @@ import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageSearchControl } from '~/components/ui/page-search-control';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { Pagination } from '~/components/ui/pagination';
@@ -686,40 +687,58 @@ export function FollowUpPage({
       </div>
 
       {/* ── Filters row ──────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        {/* Closer + age hidden on mobile — inside Actions sheet */}
-        {!isCartView && (
-          <div className="hidden sm:block">
-            <SearchableSelect
-              id="follow-up-closer"
-              value={filters.assignedCsId}
-              onChange={handleCloserChange}
-              options={closerOptions}
-              placeholder="All closers"
-              searchPlaceholder="Search closers…"
-              controlSize="sm"
-              wrapperClassName="w-48"
-            />
-          </div>
-        )}
-        <div className="hidden sm:block">
-          <FormSelect
-            id="follow-up-age"
-            value={hasCustomDateRange ? CUSTOM_RANGE_VALUE : filters.olderThanDays}
-            onChange={(e) => handleAgeChange(e.target.value)}
-            options={AGE_OPTIONS}
-            placeholder="Any age"
-          />
-        </div>
-        <div className="flex-1">
+      <ToolbarFiltersCollapsible
+        className="!border-0 !px-0 !py-0"
+        badgeCount={
+          (!isCartView && filters.assignedCsId && filters.assignedCsId !== 'ALL' ? 1 : 0) +
+          (!hasCustomDateRange && filters.olderThanDays && filters.olderThanDays !== 'ALL' ? 1 : 0)
+        }
+        searchRow={
           <PageSearchControl
             value={filters.search}
             placeholder={isCartView ? 'Search customer name…' : 'Search customer…'}
             title="Search customers"
             onApply={applySearch}
           />
-        </div>
-      </div>
+        }
+        desktopInlineFilters={
+          isCartView ? (
+            <div className="relative" data-toolbar-filter>
+              <FormSelect
+                id="follow-up-age"
+                value={hasCustomDateRange ? CUSTOM_RANGE_VALUE : filters.olderThanDays}
+                onChange={(e) => handleAgeChange(e.target.value)}
+                options={AGE_OPTIONS}
+                placeholder="Any age"
+              />
+            </div>
+          ) : (
+            <>
+              <div className="relative" data-toolbar-filter>
+                <SearchableSelect
+                  id="follow-up-closer"
+                  value={filters.assignedCsId}
+                  onChange={handleCloserChange}
+                  options={closerOptions}
+                  placeholder="All closers"
+                  searchPlaceholder="Search closers…"
+                  controlSize="sm"
+                  wrapperClassName="w-48"
+                />
+              </div>
+              <div className="relative" data-toolbar-filter>
+                <FormSelect
+                  id="follow-up-age"
+                  value={hasCustomDateRange ? CUSTOM_RANGE_VALUE : filters.olderThanDays}
+                  onChange={(e) => handleAgeChange(e.target.value)}
+                  options={AGE_OPTIONS}
+                  placeholder="Any age"
+                />
+              </div>
+            </>
+          )
+        }
+      />
 
 
       {/* ── Smart Pick ─────────────────────────────────── */}

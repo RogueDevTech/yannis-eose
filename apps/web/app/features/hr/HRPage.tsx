@@ -23,6 +23,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { FormSelect } from '~/components/ui/form-select';
 import { PageSearchControl } from '~/components/ui/page-search-control';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
@@ -584,58 +585,66 @@ export function HRPage({
                 ];
                 return (
                   <div className={`list-panel ${adjustmentsFetching ? 'opacity-60' : ''}`}>
-                    <div className="flex flex-col gap-2 border-b border-app-border p-3 sm:flex-row sm:items-center">
-                      <PageSearchControl
-                        value={adjustmentSearch}
-                        onApply={setAdjustmentSearch}
-                        placeholder="Search name or reason"
-                        title="Search adjustments"
-                      />
-                      <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex sm:items-center">
-                        <FormSelect
-                          value={adjustmentCategoryFilter}
-                          onChange={(e) => setAdjustmentCategoryFilter(e.target.value)}
-                          placeholder="All categories"
-                          options={[
-                            { value: '', label: 'All categories' },
-                            ...ADJ_ALL_CATEGORIES.map((c) => ({
-                              value: c,
-                              label: c.replace(/_/g, ' '),
-                            })),
-                          ]}
+                    <ToolbarFiltersCollapsible
+                      className="border-b border-app-border !px-3 !py-2"
+                      badgeCount={
+                        (adjustmentCategoryFilter ? 1 : 0) +
+                        (adjustmentStatusFilter ? 1 : 0) +
+                        (adjustmentPeriodFilter ? 1 : 0)
+                      }
+                      onClearAll={() => {
+                        setAdjustmentSearch('');
+                        setAdjustmentCategoryFilter('');
+                        setAdjustmentStatusFilter('');
+                        setAdjustmentPeriodFilter('');
+                      }}
+                      searchRow={
+                        <PageSearchControl
+                          value={adjustmentSearch}
+                          onApply={setAdjustmentSearch}
+                          placeholder="Search name or reason"
+                          title="Search adjustments"
                         />
-                        <FormSelect
-                          value={adjustmentStatusFilter}
-                          onChange={(e) => setAdjustmentStatusFilter(e.target.value)}
-                          placeholder="All statuses"
-                          options={[
-                            { value: '', label: 'All statuses' },
-                            { value: 'APPROVED', label: 'Approved' },
-                            { value: 'PENDING', label: 'Pending' },
-                          ]}
-                        />
-                        <FormSelect
-                          value={adjustmentPeriodFilter}
-                          onChange={(e) => setAdjustmentPeriodFilter(e.target.value)}
-                          placeholder="All batches"
-                          options={[{ value: '', label: 'All batches' }, ...periodOptions]}
-                        />
-                        {hasActiveAdjustmentFilter ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            onClick={() => {
-                              setAdjustmentSearch('');
-                              setAdjustmentCategoryFilter('');
-                              setAdjustmentStatusFilter('');
-                              setAdjustmentPeriodFilter('');
-                            }}
-                          >
-                            Clear
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
+                      }
+                      desktopInlineFilters={
+                        <>
+                          <div className="relative" data-toolbar-filter>
+                            <FormSelect
+                              value={adjustmentCategoryFilter}
+                              onChange={(e) => setAdjustmentCategoryFilter(e.target.value)}
+                              placeholder="All categories"
+                              options={[
+                                { value: '', label: 'All categories' },
+                                ...ADJ_ALL_CATEGORIES.map((c) => ({
+                                  value: c,
+                                  label: c.replace(/_/g, ' '),
+                                })),
+                              ]}
+                            />
+                          </div>
+                          <div className="relative" data-toolbar-filter>
+                            <FormSelect
+                              value={adjustmentStatusFilter}
+                              onChange={(e) => setAdjustmentStatusFilter(e.target.value)}
+                              placeholder="All statuses"
+                              options={[
+                                { value: '', label: 'All statuses' },
+                                { value: 'APPROVED', label: 'Approved' },
+                                { value: 'PENDING', label: 'Pending' },
+                              ]}
+                            />
+                          </div>
+                          <div className="relative" data-toolbar-filter>
+                            <FormSelect
+                              value={adjustmentPeriodFilter}
+                              onChange={(e) => setAdjustmentPeriodFilter(e.target.value)}
+                              placeholder="All batches"
+                              options={[{ value: '', label: 'All batches' }, ...periodOptions]}
+                            />
+                          </div>
+                        </>
+                      }
+                    />
                     <CompactTable
                       withCard={false}
                       columns={adjustmentColumns}

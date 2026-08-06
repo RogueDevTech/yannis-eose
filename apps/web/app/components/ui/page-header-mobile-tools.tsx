@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -32,6 +33,15 @@ export interface PageHeaderMobileToolsProps {
   /** @deprecated No longer rendered inline on mobile. */
   mobileLeading?: ReactNode;
   saveFilterKey?: boolean | string;
+  /**
+   * When true, render an "Actions" button on DESKTOP too (not just mobile) that
+   * opens the same sheet. Use this to keep only the quick actions inline in
+   * `desktop` (Live / Refresh / date) and move the rest into `sheet`, so a busy
+   * header doesn't overflow. Label customisable via `desktopActionsLabel`.
+   */
+  desktopActions?: boolean;
+  /** Label for the desktop Actions button. Default "Actions". */
+  desktopActionsLabel?: string;
 }
 
 /**
@@ -51,11 +61,20 @@ export function PageHeaderMobileTools({
   sheetCloseLabel = 'Close',
   sheetBodyMaxHeightClassName = 'max-h-[min(75dvh,560px)]',
   saveFilterKey,
+  desktopActions = false,
+  desktopActionsLabel = 'Actions',
 }: PageHeaderMobileToolsProps) {
-  const [open, setOpen] = useState(false);
+  // `openedFrom` tracks the surface that opened the actions: 'desktop' anchors a
+  // popover under the Actions button; 'mobile' (via the bridge) shows the full
+  // sheet Modal. Desktop deserves a lightweight dropdown, not a centered modal.
+  const [openedFrom, setOpenedFrom] = useState<'desktop' | 'mobile' | null>(null);
   const titleId = useId();
-  const closeSheet = useCallback(() => setOpen(false), []);
-  const openSheet = useCallback(() => setOpen(true), []);
+  const closeSheet = useCallback(() => setOpenedFrom(null), []);
+  // The mobile-actions bridge calls this — always the mobile sheet.
+  const openSheet = useCallback(() => setOpenedFrom('mobile'), []);
+  const desktopBtnRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [popoverPos, setPopoverPos] = useState({ top: 0, right: 0 });
   const { pathname } = useLocation();
 
   const resolvedFilterKey = saveFilterKey === true
@@ -80,12 +99,68 @@ export function PageHeaderMobileTools({
   const hasSavedPrefs = resolvedFilterKey ? filterPrefs.hasSavedPrefs : false;
   const filtersChanged = resolvedFilterKey ? filterPrefs.hasChanges : false;
 
+  // ── Desktop popover: position under the Actions button, close on outside-click
+  //    / scroll. Mirrors ActionDropdown so behavior is consistent across the app.
+  useEffect(() => {
+    if (openedFrom !== 'desktop' || !desktopBtnRef.current) return;
+    const rect = desktopBtnRef.current.getBoundingClientRect();
+    setPopoverPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+  }, [openedFrom]);
+
+  useEffect(() => {
+    if (openedFrom !== 'desktop') return;
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Node;
+      if (
+        desktopBtnRef.current && !desktopBtnRef.current.contains(target) &&
+        popoverRef.current && !popoverRef.current.contains(target)
+      ) {
+        setOpenedFrom(null);
+      }
+    }
+    function handleScroll() {
+      setOpenedFrom(null);
+    }
+    document.addEventListener('mousedown', handleClick);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [openedFrom]);
+
   return (
     <>
-      {/* Desktop: inline actions */}
+      {/* Desktop: inline actions. With `desktopActions`, the quick items stay
+          inline and an Actions button opens the sheet (same as mobile) so a busy
+          header stays tidy. Without it, everything renders inline as before. */}
       <div className="hidden shrink-0 flex-wrap items-center gap-2 md:flex">
         {desktop}
-        {resolvedFilterKey && <SaveFilterPrefsButton pageKey={resolvedFilterKey} hasSavedPrefs={hasSavedPrefs} filtersChanged={filtersChanged} />}
+        {!desktopActions && resolvedFilterKey && (
+          <SaveFilterPrefsButton pageKey={resolvedFilterKey} hasSavedPrefs={hasSavedPrefs} filtersChanged={filtersChanged} />
+        )}
+        {desktopActions && hasSheetOrFilters && (
+          <Button
+            ref={desktopBtnRef}
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setOpenedFrom((v) => (v === 'desktop' ? null : 'desktop'))}
+            aria-label={triggerAriaLabel}
+            aria-haspopup="menu"
+            aria-expanded={openedFrom === 'desktop'}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <FiltersIcon className="w-4 h-4" />
+              {desktopActionsLabel}
+              {filtersBadgeCount > 0 && (
+                <span className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-500 px-1 text-2xs font-semibold text-white">
+                  {filtersBadgeCount}
+                </span>
+              )}
+            </span>
+          </Button>
+        )}
       </div>
 
       {/* Marker kept for diagnostics / optional DOM checks */}
@@ -99,10 +174,57 @@ export function PageHeaderMobileTools({
         />
       ) : null}
 
+      {/* Desktop: a dropdown anchored under the Actions button, over a dimmed
+          full-screen backdrop (modal feel) so focus lands on the menu. Only when
+          opened from the desktop button. */}
+      {hasSheetOrFilters && openedFrom === 'desktop' && typeof document !== 'undefined'
+        ? createPortal(
+            <>
+            {/* Dim backdrop — click anywhere off the menu to dismiss. */}
+            <div
+              className="fixed inset-0 z-[9998] bg-black/40 animate-fade-in"
+              aria-hidden
+              onMouseDown={() => closeSheet()}
+            />
+            <div
+              ref={popoverRef}
+              role="menu"
+              aria-label={sheetTitle}
+              className="fixed z-[9999] w-64 max-w-[calc(100vw-2rem)] rounded-lg border border-app-border bg-app-elevated shadow-lg animate-fade-in"
+              style={{ top: popoverPos.top, right: popoverPos.right }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div
+                // Close the dropdown as soon as any item is activated — most open
+                // their own modal (Compare, Export) or navigate, so leaving the
+                // menu open would stack a popover behind the new surface.
+                onClick={() => closeSheet()}
+                className={[
+                  'flex max-h-[min(70dvh,480px)] flex-col gap-2 overflow-y-auto p-2',
+                  '[&_button]:w-full [&_button]:justify-center [&_button]:text-sm',
+                  '[&_a.btn-primary]:w-full [&_a.btn-primary]:justify-center [&_a.btn-primary]:text-sm',
+                  '[&_a.btn-secondary]:w-full [&_a.btn-secondary]:justify-center [&_a.btn-secondary]:text-sm',
+                ].join(' ')}
+              >
+                {/* Desktop dropdown shows ONLY the extra actions — the filters have
+                    their own row/toolbar on desktop, so they are NOT repeated here
+                    (unlike the mobile sheet, which is the only place filters live). */}
+                {sheetContent}
+                {resolvedFilterKey && (
+                  <SaveFilterPrefsButton pageKey={resolvedFilterKey} hasSavedPrefs={hasSavedPrefs} className="w-full" />
+                )}
+              </div>
+            </div>
+            </>,
+            document.body,
+          )
+        : null}
+
+      {/* Mobile: the full-screen actions sheet, opened via the mobile bridge. */}
       {hasSheetOrFilters ? (
         <Modal
-          open={open}
-          onClose={() => setOpen(false)}
+          open={openedFrom === 'mobile'}
+          onClose={() => setOpenedFrom(null)}
           maxWidth="max-w-full"
           aria-labelledby={titleId}
           contentClassName="p-0"
@@ -140,7 +262,7 @@ export function PageHeaderMobileTools({
             ) : null}
           </div>
           <div className="border-t border-app-border p-3 pt-2">
-            <Button type="button" variant="primary" className="w-full" onClick={() => setOpen(false)}>
+            <Button type="button" variant="primary" className="w-full" onClick={() => setOpenedFrom(null)}>
               {sheetCloseLabel}
             </Button>
           </div>

@@ -567,7 +567,9 @@ function FormDetailBody({
                       return [drop != null ? `${base}  (−${drop.toFixed(0)}% from prev)` : base, 'Count'] as [string, string];
                     }}
                   />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={64}>
+                  {/* minPointSize=3 → a zero-count stage still shows a thin marker
+                      at the baseline instead of nothing, so the funnel stays legible. */}
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={64} minPointSize={3}>
                     <LabelList dataKey="count" position="top" style={{ fontSize: 11, fill: 'var(--color-app-fg, #64748b)' }} />
                     {funnelStages.map((s, i) => (
                       <Cell key={s.stage} fill={FUNNEL_COLORS[i]} />

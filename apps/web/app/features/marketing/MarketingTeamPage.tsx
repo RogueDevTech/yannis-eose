@@ -7,6 +7,7 @@ import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
@@ -950,6 +951,7 @@ export function MarketingTeamPage({
                 />
               </div>
             }
+            desktopActions
             desktop={
               <>
                 <PageRefreshButton />
@@ -957,24 +959,24 @@ export function MarketingTeamPage({
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
-                <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-                  Generate report
-                </Button>
               </>
             }
             sheet={({ closeSheet }) => (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-12 w-full justify-center"
-                onClick={() => {
-                  closeSheet();
-                  setShowExportModal(true);
-                }}
-              >
-                Generate report
-              </Button>
+              <>
+                <CompareButton source="marketing-team" />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowExportModal(true);
+                  }}
+                >
+                  Generate report
+                </Button>
+              </>
             )}
           />
         }

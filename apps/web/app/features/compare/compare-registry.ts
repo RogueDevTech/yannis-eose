@@ -231,12 +231,563 @@ const logisticsOrdersSource: CompareSource<LogisticsBundlePayload> = {
   ],
 };
 
+// ── Helpers shared by the string-amount sources ─────────────────────────────
+
+/** Parse a numeric-string (Postgres ::text amount) to a number. */
+const num = (v: unknown): number => {
+  const parsed = Number(v);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+/** GET a tRPC procedure with a {startDate, endDate, ...extra} input. */
+async function fetchDated<T>(
+  proc: string,
+  period: ComparePeriod,
+  cookie: string | undefined,
+  extra: Record<string, unknown> = {},
+): Promise<T | null> {
+  const input = encodeURIComponent(
+    JSON.stringify({ startDate: period.startDate, endDate: period.endDate, ...extra }),
+  );
+  const res = await apiRequest<unknown>(`/trpc/${proc}?input=${input}`, { method: 'GET', cookie });
+  return unwrap<T>(res);
+}
+
+// ── Marketing: overview / team / cross-funnel / expenses / leaderboard ────────
+
+interface MarketingOverviewPayload {
+  metrics: {
+    totalSpend: number;
+    approvedSpend: number;
+    pendingSpend: number;
+    otherExpenses: number;
+    totalOrders: number;
+    deliveredOrders: number;
+    deliveredThisMonth: number;
+    deliveredRevenue: number;
+    confirmedOrders: number;
+    confirmationRate: number; // 0-100
+    cpa: number;
+    trueRoas: number; // ratio
+    deliveryRate: number; // 0-100
+  };
+  abandonedCartCount: number;
+}
+
+const marketingOverviewSource: CompareSource<MarketingOverviewPayload> = {
+  key: 'marketing-overview',
+  label: 'Marketing overview',
+  backTo: '/admin/marketing/overview',
+  guard: {
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'],
+    permission: 'marketing.teamOverview',
+    orMarketingTeamSupervisorOnBranch: true,
+  },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<MarketingOverviewPayload>('marketing.overviewPageBundle', period, cookie),
+  metrics: [
+    { key: 'totalOrders', label: 'Total orders', kind: 'count', funnel: true, value: (d) => d.metrics.totalOrders },
+    { key: 'confirmedOrders', label: 'Confirmed', kind: 'count', funnel: true, value: (d) => d.metrics.confirmedOrders },
+    { key: 'deliveredOrders', label: 'Delivered', kind: 'count', funnel: true, value: (d) => d.metrics.deliveredOrders },
+    { key: 'deliveredRevenue', label: 'Delivered revenue', kind: 'count', value: (d) => d.metrics.deliveredRevenue },
+    { key: 'totalSpend', label: 'Total ad spend', kind: 'count', value: (d) => d.metrics.totalSpend },
+    { key: 'approvedSpend', label: 'Approved spend', kind: 'count', value: (d) => d.metrics.approvedSpend },
+    { key: 'otherExpenses', label: 'Other expenses', kind: 'count', value: (d) => d.metrics.otherExpenses },
+    { key: 'cpa', label: 'CPA', kind: 'count', value: (d) => d.metrics.cpa },
+    { key: 'trueRoas', label: 'True ROAS', kind: 'count', value: (d) => d.metrics.trueRoas },
+    { key: 'confirmationRate', label: 'Confirmation rate', kind: 'percent', value: (d) => d.metrics.confirmationRate / 100 },
+    { key: 'deliveryRate', label: 'Delivery rate', kind: 'percent', value: (d) => d.metrics.deliveryRate / 100 },
+    { key: 'abandonedCarts', label: 'Abandoned carts', kind: 'count', value: (d) => d.abandonedCartCount },
+  ],
+};
+
+/** One row of `marketing.leaderboard` / `marketing.teamPageBundle.leaderboard`. */
+interface MarketingLeaderboardEntry {
+  totalSpend: number;
+  totalOrders: number;
+  deliveredOrders: number;
+  deliveredThisMonth: number;
+  deliveredRevenue: number;
+  confirmedOrders: number;
+  confirmationRate: number; // 0-100
+  cpa: number;
+  trueRoas: number;
+  deliveryRate: number; // 0-100
+  profitabilityScore: number; // 0-1
+}
+
+/** Sum leaderboard rows into team totals + recomputed rates. */
+function reduceMarketingLeaderboard(rows: MarketingLeaderboardEntry[]) {
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.totalSpend += num(r.totalSpend);
+      acc.totalOrders += num(r.totalOrders);
+      acc.deliveredOrders += num(r.deliveredOrders);
+      acc.deliveredRevenue += num(r.deliveredRevenue);
+      acc.confirmedOrders += num(r.confirmedOrders);
+      return acc;
+    },
+    { totalSpend: 0, totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0 },
+  );
+  return {
+    ...totals,
+    mbCount: rows.length,
+    confirmationRate: totals.totalOrders > 0 ? totals.confirmedOrders / totals.totalOrders : 0,
+    deliveryRate: totals.totalOrders > 0 ? totals.deliveredOrders / totals.totalOrders : 0,
+  };
+}
+
+interface MarketingTeamBundle {
+  leaderboard: MarketingLeaderboardEntry[];
+  fundingSummary?: { totalSent?: string; totalCompleted?: string; totalDisputed?: string } | null;
+}
+
+const marketingTeamSource: CompareSource<MarketingTeamBundle> = {
+  key: 'marketing-team',
+  label: 'Marketing team',
+  backTo: '/admin/marketing/team',
+  guard: {
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
+    permission: 'marketing.teamOverview',
+    orMarketingTeamSupervisorOnBranch: true,
+  },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<MarketingTeamBundle>('marketing.teamPageBundle', period, cookie),
+  metrics: [
+    { key: 'totalOrders', label: 'Total orders', kind: 'count', funnel: true, value: (d) => reduceMarketingLeaderboard(d.leaderboard ?? []).totalOrders },
+    { key: 'confirmedOrders', label: 'Confirmed', kind: 'count', funnel: true, value: (d) => reduceMarketingLeaderboard(d.leaderboard ?? []).confirmedOrders },
+    { key: 'deliveredOrders', label: 'Delivered', kind: 'count', funnel: true, value: (d) => reduceMarketingLeaderboard(d.leaderboard ?? []).deliveredOrders },
+    { key: 'deliveredRevenue', label: 'Delivered revenue', kind: 'count', value: (d) => reduceMarketingLeaderboard(d.leaderboard ?? []).deliveredRevenue },
+    { key: 'totalSpend', label: 'Ad spend', kind: 'count', value: (d) => reduceMarketingLeaderboard(d.leaderboard ?? []).totalSpend },
+    { key: 'confirmationRate', label: 'Confirmation rate', kind: 'percent', value: (d) => reduceMarketingLeaderboard(d.leaderboard ?? []).confirmationRate },
+    { key: 'deliveryRate', label: 'Delivery rate', kind: 'percent', value: (d) => reduceMarketingLeaderboard(d.leaderboard ?? []).deliveryRate },
+    { key: 'activeMbs', label: 'Active media buyers', kind: 'count', value: (d) => (d.leaderboard ?? []).length },
+    { key: 'fundingSent', label: 'Funding sent', kind: 'count', value: (d) => num(d.fundingSummary?.totalSent) },
+    { key: 'fundingCompleted', label: 'Funding completed', kind: 'count', value: (d) => num(d.fundingSummary?.totalCompleted) },
+  ],
+};
+
+interface CrossFunnelStats {
+  totalAttempts?: number;
+  uniqueCustomers?: number;
+  resubmissions?: number;
+  sameMb?: number;
+  crossFunnel?: number;
+}
+
+const marketingCrossFunnelSource: CompareSource<CrossFunnelStats> = {
+  key: 'marketing-cross-funnel',
+  label: 'Cross-funnel attempts',
+  backTo: '/admin/marketing/cross-funnel',
+  guard: {
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'],
+    permission: 'marketing.read',
+    orMarketingTeamSupervisorOnBranch: true,
+  },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<CrossFunnelStats>('marketing.crossFunnelStats', period, cookie),
+  metrics: [
+    { key: 'totalAttempts', label: 'Total attempts', kind: 'count', funnel: true, value: (d) => num(d.totalAttempts) },
+    { key: 'uniqueCustomers', label: 'Unique customers', kind: 'count', funnel: true, value: (d) => num(d.uniqueCustomers) },
+    { key: 'resubmissions', label: 'Resubmissions', kind: 'count', funnel: true, value: (d) => num(d.resubmissions) },
+    { key: 'sameMb', label: 'Same media buyer', kind: 'count', value: (d) => num(d.sameMb) },
+    { key: 'crossFunnel', label: 'Cross-funnel', kind: 'count', value: (d) => num(d.crossFunnel) },
+  ],
+};
+
+interface AdSpendListPayload {
+  totalSpend: string;
+  pagination: { total: number };
+}
+
+const marketingExpensesSource: CompareSource<{ approved: AdSpendListPayload | null; pending: AdSpendListPayload | null }> = {
+  key: 'marketing-expenses',
+  label: 'Ad spend',
+  backTo: '/admin/marketing/expenses',
+  guard: {
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'],
+    permission: 'marketing.read',
+    orMarketingTeamSupervisorOnBranch: true,
+  },
+  fetchPeriod: async (period, cookie) => {
+    const [approved, pending] = await Promise.all([
+      fetchDated<AdSpendListPayload>('marketing.listAdSpend', period, cookie, { status: 'APPROVED', page: 1, limit: 1 }),
+      fetchDated<AdSpendListPayload>('marketing.listAdSpend', period, cookie, { status: 'PENDING', page: 1, limit: 1 }),
+    ]);
+    if (!approved && !pending) return null;
+    return { approved, pending };
+  },
+  metrics: [
+    { key: 'approvedSpend', label: 'Approved spend', kind: 'count', value: (d) => num(d.approved?.totalSpend) },
+    { key: 'pendingSpend', label: 'Pending spend', kind: 'count', value: (d) => num(d.pending?.totalSpend) },
+    { key: 'totalSpend', label: 'Total spend', kind: 'count', value: (d) => num(d.approved?.totalSpend) + num(d.pending?.totalSpend) },
+    { key: 'approvedCount', label: 'Approved entries', kind: 'count', value: (d) => num(d.approved?.pagination?.total) },
+    { key: 'pendingCount', label: 'Pending entries', kind: 'count', value: (d) => num(d.pending?.pagination?.total) },
+  ],
+};
+
+const marketingLeaderboardSource: CompareSource<MarketingLeaderboardEntry[]> = {
+  key: 'marketing-leaderboard',
+  label: 'Marketing leaderboard',
+  backTo: '/admin/marketing/leaderboard',
+  guard: {
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
+    permission: 'marketing.leaderboard',
+    orMarketingTeamSupervisorOnBranch: true,
+  },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<MarketingLeaderboardEntry[]>('marketing.leaderboard', period, cookie),
+  metrics: [
+    { key: 'totalOrders', label: 'Total orders', kind: 'count', funnel: true, value: (d) => reduceMarketingLeaderboard(d ?? []).totalOrders },
+    { key: 'confirmedOrders', label: 'Confirmed', kind: 'count', funnel: true, value: (d) => reduceMarketingLeaderboard(d ?? []).confirmedOrders },
+    { key: 'deliveredOrders', label: 'Delivered', kind: 'count', funnel: true, value: (d) => reduceMarketingLeaderboard(d ?? []).deliveredOrders },
+    { key: 'deliveredRevenue', label: 'Delivered revenue', kind: 'count', value: (d) => reduceMarketingLeaderboard(d ?? []).deliveredRevenue },
+    { key: 'totalSpend', label: 'Ad spend', kind: 'count', value: (d) => reduceMarketingLeaderboard(d ?? []).totalSpend },
+    { key: 'confirmationRate', label: 'Confirmation rate', kind: 'percent', value: (d) => reduceMarketingLeaderboard(d ?? []).confirmationRate },
+    { key: 'deliveryRate', label: 'Delivery rate', kind: 'percent', value: (d) => reduceMarketingLeaderboard(d ?? []).deliveryRate },
+    { key: 'mbCount', label: 'Media buyers', kind: 'count', value: (d) => (d ?? []).length },
+  ],
+};
+
+// ── Sales: team / leaderboard ────────────────────────────────────────────────
+
+/** One row of `orders.csLeaderboard` / csTeamPageBundle.leaderboard. */
+interface CSLeaderboardEntry {
+  ordersEngaged: number;
+  ordersConfirmed: number;
+  ordersDelivered: number;
+  callsMade: number;
+  confirmationRate: number; // 0-100
+  deliveryRate: number; // 0-100
+}
+
+function reduceCSLeaderboard(rows: CSLeaderboardEntry[]) {
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.engaged += num(r.ordersEngaged);
+      acc.confirmed += num(r.ordersConfirmed);
+      acc.delivered += num(r.ordersDelivered);
+      acc.calls += num(r.callsMade);
+      return acc;
+    },
+    { engaged: 0, confirmed: 0, delivered: 0, calls: 0 },
+  );
+  return {
+    ...totals,
+    closers: rows.length,
+    confirmationRate: totals.engaged > 0 ? totals.confirmed / totals.engaged : 0,
+    deliveryRate: totals.engaged > 0 ? totals.delivered / totals.engaged : 0,
+  };
+}
+
+interface CSTeamBundle {
+  leaderboard: CSLeaderboardEntry[];
+}
+
+const salesTeamSource: CompareSource<CSTeamBundle> = {
+  key: 'sales-team',
+  label: 'CS team analysis',
+  backTo: '/admin/sales/team',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'], permission: 'cs.teamOverview' },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<CSTeamBundle>('orders.csTeamPageBundle', period, cookie),
+  metrics: [
+    { key: 'engaged', label: 'Orders engaged', kind: 'count', funnel: true, value: (d) => reduceCSLeaderboard(d.leaderboard ?? []).engaged },
+    { key: 'confirmed', label: 'Confirmed', kind: 'count', funnel: true, value: (d) => reduceCSLeaderboard(d.leaderboard ?? []).confirmed },
+    { key: 'delivered', label: 'Delivered', kind: 'count', funnel: true, value: (d) => reduceCSLeaderboard(d.leaderboard ?? []).delivered },
+    { key: 'callsMade', label: 'Calls made', kind: 'count', value: (d) => reduceCSLeaderboard(d.leaderboard ?? []).calls },
+    { key: 'confirmationRate', label: 'Confirmation rate', kind: 'percent', value: (d) => reduceCSLeaderboard(d.leaderboard ?? []).confirmationRate },
+    { key: 'deliveryRate', label: 'Delivery rate', kind: 'percent', value: (d) => reduceCSLeaderboard(d.leaderboard ?? []).deliveryRate },
+    { key: 'closers', label: 'Active closers', kind: 'count', value: (d) => (d.leaderboard ?? []).length },
+  ],
+};
+
+const salesLeaderboardSource: CompareSource<CSLeaderboardEntry[]> = {
+  key: 'sales-leaderboard',
+  label: 'CS leaderboard',
+  backTo: '/admin/sales/leaderboard',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'], permission: 'orders.csLeaderboard' },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<CSLeaderboardEntry[]>('orders.csLeaderboard', period, cookie),
+  metrics: [
+    { key: 'engaged', label: 'Orders engaged', kind: 'count', funnel: true, value: (d) => reduceCSLeaderboard(d ?? []).engaged },
+    { key: 'confirmed', label: 'Confirmed', kind: 'count', funnel: true, value: (d) => reduceCSLeaderboard(d ?? []).confirmed },
+    { key: 'delivered', label: 'Delivered', kind: 'count', funnel: true, value: (d) => reduceCSLeaderboard(d ?? []).delivered },
+    { key: 'callsMade', label: 'Calls made', kind: 'count', value: (d) => reduceCSLeaderboard(d ?? []).calls },
+    { key: 'confirmationRate', label: 'Confirmation rate', kind: 'percent', value: (d) => reduceCSLeaderboard(d ?? []).confirmationRate },
+    { key: 'deliveryRate', label: 'Delivery rate', kind: 'percent', value: (d) => reduceCSLeaderboard(d ?? []).deliveryRate },
+    { key: 'closers', label: 'Closers', kind: 'count', value: (d) => (d ?? []).length },
+  ],
+};
+
+// ── Logistics: team ──────────────────────────────────────────────────────────
+
+/** One row of `logistics.teamOverview` (LogisticsProviderRow). */
+interface LogisticsProviderRow {
+  status: string;
+  totalAssigned: number;
+  delivered: number;
+  unitsDelivered: number;
+  locationCount: number;
+  remittedAmount: string;
+  pendingRemittanceAmount: string;
+  owingAmount: string;
+}
+
+function reduceLogisticsProviders(rows: LogisticsProviderRow[]) {
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.assigned += num(r.totalAssigned);
+      acc.delivered += num(r.delivered);
+      acc.units += num(r.unitsDelivered);
+      acc.locations += num(r.locationCount);
+      acc.remitted += num(r.remittedAmount);
+      acc.pending += num(r.pendingRemittanceAmount);
+      acc.owing += num(r.owingAmount);
+      if (r.status === 'ACTIVE') acc.active += 1;
+      return acc;
+    },
+    { assigned: 0, delivered: 0, units: 0, locations: 0, remitted: 0, pending: 0, owing: 0, active: 0 },
+  );
+  return {
+    ...totals,
+    providers: rows.length,
+    deliveryRate: totals.assigned > 0 ? totals.delivered / totals.assigned : 0,
+  };
+}
+
+const logisticsTeamSource: CompareSource<LogisticsProviderRow[]> = {
+  key: 'logistics-team',
+  label: 'Logistics team',
+  backTo: '/admin/logistics/team',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER'], permission: 'logistics.teamOverview' },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<LogisticsProviderRow[]>('logistics.teamOverview', period, cookie),
+  metrics: [
+    { key: 'assigned', label: 'Total assigned', kind: 'count', funnel: true, value: (d) => reduceLogisticsProviders(d ?? []).assigned },
+    { key: 'delivered', label: 'Delivered', kind: 'count', funnel: true, value: (d) => reduceLogisticsProviders(d ?? []).delivered },
+    { key: 'unitsDelivered', label: 'Units delivered', kind: 'count', value: (d) => reduceLogisticsProviders(d ?? []).units },
+    { key: 'deliveryRate', label: 'Delivery rate', kind: 'percent', value: (d) => reduceLogisticsProviders(d ?? []).deliveryRate },
+    { key: 'remitted', label: 'Remitted amount', kind: 'count', value: (d) => reduceLogisticsProviders(d ?? []).remitted },
+    { key: 'pending', label: 'Pending remittance', kind: 'count', value: (d) => reduceLogisticsProviders(d ?? []).pending },
+    { key: 'activeProviders', label: 'Active providers', kind: 'count', value: (d) => reduceLogisticsProviders(d ?? []).active },
+  ],
+};
+
+// ── Finance: overview / delivery-remittances / disbursements ──────────────────
+
+/** Shared remittance summary shape (numeric-strings). Nullable on the wire. */
+interface RemittanceSummary {
+  pendingAmount?: string;
+  pendingCount?: string;
+  totalRemitted?: string;
+  receivedAmount?: string;
+  receivedOrderCount?: string;
+  totalDeliveryFees?: string;
+  deliveryFeeCount?: string;
+  deliveredNetAmount?: string;
+  deliveredCount?: string;
+  awaitingPeriodAmount?: string;
+  awaitingPeriodCount?: string;
+}
+
+interface FundingSummary {
+  totalSent?: string;
+  sentCount?: number;
+  totalCompleted?: string;
+  completedCount?: number;
+  totalDisputed?: string;
+  disputedCount?: number;
+}
+
+interface FinanceOverviewBundle {
+  remittanceSummary?: RemittanceSummary | null;
+  fundingSummary?: FundingSummary | null;
+}
+
+const financeOverviewSource: CompareSource<FinanceOverviewBundle> = {
+  key: 'finance-overview',
+  label: 'Finance overview',
+  backTo: '/admin/finance/overview',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER', 'ACCOUNTANT', 'AUDITOR'], permission: 'finance.read' },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<FinanceOverviewBundle>('finance.overviewPageBundle', period, cookie),
+  metrics: [
+    { key: 'totalRemitted', label: 'Total remitted', kind: 'count', funnel: true, value: (d) => num(d.remittanceSummary?.totalRemitted ?? d.remittanceSummary?.receivedAmount) },
+    { key: 'pendingRemittance', label: 'Pending remittance', kind: 'count', funnel: true, value: (d) => num(d.remittanceSummary?.pendingAmount) },
+    { key: 'deliveryFees', label: 'Delivery fees', kind: 'count', value: (d) => num(d.remittanceSummary?.totalDeliveryFees) },
+    { key: 'fundingSent', label: 'Funding sent', kind: 'count', value: (d) => num(d.fundingSummary?.totalSent) },
+    { key: 'fundingCompleted', label: 'Funding completed', kind: 'count', value: (d) => num(d.fundingSummary?.totalCompleted) },
+    { key: 'fundingDisputed', label: 'Funding disputed', kind: 'count', value: (d) => num(d.fundingSummary?.totalDisputed) },
+    { key: 'remittedCount', label: 'Remitted orders', kind: 'count', value: (d) => num(d.remittanceSummary?.receivedOrderCount) },
+    { key: 'pendingCount', label: 'Pending orders', kind: 'count', value: (d) => num(d.remittanceSummary?.pendingCount) },
+  ],
+};
+
+interface DeliveryRemittancesBundle {
+  remittances: { summary?: RemittanceSummary | null };
+}
+
+const deliveryRemittancesSource: CompareSource<DeliveryRemittancesBundle> = {
+  key: 'delivery-remittances',
+  label: 'Delivery remittances',
+  backTo: '/admin/finance/delivery-remittances',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'], permission: 'finance.read' },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<DeliveryRemittancesBundle>('logistics.deliveryRemittancesPageBundle', period, cookie, { page: 1, limit: 1, summaryOnly: true }),
+  metrics: [
+    { key: 'received', label: 'Remitted received', kind: 'count', funnel: true, value: (d) => num(d.remittances?.summary?.receivedAmount ?? d.remittances?.summary?.totalRemitted) },
+    { key: 'pending', label: 'Pending confirmation', kind: 'count', funnel: true, value: (d) => num(d.remittances?.summary?.pendingAmount) },
+    { key: 'delivered', label: 'Delivered value', kind: 'count', value: (d) => num(d.remittances?.summary?.deliveredNetAmount) },
+    { key: 'deliveryFees', label: 'Delivery fees', kind: 'count', value: (d) => num(d.remittances?.summary?.totalDeliveryFees) },
+    { key: 'receivedCount', label: 'Remitted orders', kind: 'count', value: (d) => num(d.remittances?.summary?.receivedOrderCount) },
+    { key: 'deliveredCount', label: 'Delivered orders', kind: 'count', value: (d) => num(d.remittances?.summary?.deliveredCount) },
+    { key: 'awaiting', label: 'Awaiting (period)', kind: 'count', value: (d) => num(d.remittances?.summary?.awaitingPeriodAmount) },
+  ],
+};
+
+interface DisbursementsBundle {
+  summary?: FundingSummary | null;
+}
+
+const disbursementsSource: CompareSource<DisbursementsBundle> = {
+  key: 'disbursements',
+  label: 'Disbursements',
+  backTo: '/admin/finance/disbursements',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER', 'ACCOUNTANT'], permission: 'finance.disburse' },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<DisbursementsBundle>('marketing.disbursementsPageBundle', period, cookie),
+  metrics: [
+    { key: 'totalSent', label: 'Total sent', kind: 'count', funnel: true, value: (d) => num(d.summary?.totalSent) },
+    { key: 'totalCompleted', label: 'Completed', kind: 'count', funnel: true, value: (d) => num(d.summary?.totalCompleted) },
+    { key: 'totalDisputed', label: 'Disputed', kind: 'count', value: (d) => num(d.summary?.totalDisputed) },
+    { key: 'sentCount', label: 'Sent count', kind: 'count', value: (d) => num(d.summary?.sentCount) },
+    { key: 'completedCount', label: 'Completed count', kind: 'count', value: (d) => num(d.summary?.completedCount) },
+    { key: 'disputedCount', label: 'Disputed count', kind: 'count', value: (d) => num(d.summary?.disputedCount) },
+  ],
+};
+
+// ── Sales: cart-orders / delivered-follow-up (status-count sources) ───────────
+
+const cartOrdersSource: CompareSource<StatusCounts> = {
+  key: 'cart-orders',
+  label: 'Cart orders',
+  backTo: '/admin/sales/cart-orders',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_CLOSER'], permission: ['orders.read', 'marketing.orders'] },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<StatusCounts>('cartOrders.getStatusCounts', period, cookie),
+  metrics: [
+    { key: 'total', label: 'Total cart orders', kind: 'count', funnel: true, value: totalExclDeleted },
+    { key: 'confirmed', label: 'Confirmed', kind: 'count', funnel: true, value: confirmedPlus },
+    { key: 'delivered', label: 'Delivered', kind: 'count', funnel: true, value: deliveredPlus },
+    { key: 'remitted', label: 'Remitted', kind: 'count', funnel: true, value: (d) => n(d, 'REMITTED') },
+    { key: 'confirmationRate', label: 'Confirmation rate', kind: 'percent', value: (d) => { const t = totalExclDeleted(d); return t > 0 ? confirmedPlus(d) / t : 0; } },
+    { key: 'deliveryRate', label: 'Delivery rate', kind: 'percent', value: (d) => { const t = totalExclDeleted(d); return t > 0 ? deliveredPlus(d) / t : 0; } },
+  ],
+};
+
+interface CsOrdersBundle {
+  statusCounts: StatusCounts;
+}
+
+const deliveredFollowUpSource: CompareSource<CsOrdersBundle> = {
+  key: 'delivered-follow-up',
+  label: 'Delivered follow-up',
+  backTo: '/admin/sales/delivered-follow-up',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_CLOSER'], permission: 'orders.read' },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<CsOrdersBundle>('orders.csOrdersPageBundle', period, cookie, {
+      orderSource: 'delivered_follow_up',
+      countsStartDate: period.startDate,
+      countsEndDate: period.endDate,
+      heatYearMonth: period.startDate.slice(0, 7),
+    }),
+  metrics: [
+    { key: 'total', label: 'Total orders', kind: 'count', funnel: true, value: (d) => totalExclDeleted(d.statusCounts) },
+    { key: 'confirmed', label: 'Confirmed', kind: 'count', funnel: true, value: (d) => confirmedPlus(d.statusCounts) },
+    { key: 'delivered', label: 'Delivered', kind: 'count', funnel: true, value: (d) => deliveredPlus(d.statusCounts) },
+    { key: 'remitted', label: 'Remitted', kind: 'count', funnel: true, value: (d) => n(d.statusCounts, 'REMITTED') },
+  ],
+};
+
+// ── Executive dashboards: CEO overview + SuperAdmin overview ──────────────────
+
+interface CeoOverview {
+  overview: {
+    revenue: number;
+    trueProfit: number;
+    margin: number; // 0-100
+    costBreakdown: { adSpend: number; landedCost: number; deliveryFee: number };
+    orderPipeline: { total: number };
+    marketing: {
+      cpa: number;
+      deliveryRate: number; // 0-100
+      confirmationRate: number; // 0-100
+      totalOrders: number;
+      roas: number; // ratio
+      approvedSpend: number;
+    };
+    activeStaffCount: number;
+  };
+}
+
+/** Metric rows shared by the CEO + SuperAdmin overview sources. */
+const CEO_OVERVIEW_METRICS: CompareMetricDef<CeoOverview>[] = [
+  { key: 'revenue', label: 'Revenue', kind: 'count', funnel: true, value: (d) => num(d.overview.revenue) },
+  { key: 'trueProfit', label: 'True profit', kind: 'count', funnel: true, value: (d) => num(d.overview.trueProfit) },
+  { key: 'margin', label: 'Margin', kind: 'percent', value: (d) => num(d.overview.margin) / 100 },
+  { key: 'totalOrders', label: 'Total orders', kind: 'count', funnel: true, value: (d) => num(d.overview.orderPipeline.total) },
+  { key: 'adSpend', label: 'Ad spend', kind: 'count', value: (d) => num(d.overview.costBreakdown.adSpend) },
+  { key: 'landedCost', label: 'Landed cost', kind: 'count', value: (d) => num(d.overview.costBreakdown.landedCost) },
+  { key: 'deliveryFee', label: 'Delivery fees', kind: 'count', value: (d) => num(d.overview.costBreakdown.deliveryFee) },
+  { key: 'cpa', label: 'CPA', kind: 'count', value: (d) => num(d.overview.marketing.cpa) },
+  { key: 'roas', label: 'True ROAS', kind: 'count', value: (d) => num(d.overview.marketing.roas) },
+  { key: 'confirmationRate', label: 'Confirmation rate', kind: 'percent', value: (d) => num(d.overview.marketing.confirmationRate) / 100 },
+  { key: 'deliveryRate', label: 'Delivery rate', kind: 'percent', value: (d) => num(d.overview.marketing.deliveryRate) / 100 },
+  { key: 'activeStaff', label: 'Active staff', kind: 'count', value: (d) => num(d.overview.activeStaffCount) },
+];
+
+const ceoOverviewSource: CompareSource<CeoOverview> = {
+  key: 'ceo-overview',
+  label: 'Executive overview',
+  backTo: '/admin/ceo',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'SUPPORT'], permission: 'ceo.overview' },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<CeoOverview>('dashboard.ceoOverviewBundle', period, cookie),
+  metrics: CEO_OVERVIEW_METRICS,
+};
+
+const adminOverviewSource: CompareSource<CeoOverview> = {
+  key: 'admin-overview',
+  label: 'Dashboard overview',
+  backTo: '/admin',
+  guard: { roles: ['SUPER_ADMIN', 'ADMIN', 'SUPPORT'], permission: 'ceo.overview' },
+  fetchPeriod: (period, cookie) =>
+    fetchDated<CeoOverview>('dashboard.ceoOverview', period, cookie),
+  metrics: CEO_OVERVIEW_METRICS,
+};
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const SOURCES: Record<string, CompareSource<any>> = {
   [marketingAnalyticsSource.key]: marketingAnalyticsSource,
   [marketingOrdersSource.key]: marketingOrdersSource,
+  [marketingOverviewSource.key]: marketingOverviewSource,
+  [marketingTeamSource.key]: marketingTeamSource,
+  [marketingCrossFunnelSource.key]: marketingCrossFunnelSource,
+  [marketingExpensesSource.key]: marketingExpensesSource,
+  [marketingLeaderboardSource.key]: marketingLeaderboardSource,
   [salesOrdersSource.key]: salesOrdersSource,
+  [salesTeamSource.key]: salesTeamSource,
+  [salesLeaderboardSource.key]: salesLeaderboardSource,
   [logisticsOrdersSource.key]: logisticsOrdersSource,
+  [logisticsTeamSource.key]: logisticsTeamSource,
+  [financeOverviewSource.key]: financeOverviewSource,
+  [deliveryRemittancesSource.key]: deliveryRemittancesSource,
+  [disbursementsSource.key]: disbursementsSource,
+  [cartOrdersSource.key]: cartOrdersSource,
+  [deliveredFollowUpSource.key]: deliveredFollowUpSource,
+  [ceoOverviewSource.key]: ceoOverviewSource,
+  [adminOverviewSource.key]: adminOverviewSource,
 };
 
 export function getCompareSource(key: string | null | undefined): CompareSource | undefined {

@@ -307,13 +307,8 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             sheetTitle="Actions"
             triggerAriaLabel="Config tools"
             saveFilterKey
-            desktop={
-              <>
-                <Button size="sm" variant="secondary" onClick={handleSyncPreview} disabled={isSyncing || syncPreviewLoading || isSyncRunning} loading={syncPreviewLoading} loadingText="Checking...">Sync Now</Button>
-                <Button size="sm" variant="secondary" onClick={openCreate}>Add Rule</Button>
-                <Button size="sm" onClick={() => setCreateGroupOpen(true)}>Add Group</Button>
-              </>
-            }
+            desktopActions
+            desktop={null}
             sheet={
               <>
                 <Button size="sm" variant="secondary" className="w-full" onClick={handleSyncPreview} disabled={isSyncing || syncPreviewLoading || isSyncRunning} loading={syncPreviewLoading} loadingText="Checking...">Sync Now</Button>

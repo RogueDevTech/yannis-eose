@@ -5,6 +5,7 @@ import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Tabs } from '~/components/ui/tabs';
@@ -97,6 +98,7 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
                     startTime={filters.startTime ?? ''}
                     endTime={filters.endTime ?? ''}
                     periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
+                <CompareButton source="finance-overview" />
               </>
             }
             filters={

@@ -17,6 +17,7 @@ import { AssignCloserModal } from '~/components/ui/assign-closer-modal';
 import { SmartPick } from '~/components/ui/smart-pick';
 import { Pagination } from '~/components/ui/pagination';
 import { PageSearchControl } from '~/components/ui/page-search-control';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
@@ -399,35 +400,48 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
 
       {/* Filters + Search + Smart Pick */}
       <div className="space-y-2">
-        <div className="flex flex-wrap items-end gap-2">
-          <PageSearchControl
-            value={search}
-            placeholder="Search by name, order ID, or closer..."
-            title="Search orders"
-            onApply={(query) => { setSearch(query); setPage(1); }}
-          />
-          <FormSelect
-            value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-            options={[
-              { value: 'ALL', label: `All statuses (${allItems.length})` },
-              ...statusOptions,
-            ]}
-            wrapperClassName="w-auto min-w-[10rem]"
-          />
-          {canAssign && (
-            <FormSelect
-              value={assignmentFilter}
-              onChange={(e) => { setAssignmentFilter(e.target.value as 'ALL' | 'ASSIGNED' | 'UNASSIGNED'); setPage(1); }}
-              options={[
-                { value: 'ALL', label: 'All assignments' },
-                { value: 'ASSIGNED', label: `Assigned (${assignedCount})` },
-                { value: 'UNASSIGNED', label: `Unassigned (${allItems.length - assignedCount})` },
-              ]}
-              wrapperClassName="w-auto min-w-[10rem]"
+        <ToolbarFiltersCollapsible
+          className="!border-0 !px-0 !py-0"
+          badgeCount={(statusFilter !== 'ALL' ? 1 : 0) + (assignmentFilter !== 'ALL' ? 1 : 0)}
+          onClearAll={() => { setStatusFilter('ALL'); setAssignmentFilter('ALL'); setPage(1); }}
+          searchRow={
+            <PageSearchControl
+              value={search}
+              placeholder="Search by name, order ID, or closer..."
+              title="Search orders"
+              onApply={(query) => { setSearch(query); setPage(1); }}
             />
-          )}
-        </div>
+          }
+          desktopInlineFilters={
+            <>
+              <div className="relative" data-toolbar-filter>
+                <FormSelect
+                  value={statusFilter}
+                  onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+                  options={[
+                    { value: 'ALL', label: `All statuses (${allItems.length})` },
+                    ...statusOptions,
+                  ]}
+                  wrapperClassName="w-auto min-w-[10rem]"
+                />
+              </div>
+              {canAssign && (
+                <div className="relative" data-toolbar-filter>
+                  <FormSelect
+                    value={assignmentFilter}
+                    onChange={(e) => { setAssignmentFilter(e.target.value as 'ALL' | 'ASSIGNED' | 'UNASSIGNED'); setPage(1); }}
+                    options={[
+                      { value: 'ALL', label: 'All assignments' },
+                      { value: 'ASSIGNED', label: `Assigned (${assignedCount})` },
+                      { value: 'UNASSIGNED', label: `Unassigned (${allItems.length - assignedCount})` },
+                    ]}
+                    wrapperClassName="w-auto min-w-[10rem]"
+                  />
+                </div>
+              )}
+            </>
+          }
+        />
         {!isCloser && (
           <SmartPick
             total={selectableItems.length}

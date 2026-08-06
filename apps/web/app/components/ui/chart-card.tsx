@@ -64,13 +64,22 @@ export function ChartCard({
       </div>
 
       {expandable && (
-        <Modal open={expanded} onClose={() => setExpanded(false)} maxWidth="max-w-5xl">
-          <div className="space-y-3">
+        <Modal
+          open={expanded}
+          onClose={() => setExpanded(false)}
+          maxWidth="max-w-5xl"
+          contentClassName="p-5 sm:p-6"
+        >
+          <div className="space-y-4">
             <div className="min-w-0">
               <h3 className="text-base font-semibold text-app-fg">{title}</h3>
               {subtitle != null && <p className="text-sm text-app-fg-muted mt-0.5">{subtitle}</p>}
             </div>
-            <div style={{ height: modalHeight }}>{children}</div>
+            {/* Small inner inset so the chart's axis labels + end points don't sit
+                flush against the modal edge. */}
+            <div className="px-1 sm:px-2" style={{ height: modalHeight }}>
+              {children}
+            </div>
           </div>
         </Modal>
       )}

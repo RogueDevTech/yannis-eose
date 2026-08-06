@@ -335,6 +335,7 @@ export default function CartOrdersRoute() {
     >
       {(data) => (
         <OrdersListPage
+          compareSource="cart-orders"
           orders={data.orders ?? []}
           total={data.total ?? 0}
           totalPages={data.totalPages ?? 1}

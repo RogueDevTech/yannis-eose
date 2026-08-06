@@ -732,23 +732,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 </>
               );
             })()}
-            desktop={
-              <div className="flex flex-wrap gap-2">
-                <PageRefreshButton />
-                <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(true)}>
-                  Company
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => { setAddLocationProviderId(''); setShowAddLocation(true); }}>
-                  Location
-                </Button>
-                <Link to="/admin/logistics/partners/import-combined" prefetch="intent" className="btn-primary btn-sm">
-                  Import from Excel
-                </Link>
-                <Button variant="secondary" size="sm" onClick={() => setShowExport(true)}>
-                  Generate report
-                </Button>
-              </div>
-            }
+            desktopActions
+            desktop={<PageRefreshButton />}
             sheet={
               <>
                 <Button variant="secondary" className="h-12 w-full justify-center" onClick={() => setShowAddProvider(true)}>
