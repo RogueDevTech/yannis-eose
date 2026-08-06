@@ -3,7 +3,7 @@ import { defer, type LoaderFunctionArgs, type MetaFunction } from '@remix-run/no
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
+import { usePageRefreshOnEvent, usePollingFallback, useLivePoll } from '~/hooks/useSocket';
 import { MarketingAnalyticsPage } from '~/features/marketing/MarketingAnalyticsPage';
 import { MarketingAnalyticsLoadingShell } from '~/features/marketing/MarketingAnalyticsLoadingShell';
 import type { FormAnalytics } from '~/features/marketing/types';
@@ -85,6 +85,7 @@ export default function MarketingFormAnalyticsRoute() {
   const { analyticsShell, analyticsData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...ANALYTICS_LIVE_EVENTS]);
   usePollingFallback(20_000);
+  useLivePoll(15_000);
   return (
     <CachedAwait
       resolve={analyticsData}

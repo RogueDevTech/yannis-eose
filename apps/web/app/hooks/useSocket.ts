@@ -327,6 +327,33 @@ export function usePollingFallback(intervalMs = 30_000): void {
 }
 
 /**
+ * Always-on revalidation, INDEPENDENT of socket state. For live dashboards
+ * (Form Analytics) where a missed socket event must not leave the page stale:
+ * `usePageRefreshOnEvent` only fires while connected and `usePollingFallback`
+ * only polls while disconnected, so a connected-but-event-missed case updates
+ * nothing. This closes that gap with a guaranteed interval refresh. Skips the
+ * tick while the tab is hidden to avoid needless load. Busts the client-loader
+ * cache so `cachedClientLoader` routes actually fetch fresh data.
+ */
+export function useLivePoll(intervalMs = 15_000): void {
+  const { revalidate } = useRevalidator();
+  const revalidateRef = useRef(revalidate);
+  revalidateRef.current = revalidate;
+
+  useEffect(() => {
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      if (typeof window !== 'undefined') {
+        invalidateCachedLoader(window.location.pathname);
+      }
+      runSafeRevalidate(() => revalidateRef.current());
+    };
+    const id = setInterval(tick, intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+}
+
+/**
  * Sales Closer — broadcasts current UI state for Team Live View.
  * Call this in route components for Sales closers. Only emits if the socket is connected.
  *
