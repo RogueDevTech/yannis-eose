@@ -44,6 +44,36 @@ const FUNNEL_COLORS = ['#6366f1', '#f59e0b', '#0284c7', '#4f46e5', '#0ea5e9', '#
 const RAW_VIEWS_COLOR = '#6366f1'; // indigo — all views
 const UNIQUE_VIEWS_COLOR = '#f59e0b'; // amber — unique views
 
+/**
+ * X-axis tick for the funnel bar chart: colours each stage label to match its
+ * bar (FUNNEL_COLORS is index-aligned to the stages), so the label reads as the
+ * bar's legend. Supports the mobile slant via `angle`.
+ */
+function FunnelAxisTick(props: {
+  x?: number;
+  y?: number;
+  payload?: { value?: string | number; index?: number };
+  angle?: number;
+  fontSize?: number;
+}) {
+  const { x = 0, y = 0, payload, angle = 0, fontSize = 11 } = props;
+  const color = FUNNEL_COLORS[payload?.index ?? 0] ?? 'var(--color-app-fg-muted, #94a3b8)';
+  return (
+    <text
+      x={x}
+      y={y}
+      dy={angle ? 4 : 12}
+      textAnchor={angle ? 'end' : 'middle'}
+      transform={angle ? `rotate(${angle}, ${x}, ${y})` : undefined}
+      fill={color}
+      fontSize={fontSize}
+      fontWeight={500}
+    >
+      {payload?.value}
+    </text>
+  );
+}
+
 // Theme-aware Recharts tooltip: Recharts renders a hardcoded white card by
 // default, which ignores the app theme (stays white in dark/soft). These map the
 // tooltip surface, border, and text to the app's CSS vars so it follows the theme.
@@ -66,8 +96,8 @@ const TOOLTIP_ITEM_STYLE = { color: 'rgb(var(--app-fg-muted))', padding: 0, font
 function funnelAxisFor(isMobile: boolean) {
   return {
     xAxisProps: isMobile
-      ? { angle: -35, textAnchor: 'end' as const, height: 56, tick: { fontSize: 10 } }
-      : { tick: { fontSize: 11 } },
+      ? { height: 56, tick: <FunnelAxisTick angle={-35} fontSize={10} /> }
+      : { tick: <FunnelAxisTick fontSize={11} /> },
     chartMargin: isMobile
       ? { top: 24, right: 4, left: 0, bottom: 8 }
       : { top: 24, right: 4, left: 0, bottom: 4 },
