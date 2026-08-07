@@ -627,6 +627,21 @@ export const automationRuleKindEnum = pgEnum('automation_rule_kind', ['EVENT', '
 /** Delivery channel for an automation. */
 export const automationChannelEnum = pgEnum('automation_channel', ['EMAIL', 'SMS', 'WHATSAPP']);
 
+/** Channel of an automation message template (own table, includes EMAIL + subject). */
+export const automationMessageChannelEnum = pgEnum('automation_message_channel', ['EMAIL', 'SMS', 'WHATSAPP']);
+
+/** Lifecycle of an automation message template. */
+export const automationMessageTemplateStatusEnum = pgEnum('automation_message_template_status', [
+  'ACTIVE',
+  'ARCHIVED',
+]);
+
+/** How a target group is populated. */
+export const targetGroupSourceKindEnum = pgEnum('target_group_source_kind', ['RULE', 'UPLOAD', 'MANUAL']);
+
+/** How an individual member joined a target group. */
+export const targetGroupMemberSourceEnum = pgEnum('target_group_member_source', ['RULE', 'UPLOAD', 'MANUAL']);
+
 /** Lifecycle of a scheduled automation send. */
 export const automationJobStatusEnum = pgEnum('automation_job_status', [
   'PENDING',

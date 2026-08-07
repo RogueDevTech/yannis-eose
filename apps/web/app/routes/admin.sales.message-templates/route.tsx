@@ -458,30 +458,10 @@ function MessageTemplatesPage({
             sheetTitle="Message template tools"
             sheetSubtitle={<span>Preview and create</span>}
             triggerAriaLabel="Message template toolbar"
+            desktopActions
             desktop={
-              <>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPreviewAllOpen(true)}
-                  disabled={filtered.length === 0}
-                  title={filtered.length === 0 ? 'No templates to preview' : 'See every template with sample data'}
-                >
-                  Preview all
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => {
-                    setCreateBody('');
-                    setCreateOpen(true);
-                  }}
-                >
-                  New Template
-                </Button>
-                <PageRefreshButton />
-              </>
+              // Quick actions only; Preview all + New Template live in the sheet.
+              <PageRefreshButton />
             }
             sheet={({ closeSheet }) => (
               <>

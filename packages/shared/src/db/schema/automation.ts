@@ -3,6 +3,8 @@ import {
   automationRuleKindEnum,
   automationChannelEnum,
   automationJobStatusEnum,
+  automationMessageChannelEnum,
+  automationMessageTemplateStatusEnum,
   messageSuppressionChannelEnum,
   messageSuppressionReasonEnum,
 } from './enums';
@@ -48,6 +50,30 @@ export const automationRules = pgTable('automation_rules', {
   ...timestampColumns,
 });
 
+// ── Automation message templates ─────────────────────────────
+// The message content an automation rule sends. Own table (NOT the CS
+// message_templates), so email automations are first-class: own channel enum
+// with EMAIL + a subject column. Durable config → full temporal history.
+export const automationMessageTemplates = pgTable('automation_message_templates', {
+  id: uuidv7Pk(),
+  /** Company boundary. NULL = org-wide. */
+  groupId: uuid('group_id').references(() => branchGroups.id),
+  name: text('name').notNull(),
+  /** Channels this template can be used on. One body reused across them (subject
+   *  only applies to email). A rule picks this template when it covers a channel. */
+  channels: text('channels').array().notNull().default([]),
+  /** Legacy single channel — nullable, retained for back-compat until dropped.
+   *  New templates write `channels`. */
+  channel: automationMessageChannelEnum('channel'),
+  /** Email subject. NULL for SMS/WhatsApp; email falls back to the rule name when null. */
+  subject: text('subject'),
+  /** Body with {{placeholder}} syntax (same convention as CS templates). */
+  body: text('body').notNull(),
+  status: automationMessageTemplateStatusEnum('status').notNull().default('ACTIVE'),
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
 // ── Automation jobs (delayed-send queue) ─────────────────────
 // One scheduled send per customer — the "wait 2 hours" queue. High-volume +
 // ephemeral → actor-stamp only, no history table.
@@ -68,6 +94,10 @@ export const automationJobs = pgTable('automation_jobs', {
   outboundMessageId: uuid('outbound_message_id').references(() => outboundMessages.id),
   errorMessage: text('error_message'),
   attempts: integer('attempts').notNull().default(0),
+  /** Direct recipient email for order-less jobs (e.g. Target Group members). When
+   *  set, processJob sends here instead of resolving from an order. Raw phone is
+   *  never stored (Lead Fortress) — order-less members are email-only. */
+  recipientEmail: text('recipient_email'),
   ...temporalColumns,
   ...timestampColumns,
 });

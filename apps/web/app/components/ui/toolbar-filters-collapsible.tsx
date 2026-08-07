@@ -193,8 +193,25 @@ export function ToolbarFiltersCollapsible({
               // and stays pinned to the wrapper's top-right corner.
               '[&_[data-toolbar-filter]>*:not(.absolute)]:!w-full [&_[data-toolbar-filter]>*:not(.absolute)]:!max-w-none',
               '[&_[data-toolbar-filter]_.relative]:!w-full',
-              // Taller controls to match the roomy modal spacing.
-              '[&_[data-toolbar-filter]_button[aria-haspopup]]:!min-h-[2.75rem]',
+              // Each filter control reads as an elevated card with a CENTERED
+              // label — matching the Actions dropdown buttons (Compare / View
+              // data in chart / …) so the whole Filters modal is visually
+              // consistent. Applied globally here so every page's desktop Filters
+              // modal gets the treatment without per-page styling.
+              '[&_[data-toolbar-filter]_button[aria-haspopup]]:!min-h-[3rem]',
+              '[&_[data-toolbar-filter]_button[aria-haspopup]]:!rounded-lg',
+              '[&_[data-toolbar-filter]_button[aria-haspopup]]:!border-app-border',
+              '[&_[data-toolbar-filter]_button[aria-haspopup]]:!bg-app-elevated',
+              '[&_[data-toolbar-filter]_button[aria-haspopup]:hover]:!bg-app-hover',
+              // Center the label: the trigger becomes a centered flex row, its
+              // text span grows and centers, and the chevron sits at the right.
+              '[&_[data-toolbar-filter]_button[aria-haspopup]]:!flex',
+              '[&_[data-toolbar-filter]_button[aria-haspopup]]:!items-center',
+              '[&_[data-toolbar-filter]_button[aria-haspopup]]:!justify-center',
+              '[&_[data-toolbar-filter]_button[aria-haspopup]]:!text-center',
+              '[&_[data-toolbar-filter]_button[aria-haspopup]>span:first-child]:!flex-1',
+              '[&_[data-toolbar-filter]_button[aria-haspopup]>span:first-child]:!text-center',
+              '[&_[data-toolbar-filter]_button[aria-haspopup]>span:first-child]:!justify-center',
             ].join(' ')}
           >
             {modalBody}

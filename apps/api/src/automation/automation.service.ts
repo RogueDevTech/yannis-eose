@@ -15,6 +15,9 @@ import type {
   ListMarketingAutomationRulesInput,
   UpdateMarketingAutomationRuleInput,
   TestMarketingAutomationRuleInput,
+  CreateAutomationMessageTemplateInput,
+  UpdateAutomationMessageTemplateInput,
+  ListAutomationMessageTemplatesInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
@@ -110,6 +113,11 @@ export class AutomationService {
     activeGroupId: string | null,
   ) {
     this.assertChannelsConfigured(input.channels);
+    // A rule can only be created already-enabled if it can send + target.
+    // Otherwise it must be saved as a disabled draft first.
+    if (input.enabled) {
+      this.assertEnableable({ kind: input.kind, templateId: input.templateId ?? null, trigger: input.trigger ?? {} });
+    }
 
     return withActor(this.db, { id: actor.id }, async (tx) => {
       const rows = await tx
@@ -157,8 +165,19 @@ export class AutomationService {
     actor: SessionUser,
     activeGroupId: string | null,
   ) {
-    await this.requireRule(input.ruleId, activeGroupId);
+    const existing = await this.requireRule(input.ruleId, activeGroupId);
     if (input.channels) this.assertChannelsConfigured(input.channels);
+
+    // If the rule will be enabled after this patch, it must be sendable + targeted.
+    // Merge the patch over the existing row to evaluate the resulting state.
+    const willBeEnabled = input.enabled ?? existing.enabled;
+    if (willBeEnabled) {
+      this.assertEnableable({
+        kind: existing.kind,
+        templateId: input.templateId !== undefined ? input.templateId : existing.templateId,
+        trigger: input.trigger !== undefined ? input.trigger : existing.trigger,
+      });
+    }
 
     return withActor(this.db, { id: actor.id }, async (tx) => {
       const set: Record<string, unknown> = { updatedAt: new Date() };
@@ -184,7 +203,11 @@ export class AutomationService {
   }
 
   async setEnabled(ruleId: string, enabled: boolean, actor: SessionUser, activeGroupId: string | null) {
-    await this.requireRule(ruleId, activeGroupId);
+    const rule = await this.requireRule(ruleId, activeGroupId);
+    // Enabling requires a sendable, targeted rule; disabling is always allowed.
+    if (enabled) {
+      this.assertEnableable({ kind: rule.kind, templateId: rule.templateId, trigger: rule.trigger });
+    }
     return withActor(this.db, { id: actor.id }, async (tx) => {
       const rows = await tx
         .update(schema.automationRules)
@@ -210,6 +233,157 @@ export class AutomationService {
         .where(and(eq(schema.automationJobs.ruleId, ruleId), eq(schema.automationJobs.status, 'PENDING')));
     });
     return { deleted: true };
+  }
+
+  /** Fetch a single rule (company-scoped). Used by the edit/detail surfaces. */
+  async getById(ruleId: string, activeGroupId: string | null) {
+    return this.requireRule(ruleId, activeGroupId);
+  }
+
+  /**
+   * A rule can be saved as a disabled DRAFT with no template/audience, but it can
+   * only be ENABLED once it can actually send and target: it needs a message
+   * template, and a SEGMENT rule needs a non-empty audience. Throws otherwise so
+   * a live rule is never a silent no-op.
+   */
+  private assertEnableable(rule: {
+    kind: string;
+    templateId: string | null;
+    trigger: unknown;
+  }) {
+    if (!rule.templateId) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Add a message template before enabling this rule, otherwise it has nothing to send.',
+      });
+    }
+    if (rule.kind === 'SEGMENT') {
+      const parsed = automationTriggerSchema.safeParse(rule.trigger ?? {});
+      const seg = parsed.success ? parsed.data.segment : undefined;
+      const hasAudience =
+        !!seg &&
+        (!!seg.targetGroupId ||
+          (seg.statuses?.length ?? 0) > 0 ||
+          (seg.branchIds?.length ?? 0) > 0 ||
+          seg.sinceDays != null);
+      if (!hasAudience) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Choose a target group or define an audience (status, branch, or recency) before enabling this broadcast, otherwise it reaches no one.',
+        });
+      }
+    }
+  }
+
+  // ── Automation message templates (own table) ────────────────
+
+  async listTemplates(
+    input: ListAutomationMessageTemplatesInput,
+    activeGroupId: string | null,
+  ) {
+    const conditions = [isNull(schema.automationMessageTemplates.validTo)];
+    if (activeGroupId) {
+      conditions.push(
+        or(
+          eq(schema.automationMessageTemplates.groupId, activeGroupId),
+          isNull(schema.automationMessageTemplates.groupId),
+        )!,
+      );
+    }
+    // Channel filter: match templates that INCLUDE the requested channel (array contains).
+    if (input?.channel) {
+      conditions.push(sql`${schema.automationMessageTemplates.channels} @> ARRAY[${input.channel}]::text[]`);
+    }
+    if (!input?.includeArchived) {
+      conditions.push(eq(schema.automationMessageTemplates.status, 'ACTIVE'));
+    }
+    return this.db
+      .select()
+      .from(schema.automationMessageTemplates)
+      .where(and(...conditions))
+      .orderBy(desc(schema.automationMessageTemplates.createdAt))
+      .limit(200);
+  }
+
+  async createTemplate(
+    input: CreateAutomationMessageTemplateInput,
+    actor: SessionUser,
+    activeGroupId: string | null,
+  ) {
+    return withActor(this.db, { id: actor.id }, async (tx) => {
+      const rows = await tx
+        .insert(schema.automationMessageTemplates)
+        .values({
+          groupId: activeGroupId ?? null,
+          name: input.name,
+          channels: input.channels,
+          // Subject only meaningful when the template can send email.
+          subject: input.channels.includes('EMAIL') ? (input.subject ?? null) : null,
+          body: input.body,
+        })
+        .returning();
+      const created = rows[0];
+      if (!created) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create template' });
+      }
+      return created;
+    });
+  }
+
+  private async requireTemplate(templateId: string, activeGroupId: string | null) {
+    const [tpl] = await this.db
+      .select()
+      .from(schema.automationMessageTemplates)
+      .where(
+        and(
+          eq(schema.automationMessageTemplates.id, templateId),
+          isNull(schema.automationMessageTemplates.validTo),
+        ),
+      )
+      .limit(1);
+    if (!tpl) throw new TRPCError({ code: 'NOT_FOUND', message: 'Template not found' });
+    if (activeGroupId && tpl.groupId && tpl.groupId !== activeGroupId) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Template belongs to another company.' });
+    }
+    return tpl;
+  }
+
+  async updateTemplate(
+    input: UpdateAutomationMessageTemplateInput,
+    actor: SessionUser,
+    activeGroupId: string | null,
+  ) {
+    const existing = await this.requireTemplate(input.templateId, activeGroupId);
+    const nextChannels = input.channels ?? existing.channels ?? [];
+    const includesEmail = nextChannels.includes('EMAIL');
+    return withActor(this.db, { id: actor.id }, async (tx) => {
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.name !== undefined) set['name'] = input.name;
+      if (input.channels !== undefined) set['channels'] = input.channels;
+      if (input.body !== undefined) set['body'] = input.body;
+      // Subject only applies when Email is among the channels; clear it otherwise.
+      if (input.subject !== undefined || input.channels !== undefined) {
+        set['subject'] = includesEmail ? (input.subject ?? existing.subject ?? null) : null;
+      }
+      const rows = await tx
+        .update(schema.automationMessageTemplates)
+        .set(set)
+        .where(eq(schema.automationMessageTemplates.id, input.templateId))
+        .returning();
+      return rows[0]!;
+    });
+  }
+
+  async archiveTemplate(templateId: string, actor: SessionUser, activeGroupId: string | null) {
+    await this.requireTemplate(templateId, activeGroupId);
+    return withActor(this.db, { id: actor.id }, async (tx) => {
+      const rows = await tx
+        .update(schema.automationMessageTemplates)
+        .set({ status: 'ARCHIVED', updatedAt: new Date() })
+        .where(eq(schema.automationMessageTemplates.id, templateId))
+        .returning();
+      return rows[0]!;
+    });
   }
 
   // ── EVENT engine: match rules → enqueue jobs ────────────────
@@ -344,7 +518,8 @@ export class AutomationService {
     // Resolve recipient + placeholder context from the order (raw phone/email
     // stays server-side; never surfaced to a viewer — Pillar 2).
     const ctx = await this.resolveContext(job.orderId);
-    const to = channel === 'EMAIL' ? ctx.email : ctx.phone;
+    // Order-less jobs (Target Group members) carry their email directly on the job.
+    const to = channel === 'EMAIL' ? (ctx.email ?? job.recipientEmail) : ctx.phone;
     if (!to) {
       await this.finishJob(job.id, 'SKIPPED', null, `No ${channel === 'EMAIL' ? 'email' : 'phone'} on record.`);
       return false;
@@ -355,7 +530,7 @@ export class AutomationService {
       const suppressed = await this.suppression.isSuppressed({
         channel,
         phoneHash: job.customerPhoneHash || null,
-        email: ctx.email,
+        email: ctx.email ?? job.recipientEmail,
       });
       if (suppressed) {
         await this.finishJob(job.id, 'SKIPPED', null, 'Recipient is on the opt-out list.');
@@ -363,20 +538,21 @@ export class AutomationService {
       }
     }
 
-    const body = await this.renderBody(rule.templateId, ctx.order);
-    if (!body) {
-      await this.finishJob(job.id, 'SKIPPED', null, 'Rule has no template body.');
+    const rendered = await this.renderTemplate(rule.templateId, ctx.order);
+    if (!rendered) {
+      await this.finishJob(job.id, 'SKIPPED', null, 'Rule has no message template.');
       return false;
     }
 
     const result = await provider.send({
       to,
-      subject: rule.name,
-      body,
+      // Email uses the template's subject; fall back to the rule name when absent.
+      subject: rendered.subject ?? rule.name,
+      body: rendered.body,
     });
 
     if (result.success) {
-      const outboundMessageId = await this.logOutbound(job, channel, body);
+      const outboundMessageId = await this.logOutbound(job, channel, rendered.body);
       await this.finishJob(job.id, 'SENT', outboundMessageId, null);
       return true;
     }
@@ -495,18 +671,26 @@ export class AutomationService {
     };
   }
 
-  private async renderBody(
+  /**
+   * Render a rule's message content from the automation template table. Returns
+   * both the rendered body and the (email) subject; null when there is no template
+   * or it no longer exists. Placeholders are substituted from the order context.
+   */
+  private async renderTemplate(
     templateId: string | null,
     order: AutomationOrderContext | null,
-  ): Promise<string | null> {
+  ): Promise<{ body: string; subject: string | null } | null> {
     if (!templateId) return null;
     const [tpl] = await this.db
-      .select({ body: schema.messageTemplates.body })
-      .from(schema.messageTemplates)
-      .where(eq(schema.messageTemplates.id, templateId))
+      .select({ body: schema.automationMessageTemplates.body, subject: schema.automationMessageTemplates.subject })
+      .from(schema.automationMessageTemplates)
+      .where(eq(schema.automationMessageTemplates.id, templateId))
       .limit(1);
     if (!tpl) return null;
-    return order ? renderAutomationBody(tpl.body, order) : tpl.body;
+    return {
+      body: order ? renderAutomationBody(tpl.body, order) : tpl.body,
+      subject: tpl.subject ?? null,
+    };
   }
 
   // ── SEGMENT broadcasts: scheduled + on-demand ───────────────
@@ -550,6 +734,13 @@ export class AutomationService {
     const trigger = this.parseTrigger(rule.trigger);
     const seg = trigger?.segment ?? {};
 
+    // Target Group audience — resolve members from the materialized membership
+    // table. Members may have no order, so we carry their email on the job and
+    // send email-only (raw phone isn't stored for order-less members).
+    if (seg.targetGroupId) {
+      return this.enqueueForTargetGroup(rule, seg.targetGroupId);
+    }
+
     const where = [] as ReturnType<typeof eq>[];
     if (seg.statuses?.length) {
       where.push(inArray(schema.orders.status, seg.statuses as (typeof schema.orders.status.enumValues)[number][]));
@@ -592,6 +783,72 @@ export class AutomationService {
           });
           enqueued += 1;
         }
+      }
+    });
+    return { enqueued };
+  }
+
+  /**
+   * Enqueue jobs for a Target Group's members. Members are keyed by phone hash and
+   * carry a denormalized email; since they may have no order, we send EMAIL only
+   * (raw phone isn't stored for order-less members — Lead Fortress). Members
+   * without an email are skipped. The email is stamped on the job's recipientEmail.
+   */
+  private async enqueueForTargetGroup(
+    rule: typeof schema.automationRules.$inferSelect,
+    targetGroupId: string,
+  ): Promise<{ enqueued: number }> {
+    // COMPANY ISOLATION: the group must belong to the rule's company (or be
+    // org-wide). Without this check a rule could point at another company's group
+    // id and broadcast to their members — a cross-company data leak.
+    const [group] = await this.db
+      .select({ id: schema.targetGroups.id, groupId: schema.targetGroups.groupId })
+      .from(schema.targetGroups)
+      .where(and(eq(schema.targetGroups.id, targetGroupId), isNull(schema.targetGroups.validTo)))
+      .limit(1);
+    if (!group) return { enqueued: 0 };
+    if (rule.groupId && group.groupId && group.groupId !== rule.groupId) {
+      this.logger.warn(
+        `rule ${rule.id} (company ${rule.groupId}) referenced target group ${targetGroupId} of company ${group.groupId} — skipped for isolation`,
+      );
+      return { enqueued: 0 };
+    }
+
+    const members = await this.db
+      .select({
+        phoneHash: schema.targetGroupMembers.customerPhoneHash,
+        email: schema.targetGroupMembers.customerEmail,
+      })
+      .from(schema.targetGroupMembers)
+      .where(
+        and(
+          eq(schema.targetGroupMembers.targetGroupId, targetGroupId),
+          isNull(schema.targetGroupMembers.validTo),
+        ),
+      )
+      .limit(5000);
+
+    // Order-less members are email-only. Filter to those with an email.
+    const emailable = members.filter((m) => !!m.email);
+    const channels = (rule.channels?.length ? rule.channels : rule.channel ? [rule.channel] : []) as string[];
+    // Only EMAIL can reach order-less group members; other channels are skipped here.
+    const emailChannels = channels.filter((c) => c === 'EMAIL');
+    if (emailChannels.length === 0 || emailable.length === 0) return { enqueued: 0 };
+
+    let enqueued = 0;
+    const now = new Date();
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      for (const m of emailable) {
+        await tx.insert(schema.automationJobs).values({
+          ruleId: rule.id,
+          customerPhoneHash: m.phoneHash,
+          orderId: null,
+          channel: 'EMAIL' as AutomationChannel,
+          recipientEmail: m.email,
+          scheduledAt: now,
+          status: 'PENDING',
+        });
+        enqueued += 1;
       }
     });
     return { enqueued };
@@ -654,10 +911,10 @@ export class AutomationService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: `${input.channel} channel is not configured.` });
     }
     const ctx = input.sampleOrderId ? await this.resolveContext(input.sampleOrderId) : { order: null };
-    const body =
-      (await this.renderBody(rule.templateId, ctx.order)) ??
-      `Test message from automation rule "${rule.name}".`;
-    const result = await provider.send({ to: input.to, subject: `[Test] ${rule.name}`, body });
+    const rendered = await this.renderTemplate(rule.templateId, ctx.order);
+    const body = rendered?.body ?? `Test message from automation rule "${rule.name}".`;
+    const subject = `[Test] ${rendered?.subject ?? rule.name}`;
+    const result = await provider.send({ to: input.to, subject, body });
     if (!result.success) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: result.error ?? 'Test send failed.' });
     }
