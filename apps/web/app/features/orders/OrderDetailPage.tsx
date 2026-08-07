@@ -1032,10 +1032,6 @@ export function OrderDetailPage({
   const [deliveredDeletionModalOpen, setDeliveredDeletionModalOpen] = useState(false);
   const [deliveredDeletionReason, setDeliveredDeletionReason] = useState('');
   const deliveredDeletionFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  const [retrackRequestModalOpen, setRetrackRequestModalOpen] = useState(false);
-  const [retrackRequestTarget, setRetrackRequestTarget] = useState('');
-  const [retrackRequestReason, setRetrackRequestReason] = useState('');
-  const retrackRequestFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [restoreModalOpen, setRestoreModalOpen] = useState(false);
   const [assignToId, setAssignToId] = useState('');
   const [lateStageTransferReason, setLateStageTransferReason] = useState('');
@@ -1092,6 +1088,11 @@ export function OrderDetailPage({
   const [editStatusModalOpen, setEditStatusModalOpen] = useState(false);
   const [editStatusTarget, setEditStatusTarget] = useState('');
   const [editStatusReason, setEditStatusReason] = useState('');
+  // Direct-retrack value hold: when Finance rolls an order back because the
+  // remitted cash didn't match the posted value, flag it as a value mismatch so
+  // the backend opens a value hold (blocks re-delivery until the price is fixed).
+  const [editStatusReasonKind, setEditStatusReasonKind] = useState<'value' | 'other'>('other');
+  const [editStatusCorrectedAmount, setEditStatusCorrectedAmount] = useState('');
   const [editDetailsModalOpen, setEditDetailsModalOpen] = useState(false);
   const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number; offerLabel: string | null }>>([]);
   const [priceApprovalReason, setPriceApprovalReason] = useState('');
@@ -1327,14 +1328,6 @@ export function OrderDetailPage({
     setDeliveredDeletionModalOpen(false);
     setDeliveredDeletionReason('');
   }, { intent: 'requestDeliveredOrderDeletion' });
-  useFetcherToast(retrackRequestFetcher.data, {
-    successMessage: 'Retrack request submitted, awaiting approval',
-  });
-  useCloseOnFetcherSuccess(retrackRequestFetcher, () => {
-    setRetrackRequestModalOpen(false);
-    setRetrackRequestTarget('');
-    setRetrackRequestReason('');
-  }, { intent: 'requestOrderRetrack' });
   const showCopyOrderSummary = canCopyOrderSummaryForChat(userRole, currentBranchId ?? null, order, permissions);
   const logisticsLocationWithGroupLink =
     order.logisticsLocationId != null
@@ -2116,6 +2109,32 @@ export function OrderDetailPage({
             </Modal>
           )}
         </>
+      )}
+
+      {order.valueHoldPending && (
+        <div className="rounded-lg border border-danger-300 dark:border-danger-700/60 bg-danger-50 dark:bg-danger-900/20 px-4 py-3">
+          <div className="flex items-start gap-2.5">
+            <svg
+              className="h-5 w-5 shrink-0 text-danger-600 dark:text-danger-400 mt-0.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+            <div className="flex-1 min-w-0 text-sm text-danger-900 dark:text-danger-100">
+              <p className="font-semibold">Value hold: order retracked for incorrect value</p>
+              <p className="mt-0.5 text-danger-800 dark:text-danger-200/90">
+                This order was retracked because its value was incorrect. Correct the order price to proceed. It cannot be delivered until the price is fixed.
+                {order.valueHoldHint != null && order.valueHoldHint !== '' ? (
+                  <> Finance indicated the correct value is <strong>₦{Number(order.valueHoldHint).toLocaleString()}</strong>.</>
+                ) : null}
+              </p>
+            </div>
+          </div>
+        </div>
       )}
 
       {order.pendingRetrackRequestId && (
@@ -3636,66 +3655,6 @@ export function OrderDetailPage({
         </Modal>
       )}
 
-      {/* Finance retrack request modal — dual-approval (HoCS + HoL) */}
-      {retrackRequestModalOpen && (
-        <Modal
-          open
-          onClose={() => { setRetrackRequestModalOpen(false); setRetrackRequestTarget(''); setRetrackRequestReason(''); }}
-          maxWidth="max-w-sm"
-          contentClassName="p-6 space-y-4"
-        >
-          <h3 className="text-lg font-semibold text-app-fg">Request status retrack</h3>
-          <p className="text-sm text-app-fg-muted">
-            Roll this order back to an earlier status. Both the Head of CS and Head of Logistics must approve before the retrack executes.
-          </p>
-          <FormSelect
-            label="Roll back to"
-            value={retrackRequestTarget}
-            onChange={(e) => setRetrackRequestTarget(e.target.value)}
-            options={(() => {
-              // Only expose customer-meaningful statuses — internal logistics steps
-              // (Agent Assigned / Dispatched / In Transit) are hidden. Both targets
-              // below are valid single-hop retracks in the state machine, so the
-              // request never dead-ends at execution.
-              // REMITTED can only step back to DELIVERED; DELIVERED steps back to Confirmed.
-              if (order.status === 'REMITTED') {
-                return [{ value: 'DELIVERED', label: 'Delivered' }];
-              }
-              return [{ value: 'CONFIRMED', label: 'Confirmed' }];
-            })()}
-          />
-          <Textarea
-            label="Reason"
-            value={retrackRequestReason}
-            onChange={(e) => setRetrackRequestReason(e.target.value)}
-            placeholder="Why should this order be retracked?"
-            rows={2}
-          />
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => { setRetrackRequestModalOpen(false); setRetrackRequestTarget(''); setRetrackRequestReason(''); }}>
-              Cancel
-            </Button>
-            <retrackRequestFetcher.Form method="post">
-              <input type="hidden" name="intent" value="requestOrderRetrack" />
-              <input type="hidden" name="targetStatus" value={retrackRequestTarget} />
-              <input type="hidden" name="reason" value={retrackRequestReason} />
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={
-                  !retrackRequestTarget ||
-                  retrackRequestReason.trim().length < 10 ||
-                  retrackRequestFetcher.state === 'submitting'
-                }
-                loading={retrackRequestFetcher.state === 'submitting'}
-                loadingText="Submitting…"
-              >
-                Submit request
-              </Button>
-            </retrackRequestFetcher.Form>
-          </div>
-        </Modal>
-      )}
 
       {/* Restore order modal (CANCELLED/DELETED → UNPROCESSED) — Admin / Super Admin only */}
       {restoreModalOpen && (
@@ -4344,13 +4303,40 @@ export function OrderDetailPage({
           placeholder="Why is this status being changed?"
           rows={2}
         />
+        <FormSelect
+          label="Reason type"
+          value={editStatusReasonKind}
+          onChange={(e) => setEditStatusReasonKind(e.target.value as 'value' | 'other')}
+          options={[
+            { value: 'other', label: 'Other' },
+            { value: 'value', label: 'Value mismatch (remitted ≠ posted)' },
+          ]}
+        />
+        {editStatusReasonKind === 'value' && (
+          <div className="rounded-lg border border-warning-300 bg-warning-50 p-3 dark:border-warning-700 dark:bg-warning-900/20 space-y-2">
+            <p className="text-2xs text-warning-700 dark:text-warning-300">
+              This opens a value hold: the order cannot be re-delivered until CS corrects the price.
+            </p>
+            <TextInput
+              type="number"
+              label="Correct value (optional)"
+              value={editStatusCorrectedAmount}
+              onChange={(e) => setEditStatusCorrectedAmount(e.target.value)}
+              placeholder="e.g. 120000"
+              min={0}
+            />
+            <p className="text-2xs text-app-fg-muted">
+              Pre-fills the price correction for CS. Does not change the order by itself.
+            </p>
+          </div>
+        )}
         {fetcherSurface.errorMatchingIntent('transition') && (
           <p className="text-sm text-danger-600 dark:text-danger-400">
             {fetcherSurface.errorMatchingIntent('transition')}
           </p>
         )}
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={() => setEditStatusModalOpen(false)}>
+          <Button variant="secondary" onClick={() => { setEditStatusModalOpen(false); setEditStatusReasonKind('other'); setEditStatusCorrectedAmount(''); }}>
             Cancel
           </Button>
           <Button
@@ -4375,6 +4361,16 @@ export function OrderDetailPage({
                   // so finance users don't have to pick one manually.
                   ...(editStatusTarget === 'CONFIRMED' && order.preferredDeliveryDate
                     ? { preferredDeliveryDate: order.preferredDeliveryDate.slice(0, 10) }
+                    : {}),
+                  // Value mismatch → open a value hold that blocks re-delivery until
+                  // the price is corrected. Optional corrected amount pre-fills the fix.
+                  ...(editStatusReasonKind === 'value'
+                    ? {
+                        retrackReasonKind: 'value',
+                        ...(editStatusCorrectedAmount.trim() !== ''
+                          ? { correctedTotalAmount: editStatusCorrectedAmount.trim() }
+                          : {}),
+                      }
                     : {}),
                 },
                 { method: 'post' },

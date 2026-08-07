@@ -239,6 +239,13 @@ export const transitionOrderSchema = z.object({
     engagementMethod: z
       .enum(['phone_revealed', 'voip_call_started', 'manual_call_logged'])
       .optional(),
+    /** When a (direct) retrack is due to a value mismatch (remitted != posted).
+     *  'value' opens a value hold that blocks re-delivery until the price is
+     *  corrected. Only meaningful on a backward/retrack transition. */
+    retrackReasonKind: z.enum(['value', 'other']).optional(),
+    /** Optional corrected order total Finance believes is right, stored as a hint
+     *  to pre-fill the CS line-price correction. Does not clear the hold itself. */
+    correctedTotalAmount: z.number().positive().optional(),
   }).optional(),
 });
 

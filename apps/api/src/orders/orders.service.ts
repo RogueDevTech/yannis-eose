@@ -5476,6 +5476,21 @@ export class OrdersService {
       }
     }
 
+    // Value hold: Finance retracks directly (no approval) when the remitted cash
+    // didn't match the posted value. When this backward transition is flagged as a
+    // value mismatch, open a hold that blocks re-delivery (manual and via the cart
+    // mirror) until CS corrects the line price — the correction auto-clears it. The
+    // optional correctedTotalAmount is stored as a hint for the CS correction.
+    // Use `isBackward` (computed above from the FULL RETRACK_LIFECYCLE map, all 9
+    // statuses) — NOT the truncated LIFECYCLE_ORDER indices, which return -1 for a
+    // REMITTED source and would silently skip opening the hold on a REMITTED retrack.
+    if (isBackward && input.metadata?.retrackReasonKind === 'value') {
+      updateFields['valueHoldPending'] = true;
+      const hint = Number(input.metadata?.correctedTotalAmount);
+      updateFields['valueHoldHint'] =
+        Number.isFinite(hint) && hint > 0 ? sql`${hint}::numeric` : null;
+    }
+
     // 15-min order lock on CS_ENGAGED (agent clicks Call)
     if (newStatus === 'CS_ENGAGED') {
       const lockExpiry = new Date(Date.now() + 15 * 60 * 1000);
@@ -5984,6 +5999,20 @@ export class OrdersService {
     if (workingInput.customerEmail !== undefined) updateFields['customerEmail'] = workingInput.customerEmail;
     if (workingInput.totalAmount !== undefined) updateFields['totalAmount'] = sql`${workingInput.totalAmount}::numeric`;
     if (workingInput.items !== undefined) updateFields['items'] = workingInput.items;
+
+    // Auto-clear any value hold when a genuine line-price correction is applied.
+    // A price correction is the ONLY thing that lifts a value-retrack hold. We gate
+    // on BOTH items and totalAmount being present (the signature of a line-price
+    // change, and what the ORDER_LINE_PRICE_CHANGE apply path sends) so unrelated
+    // edits that touch totalAmount alone (e.g. delivery discount) don't clear it.
+    if (
+      order.valueHoldPending &&
+      workingInput.items !== undefined &&
+      workingInput.totalAmount !== undefined
+    ) {
+      updateFields['valueHoldPending'] = false;
+      updateFields['valueHoldHint'] = null;
+    }
 
     const updated = await withActor(this.db, actor, async (tx) => {
       const updatedRows = await tx
@@ -9093,6 +9122,18 @@ export class OrdersService {
       }
 
       case 'DELIVERED': {
+        // Value hold: this order was retracked by Finance for a value mismatch and
+        // its line price has NOT yet been corrected. Block re-delivery (manual or
+        // via CART_SOURCE_MIRROR) until the price is fixed — correcting the line
+        // price auto-clears the hold. This is the guard that stops the "retracked
+        // for wrong value, silently re-delivered at the stale value" leak.
+        if (order.valueHoldPending) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              'This order was retracked because its value was incorrect. Correct the order price before marking it delivered.',
+          });
+        }
         // 3PL marks delivered independently; proof/cost collected later in delivery remittance
         if (metadata?.deliveryProofUrl && typeof metadata.deliveryProofUrl === 'string' && metadata.deliveryProofUrl.trim() !== '') {
           try {
@@ -9117,6 +9158,17 @@ export class OrdersService {
       }
 
       case 'PARTIALLY_DELIVERED': {
+        // Value hold: same as DELIVERED — a held order (retracked for an incorrect
+        // value, price not yet corrected) must not be (partially) delivered at the
+        // stale value. PARTIALLY_DELIVERED can cascade to REMITTED, so it needs the
+        // identical guard.
+        if (order.valueHoldPending) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              'This order was retracked because its value was incorrect. Correct the order price before marking it delivered.',
+          });
+        }
         if (
           metadata?.deliveredQuantity === undefined ||
           metadata?.returnedQuantity === undefined

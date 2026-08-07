@@ -41,6 +41,19 @@ export const orders = pgTable('orders', {
   deliveryProofUrl: text('delivery_proof_url'),
   /** Discount amount applied at delivery when 3PL marks DELIVERED/PARTIALLY_DELIVERED; order totalAmount is reduced by this. */
   deliveryDiscountAmount: numeric('delivery_discount_amount', { precision: 12, scale: 2 }),
+  /**
+   * Value hold: set true when Finance retracks this order for a value mismatch
+   * (remitted cash != posted value). While true, the order CANNOT be re-delivered
+   * or re-remitted (manual or via CART_SOURCE_MIRROR) — CS must first correct the
+   * line price. Cleared automatically when a line-price correction is applied.
+   */
+  valueHoldPending: boolean('value_hold_pending').default(false).notNull(),
+  /**
+   * Optional corrected amount Finance typed at retrack time. A hint that pre-fills
+   * the CS line-price correction form; does NOT clear the hold by itself (only an
+   * actual line-price correction does).
+   */
+  valueHoldHint: numeric('value_hold_hint', { precision: 12, scale: 2 }),
   /** Required receipt URL when 3PL resolves order (Resolve order modal). */
   resolveReceiptUrl: text('resolve_receipt_url'),
   parentOrderId: uuid('parent_order_id'),

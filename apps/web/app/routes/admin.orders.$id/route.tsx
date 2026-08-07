@@ -1575,6 +1575,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
       const discount = parseFloat(deliveryDiscountAmountStr);
       if (!Number.isNaN(discount) && discount >= 0) metadata['deliveryDiscountAmount'] = discount;
     }
+    // Direct value-retrack: a backward transition flagged as a value mismatch opens
+    // a value hold (blocks re-delivery until the price is corrected). The backend
+    // only acts on this when the transition is actually a retrack.
+    if (formData.get('retrackReasonKind')?.toString()?.trim() === 'value') {
+      metadata['retrackReasonKind'] = 'value';
+      const correctedStr = formData.get('correctedTotalAmount')?.toString()?.trim();
+      if (correctedStr) {
+        const corrected = parseFloat(correctedStr);
+        if (!Number.isNaN(corrected) && corrected > 0) metadata['correctedTotalAmount'] = corrected;
+      }
+    }
 
     // Status transitions do real work: validate gates, run the inventory
     // geofence + reservation, write the timeline event + status, generate
