@@ -11,6 +11,7 @@ import { Button } from '~/components/ui/button';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -834,6 +835,7 @@ export function DisbursementsPage({
             triggerAriaLabel="Disbursement toolbar"
             saveFilterKey
             filtersBadgeCount={activeFilterBadge}
+            desktopActions
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />
@@ -841,14 +843,6 @@ export function DisbursementsPage({
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
-                <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-                  Generate report
-                </Button>
-                {canCreate && (
-                  <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
-                    New disbursement
-                  </Button>
-                )}
               </div>
             }
             filters={

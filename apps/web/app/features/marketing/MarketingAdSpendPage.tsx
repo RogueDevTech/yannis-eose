@@ -23,6 +23,7 @@ import { Spinner } from '~/components/ui/spinner';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { PageSearchControl } from '~/components/ui/page-search-control';
@@ -1107,6 +1108,7 @@ export function MarketingAdSpendPage({
                 </>
               );
             })()}
+            desktopActions
             desktop={
               <>
                 <PageRefreshButton />
@@ -1116,17 +1118,11 @@ export function MarketingAdSpendPage({
                     startTime={dateFilters.startTime}
                     endTime={dateFilters.endTime}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
-                <BranchScopedLink
-                  to="/admin/marketing/expenses/new"
-                  actionLabel="adding ad spend"
-                  className="btn-primary btn-sm inline-flex items-center justify-center shrink-0"
-                >
-                  Add Expense
-                </BranchScopedLink>
               </>
             }
             sheet={({ closeSheet }) => (
               <>
+                <CompareButton source="marketing-expenses" />
                 <BranchScopedLink
                   to="/admin/marketing/expenses/new"
                   actionLabel="adding ad spend"

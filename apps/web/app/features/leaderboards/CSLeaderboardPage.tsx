@@ -5,6 +5,7 @@ import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -57,6 +58,8 @@ export function CSLeaderboardPage({
             sheetTitle="Actions"
             triggerAriaLabel="CS leaderboard date range"
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
@@ -66,6 +69,7 @@ export function CSLeaderboardPage({
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
               </>
             }
+            sheet={<CompareButton source="sales-leaderboard" />}
           />
         }
       />

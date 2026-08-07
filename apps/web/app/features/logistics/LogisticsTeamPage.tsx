@@ -5,6 +5,7 @@ import { DotSeparator, DualValue } from '~/components/ui/dot-separator';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { FilterPills } from '~/components/ui/filter-pills';
@@ -705,6 +706,7 @@ export function LogisticsTeamPage({
                 className="w-full justify-center"
               />
             }
+            desktopActions
             desktop={
               <>
                 <PageRefreshButton />
@@ -712,16 +714,11 @@ export function LogisticsTeamPage({
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
-                <Button type="button" variant="secondary" size="sm" onClick={() => setShowAggregateReport(true)}>
-                  Generate report
-                </Button>
-                <Button type="button" variant="secondary" size="sm" onClick={() => openCashStatement()}>
-                  Cash statement
-                </Button>
               </>
             }
             sheet={({ closeSheet }) => (
               <>
+                <CompareButton source="logistics-team" />
                 <Button
                   type="button"
                   variant="secondary"
@@ -819,8 +816,12 @@ export function LogisticsTeamPage({
                 <option value="company">By Logistics company</option>
                 <option value="location">By Logistics location</option>
               </FormSelect>
+            </div>
+          }
+          desktopInlineFilters={
+            <>
               {productOptions.length > 0 && (
-                <div className="relative shrink-0">
+                <div className="relative" data-toolbar-filter>
                   {activeProductId && (
                     <FilterDismiss onClear={() => {
                       const params = new URLSearchParams(searchParams);
@@ -846,7 +847,7 @@ export function LogisticsTeamPage({
                   </FormSelect>
                 </div>
               )}
-              <div className="hidden md:block relative shrink-0">
+              <div className="relative" data-toolbar-filter>
                 {(sortByFromLoader !== 'assigned' || sortDirFromLoader !== 'desc') && (
                   <FilterDismiss onClear={() => mergeListParams({ sortBy: 'assigned', sortDir: 'desc', page: 1 })} />
                 )}
@@ -855,31 +856,12 @@ export function LogisticsTeamPage({
                   onChange={(next) => mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })}
                   defaultValue={{ sortBy: 'assigned', sortDir: 'desc' }}
                   options={SORT_MENU_OPTIONS}
+                  className="w-full justify-center"
                 />
               </div>
-            </div>
+            </>
           }
-          desktopInlineFilters={null}
-          sheetFilterBody={
-            <div className="relative">
-              {(sortByFromLoader !== 'assigned' || sortDirFromLoader !== 'desc') && (
-                <FilterDismiss
-                  onClear={() =>
-                    mergeListParams({ sortBy: 'assigned', sortDir: 'desc', page: 1 })
-                  }
-                />
-              )}
-              <SortMenu
-                value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
-                onChange={(next) =>
-                  mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
-                }
-                defaultValue={{ sortBy: 'assigned', sortDir: 'desc' }}
-                options={SORT_MENU_OPTIONS}
-                className="w-full justify-center"
-              />
-            </div>
-          }
+          sheetFilterBody={null}
         />
 
         {totalCount > 0 && (q || sortByFromLoader !== 'assigned' || sortDirFromLoader !== 'desc') && (

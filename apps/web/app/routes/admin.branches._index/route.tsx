@@ -152,12 +152,11 @@ function BranchManagementContent({ branches, branchGroups }: { branches: Branch[
             sheetTitle="Branch tools"
             sheetSubtitle={<span>Refresh and create</span>}
             triggerAriaLabel="Branch toolbar"
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
-                <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
-                  New Branch
-                </Button>
               </>
             }
             sheet={({ closeSheet }) => (

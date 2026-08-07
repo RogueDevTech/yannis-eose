@@ -18,6 +18,7 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { useDraftFilters } from '~/hooks/useDraftFilters';
 import { JournalEntryViewModal } from './JournalEntryViewModal';
 
 interface JournalEntryRow {
@@ -58,6 +59,9 @@ export function GeneralLedgerPage({ records, pagination, filters }: GeneralLedge
     );
   };
 
+  const df = useDraftFilters(['status']);
+  const draftStatus = df.get('status') || '';
+
   const filterBadgeCount = [filters.status, filters.search].filter(Boolean).length;
 
   const totalDebit = useMemo(
@@ -72,8 +76,8 @@ export function GeneralLedgerPage({ records, pagination, filters }: GeneralLedge
   const statusSelect = (
     <FormSelect
       label="Status"
-      value={filters.status}
-      onChange={(e) => setFilter('status', e.target.value)}
+      value={draftStatus}
+      onChange={(e) => df.set('status', e.target.value || null)}
       options={[
         { value: '', label: 'All' },
         { value: 'POSTED', label: 'Posted' },
@@ -204,6 +208,9 @@ export function GeneralLedgerPage({ records, pagination, filters }: GeneralLedge
         searchRow={searchControl}
         desktopInlineFilters={statusSelect}
         sheetFilterBody={statusSelect}
+        onApply={df.apply}
+        applyDisabled={!df.dirty}
+        onOpen={df.reseed}
       />
 
       {records.length === 0 ? (

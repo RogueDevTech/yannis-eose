@@ -6,6 +6,7 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageSearchControl } from '~/components/ui/page-search-control';
+import { PageFiltersControl } from '~/components/ui/page-filters-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Button } from '~/components/ui/button';
@@ -308,34 +309,50 @@ export function PayrollAssignRolePage({
                   title={`Search ${nounPlural}`}
                   onApply={(query) => setFilter('search', query)}
                 />
-                {!isContractors ? (
-                  <FormSelect
-                    label=""
-                    name="role"
-                    options={ROLE_FILTER_OPTIONS}
-                    value={filters.role ?? ''}
-                    onChange={(e) => setFilter('role', e.target.value)}
-                    className="w-44"
-                  />
-                ) : null}
-                {branches.length > 1 && (
-                  <FormSelect
-                    label=""
-                    name="branchId"
-                    options={branchOptions}
-                    value={filters.branchId ?? ''}
-                    onChange={(e) => setFilter('branchId', e.target.value)}
-                    className="w-44"
-                  />
-                )}
-                <FormSelect
-                  label=""
-                  name="assignStatus"
-                  options={ASSIGN_STATUS_OPTIONS}
-                  value={filters.assignStatus ?? ''}
-                  onChange={(e) => setFilter('assignStatus', e.target.value)}
-                  className="w-48"
-                />
+                <PageFiltersControl
+                  badgeCount={
+                    (!isContractors && filters.role ? 1 : 0) +
+                    (filters.branchId ? 1 : 0) +
+                    (filters.assignStatus ? 1 : 0)
+                  }
+                  onClearAll={() => {
+                    setFilter('role', '');
+                    setFilter('branchId', '');
+                    setFilter('assignStatus', '');
+                  }}
+                >
+                  {!isContractors ? (
+                    <div className="relative" data-toolbar-filter>
+                      <FormSelect
+                        label="System role"
+                        name="role"
+                        options={ROLE_FILTER_OPTIONS}
+                        value={filters.role ?? ''}
+                        onChange={(e) => setFilter('role', e.target.value)}
+                      />
+                    </div>
+                  ) : null}
+                  {branches.length > 1 && (
+                    <div className="relative" data-toolbar-filter>
+                      <FormSelect
+                        label="Branch"
+                        name="branchId"
+                        options={branchOptions}
+                        value={filters.branchId ?? ''}
+                        onChange={(e) => setFilter('branchId', e.target.value)}
+                      />
+                    </div>
+                  )}
+                  <div className="relative" data-toolbar-filter>
+                    <FormSelect
+                      label="Assignment status"
+                      name="assignStatus"
+                      options={ASSIGN_STATUS_OPTIONS}
+                      value={filters.assignStatus ?? ''}
+                      onChange={(e) => setFilter('assignStatus', e.target.value)}
+                    />
+                  </div>
+                </PageFiltersControl>
                 <PageRefreshButton />
               </div>
             }

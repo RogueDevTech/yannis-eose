@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams, useFetcher, useNavigate } from '@remix-run/react';
+import { Link, useSearchParams, useFetcher } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
-import { ActionDropdown } from '~/components/ui/action-dropdown';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
@@ -163,19 +162,8 @@ export function UsersListPage({
   const [resendConfirm, setResendConfirm] = useState<{ id: string; name: string; email: string } | null>(null);
   const [previewUser, setPreviewUser] = useState<User | null>(null);
   const isResending = resendFetcher.state !== 'idle';
-  /** Single open-menu id for the page-header split-button (Add user ▾). */
-  const [openHeaderMenuId, setOpenHeaderMenuId] = useState<string | null>(null);
   /** Staff-accounts export modal (client-side CSV/PDF/XLSX of the full roster). */
   const [showExportModal, setShowExportModal] = useState(false);
-  const navigate = useNavigate();
-  /** Navigate straight to the create form — the form itself gates branch
-   *  selection dynamically based on the chosen role (`data-branch-scoped-action`
-   *  flips to "true" only for branch-eligible roles), so we don't block
-   *  navigation upfront. Org-wide roles like Finance Officer skip branch
-   *  selection entirely. */
-  const goToAddUser = useCallback(() => {
-    navigate(`${usersBasePath}/new`);
-  }, [navigate, usersBasePath]);
 
   const submitSearchToUrl = useCallback(
     (raw: string) => {
@@ -509,6 +497,8 @@ export function UsersListPage({
             triggerAriaLabel="Filters and actions"
             saveFilterKey
             filtersBadgeCount={filtersToolbarBadge}
+            desktopActions
+            desktopActionsLabel="Actions"
             filters={
               <>
                 <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
@@ -560,28 +550,6 @@ export function UsersListPage({
             desktop={
               <>
                 <PageRefreshButton />
-                {staffAccounts ? (
-                  // Staff accounts are created via Staff onboarding — no Add button here.
-                  // Export is gated on `hr.export` (sensitive payout fields).
-                  canExport ? (
-                    <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-                      Export
-                    </Button>
-                  ) : null
-                ) : (
-                  <ActionDropdown
-                    id="add-user"
-                    trigger="button"
-                    triggerLabel="Add User"
-                    triggerVariant="primary"
-                    openMenuId={openHeaderMenuId}
-                    setOpenMenuId={setOpenHeaderMenuId}
-                    items={[
-                      { label: 'Add manually', onClick: goToAddUser },
-                      { label: 'Import from Excel', to: '/hr/users/import' },
-                    ]}
-                  />
-                )}
               </>
             }
             sheet={({ closeSheet }) => (

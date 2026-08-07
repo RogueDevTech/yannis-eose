@@ -148,16 +148,9 @@ export function OpeningBalancesPage({
             <PageHeaderMobileTools
               sheetTitle="Actions"
               triggerAriaLabel="Opening balances tools"
-              desktop={
-                <div className="flex items-center gap-2">
-                  <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/admin/accounting/accounts')}>
-                    Cancel
-                  </Button>
-                  <Button type="button" size="sm" onClick={() => setShowPostConfirm(true)} disabled={!hasAny || fetcher.state !== 'idle'}>
-                    {fetcher.state !== 'idle' ? 'Posting…' : 'Post'}
-                  </Button>
-                </div>
-              }
+              desktopActions
+              desktopActionsLabel="Actions"
+              desktop={null}
               sheet={
                 <>
                   <Button type="button" className="w-full" variant="secondary" onClick={() => navigate('/admin/accounting/accounts')}>

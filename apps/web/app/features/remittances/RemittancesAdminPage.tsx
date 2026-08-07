@@ -18,6 +18,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageSearchControl } from '~/components/ui/page-search-control';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { type FilterPillOption } from '~/components/ui/filter-pills';
@@ -643,76 +644,93 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
         />
       </div>
 
-      {/* Desktop-only filter bar — search + filters on one line. On mobile these
+      {/* Desktop-only toolbar — search + Filters button (modal). On mobile these
           live in the PageHeaderMobileTools sheet (search renders separately above). */}
-      <div className="hidden md:block card p-4">
-        <div className="flex flex-wrap items-center gap-2">
+      <ToolbarFiltersCollapsible
+        badgeCount={
+          (statusValue ? 1 : 0) +
+          (filters.locationId ? 1 : 0) +
+          (filters.sender ? 1 : 0) +
+          (filters.minQty ? 1 : 0) +
+          (filters.maxQty ? 1 : 0)
+        }
+        onClearAll={clearAllFilters}
+        searchRow={
           <PageSearchControl
             value={filters.search}
             placeholder="Search by ID or product"
             title="Search transfers"
             onApply={(query) => setFilterParam('search', query)}
           />
-          <FormSelect
-            controlSize="sm"
-            wrapperClassName="w-44"
-            value={statusValue}
-            onChange={(e) => setFilterParam('status', e.target.value)}
-            options={statusPillOptions.map((o) => ({
-              value: o.value,
-              label: `${o.label} (${o.count ?? 0})`,
-            }))}
-          />
-          <SearchableSelect
-            controlSize="sm"
-            wrapperClassName="w-52"
-            placeholder="All locations"
-            value={filters.locationId}
-            onChange={(v) => setFilterParam('locationId', v)}
-            options={[
-              { value: '', label: 'All locations' },
-              ...locations.map((loc) => ({
-                value: loc.id,
-                label: loc.providerName ? `${loc.name} • ${loc.providerName}` : loc.name,
-              })),
-            ]}
-          />
-          <SearchableSelect
-            controlSize="sm"
-            wrapperClassName="w-48"
-            placeholder="All senders"
-            value={filters.sender}
-            onChange={(v) => setFilterParam('sender', v)}
-            options={[
-              { value: '', label: 'All senders' },
-              ...senderOptions.map((name) => ({ value: name, label: name })),
-            ]}
-          />
-          <NumberInput
-            min={0}
-            controlSize="sm"
-            allowEmpty
-            wrapperClassName="w-28"
-            placeholder="Min qty"
-            value={filters.minQty === '' ? null : Number(filters.minQty)}
-            onValueChange={(n) => setFilterParam('minQty', String(n))}
-            onValueCleared={() => setFilterParam('minQty', '')}
-          />
-          <NumberInput
-            min={0}
-            controlSize="sm"
-            allowEmpty
-            wrapperClassName="w-28"
-            placeholder="Max qty"
-            value={filters.maxQty === '' ? null : Number(filters.maxQty)}
-            onValueChange={(n) => setFilterParam('maxQty', String(n))}
-            onValueCleared={() => setFilterParam('maxQty', '')}
-          />
-          <Button type="button" variant="secondary" size="sm" onClick={clearAllFilters}>
-            Clear all filters
-          </Button>
-        </div>
-      </div>
+        }
+        desktopInlineFilters={
+          <>
+            <div className="relative" data-toolbar-filter>
+              <FormSelect
+                controlSize="sm"
+                wrapperClassName="w-44"
+                value={statusValue}
+                onChange={(e) => setFilterParam('status', e.target.value)}
+                options={statusPillOptions.map((o) => ({
+                  value: o.value,
+                  label: `${o.label} (${o.count ?? 0})`,
+                }))}
+              />
+            </div>
+            <div className="relative" data-toolbar-filter>
+              <SearchableSelect
+                controlSize="sm"
+                wrapperClassName="w-52"
+                placeholder="All locations"
+                value={filters.locationId}
+                onChange={(v) => setFilterParam('locationId', v)}
+                options={[
+                  { value: '', label: 'All locations' },
+                  ...locations.map((loc) => ({
+                    value: loc.id,
+                    label: loc.providerName ? `${loc.name} • ${loc.providerName}` : loc.name,
+                  })),
+                ]}
+              />
+            </div>
+            <div className="relative" data-toolbar-filter>
+              <SearchableSelect
+                controlSize="sm"
+                wrapperClassName="w-48"
+                placeholder="All senders"
+                value={filters.sender}
+                onChange={(v) => setFilterParam('sender', v)}
+                options={[
+                  { value: '', label: 'All senders' },
+                  ...senderOptions.map((name) => ({ value: name, label: name })),
+                ]}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <NumberInput
+                min={0}
+                controlSize="sm"
+                allowEmpty
+                wrapperClassName="w-full"
+                placeholder="Min qty"
+                value={filters.minQty === '' ? null : Number(filters.minQty)}
+                onValueChange={(n) => setFilterParam('minQty', String(n))}
+                onValueCleared={() => setFilterParam('minQty', '')}
+              />
+              <NumberInput
+                min={0}
+                controlSize="sm"
+                allowEmpty
+                wrapperClassName="w-full"
+                placeholder="Max qty"
+                value={filters.maxQty === '' ? null : Number(filters.maxQty)}
+                onValueChange={(n) => setFilterParam('maxQty', String(n))}
+                onValueCleared={() => setFilterParam('maxQty', '')}
+              />
+            </div>
+          </>
+        }
+      />
 
       {/* Bulk action bar */}
       {selectedPendingCount > 0 && (

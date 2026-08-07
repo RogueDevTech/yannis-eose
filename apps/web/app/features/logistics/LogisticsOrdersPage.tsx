@@ -8,6 +8,7 @@ import { FunnelBreakdownModal } from '~/features/dashboard/funnel-breakdown';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { useFetcherToast } from '~/components/ui/toast';
 import { CsCommentIcon, MobileCommentPreview } from '~/components/ui/cs-comment-icon';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -645,6 +646,7 @@ function LogisticsOrdersPageImpl({
               triggerAriaLabel="Logistics orders tools"
               saveFilterKey
               filtersBadgeCount={logisticsOrdersToolbarFilterBadge}
+              desktopActions
               desktop={
                 <>
                   <PageRefreshButton />
@@ -652,13 +654,6 @@ function LogisticsOrdersPageImpl({
                       startDate={filters.startDate}
                       endDate={filters.endDate}
                       periodAllTime={filters.periodAllTime} chrome="pill" />
-                  <button
-                    type="button"
-                    className="btn-secondary btn-sm"
-                    onClick={() => setShowChartView((v) => !v)}
-                  >
-                    {showChartView ? 'View as data' : 'View data in chart'}
-                  </button>
                 </>
               }
               filters={
@@ -735,18 +730,21 @@ function LogisticsOrdersPageImpl({
                 </>
               }
               sheet={({ closeSheet }) => (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="h-12 w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setShowChartView((v) => !v);
-                  }}
-                >
-                  {showChartView ? 'View as data' : 'View data in chart'}
-                </Button>
+                <>
+                  <CompareButton source="logistics-orders" />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowChartView((v) => !v);
+                    }}
+                  >
+                    {showChartView ? 'View as data' : 'View data in chart'}
+                  </Button>
+                </>
               )}
             />
           }
@@ -920,23 +918,24 @@ function LogisticsOrdersPageImpl({
         hideMobileSheet
         badgeCount={logisticsOrdersToolbarFilterBadge}
         searchRow={
-            <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
-              <PageSearchControl
-                value={searchFilter || ''}
-                placeholder="Search by customer name..."
-                title="Search orders"
-                onApply={(query) => {
-                  setSearchParams((p) => {
-                    const next = new URLSearchParams(p);
-                    next.set('page', '1');
-                    if (query) next.set('search', query);
-                    else next.delete('search');
-                    return next;
-                  });
-                }}
-              />
-              <div className="hidden shrink-0 items-center gap-3 md:flex">
-                <div className="relative w-full min-w-0 sm:w-48">
+            <PageSearchControl
+              value={searchFilter || ''}
+              placeholder="Search by customer name..."
+              title="Search orders"
+              onApply={(query) => {
+                setSearchParams((p) => {
+                  const next = new URLSearchParams(p);
+                  next.set('page', '1');
+                  if (query) next.set('search', query);
+                  else next.delete('search');
+                  return next;
+                });
+              }}
+            />
+          }
+          desktopInlineFilters={
+            <>
+                <div className="relative" data-toolbar-filter>
                   {selectedStatus !== 'ALL' && (
                     <FilterDismiss onClear={() => handleStatusChange('ALL')} />
                   )}
@@ -951,7 +950,7 @@ function LogisticsOrdersPageImpl({
                   />
                 </div>
                 {branches.length > 0 && (
-                  <div className="relative w-full min-w-0 sm:w-48">
+                  <div className="relative" data-toolbar-filter>
                     {!!selectedBranch && (
                       <FilterDismiss onClear={() => handleBranchChange('')} />
                     )}
@@ -972,10 +971,8 @@ function LogisticsOrdersPageImpl({
                     />
                   </div>
                 )}
-              </div>
-            </div>
+            </>
           }
-          desktopInlineFilters={null}
           sheetFilterBody={null}
         />
 

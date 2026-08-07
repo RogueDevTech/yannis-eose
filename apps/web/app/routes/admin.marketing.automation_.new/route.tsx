@@ -22,12 +22,46 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!canManageAutomation(user)) throw new Response('Forbidden', { status: 403 });
 
   const cookie = getSessionCookie(request);
-  const res = await apiRequest<unknown>('/trpc/automation.configuredChannels', { method: 'GET', cookie });
-  const configuredChannels = res.ok
-    ? (((res.data as { result?: { data?: AutomationChannel[] } })?.result?.data ?? []) as AutomationChannel[])
+  const [chRes, tplRes, brRes, tgRes] = await Promise.all([
+    apiRequest<unknown>('/trpc/automation.configuredChannels', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/automation.templates.list', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/automation.targetGroups.list', { method: 'GET', cookie }),
+  ]);
+
+  const configuredChannels = chRes.ok
+    ? (((chRes.data as { result?: { data?: AutomationChannel[] } })?.result?.data ?? []) as AutomationChannel[])
     : [];
 
-  return json({ configuredChannels });
+  type TplRow = { id: string; name: string; channels: AutomationChannel[] | null; channel: AutomationChannel | null; subject: string | null };
+  const templates = tplRes.ok
+    ? (((tplRes.data as { result?: { data?: TplRow[] } })?.result?.data ?? []) as TplRow[]).map((t) => ({
+        id: t.id,
+        name: t.name,
+        // Prefer the channels array; fall back to the legacy single channel for old rows.
+        channels: (t.channels && t.channels.length > 0 ? t.channels : t.channel ? [t.channel] : []) as AutomationChannel[],
+        subject: t.subject ?? null,
+      }))
+    : [];
+
+  type BranchRow = { id: string; name: string };
+  const branches = brRes.ok
+    ? (((brRes.data as { result?: { data?: BranchRow[] } })?.result?.data ?? []) as BranchRow[]).map((b) => ({
+        id: b.id,
+        name: b.name,
+      }))
+    : [];
+
+  type TgRow = { id: string; name: string; memberCount: number };
+  const targetGroups = tgRes.ok
+    ? (((tgRes.data as { result?: { data?: TgRow[] } })?.result?.data ?? []) as TgRow[]).map((g) => ({
+        id: g.id,
+        name: g.name,
+        memberCount: g.memberCount ?? 0,
+      }))
+    : [];
+
+  return json({ configuredChannels, templates, branches, targetGroups });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -42,6 +76,19 @@ export async function action({ request }: ActionFunctionArgs) {
   const channels = fd.getAll('channels').map((c) => c.toString()).filter(Boolean);
   const delayRaw = fd.get('delayMinutes')?.toString();
   const scheduleRaw = fd.get('scheduleCron')?.toString();
+  const templateId = fd.get('templateId')?.toString() || undefined;
+
+  // Trigger jsonb serialized by the form (event {event,toStatus?} or segment filter).
+  let trigger: Record<string, unknown> = {};
+  const triggerRaw = fd.get('trigger')?.toString();
+  if (triggerRaw) {
+    try {
+      const parsed = JSON.parse(triggerRaw);
+      if (parsed && typeof parsed === 'object') trigger = parsed as Record<string, unknown>;
+    } catch {
+      // Malformed trigger — fall back to empty ({}) so create still succeeds as a draft.
+    }
+  }
 
   const res = await apiRequest<unknown>('/trpc/automation.create', {
     method: 'POST',
@@ -50,6 +97,8 @@ export async function action({ request }: ActionFunctionArgs) {
       name: fd.get('name')?.toString() ?? '',
       kind,
       channels,
+      trigger,
+      ...(templateId ? { templateId } : {}),
       respectOptOut: fd.get('respectOptOut') === 'on',
       priority: Number(fd.get('priority')?.toString() || '0'),
       enabled: fd.get('enabled') !== 'off',
@@ -69,6 +118,13 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function NewAutomationRoute() {
-  const { configuredChannels } = useLoaderData<typeof loader>();
-  return <NewAutomationPage configuredChannels={configuredChannels} />;
+  const { configuredChannels, templates, branches, targetGroups } = useLoaderData<typeof loader>();
+  return (
+    <NewAutomationPage
+      configuredChannels={configuredChannels}
+      templates={templates}
+      branches={branches}
+      targetGroups={targetGroups}
+    />
+  );
 }

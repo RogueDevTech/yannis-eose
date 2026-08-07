@@ -17,6 +17,7 @@ const ANALYTICS_LIVE_EVENTS = ['form:view', 'order:new'] as const;
 const EMPTY_ANALYTICS: FormAnalytics = {
   statStrip: { rawLandings: 0, uniqueLandings: 0, avgDwellMs: null, conversionRate: 0, attributionCoverage: 0 },
   funnel: { formViews: 0, startedCart: 0, ordered: 0, confirmed: 0, delivered: 0 },
+  trendUnit: 'day',
   timeSeries: [],
   topForms: [],
   forms: [],

@@ -10,6 +10,7 @@ import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageSearchControl } from '~/components/ui/page-search-control';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { RealMoneyTag } from '~/components/ui/real-money-tag';
@@ -494,28 +495,11 @@ export function ChartOfAccountsPage({
                 {filterControls}
               </>
             }
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 <PageRefreshButton />
-                {canWrite && (
-                  <Link to="/admin/accounting/opening-balances" className="btn-secondary btn-sm inline-flex items-center">
-                    {hasOpeningBalances ? 'View Opening Balances' : 'Post Opening Balances'}
-                  </Link>
-                )}
-                {canWrite ? (
-                  <ActionDropdown
-                    id="coa-add-account"
-                    openMenuId={openMenuId}
-                    setOpenMenuId={setOpenMenuId}
-                    trigger="button"
-                    triggerVariant="primary"
-                    triggerLabel="Add Account"
-                    items={[
-                      { label: 'Leaf (postable)', onClick: () => openCreate('leaf') },
-                      { label: 'Group (header)', onClick: () => openCreate('group') },
-                    ]}
-                  />
-                ) : null}
               </div>
             }
             sheet={
@@ -601,50 +585,60 @@ export function ChartOfAccountsPage({
         </div>
       )}
 
-      <div className="hidden md:flex flex-wrap items-center gap-2">
-        <PageSearchControl
-          value={search}
-          onApply={setSearch}
-          placeholder="Search by code or name"
-          title="Search accounts"
-        />
-        <FormSelect
-          value={rootTypeFilter}
-          onChange={(e) => setRootTypeFilter(e.target.value)}
-          options={[{ value: '', label: 'All types' }, ...ROOT_TYPES]}
-          className="w-36"
-        />
-        <FormSelect
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          options={CATEGORY_OPTIONS}
-          className="w-48"
-        />
-        <FormSelect
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          options={[
-            { value: 'active', label: 'Active' },
-            { value: 'inactive', label: 'Inactive' },
-            { value: 'all', label: 'All' },
-          ]}
-          className="w-32"
-        />
-        <label className="flex items-center gap-1.5 text-xs text-app-fg-muted cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={postableOnly}
-            onChange={(e) => setPostableOnly(e.target.checked)}
-            className="rounded border-app-border text-brand-600 focus:ring-brand-500"
+      <ToolbarFiltersCollapsible
+        className="!border-0 !px-0 !py-0"
+        badgeCount={filtersBadgeCount}
+        onClearAll={hasFilters ? resetFilters : undefined}
+        searchRow={
+          <PageSearchControl
+            value={search}
+            onApply={setSearch}
+            placeholder="Search by code or name"
+            title="Search accounts"
           />
-          Postable only
-        </label>
-        {hasFilters && (
-          <button type="button" onClick={resetFilters} className="text-xs text-brand-600 hover:underline">
-            Reset
-          </button>
-        )}
-      </div>
+        }
+        desktopInlineFilters={
+          <>
+            <div className="relative" data-toolbar-filter>
+              <FormSelect
+                value={rootTypeFilter}
+                onChange={(e) => setRootTypeFilter(e.target.value)}
+                options={[{ value: '', label: 'All types' }, ...ROOT_TYPES]}
+                className="w-36"
+              />
+            </div>
+            <div className="relative" data-toolbar-filter>
+              <FormSelect
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                options={CATEGORY_OPTIONS}
+                className="w-48"
+              />
+            </div>
+            <div className="relative" data-toolbar-filter>
+              <FormSelect
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                options={[
+                  { value: 'active', label: 'Active' },
+                  { value: 'inactive', label: 'Inactive' },
+                  { value: 'all', label: 'All' },
+                ]}
+                className="w-32"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm text-app-fg cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={postableOnly}
+                onChange={(e) => setPostableOnly(e.target.checked)}
+                className="rounded border-app-border text-brand-600 focus:ring-brand-500"
+              />
+              Postable only
+            </label>
+          </>
+        }
+      />
 
       {accounts.length === 0 ? (
         <EmptyState

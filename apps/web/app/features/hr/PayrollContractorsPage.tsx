@@ -253,14 +253,11 @@ export function PayrollContractorsPage({
             sheetTitle="Filters"
             triggerAriaLabel="Contractors toolbar"
             filtersBadgeCount={activeFilterCount}
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
-                {canWrite ? (
-                  <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-                    Add contractor
-                  </Button>
-                ) : null}
               </>
             }
             filters={() => (

@@ -22,6 +22,10 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? `Compare: ${data.sourceLabel} — Yannis EOSE` : 'Compare — Yannis EOSE' },
 ];
 
+/** Ceiling for the relative-change ranking so a zero-baseline metric (B=0) can't
+ *  outrank every finite mover. 100 = a 10,000% swing, well past any real change. */
+const MAX_CHANGE_MAGNITUDE = 100;
+
 /** The streamed part — computed metric rows + funnel for both periods. */
 interface ComparisonResult {
   error: boolean;
@@ -50,9 +54,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const periodA = resolveComparePeriod(granularity, aToken);
   const periodB = resolveComparePeriod(granularity, bToken);
 
-  // Missing/malformed periods → send the user back to the source page (or the
-  // dashboard) to pick a valid comparison instead of showing a broken compare.
-  if (!periodA || !periodB) {
+  // Missing/malformed periods, or the two periods being identical → send the user
+  // back to the source page (or dashboard) rather than showing a broken compare.
+  // Identical periods would give both funnel bars + table columns the same label,
+  // silently collapsing the chart to one series (the picker already prevents this;
+  // this guards a hand-edited URL).
+  if (!periodA || !periodB || aToken === bToken) {
     throw redirect(source.backTo ?? '/admin');
   }
 
@@ -79,9 +86,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     const rows: CompareRow[] = activeMetrics.map((m) => {
-      const a = m.value(dataA);
-      const b = m.value(dataB);
-      const change = computeCompareChange(a, b, m.kind);
+      const a = m.value(dataA); // first-selected period = baseline ("previous")
+      const b = m.value(dataB); // second-selected period = subject ("later")
+      // Change measures how the LATER period (B) moved relative to the EARLIER (A):
+      // (B − A) / A. So if B is lower than A the change is negative/red — B is not
+      // ahead of the baseline. (now = B, prev = A.)
+      const change = computeCompareChange(b, a, m.kind);
       return {
         label: m.label,
         aFormatted: formatCompareValue(a, m.kind),
@@ -91,7 +101,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
         a,
         b,
         kind: m.kind,
-        changeMagnitude: b !== 0 ? Math.abs((a - b) / b) : a !== 0 ? Infinity : 0,
+        // Relative change magnitude for ranking the "biggest movers" strip. Baseline
+        // is A (the earlier period). When A=0 (no baseline) the ratio is undefined;
+        // instead of Infinity — which ties every "new from zero" metric and always
+        // outranks real finite movers — cap at a finite ceiling so genuine large
+        // changes stay comparable, and let the absolute-value tiebreak order the
+        // zero-baseline ones sensibly (bigger jump ranks higher).
+        changeMagnitude:
+          a !== 0 ? Math.min(Math.abs((b - a) / a), MAX_CHANGE_MAGNITUDE) : b !== 0 ? MAX_CHANGE_MAGNITUDE : 0,
       };
     });
 

@@ -173,28 +173,11 @@ export function PayrollPayRoleViewPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Pay role toolbar"
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />
-                {canWrite && (
-                  <>
-                    <Link
-                      to={`/hr/payroll/config/rules/${payRole.id}/edit`}
-                      className="btn-primary inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg"
-                    >
-                      Edit formula
-                    </Link>
-                    <Link
-                      to={assignHref}
-                      className="btn-secondary inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg"
-                    >
-                      Assign people
-                    </Link>
-                    <Button variant="danger" size="sm" onClick={() => setShowArchive(true)}>
-                      Archive
-                    </Button>
-                  </>
-                )}
               </div>
             }
             sheet={({ closeSheet }) =>

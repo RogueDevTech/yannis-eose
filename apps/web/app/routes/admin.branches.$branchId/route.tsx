@@ -2696,16 +2696,9 @@ function BranchSupervisorTeamsPanel({
                       sheetTitle="Department tools"
                       triggerAriaLabel="Department actions"
                       showMobileRefresh={false}
-                      desktop={
-                        <Button
-                          type="button"
-                          variant="primary"
-                          size="sm"
-                          onClick={() => setCreateTeamOpen(true)}
-                        >
-                          Create team
-                        </Button>
-                      }
+                      desktopActions
+                      desktopActionsLabel="Actions"
+                      desktop={null}
                       sheet={({ closeSheet }) => (
                         <Button
                           type="button"
@@ -3428,6 +3421,8 @@ function BranchOverviewPage({
             triggerAriaLabel="Branch toolbar"
             showMobileRefresh={false}
             mobileLeading={<StatusBadge status={branch.status} />}
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex items-center gap-2 flex-wrap">
                 <StatusBadge status={branch.status} />

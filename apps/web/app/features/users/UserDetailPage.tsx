@@ -919,97 +919,11 @@ export function UserDetailPage({
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Profile toolbar"
+            desktopActions
             desktop={
+              // Quick action only; all profile actions live in the Actions sheet.
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />
-                {!isSelfView &&
-                  !isSuperAdminProfile &&
-                  (canOpenSettingsTab || canEditLimited) && (
-                    <BranchScopedLink
-                      to={`/hr/users/${user.id}/edit`}
-                      actionLabel="editing this user"
-                      prefetch="intent"
-                      className="btn-primary btn-sm"
-                    >
-                      Edit user
-                    </BranchScopedLink>
-                  )}
-                {showOnboardingTab && (isSelfView || viewerCanManageHrOnboarding) && (
-                  <BranchScopedLink
-                    to={isSelfView ? '/admin/onboarding' : `/hr/users/${user.id}/onboarding`}
-                    actionLabel={isSelfView ? 'opening your onboarding' : 'opening staff onboarding'}
-                    prefetch="intent"
-                    className="btn-secondary btn-sm"
-                  >
-                    {isSelfView ? 'Your onboarding' : 'Open onboarding'}
-                  </BranchScopedLink>
-                )}
-                {!isSelfView &&
-                  viewerShowsMirror &&
-                  (mirrorSubmitDisabled ? (
-                    <span title="Exit mirror mode to start a new mirror session as this user.">
-                      <Button type="button" variant="secondary" size="sm" disabled className="opacity-70 cursor-not-allowed">
-                        Mirror user
-                      </Button>
-                    </span>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
-                      loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
-                      loadingText="Entering..."
-                      onClick={() => {
-                        const form = document.getElementById('mirror-user-form') as HTMLFormElement | null;
-                        form?.requestSubmit();
-                      }}
-                    >
-                      Mirror user
-                    </Button>
-                  ))}
-                {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
-                  <>
-                    <Button type="button" variant="secondary" size="sm" onClick={() => setShowResetPassword(true)}>
-                      Reset Password
-                    </Button>
-                    {user.status === 'ACTIVE' && canDeactivateStaff && (
-                      <Button
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        onClick={() => setShowDeactivateConfirm(true)}
-                        className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
-                      >
-                        Deactivate
-                      </Button>
-                    )}
-                    {user.status === 'PENDING' && canDeletePendingStaff && (
-                      <Button
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        onClick={() => setShowDeletePendingConfirm(true)}
-                        className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
-                      >
-                        Delete user
-                      </Button>
-                    )}
-                    {(user.status === 'INACTIVE' ||
-                      user.status === 'ARCHIVED' ||
-                      (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setShowReactivateConfirm(true)}
-                        className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300"
-                      >
-                        Reactivate
-                      </Button>
-                    )}
-                  </>
-                )}
               </div>
             }
             sheet={({ closeSheet }) => (

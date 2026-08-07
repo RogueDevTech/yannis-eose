@@ -22,12 +22,12 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { CompareButton } from '~/features/compare/CompareButton';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
-import { EmptyState } from '~/components/ui/empty-state';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { AnimatedCount } from '~/components/ui/animated-count';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { PageSearchControl } from '~/components/ui/page-search-control';
+import { ChartCard } from '~/components/ui/chart-card';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { useIsMobile } from '~/hooks/useIsMobile';
 import type { FormAnalytics } from './types';
@@ -43,6 +43,36 @@ const FUNNEL_COLORS = ['#6366f1', '#f59e0b', '#0284c7', '#4f46e5', '#0ea5e9', '#
 // (funnel end-state), so views never use it.
 const RAW_VIEWS_COLOR = '#6366f1'; // indigo — all views
 const UNIQUE_VIEWS_COLOR = '#f59e0b'; // amber — unique views
+
+/**
+ * X-axis tick for the funnel bar chart: colours each stage label to match its
+ * bar (FUNNEL_COLORS is index-aligned to the stages), so the label reads as the
+ * bar's legend. Supports the mobile slant via `angle`.
+ */
+function FunnelAxisTick(props: {
+  x?: number;
+  y?: number;
+  payload?: { value?: string | number; index?: number };
+  angle?: number;
+  fontSize?: number;
+}) {
+  const { x = 0, y = 0, payload, angle = 0, fontSize = 11 } = props;
+  const color = FUNNEL_COLORS[payload?.index ?? 0] ?? 'var(--color-app-fg-muted, #94a3b8)';
+  return (
+    <text
+      x={x}
+      y={y}
+      dy={angle ? 4 : 12}
+      textAnchor={angle ? 'end' : 'middle'}
+      transform={angle ? `rotate(${angle}, ${x}, ${y})` : undefined}
+      fill={color}
+      fontSize={fontSize}
+      fontWeight={500}
+    >
+      {payload?.value}
+    </text>
+  );
+}
 
 // Theme-aware Recharts tooltip: Recharts renders a hardcoded white card by
 // default, which ignores the app theme (stays white in dark/soft). These map the
@@ -66,8 +96,8 @@ const TOOLTIP_ITEM_STYLE = { color: 'rgb(var(--app-fg-muted))', padding: 0, font
 function funnelAxisFor(isMobile: boolean) {
   return {
     xAxisProps: isMobile
-      ? { angle: -35, textAnchor: 'end' as const, height: 56, tick: { fontSize: 10 } }
-      : { tick: { fontSize: 11 } },
+      ? { height: 56, tick: <FunnelAxisTick angle={-35} fontSize={10} /> }
+      : { tick: <FunnelAxisTick fontSize={11} /> },
     chartMargin: isMobile
       ? { top: 24, right: 4, left: 0, bottom: 8 }
       : { top: 24, right: 4, left: 0, bottom: 4 },
@@ -95,6 +125,30 @@ function formatPct(ratio: number): string {
   return `${(ratio * 100).toFixed(1)}%`;
 }
 
+/**
+ * X-axis label for a trend point. The backend sends a local (Africa/Lagos) wall-
+ * clock timestamp string ("2026-08-06T09:00:00"). For hour buckets show the hour
+ * ("9 AM"); for day buckets show the date ("6 Aug"). Parsed via the date parts so
+ * the label reflects the business-day bucket, not the viewer's timezone.
+ */
+function formatTrendLabel(iso: string, unit: 'hour' | 'day'): string {
+  const [datePart, timePart] = iso.split('T');
+  if (unit === 'hour') {
+    const hour = Number((timePart ?? '00:00:00').slice(0, 2));
+    const period = hour < 12 ? 'AM' : 'PM';
+    const h12 = hour % 12 === 0 ? 12 : hour % 12;
+    return `${h12} ${period}`;
+  }
+  // Day bucket: format the date part as "6 Aug".
+  const [y, m, d] = (datePart ?? '').split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 interface Props {
   analytics: FormAnalytics;
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
@@ -114,18 +168,16 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
   const isDetail = detail != null;
   const { xAxisProps: funnelXAxisProps, chartMargin: funnelChartMargin } = funnelAxisFor(isMobile);
 
-  const hasData = statStrip.rawLandings > 0;
-
   const statItems: OverviewStatStripItem[] = [
-    {
-      label: 'Unique form views',
-      value: <AnimatedCount value={statStrip.uniqueLandings} />,
-      title: 'Distinct visitors: each person counts once, no matter how many times they reopen the form.',
-    },
     {
       label: 'All form views',
       value: <AnimatedCount value={statStrip.rawLandings} />,
       title: 'Every time the form was opened, including the same visitor refreshing or returning. Always >= Unique form views.',
+    },
+    {
+      label: 'Unique form views',
+      value: <AnimatedCount value={statStrip.uniqueLandings} />,
+      title: 'Distinct visitors: each person counts once, no matter how many times they reopen the form.',
     },
     {
       label: 'Avg time on form',
@@ -165,11 +217,12 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
     return { ...s, fill: FUNNEL_COLORS[i], dropPct };
   });
 
-  // Daily views trend (all vs unique) for the Overview + detail charts.
+  // Views trend (all vs unique) for the Overview + detail charts. Hour buckets on
+  // a single-day range (label "9 AM"), else day buckets (label "6 Aug").
   const trendData = analytics.timeSeries.map((d) => ({
     viewsRaw: d.viewsRaw,
     viewsUnique: d.viewsUnique,
-    label: new Date(`${d.date}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+    label: formatTrendLabel(d.date, analytics.trendUnit),
   }));
 
   // Top forms by traffic — top 5 for the Overview table (full ranking is on the All forms tab).
@@ -190,6 +243,8 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
             sheetTitle="Actions"
             triggerAriaLabel="Analytics actions"
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 {liveEvents != null && liveEvents.length > 0 && (
@@ -201,9 +256,9 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                   periodAllTime={filters?.periodAllTime ?? false}
                   chrome="pill"
                 />
-                {!isDetail && <CompareButton source="marketing-analytics" />}
               </>
             }
+            sheet={!isDetail ? <CompareButton source="marketing-analytics" /> : undefined}
           />
         }
       />
@@ -229,26 +284,19 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
           searchable forms list lives on its own page (View all forms). */}
       {!isDetail && (
       <>
-      {!hasData ? (
-        <div className="card">
-          <EmptyState
-            title="No form traffic yet"
-            description="Once visitors start landing on your forms, their traffic, time on form, and conversion will appear here."
-          />
-        </div>
-      ) : (
+        {/* Always render the full page structure — funnel, trend, and tables —
+            even with no traffic yet, so a quiet period shows zeros in the real
+            layout rather than collapsing to a single empty-state card. */}
         <>
           {/* Row 1: Conversion funnel (bars) + Form views over time (area) — like the
               per-form detail page. Charts-only; the data tables live in the All forms tab. */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Funnel — vertical descending bars (funnel silhouette), counts on top. */}
-            <div className="card overflow-hidden px-2 py-4 sm:p-5">
-              <h3 className="text-sm font-semibold text-app-fg mb-1 px-2 sm:px-0">Conversion funnel</h3>
-              <p className="text-xs text-app-fg-muted mb-3 px-2 sm:px-0">
-                All views to delivered. Hover a bar for the drop-off from the prior stage.
-              </p>
+            <ChartCard
+              title="Conversion funnel"
+              subtitle="All views to delivered. Hover a bar for the drop-off from the prior stage."
+            >
               <ClientOnly fallback={chartSkeleton}>
-                <div style={{ height: 300 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={funnelStages} margin={funnelChartMargin}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.2)" />
@@ -267,7 +315,9 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                         return [text, <span key="n" style={{ color: payload?.fill }}>Count</span>];
                       }}
                     />
-                    <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={64}>
+                    {/* minPointSize=3 → a zero-count stage still shows a thin marker
+                        at the baseline instead of nothing, so the funnel stays legible. */}
+                    <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={64} minPointSize={3}>
                       <LabelList dataKey="count" position="top" style={{ fontSize: 11, fill: 'var(--color-app-fg, #64748b)' }} />
                       {funnelStages.map((s, i) => (
                         <Cell key={s.stage} fill={FUNNEL_COLORS[i]} />
@@ -275,19 +325,14 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-                </div>
               </ClientOnly>
-            </div>
+            </ChartCard>
 
             {/* Form views over time. */}
-            <div className="card overflow-hidden px-2 py-4 sm:p-5">
-              <h3 className="text-sm font-semibold text-app-fg mb-1 px-2 sm:px-0">Form views over time</h3>
-              <p className="text-xs text-app-fg-muted mb-3 px-2 sm:px-0">Daily all vs unique views.</p>
-              {trendData.length === 0 ? (
-                <EmptyState title="No daily breakdown" description="Pick a date range to see views per day." />
-              ) : (
+            <ChartCard title="Form views over time" subtitle="All vs unique views over the period.">
+              {/* Always render the chart — an empty period shows a flat zero axis
+                  rather than an empty-state card, keeping the layout consistent. */}
                 <ClientOnly fallback={chartSkeleton}>
-                  <div style={{ height: 300 }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={trendData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
                         <defs>
@@ -321,10 +366,8 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
                         <Area type="monotone" dataKey="viewsUnique" name="Unique form views" stroke={UNIQUE_VIEWS_COLOR} strokeWidth={2} fill={`url(#${chartUid}-ounique)`} />
                       </AreaChart>
                     </ResponsiveContainer>
-                  </div>
                 </ClientOnly>
-              )}
-            </div>
+            </ChartCard>
           </div>
 
           {/* Data tables — funnel (Stage/Count/Drop-off) + top forms — always shown
@@ -332,7 +375,6 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
           <FunnelDataTables funnelStages={funnelStages} topForms={topFive} topFormsTotal={topFormsTotal} crossFunnel={crossFunnel} formViews={funnel.formViews} filters={filters} />
 
         </>
-      )}
       </>
       )}
     </div>
@@ -380,16 +422,28 @@ function FunnelDataTables({
                 <td className={td}>{s.dropPct != null ? `−${s.dropPct.toFixed(0)}%` : '--'}</td>
               </tr>
             ))}
-            {/* Cross-funnel: same customer reached via a DIFFERENT media buyer — traffic
-                that went to another funnel instead of this order flow. Not a funnel
-                stage, so its 3rd column shows its share of views, not a drop-off. */}
-            <tr className="border-t border-app-border bg-app-hover/40" title="Same customer submitted the same product via a different media buyer.">
+            {/* Cross-funnel: submissions that DID come in and were tracked, but
+                matched an order already placed for the same customer + product, so
+                no duplicate was created. Surfacing this here answers the common
+                "my form isn't tracking all my orders" worry — it did track them,
+                they just didn't become a second order. Not a funnel stage, so the
+                3rd column shows its share of views, not a drop-off. */}
+            <tr
+              className="border-t border-app-border bg-app-hover/40"
+              title="These submissions came in and were tracked, but matched an order already placed for the same customer and product recently, so no new order was created."
+            >
               <td className={`${td} text-app-fg-muted`}>Cross-funnel</td>
               <td className={`${td} text-app-fg-muted`}>{crossFunnel.crossFunnel.toLocaleString()}</td>
               <td className={`${td} text-app-fg-muted`}>{crossPct != null ? `${crossPct.toFixed(0)}% of views` : '--'}</td>
             </tr>
           </tbody>
         </table>
+        {crossFunnel.crossFunnel > 0 && (
+          <p className="mt-3 px-3 text-xs text-app-fg-muted">
+            Cross-funnel submissions were tracked. They matched an order already placed for the same
+            customer and product recently, so no new order was created.
+          </p>
+        )}
       </div>
 
       {/* Top forms table */}
@@ -467,7 +521,7 @@ function FormDetailBody({
   const trendData = timeSeries.map((d) => ({
     viewsRaw: d.viewsRaw,
     viewsUnique: d.viewsUnique,
-    label: new Date(`${d.date}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+    label: formatTrendLabel(d.date, analytics.trendUnit),
   }));
 
   const meta: { label: string; value: string }[] = [
@@ -515,7 +569,9 @@ function FormDetailBody({
                       return [drop != null ? `${base}  (−${drop.toFixed(0)}% from prev)` : base, 'Count'] as [string, string];
                     }}
                   />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={64}>
+                  {/* minPointSize=3 → a zero-count stage still shows a thin marker
+                      at the baseline instead of nothing, so the funnel stays legible. */}
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={64} minPointSize={3}>
                     <LabelList dataKey="count" position="top" style={{ fontSize: 11, fill: 'var(--color-app-fg, #64748b)' }} />
                     {funnelStages.map((s, i) => (
                       <Cell key={s.stage} fill={FUNNEL_COLORS[i]} />
@@ -530,10 +586,8 @@ function FormDetailBody({
         {/* Form views over time. */}
         <div className="card overflow-hidden px-2 py-4 sm:p-5">
           <h3 className="text-sm font-semibold text-app-fg mb-1 px-2 sm:px-0">Form views over time</h3>
-          <p className="text-xs text-app-fg-muted mb-3 px-2 sm:px-0">Daily all vs unique views for this form.</p>
-          {trendData.length === 0 ? (
-            <EmptyState title="No daily breakdown" description="Pick a date range to see views per day." />
-          ) : (
+          <p className="text-xs text-app-fg-muted mb-3 px-2 sm:px-0">All vs unique views over the period for this form.</p>
+          {/* Always render — an empty period shows a flat zero axis, not a card. */}
             <ClientOnly fallback={<div className="h-72 w-full animate-pulse rounded bg-app-hover" />}>
               <div style={{ height: 300 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -571,7 +625,6 @@ function FormDetailBody({
                 </ResponsiveContainer>
               </div>
             </ClientOnly>
-          )}
         </div>
       </div>
     </div>

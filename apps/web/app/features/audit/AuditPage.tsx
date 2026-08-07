@@ -1250,6 +1250,7 @@ export function AuditPage({
                   }
                 : undefined
             }
+            desktopActions
             desktop={
               <>
                 <PageRefreshButton />
@@ -1258,11 +1259,6 @@ export function AuditPage({
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
                 <PollingStatusIndicator state={pollState} countdown={countdown} />
-                {rows.length > 0 && canExport && (
-                  <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-                    Generate report
-                  </Button>
-                )}
               </>
             }
             filters={

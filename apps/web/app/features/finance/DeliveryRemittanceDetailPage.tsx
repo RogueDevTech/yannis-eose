@@ -247,19 +247,15 @@ export function DeliveryRemittanceDetailPage({
             sheetTitle="Actions"
             triggerAriaLabel="Cash remittance toolbar"
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
-                {hasApprovePermission && (
-                  <Button variant="secondary" size="sm" onClick={() => navigate(editPath)}>
-                    Edit
-                  </Button>
-                )}
               </>
             }
             sheet={({ closeSheet }) => (
               <>
-                <PageRefreshButton />
                 {hasApprovePermission && (
                   <Button
                     variant="secondary"

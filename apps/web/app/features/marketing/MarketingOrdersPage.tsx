@@ -48,8 +48,9 @@ import {
   TableCellTextPulse,
 } from '~/components/ui/deferred-skeletons';
 
-import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { InlineFilter } from '~/components/ui/inline-filter';
+import { FilterField } from '~/components/ui/filter-field';
+import { useDraftFilters } from '~/hooks/useDraftFilters';
 
 const DEFERRED_PLACEHOLDER_ROW_COUNT = 10;
 const DEFERRED_PLACEHOLDER_ROWS: Order[] = Array.from(
@@ -237,6 +238,27 @@ export function MarketingOrdersPage({
       remixSetSearchParams(...args);
     },
     [remixSetSearchParams, primeSamePathRefetch],
+  );
+  // Draft-until-Apply for the independent filter params. Selections stage locally
+  // and only commit (one navigation) when the user presses Apply in the sheet /
+  // desktop Filters modal. Status stays immediate (below): its dropdown maps to
+  // several params and its values are also driven by stat-strip tile clicks.
+  const df = useDraftFilters(['mediaBuyerId', 'productId', 'campaignId', 'sortBy', 'sortOrder'], {
+    beforeApply: primeSamePathRefetch,
+  });
+  const draftMediaBuyerId = df.get('mediaBuyerId') || 'ALL';
+  const draftProductId = df.get('productId') || 'ALL';
+  const draftCampaignId = df.get('campaignId') || 'ALL';
+  const draftSortValue = `${df.get('sortBy') || 'createdAt'}:${df.get('sortOrder') || 'desc'}`;
+  const setDraftSort = useCallback(
+    (v: string) => {
+      const [by, order] = v.split(':');
+      df.setMany({
+        sortBy: by && by !== 'createdAt' ? by : null,
+        sortOrder: order && order !== 'desc' ? order : null,
+      });
+    },
+    [df],
   );
   // The "Cart abandonment" pseudo-status is selected whenever `?fromCart=1` is on.
   const fromCartUrlActive = searchParams.get('fromCart') === '1';
@@ -626,7 +648,11 @@ export function MarketingOrdersPage({
                 <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
               ) : null
             }
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
+              // Quick actions only — Live, Refresh, and the date filter stay
+              // inline; everything else moves to the Actions sheet (below).
               <>
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
@@ -638,31 +664,17 @@ export function MarketingOrdersPage({
                     startTime={dateFilters.startTime}
                     endTime={dateFilters.endTime}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
-                <CompareButton source="marketing-orders" />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowChartView((v) => !v)}
-                >
-                  {showChartView ? 'View as data' : 'View data in chart'}
-                </Button>
-                {canExport && (
-                  <Button onClick={() => setShowExportModal(true)} variant="secondary" size="sm">
-                    Generate report
-                  </Button>
-                )}
-                {isTestOrdersView && (
-                  <Button variant="danger" size="sm" onClick={() => setPurgeConfirmOpen(true)} disabled={purgeFetcher.state !== 'idle'}>
-                    Delete all test orders
-                  </Button>
-                )}
               </>
             }
             filtersBadgeCount={ordersToolbarFilterBadge}
+            onApply={df.apply}
+            applyDisabled={!df.dirty}
+            onSheetOpen={df.reseed}
             filters={
               <>
-                <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                {/* Status stays immediate (not draft): it maps to several params
+                    and is also driven by stat-strip tile clicks. */}
+                <FilterField>
                   <FormSelect
                     value={selectedStatus}
                     onChange={(e) => handleStatusChange(e.target.value)}
@@ -672,108 +684,64 @@ export function MarketingOrdersPage({
                     openAs="modal"
                     wrapperClassName="w-full"
                   />
-                </div>
+                </FilterField>
                 {showMediaBuyerColumn && secondary.mediaBuyersForFilter.length > 0 ? (
-                  <div className="relative">
-                    {(searchParams.get('mediaBuyerId') || 'ALL') !== 'ALL' && (
-                      <FilterDismiss onClear={() => {
-                        setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('mediaBuyerId'); n.set('page', '1'); return n; });
-                      }} />
-                    )}
-                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
-                      <SearchableSelect
-                        id="marketing-orders-filter-buyer-sheet"
-                        value={searchParams.get('mediaBuyerId') || 'ALL'}
-                        onChange={(v) => {
-                          setSearchParams((p) => {
-                            const next = new URLSearchParams(p);
-                            next.set('page', '1');
-                            if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                            else next.delete('mediaBuyerId');
-                            return next;
-                          });
-                        }}
-                        options={[
-                          { value: 'ALL', label: 'All media buyers' },
-                          ...(isAdminUser ? [{ value: '__system__', label: 'System (unattributed)' }] : []),
-                          ...secondary.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
-                        ]}
-                        triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
-                        wrapperClassName="w-full"
-                        placeholder="All media buyers"
-                        searchPlaceholder="Search buyers…"
-                      />
-                    </div>
-                  </div>
+                  <FilterField onClear={draftMediaBuyerId !== 'ALL' ? () => df.set('mediaBuyerId', null) : undefined}>
+                    <SearchableSelect
+                      id="marketing-orders-filter-buyer-sheet"
+                      value={draftMediaBuyerId}
+                      onChange={(v) => df.set('mediaBuyerId', v && v !== 'ALL' ? v : null)}
+                      options={[
+                        { value: 'ALL', label: 'All media buyers' },
+                        ...(isAdminUser ? [{ value: '__system__', label: 'System (unattributed)' }] : []),
+                        ...secondary.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                      ]}
+                      triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
+                      wrapperClassName="w-full"
+                      placeholder="All media buyers"
+                      searchPlaceholder="Search buyers…"
+                    />
+                  </FilterField>
                 ) : null}
                 {secondary.productsForFilter.length > 0 ? (
-                  <div className="relative">
-                    {(searchParams.get('productId') || 'ALL') !== 'ALL' && (
-                      <FilterDismiss onClear={() => {
-                        setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('productId'); n.set('page', '1'); return n; });
-                      }} />
-                    )}
-                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
-                      <SearchableSelect
-                        id="marketing-orders-filter-product-sheet"
-                        value={searchParams.get('productId') || 'ALL'}
-                        onChange={(v) => {
-                          setSearchParams((p) => {
-                            const next = new URLSearchParams(p);
-                            next.set('page', '1');
-                            if (v && v !== 'ALL') next.set('productId', v);
-                            else next.delete('productId');
-                            return next;
-                          });
-                        }}
-                        options={[
-                          { value: 'ALL', label: 'All products' },
-                          ...secondary.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
-                        ]}
-                        triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
-                        wrapperClassName="w-full"
-                        placeholder="All products"
-                        searchPlaceholder="Search products…"
-                      />
-                    </div>
-                  </div>
+                  <FilterField onClear={draftProductId !== 'ALL' ? () => df.set('productId', null) : undefined}>
+                    <SearchableSelect
+                      id="marketing-orders-filter-product-sheet"
+                      value={draftProductId}
+                      onChange={(v) => df.set('productId', v && v !== 'ALL' ? v : null)}
+                      options={[
+                        { value: 'ALL', label: 'All products' },
+                        ...secondary.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                      ]}
+                      triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
+                      wrapperClassName="w-full"
+                      placeholder="All products"
+                      searchPlaceholder="Search products…"
+                    />
+                  </FilterField>
                 ) : null}
                 {secondary.campaignsForFilter.length > 0 ? (
-                  <div className="relative">
-                    {(searchParams.get('campaignId') || 'ALL') !== 'ALL' && (
-                      <FilterDismiss onClear={() => {
-                        setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('campaignId'); n.set('page', '1'); return n; });
-                      }} />
-                    )}
-                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
-                      <SearchableSelect
-                        id="marketing-orders-filter-form-sheet"
-                        value={searchParams.get('campaignId') || 'ALL'}
-                        onChange={(v) => {
-                          setSearchParams((p) => {
-                            const next = new URLSearchParams(p);
-                            next.set('page', '1');
-                            if (v && v !== 'ALL') next.set('campaignId', v);
-                            else next.delete('campaignId');
-                            return next;
-                          });
-                        }}
-                        options={[
-                          { value: 'ALL', label: 'All forms' },
-                          ...secondary.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
-                        ]}
-                        triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
-                        wrapperClassName="w-full"
-                        placeholder="All forms"
-                        searchPlaceholder="Search forms…"
-                      />
-                    </div>
-                  </div>
+                  <FilterField onClear={draftCampaignId !== 'ALL' ? () => df.set('campaignId', null) : undefined}>
+                    <SearchableSelect
+                      id="marketing-orders-filter-form-sheet"
+                      value={draftCampaignId}
+                      onChange={(v) => df.set('campaignId', v && v !== 'ALL' ? v : null)}
+                      options={[
+                        { value: 'ALL', label: 'All forms' },
+                        ...secondary.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                      ]}
+                      triggerClassName="!bg-transparent !border-transparent !text-center" inlineChevron
+                      wrapperClassName="w-full"
+                      placeholder="All forms"
+                      searchPlaceholder="Search forms…"
+                    />
+                  </FilterField>
                 ) : null}
               </>
             }
             sheet={({ closeSheet }) => (
               <>
+                <CompareButton source="marketing-orders" />
                 <Button
                   type="button"
                   variant="secondary"
@@ -797,6 +765,20 @@ export function MarketingOrdersPage({
                     }}
                   >
                     Generate report
+                  </Button>
+                )}
+                {isTestOrdersView && (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    disabled={purgeFetcher.state !== 'idle'}
+                    onClick={() => {
+                      closeSheet();
+                      setPurgeConfirmOpen(true);
+                    }}
+                  >
+                    Delete all test orders
                   </Button>
                 )}
               </>
@@ -1023,6 +1005,9 @@ export function MarketingOrdersPage({
                   className="!border-0"
                   hideMobileSheet
                   badgeCount={ordersToolbarFilterBadge}
+                  onApply={df.apply}
+                  applyDisabled={!df.dirty}
+                  onOpen={df.reseed}
                   searchRow={
                     <PageSearchControl
                       value={searchFilter || ''}
@@ -1033,6 +1018,7 @@ export function MarketingOrdersPage({
                   }
                   desktopInlineFilters={
                     <>
+                      {/* Status stays immediate (multi-param + tile-driven). */}
                       <InlineFilter
                         type="select"
                         value={selectedStatus}
@@ -1044,20 +1030,10 @@ export function MarketingOrdersPage({
                         <InlineFilter
                           type="searchable"
                           id="marketing-orders-filter-buyer"
-                          value={searchParams.get('mediaBuyerId') || 'ALL'}
+                          value={draftMediaBuyerId}
                           defaultValue="ALL"
-                          onChange={(v) => {
-                            setSearchParams((p) => {
-                              const next = new URLSearchParams(p);
-                              next.set('page', '1');
-                              if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                              else next.delete('mediaBuyerId');
-                              return next;
-                            });
-                          }}
-                          onClear={() => {
-                            setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('mediaBuyerId'); n.set('page', '1'); return n; });
-                          }}
+                          onChange={(v) => df.set('mediaBuyerId', v && v !== 'ALL' ? v : null)}
+                          onClear={() => df.set('mediaBuyerId', null)}
                           options={mediaBuyerFilterOptions}
                           width="user"
                           placeholder="All media buyers"
@@ -1068,20 +1044,10 @@ export function MarketingOrdersPage({
                         <InlineFilter
                           type="searchable"
                           id="marketing-orders-filter-product"
-                          value={searchParams.get('productId') || 'ALL'}
+                          value={draftProductId}
                           defaultValue="ALL"
-                          onChange={(v) => {
-                            setSearchParams((p) => {
-                              const next = new URLSearchParams(p);
-                              next.set('page', '1');
-                              if (v && v !== 'ALL') next.set('productId', v);
-                              else next.delete('productId');
-                              return next;
-                            });
-                          }}
-                          onClear={() => {
-                            setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('productId'); n.set('page', '1'); return n; });
-                          }}
+                          onChange={(v) => df.set('productId', v && v !== 'ALL' ? v : null)}
+                          onClear={() => df.set('productId', null)}
                           options={[
                             { value: 'ALL', label: 'All products' },
                             ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
@@ -1095,20 +1061,10 @@ export function MarketingOrdersPage({
                         <InlineFilter
                           type="searchable"
                           id="marketing-orders-filter-form"
-                          value={searchParams.get('campaignId') || 'ALL'}
+                          value={draftCampaignId}
                           defaultValue="ALL"
-                          onChange={(v) => {
-                            setSearchParams((p) => {
-                              const next = new URLSearchParams(p);
-                              next.set('page', '1');
-                              if (v && v !== 'ALL') next.set('campaignId', v);
-                              else next.delete('campaignId');
-                              return next;
-                            });
-                          }}
-                          onClear={() => {
-                            setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('campaignId'); n.set('page', '1'); return n; });
-                          }}
+                          onChange={(v) => df.set('campaignId', v && v !== 'ALL' ? v : null)}
+                          onClear={() => df.set('campaignId', null)}
                           options={[
                             { value: 'ALL', label: 'All forms' },
                             ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
@@ -1120,23 +1076,10 @@ export function MarketingOrdersPage({
                       ) : null}
                       <InlineFilter
                         type="select"
-                        value={`${sortByProp}:${sortOrderProp}`}
+                        value={draftSortValue}
                         defaultValue="createdAt:desc"
-                        onChange={(v) => {
-                          const [newSortBy, newSortOrder] = v.split(':');
-                          setSearchParams((p) => {
-                            const next = new URLSearchParams(p);
-                            next.set('page', '1');
-                            if (newSortBy && newSortBy !== 'createdAt') next.set('sortBy', newSortBy);
-                            else next.delete('sortBy');
-                            if (newSortOrder && newSortOrder !== 'desc') next.set('sortOrder', newSortOrder);
-                            else next.delete('sortOrder');
-                            return next;
-                          });
-                        }}
-                        onClear={() => {
-                          setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('sortBy'); n.delete('sortOrder'); n.set('page', '1'); return n; });
-                        }}
+                        onChange={setDraftSort}
+                        onClear={() => df.setMany({ sortBy: null, sortOrder: null })}
                         options={[
                           { value: 'createdAt:desc', label: 'Newest first' },
                           { value: 'createdAt:asc', label: 'Oldest first' },

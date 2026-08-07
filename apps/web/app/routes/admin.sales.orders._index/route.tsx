@@ -886,6 +886,7 @@ export default function CSOrdersRoute() {
           {...d}
           userRole={userRole}
           liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
+          compareSource="sales-orders"
           // REMITTED is accountant-only. Deleted tab limited to users with
           // orders.delete permission (HoCS / Admin / SuperAdmin by default).
           // UNPROCESSED is hidden for plain CS_CLOSERs — they only ever see

@@ -7,6 +7,7 @@ import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/ov
 import { FormSelect } from '~/components/ui/form-select';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
@@ -136,7 +137,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         options={REVENUE_OPTIONS}
       />
     );
-  const revenueToggle = renderRevenueSelect('header');
 
   /** Build a link with current date filter context. */
   function buildLink(base: string, extra?: Record<string, string>): string {
@@ -230,11 +230,11 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
-            triggerAriaLabel="Dashboard date range"
+            triggerAriaLabel="Dashboard actions"
             saveFilterKey
+            desktopActions
             desktop={
               <>
-                {revenueToggle}
                 <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters?.startDate ?? ''}
@@ -243,8 +243,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               </>
             }
             sheet={
-              <div className="py-1">
+              <div className="flex flex-col gap-2.5">
                 {renderRevenueSelect('sheet')}
+                <CompareButton source="admin-overview" />
               </div>
             }
           />

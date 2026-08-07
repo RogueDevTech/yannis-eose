@@ -333,6 +333,8 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
               />
             }
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge
@@ -341,49 +343,6 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
                   variant={SHIPMENT_STATUS_VARIANT[status]}
                 />
                 <PageRefreshButton />
-                {(status === 'VERIFIED' || status === 'CLOSED') ? (
-                  <Link
-                    to={`/admin/inventory?shipmentId=${shipment.id}`}
-                    prefetch="intent"
-                    className="inline-flex items-center px-3 py-1.5 rounded-md border border-transparent bg-brand-500 text-sm font-medium text-white shadow-sm hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                  >
-                    View shipment stock
-                  </Link>
-                ) : null}
-                {allow('EDIT_LINES') ? (
-                  <Link
-                    to={`/admin/shipments/${shipment.id}/edit`}
-                    prefetch="intent"
-                    className="btn-secondary btn-sm"
-                  >
-                    Edit details
-                  </Link>
-                ) : null}
-                {allow('MARK_IN_TRANSIT') ? (
-                  <Button variant="secondary" size="sm" disabled={optimisticBusy} onClick={() => setConfirmInTransit(true)}>
-                    Mark in transit
-                  </Button>
-                ) : null}
-                {allow('MARK_ARRIVED') ? (
-                  <Button variant="secondary" size="sm" disabled={optimisticBusy} onClick={() => setConfirmArrived(true)}>
-                    Mark arrived
-                  </Button>
-                ) : null}
-                {allow('VERIFY') ? (
-                  <Button variant="primary" size="sm" disabled={optimisticBusy} onClick={() => setVerifyOpen(true)}>
-                    Verify and receive
-                  </Button>
-                ) : null}
-                {allow('CLOSE') ? (
-                  <Button variant="primary" size="sm" disabled={optimisticBusy} onClick={() => setConfirmClose(true)}>
-                    Close shipment
-                  </Button>
-                ) : null}
-                {allow('CANCEL') ? (
-                  <Button variant="danger" size="sm" disabled={optimisticBusy} onClick={() => setCancelOpen(true)}>
-                    Cancel
-                  </Button>
-                ) : null}
               </div>
             }
             sheet={

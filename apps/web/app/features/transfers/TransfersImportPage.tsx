@@ -363,15 +363,9 @@ export function TransfersImportPage({ locations, products }: TransfersImportPage
             sheetTitle="Actions"
             triggerAriaLabel="Import tools"
             saveFilterKey
-            desktop={
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => fileRef.current?.click()}
-              >
-                {hasFile ? 'Replace file' : 'Choose file'}
-              </Button>
-            }
+            desktopActions
+            desktopActionsLabel="Actions"
+            desktop={null}
             sheet={
               <Button
                 variant="secondary"

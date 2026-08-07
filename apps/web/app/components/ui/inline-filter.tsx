@@ -90,7 +90,10 @@ export function InlineFilter(props: InlineFilterProps) {
       : props.width ?? WIDTH_CLASSES.status;
 
   return (
-    <div className="relative">
+    // `data-toolbar-filter` lets the Filters modal (ToolbarFiltersCollapsible)
+    // force these controls full-width + stacked when they render inside it,
+    // overriding the inline `sm:w-*` width presets used in the desktop toolbar.
+    <div className="relative" data-toolbar-filter>
       {isActive && <FilterDismiss onClear={handleClear} />}
       {props.type === 'select' ? (
         <FormSelect

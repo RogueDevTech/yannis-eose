@@ -104,6 +104,11 @@ export {
   automationRuleIdSchema,
   toggleMarketingAutomationRuleSchema,
   testMarketingAutomationRuleSchema,
+  automationMessageTemplateChannelSchema,
+  createAutomationMessageTemplateSchema,
+  updateAutomationMessageTemplateSchema,
+  listAutomationMessageTemplatesSchema,
+  automationMessageTemplateIdSchema,
 } from './automation';
 
 export type {
@@ -115,7 +120,34 @@ export type {
   AutomationRuleIdInput,
   ToggleMarketingAutomationRuleInput,
   TestMarketingAutomationRuleInput,
+  AutomationMessageTemplateChannel,
+  CreateAutomationMessageTemplateInput,
+  UpdateAutomationMessageTemplateInput,
+  ListAutomationMessageTemplatesInput,
+  AutomationMessageTemplateIdInput,
 } from './automation';
+
+// Target Groups validators
+export {
+  targetGroupSourceKindSchema,
+  targetGroupFilterSchema,
+  createTargetGroupSchema,
+  updateTargetGroupSchema,
+  listTargetGroupsSchema,
+  targetGroupIdSchema,
+  listTargetGroupMembersSchema,
+  importTargetGroupMemberSchema,
+} from './target-groups';
+
+export type {
+  TargetGroupFilter,
+  CreateTargetGroupInput,
+  UpdateTargetGroupInput,
+  ListTargetGroupsInput,
+  TargetGroupIdInput,
+  ListTargetGroupMembersInput,
+  ImportTargetGroupMemberInput,
+} from './target-groups';
 
 // User validators
 export {

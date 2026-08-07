@@ -5,6 +5,7 @@ import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Tabs } from '~/components/ui/tabs';
@@ -72,25 +73,11 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
             triggerAriaLabel="Finance toolbar and filters"
             saveFilterKey
             filtersBadgeCount={filtersBadgeCount}
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
-                {branches.length > 0 && (
-                  <div className="relative">
-                    {filters.branchId && (
-                      <FilterDismiss onClear={() => setFilter('branchId', '')} />
-                    )}
-                    <SearchableSelect
-                      id="finance-overview-branch"
-                      value={filters.branchId ?? ''}
-                      onChange={(v) => setFilter('branchId', v)}
-                      options={branchOptions}
-                      placeholder="All branches"
-                      searchPlaceholder="Search branches..."
-                      disabled={branchSwitching}
-                    />
-                  </div>
-                )}
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
@@ -118,6 +105,28 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
                   />
                 </div>
               ) : undefined
+            }
+            sheet={
+              <>
+                {branches.length > 0 && (
+                  <div className="relative w-full">
+                    {filters.branchId && (
+                      <FilterDismiss onClear={() => setFilter('branchId', '')} />
+                    )}
+                    <SearchableSelect
+                      id="finance-overview-branch"
+                      value={filters.branchId ?? ''}
+                      onChange={(v) => setFilter('branchId', v)}
+                      options={branchOptions}
+                      placeholder="All branches"
+                      searchPlaceholder="Search branches..."
+                      disabled={branchSwitching}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                )}
+                <CompareButton source="finance-overview" />
+              </>
             }
           />
         }

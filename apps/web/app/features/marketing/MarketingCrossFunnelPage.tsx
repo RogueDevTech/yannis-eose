@@ -7,6 +7,7 @@ import { StatValuePulse } from '~/components/ui/deferred-skeletons';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
@@ -306,17 +307,23 @@ export function MarketingCrossFunnelPage({
             triggerAriaLabel="Duplicate attempts toolbar"
             saveFilterKey
             filtersBadgeCount={filterBadgeCount}
+            desktopActions
             desktop={
               <>
                 <PageRefreshButton />
                 <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime} chrome="pill" />
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <CompareButton source="marketing-cross-funnel" />
                 {canExport && (
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                  <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" onClick={() => { closeSheet(); setShowExportModal(true); }}>
                     Generate report
                   </Button>
                 )}
               </>
-            }
+            )}
             filters={
               <>
                 {showMbFilter && mediaBuyersForFilter.length > 0 && (
@@ -396,20 +403,6 @@ export function MarketingCrossFunnelPage({
                 )}
               </>
             }
-            sheet={canExport ? ({ closeSheet }) => (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-12 w-full justify-center"
-                onClick={() => {
-                  closeSheet();
-                  setShowExportModal(true);
-                }}
-              >
-                Generate report
-              </Button>
-            ) : undefined}
           />
         }
       />

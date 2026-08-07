@@ -2,6 +2,7 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { CompareButton } from '~/features/compare/CompareButton';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { PageHeader } from '~/components/ui/page-header';
 import { Modal } from '~/components/ui/modal';
@@ -60,8 +61,9 @@ export function MarketingLeaderboardPage({
         actions={
           <PageHeaderMobileTools
             sheetTitle="Actions"
-            triggerAriaLabel="Marketing leaderboard date range"
+            triggerAriaLabel="Marketing leaderboard actions"
             saveFilterKey
+            desktopActions
             desktop={
               <>
                 <PageRefreshButton />
@@ -70,6 +72,9 @@ export function MarketingLeaderboardPage({
                     endDate={dateFilters.endDate}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
               </>
+            }
+            sheet={
+              <CompareButton source="marketing-leaderboard" />
             }
           />
         }

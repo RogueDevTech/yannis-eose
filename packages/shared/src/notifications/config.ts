@@ -18,6 +18,7 @@ export const MANDATORY_EMAIL_TYPES = [
 export const CONFIGURABLE_EMAIL_TYPES = [
   'order:new',
   'order:new_campaign',
+  'order:duplicate_blocked',
   'order:assigned',
   'order:assigned_bulk',
   'order:reassigned',
@@ -167,6 +168,13 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
     type: 'order:new_campaign',
     label: 'New order from campaign',
     description: 'Media Buyer — new order from their campaign',
+    mandatory: false,
+    category: 'orders',
+  },
+  'order:duplicate_blocked': {
+    type: 'order:duplicate_blocked',
+    label: 'Duplicate submission blocked',
+    description: 'Media Buyer — a form submission matched an existing order, so no duplicate was created',
     mandatory: false,
     category: 'orders',
   },
@@ -497,6 +505,7 @@ export const RELEVANT_NOTIFICATION_TYPES_BY_ROLE: Record<string, NotificationTyp
   ],
   MEDIA_BUYER: [
     'order:new_campaign',
+    'order:duplicate_blocked',
     'funding:approved',
     'funding:rejected',
     'mb_fund_transfer:pending',

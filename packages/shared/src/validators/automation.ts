@@ -36,6 +36,8 @@ export const automationTriggerSchema = z.object({
       branchIds: z.array(z.string().uuid()).optional(),
       /** Only orders created within the last N days. */
       sinceDays: z.number().int().min(1).max(365).optional(),
+      /** Audience source = a saved Target Group (overrides the inline filters). */
+      targetGroupId: z.string().uuid().optional(),
     })
     .optional(),
 });
@@ -122,3 +124,45 @@ export const testMarketingAutomationRuleSchema = z.object({
   sampleOrderId: z.string().uuid().optional(),
 });
 export type TestMarketingAutomationRuleInput = z.infer<typeof testMarketingAutomationRuleSchema>;
+
+// ── Automation message templates ─────────────────────────────
+// Own template table (not the CS message_templates), so email is first-class:
+// its own channel set includes EMAIL and carries an optional subject.
+
+export const automationMessageTemplateChannelSchema = z.enum(['EMAIL', 'SMS', 'WHATSAPP']);
+export type AutomationMessageTemplateChannel = z.infer<typeof automationMessageTemplateChannelSchema>;
+
+export const createAutomationMessageTemplateSchema = z
+  .object({
+    name: z.string().min(2).max(200),
+    /** One or more channels this template can be used on. */
+    channels: z.array(automationMessageTemplateChannelSchema).min(1, 'Pick at least one channel').max(3),
+    /** Email subject. Required when EMAIL is among the channels; ignored otherwise. */
+    subject: z.string().max(300).optional(),
+    body: z.string().min(1).max(10_000),
+  })
+  .refine((d) => !d.channels.includes('EMAIL') || (d.subject != null && d.subject.trim().length > 0), {
+    message: 'Templates that include Email need a subject.',
+    path: ['subject'],
+  });
+export type CreateAutomationMessageTemplateInput = z.infer<typeof createAutomationMessageTemplateSchema>;
+
+export const updateAutomationMessageTemplateSchema = z.object({
+  templateId: z.string().uuid(),
+  name: z.string().min(2).max(200).optional(),
+  channels: z.array(automationMessageTemplateChannelSchema).min(1).max(3).optional(),
+  subject: z.string().max(300).nullable().optional(),
+  body: z.string().min(1).max(10_000).optional(),
+});
+export type UpdateAutomationMessageTemplateInput = z.infer<typeof updateAutomationMessageTemplateSchema>;
+
+export const listAutomationMessageTemplatesSchema = z
+  .object({
+    channel: automationMessageTemplateChannelSchema.optional(),
+    includeArchived: z.boolean().optional(),
+  })
+  .optional();
+export type ListAutomationMessageTemplatesInput = z.infer<typeof listAutomationMessageTemplatesSchema>;
+
+export const automationMessageTemplateIdSchema = z.object({ templateId: z.string().uuid() });
+export type AutomationMessageTemplateIdInput = z.infer<typeof automationMessageTemplateIdSchema>;

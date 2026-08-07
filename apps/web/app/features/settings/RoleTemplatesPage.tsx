@@ -269,12 +269,11 @@ export function RoleTemplatesPage({
             sheetTitle="Actions"
             triggerAriaLabel="Role template toolbar"
             saveFilterKey
+            desktopActions
+            desktopActionsLabel="Actions"
             desktop={
               <>
                 <PageRefreshButton />
-                <Button type="button" variant="primary" onClick={openCreate} disabled={busy}>
-                  New template
-                </Button>
               </>
             }
             sheet={({ closeSheet }) => (
