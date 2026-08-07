@@ -213,14 +213,26 @@ export function PageHeaderMobileTools({
       ) : null}
 
       {/* Desktop: a dropdown anchored under the Actions button, over a dimmed
-          full-screen backdrop (modal feel) so focus lands on the menu. Only when
-          opened from the desktop button. */}
-      {hasSheetOrFilters && openedFrom === 'desktop' && typeof document !== 'undefined'
+          full-screen backdrop (modal feel) so focus lands on the menu.
+
+          IMPORTANT: the dropdown stays MOUNTED whenever there is something to show
+          and is merely hidden when closed (not conditionally rendered). Some menu
+          items own their modal via internal state and render it INSIDE this
+          subtree (e.g. <CompareButton>). If the menu unmounted on close, it would
+          tear down that child in the same click that opened its modal, so the
+          modal would never appear (no error, "nothing happens"). Keeping the
+          subtree mounted lets such a child's modal — portaled to document.body —
+          survive the menu closing. */}
+      {hasSheetOrFilters && typeof document !== 'undefined'
         ? createPortal(
-            <>
-            {/* Dim backdrop — click anywhere off the menu to dismiss. */}
+            <div className={openedFrom === 'desktop' ? '' : 'pointer-events-none'}>
+            {/* Dim backdrop — click anywhere off the menu to dismiss. Only visible
+                and interactive while the menu is open. */}
             <div
-              className="fixed inset-0 z-[9998] bg-black/40 animate-fade-in"
+              className={[
+                'fixed inset-0 z-[9998] bg-black/40 transition-opacity',
+                openedFrom === 'desktop' ? 'opacity-100 animate-fade-in' : 'pointer-events-none opacity-0',
+              ].join(' ')}
               aria-hidden
               onMouseDown={() => closeSheet()}
             />
@@ -228,14 +240,19 @@ export function PageHeaderMobileTools({
               ref={popoverRef}
               role="menu"
               aria-label={sheetTitle}
-              className="fixed z-[9999] w-64 max-w-[calc(100vw-2rem)] rounded-lg border border-app-border bg-app-elevated shadow-lg animate-fade-in"
+              className={[
+                'fixed z-[9999] w-64 max-w-[calc(100vw-2rem)] rounded-lg border border-app-border bg-app-elevated shadow-lg',
+                openedFrom === 'desktop' ? 'animate-fade-in' : 'invisible pointer-events-none opacity-0',
+              ].join(' ')}
               style={{ top: popoverPos.top, right: popoverPos.right }}
               onMouseDown={(e) => e.stopPropagation()}
             >
               <div
                 // Close the dropdown as soon as any item is activated — most open
                 // their own modal (Compare, Export) or navigate, so leaving the
-                // menu open would stack a popover behind the new surface.
+                // menu open would stack a popover behind the new surface. The menu
+                // only HIDES (see above), so a modal-owning child stays mounted and
+                // its modal (portaled to body) remains visible over the hidden menu.
                 onClick={() => closeSheet()}
                 className={[
                   'flex max-h-[min(70dvh,480px)] flex-col gap-2 overflow-y-auto p-2',
@@ -253,7 +270,7 @@ export function PageHeaderMobileTools({
                 )}
               </div>
             </div>
-            </>,
+            </div>,
             document.body,
           )
         : null}
