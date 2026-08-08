@@ -171,6 +171,14 @@ export interface OrderDetail {
   pendingDeliveredOrderDeletionRequestId?: string | null;
   /** PENDING permission_request id for ORDER_STATUS_RETRACK, if any */
   pendingRetrackRequestId?: string | null;
+  /** True when Finance retracked this order (any category) and it hasn't been
+   *  resolved. Blocks re-delivery until CS/HoCS resolves the retrack. */
+  valueHoldPending?: boolean | null;
+  /** Optional corrected total Finance suggested at retrack time (pre-fills the
+   *  CS price/quantity correction). */
+  valueHoldHint?: string | null;
+  /** Category of the open retrack hold (drives the closer banner). */
+  retrackCategory?: string | null;
   /** Warning: counterpart order (follow-up or original) already delivered */
   duplicateDeliveryWarning?: {
     counterpartOrderNo: number;

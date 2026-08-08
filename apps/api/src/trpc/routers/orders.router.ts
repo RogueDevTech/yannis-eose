@@ -12,6 +12,8 @@ import {
   requestOrderDeletionSchema,
   requestDeliveredOrderDeletionSchema,
   requestOrderRetrackSchema,
+  resolveRetrackSchema,
+  retrackOrderSchema,
   assignOrderSchema,
   bulkReassignSchema,
   listOrdersSchema,
@@ -929,6 +931,47 @@ export const ordersRouter = router({
       await Promise.all([
         invalidateOrdersAggregatesCache(),
         invalidateOrderDetailCache(orderId),
+      ]);
+      return res;
+    }),
+
+  /**
+   * Resolve an open retrack hold (assigned closer / HoCS / Admin / Finance). Clears
+   * the hold + category so the order can be re-delivered. Auth enforced in-service.
+   */
+  resolveRetrack: authedProcedure
+    .input(resolveRetrackSchema)
+    .mutation(async ({ input, ctx }) => {
+      const res = await getOrdersService().resolveRetrack(input.orderId, ctx.user, { note: input.note });
+      await invalidateOrderDetailCache(input.orderId);
+      return res;
+    }),
+
+  /**
+   * Multi-hop retrack (e.g. REMITTED → CONFIRMED). Chains each valid backward hop;
+   * the category opens the hold at the landing status. Auth enforced per-hop in
+   * transition() (retrack requires HoCS/HoLogistics/Finance-write/Admin).
+   */
+  retrackOrder: authedProcedure
+    .meta({ branchScopedMutation: true })
+    .input(retrackOrderSchema.extend({ branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const res = await getOrdersService().retrackOrder(
+        {
+          orderId: input.orderId,
+          targetStatus: input.targetStatus as OrderStatus,
+          metadata: {
+            reason: input.reason,
+            retrackCategory: input.retrackCategory,
+            ...(input.correctedTotalAmount != null ? { correctedTotalAmount: input.correctedTotalAmount } : {}),
+            ...(input.preferredDeliveryDate ? { preferredDeliveryDate: input.preferredDeliveryDate } : {}),
+          },
+        },
+        ctx.user,
+      );
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCache(input.orderId),
       ]);
       return res;
     }),

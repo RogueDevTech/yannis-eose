@@ -240,6 +240,9 @@ export class LogisticsService implements OnModuleInit {
             ne(schema.orders.status, 'REMITTED'),
             ne(schema.orders.status, 'DELETED'),
             isNull(schema.orders.deletedAt),
+            // Retrack hold: don't auto-heal a retracked order (any category) to
+            // REMITTED on boot; it stays out until CS/HoCS resolves the retrack.
+            eq(schema.orders.valueHoldPending, false),
             exists(
               this.db
                 .select({ one: sql`1` })
@@ -2035,6 +2038,9 @@ export class LogisticsService implements OnModuleInit {
               ne(schema.orders.status, 'REMITTED'),
               ne(schema.orders.status, 'DELETED'),
               isNull(schema.orders.deletedAt),
+              // Retrack hold: never remit an order with an open retrack hold (any
+              // category). Rejoins once CS/HoCS resolves the retrack.
+              eq(schema.orders.valueHoldPending, false),
             ),
           )
           .returning({
@@ -3261,6 +3267,10 @@ export class LogisticsService implements OnModuleInit {
               ne(schema.orders.status, 'REMITTED'),
               ne(schema.orders.status, 'DELETED'),
               isNull(schema.orders.deletedAt),
+              // Value hold: never remit an order retracked for an incorrect value
+              // whose price hasn't been corrected — even if it lingers on this
+              // batch. It rejoins the cascade once the hold clears.
+              eq(schema.orders.valueHoldPending, false),
             ),
           )
           .returning({

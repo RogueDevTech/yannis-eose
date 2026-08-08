@@ -3,6 +3,21 @@ import { pgEnum } from 'drizzle-orm/pg-core';
 /** Branch supervisor teams — CS vs Marketing squads within a branch. */
 export const branchTeamDepartmentEnum = pgEnum('branch_team_department', ['CS', 'MARKETING']);
 
+/**
+ * Why Finance retracked an order (required on a direct retrack). Drives the
+ * color-coded banner shown to closers + the retrack hold that blocks re-delivery
+ * until CS/HoCS resolves it. Price/quantity categories also carry a corrected-value
+ * hint. Keep in sync with 0303_retrack_category.sql and RETRACK_CATEGORY_META.
+ */
+export const retrackCategoryEnum = pgEnum('retrack_category', [
+  'wrong_remittance_price',
+  'understated_overstated_price',
+  'wrong_quantity',
+  'wrong_delivery_agent',
+  'duplicate_delivery',
+  'not_delivered_moved_by_cs',
+]);
+
 /** CS auto-dispatch routing: weighted vs equal split across target teams. */
 export const csOrderRoutingStrategyEnum = pgEnum('cs_order_routing_strategy', ['WEIGHTED', 'EQUAL']);
 
@@ -495,6 +510,7 @@ export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
   'CS_ORDER_COMMENT',
   'ORDER_RESTORED',
   'ORDER_RETRACKED',
+  'ORDER_RETRACK_RESOLVED',
   'ORDER_CS_TRANSFERRED_POST_STATUS',
   'ORDER_DUPLICATE_FLAGGED',
   'ORDER_UNFROZEN',

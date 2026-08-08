@@ -239,6 +239,26 @@ export const transitionOrderSchema = z.object({
     engagementMethod: z
       .enum(['phone_revealed', 'voip_call_started', 'manual_call_logged'])
       .optional(),
+    /** When a (direct) retrack is due to a value mismatch (remitted != posted).
+     *  'value' opens a value hold that blocks re-delivery until the price is
+     *  corrected. Only meaningful on a backward/retrack transition. */
+    retrackReasonKind: z.enum(['value', 'other']).optional(),
+    /** Optional corrected order total Finance believes is right, stored as a hint
+     *  to pre-fill the CS line-price correction. Does not clear the hold itself. */
+    correctedTotalAmount: z.number().positive().optional(),
+    /** Required on a direct retrack: the reason category Finance selected. Opens
+     *  the retrack hold and drives the closer banner + notifications. Keep in sync
+     *  with the retrack_category enum + RETRACK_CATEGORIES. */
+    retrackCategory: z
+      .enum([
+        'wrong_remittance_price',
+        'understated_overstated_price',
+        'wrong_quantity',
+        'wrong_delivery_agent',
+        'duplicate_delivery',
+        'not_delivered_moved_by_cs',
+      ])
+      .optional(),
   }).optional(),
 });
 
@@ -323,6 +343,35 @@ export const requestOrderRetrackSchema = z.object({
   targetStatus: z.string().min(1),
   reason: z.string().min(10, 'Reason must be at least 10 characters'),
 });
+
+export const resolveRetrackSchema = z.object({
+  orderId: z.string().uuid(),
+  note: z.string().min(10, 'Resolution note must be at least 10 characters'),
+});
+
+export type ResolveRetrackInput = z.infer<typeof resolveRetrackSchema>;
+
+/**
+ * Multi-hop retrack (e.g. REMITTED → CONFIRMED). Walks each valid backward hop
+ * internally; the category + optional corrected value apply at the landing status.
+ */
+export const retrackOrderSchema = z.object({
+  orderId: z.string().uuid(),
+  targetStatus: z.string().min(1),
+  reason: z.string().min(10, 'Reason must be at least 10 characters'),
+  retrackCategory: z.enum([
+    'wrong_remittance_price',
+    'understated_overstated_price',
+    'wrong_quantity',
+    'wrong_delivery_agent',
+    'duplicate_delivery',
+    'not_delivered_moved_by_cs',
+  ]),
+  correctedTotalAmount: z.number().positive().optional(),
+  preferredDeliveryDate: z.string().optional(),
+});
+
+export type RetrackOrderInput = z.infer<typeof retrackOrderSchema>;
 
 export type RequestOrderRetrackInput = z.infer<typeof requestOrderRetrackSchema>;
 

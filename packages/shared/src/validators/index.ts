@@ -21,6 +21,8 @@ export {
   requestOrderDeletionSchema,
   requestDeliveredOrderDeletionSchema,
   requestOrderRetrackSchema,
+  resolveRetrackSchema,
+  retrackOrderSchema,
   softDeleteOrderSchema,
   assignOrderSchema,
   bulkReassignSchema,

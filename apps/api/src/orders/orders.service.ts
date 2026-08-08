@@ -23,7 +23,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone, retrackCategoryLabel } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
@@ -1136,6 +1136,85 @@ export class OrdersService {
     // it. The tRPC `softDeleteOrder` procedure also invalidates, but archiving
     // via the order-deletion approval flow goes straight through this service
     // method, bypassing that router call. Mirrors `invalidateOrdersAggregatesCache`.
+    await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
+
+    return { success: true };
+  }
+
+  /**
+   * Resolve an open retrack hold. Cleared ONLY here (no auto-clear on edit). Once
+   * resolved, `value_hold_pending`/`retrack_category` are cleared and the order can
+   * be re-delivered/re-remitted. Gated to the assigned closer, Head of CS, Admin, or
+   * Finance-write — the person confirms the retrack reason (price/quantity/agent/
+   * duplicate/not-delivered) has actually been fixed. A resolution note is required.
+   */
+  async resolveRetrack(
+    orderId: string,
+    actor: SessionUser,
+    opts: { note: string },
+  ): Promise<{ success: true }> {
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+    if (!order.valueHoldPending) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'This order does not have an open retrack hold to resolve.',
+      });
+    }
+
+    // Gate: assigned closer, Head of CS, Admin-level, or Finance-write.
+    const isAssignedCloser = order.assignedCsId != null && order.assignedCsId === actor.id;
+    const allowed =
+      isAssignedCloser ||
+      actor.role === 'HEAD_OF_CS' ||
+      isAdminLevel(actor) ||
+      hasFinanceWriteAccess(actor);
+    if (!allowed) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only the assigned closer, Head of CS, an Admin, or Finance can resolve a retrack.',
+      });
+    }
+
+    const note = opts.note.trim();
+    if (note.length < 10) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'A resolution note of at least 10 characters is required.',
+      });
+    }
+
+    const resolvedCategory = order.retrackCategory;
+    const categoryLabel = retrackCategoryLabel(resolvedCategory);
+    const now = new Date();
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.orders)
+        .set({
+          valueHoldPending: false,
+          retrackCategory: null,
+          valueHoldHint: null,
+          updatedAt: now,
+        })
+        .where(eq(schema.orders.id, orderId));
+
+      await tx.insert(schema.orderTimelineEvents).values({
+        orderId,
+        eventType: 'ORDER_RETRACK_RESOLVED',
+        actorId: actor.id,
+        actorName: actor.name ?? null,
+        description: `Retrack resolved${categoryLabel ? ` (${categoryLabel})` : ''} by ${actor.name ?? 'Staff'}. ${note.slice(0, 500)}`,
+        metadata: { category: resolvedCategory ?? null, note },
+        branchId: order.branchId ?? null,
+      });
+    });
+
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
     return { success: true };
@@ -5189,6 +5268,83 @@ export class OrdersService {
    * Transition an order to a new status.
    * Enforces the state machine, gates, and side effects.
    */
+  /**
+   * Retrack an order backward to an earlier status, walking one valid hop at a time.
+   * The state machine only permits single-hop backward moves (e.g. REMITTED can only
+   * step to DELIVERED), so a multi-step retrack like REMITTED → CONFIRMED is done by
+   * chaining `transition()` through each intermediate status. Every hop runs its full
+   * side effects (GL reversals, FIFO/COGS reversal, un-remit batch reconciliation), so
+   * the ledgers stay consistent. The retrack metadata (category → opens the hold,
+   * corrected-value hint) is applied on the FINAL hop only, so the order lands at the
+   * target status with the retrack hold + category set once.
+   */
+  async retrackOrder(
+    input: { orderId: string; targetStatus: OrderStatus; metadata?: TransitionOrderInput['metadata'] },
+    actor: SessionUser,
+  ) {
+    const RETRACK_POS: Record<string, number> = {
+      UNPROCESSED: 0, CS_ASSIGNED: 1, CS_ENGAGED: 2, CONFIRMED: 3,
+      AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
+    };
+    const [order] = await this.db
+      .select({ status: schema.orders.status })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, input.orderId))
+      .limit(1);
+    if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+
+    const startPos = RETRACK_POS[order.status] ?? -1;
+    const targetPos = RETRACK_POS[input.targetStatus] ?? -1;
+    if (targetPos < 0 || targetPos >= startPos) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Cannot retrack from ${order.status} to ${input.targetStatus}.`,
+      });
+    }
+
+    // Build the backward path: at each step pick the allowed next status that moves
+    // toward the target (the single valid backward hop). Guard against a broken chain.
+    let result: Awaited<ReturnType<typeof this.transition>> | undefined;
+    let currentStatus = order.status as OrderStatus;
+    const MAX_HOPS = 9; // lifecycle length — hard stop against an accidental loop
+    for (let i = 0; i < MAX_HOPS; i++) {
+      if (currentStatus === input.targetStatus) break;
+      const curPos = RETRACK_POS[currentStatus] ?? -1;
+      // Pick the LARGEST allowed backward hop toward the target — i.e. jump straight
+      // to the lowest-pos allowed status that is still >= target. The state machine
+      // exposes direct retrack edges (e.g. DELIVERED->CONFIRMED), so this lands in the
+      // fewest hops and avoids needless intermediate side effects (FIFO reverse +
+      // re-reserve churn) from walking IN_TRANSIT/DISPATCHED/AGENT_ASSIGNED one by one.
+      // Prefer landing directly on the target when it's a single allowed hop.
+      const candidates = getAllowedNextStatuses(currentStatus).filter((s) => {
+        const p = RETRACK_POS[s] ?? -1;
+        return p >= 0 && p < curPos && p >= targetPos;
+      });
+      const nextStatus = candidates.includes(input.targetStatus)
+        ? input.targetStatus
+        : candidates.sort((a, b) => (RETRACK_POS[a] ?? 99) - (RETRACK_POS[b] ?? 99))[0]; // lowest pos = largest hop
+      if (!nextStatus) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot retrack ${order.status} to ${input.targetStatus}: no valid path from ${currentStatus}.`,
+        });
+      }
+      const isFinalHop = nextStatus === input.targetStatus;
+      result = await this.transition(
+        {
+          orderId: input.orderId,
+          newStatus: nextStatus,
+          // Carry the retrack metadata (category/hint/reason) only on the final hop
+          // so the hold + category are set once, at the landing status.
+          metadata: isFinalHop ? input.metadata : { reason: input.metadata?.reason },
+        },
+        actor,
+      );
+      currentStatus = nextStatus;
+    }
+    return result;
+  }
+
   async transition(input: TransitionOrderInput, actor: SessionUser) {
     // Get current order. We intentionally do NOT filter `isNull(deletedAt)` here:
     // DELETED rows still need to be selectable so Admin/SuperAdmin can run the
@@ -5474,6 +5630,23 @@ export class OrdersService {
       for (let i = startClear; i < LIFECYCLE_ORDER.length; i++) {
         updateFields[LIFECYCLE_ORDER[i]!.tsField] = null;
       }
+    }
+
+    // Retrack hold: Finance retracks directly (no approval) and picks a CATEGORY.
+    // ANY category opens the hold, which blocks re-delivery/re-remittance (manual +
+    // via the cart / follow-up mirrors + the remittance cascades) until CS/HoCS
+    // explicitly RESOLVES the retrack. The hold no longer auto-clears on a price
+    // edit — see resolveRetrack(). The optional correctedTotalAmount is a hint for
+    // price/quantity categories. Use `isBackward` (FULL 9-status RETRACK_LIFECYCLE),
+    // NOT the truncated LIFECYCLE_ORDER indices (they return -1 for a REMITTED
+    // source and would silently skip opening the hold on a REMITTED retrack).
+    const retrackCategory = input.metadata?.retrackCategory;
+    if (isBackward && retrackCategory) {
+      updateFields['valueHoldPending'] = true;
+      updateFields['retrackCategory'] = retrackCategory;
+      const hint = Number(input.metadata?.correctedTotalAmount);
+      updateFields['valueHoldHint'] =
+        Number.isFinite(hint) && hint > 0 ? sql`${hint}::numeric` : null;
     }
 
     // 15-min order lock on CS_ENGAGED (agent clicks Call)
@@ -5833,13 +6006,22 @@ export class OrdersService {
     if (isRetrack) {
       const orderLabel = `YNS-${String(updated.orderNumber).padStart(5, '0')}`;
       const actorName = await this.resolveUserNameById(actor.id).catch(() => null) ?? 'Someone';
-      const retrackBody = `${actorName} retracked order ${orderLabel} from ${currentStatus} to ${newStatus}.`;
+      const categoryLabel = retrackCategoryLabel(input.metadata?.retrackCategory);
+      const categorySuffix = categoryLabel ? ` Reason: ${categoryLabel}.` : '';
+      const retrackBody = `${actorName} retracked order ${orderLabel} from ${currentStatus} to ${newStatus}.${categorySuffix}`;
+      const retrackData = {
+        orderId: order.id,
+        orderNumber: updated.orderNumber,
+        fromStatus: currentStatus,
+        toStatus: newStatus,
+        retrackCategory: input.metadata?.retrackCategory ?? null,
+      };
 
       this.notifications.enqueueCreateForRole('HEAD_OF_CS', {
         type: 'order:retracked',
         title: `Order retracked: ${orderLabel}`,
         body: retrackBody,
-        data: { orderId: order.id, orderNumber: updated.orderNumber, fromStatus: currentStatus, toStatus: newStatus },
+        data: retrackData,
       });
 
       // Notify the assigned CS closer so they know the order is back in their queue
@@ -5848,8 +6030,8 @@ export class OrdersService {
           userId: updated.assignedCsId,
           type: 'order:retracked',
           title: `Order retracked: ${orderLabel}`,
-          body: `${orderLabel} was moved back to ${newStatus}. Please review.`,
-          data: { orderId: order.id, orderNumber: updated.orderNumber, fromStatus: currentStatus, toStatus: newStatus },
+          body: `${orderLabel} was moved back to ${newStatus}.${categorySuffix} Please review.`,
+          data: retrackData,
         });
       }
     }
@@ -5984,6 +6166,12 @@ export class OrdersService {
     if (workingInput.customerEmail !== undefined) updateFields['customerEmail'] = workingInput.customerEmail;
     if (workingInput.totalAmount !== undefined) updateFields['totalAmount'] = sql`${workingInput.totalAmount}::numeric`;
     if (workingInput.items !== undefined) updateFields['items'] = workingInput.items;
+
+    // NOTE: a price edit no longer auto-clears the retrack hold. The hold is now a
+    // general retrack hold (any category) and is cleared ONLY by the explicit
+    // "Resolve retrack" action — see resolveRetrack(). This lets CS/HoCS confirm the
+    // specific problem (price, quantity, agent, duplicate, not-delivered) is fixed
+    // before the order can be re-delivered, rather than assuming any edit fixed it.
 
     const updated = await withActor(this.db, actor, async (tx) => {
       const updatedRows = await tx
@@ -9093,6 +9281,17 @@ export class OrdersService {
       }
 
       case 'DELIVERED': {
+        // Retrack hold: this order was retracked by Finance (any category) and has
+        // NOT been resolved. Block re-delivery (manual or via CART_SOURCE_MIRROR)
+        // until CS/HoCS resolves the retrack (see resolveRetrack). This is the guard
+        // that stops the "retracked, silently re-delivered at the stale value" leak.
+        if (order.valueHoldPending) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              'This order has an open retrack hold. Resolve the retrack (fix the flagged issue first) before marking it delivered.',
+          });
+        }
         // 3PL marks delivered independently; proof/cost collected later in delivery remittance
         if (metadata?.deliveryProofUrl && typeof metadata.deliveryProofUrl === 'string' && metadata.deliveryProofUrl.trim() !== '') {
           try {
@@ -9117,6 +9316,17 @@ export class OrdersService {
       }
 
       case 'PARTIALLY_DELIVERED': {
+        // Value hold: same as DELIVERED — a held order (retracked for an incorrect
+        // value, price not yet corrected) must not be (partially) delivered at the
+        // stale value. PARTIALLY_DELIVERED can cascade to REMITTED, so it needs the
+        // identical guard.
+        if (order.valueHoldPending) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              'This order has an open retrack hold. Resolve the retrack (fix the flagged issue first) before marking it delivered.',
+          });
+        }
         if (
           metadata?.deliveredQuantity === undefined ||
           metadata?.returnedQuantity === undefined
@@ -9404,13 +9614,25 @@ export class OrdersService {
         // Leaving REMITTED — the settlement JE is posted per-remittance-batch and
         // may cover many orders, so we can't cleanly reverse one order's slice by
         // voucher. Only auto-reverse when this order is the SOLE order on its
-        // remittance; otherwise flag for manual finance adjustment (log) rather
-        // than wrongly reversing the whole batch.
+        // remittance; otherwise reverse just this order's slice.
+        //
+        // We ALSO reconcile the logistics remittance batch ledger so it stays
+        // consistent with the GL: detach the order from delivery_remittance_orders
+        // and reduce the batch's APPROVED outcome amount by this order's net
+        // contribution (total_amount − delivery_fee — the same per-order term the
+        // settlement summed) and decrement order_count. Without this, the GL would
+        // show the cash un-settled while the batch still counts the order (frozen
+        // outcome), a Financial-Truth divergence. This write bypasses the
+        // updateDeliveryRemittance freeze guard intentionally (system reconciliation,
+        // not a manual edit); the freeze guard lives only in that user-facing method.
         try {
           const rem = await this.db
             .select({ id: schema.deliveryRemittanceOrders.deliveryRemittanceId })
             .from(schema.deliveryRemittanceOrders)
             .where(eq(schema.deliveryRemittanceOrders.orderId, updatedOrder.id));
+          // This order's net contribution to the batch outcome (matches settlement).
+          const orderNet =
+            (Number(updatedOrder.totalAmount ?? 0) || 0) - (Number(updatedOrder.deliveryFee ?? 0) || 0);
           for (const r of rem) {
             const countRows = await this.db
               .select({ n: sql<number>`count(*)::int` })
@@ -9430,9 +9652,47 @@ export class OrdersService {
                 'order retracted out of REMITTED',
               );
             }
+            // Reconcile the batch ledger: detach + adjust the APPROVED outcome, in
+            // ONE tx (delete + outcome update commit together). The `amount -=` is
+            // not idempotent, but the detach guarantees a re-run finds no junction
+            // row (the loop reads via deliveryRemittanceOrders), so it never
+            // double-subtracts. `${netRounded}` mirrors settlement's 2dp rounding.
+            const netRounded = Number(orderNet.toFixed(2));
+            await withActor(this.db, actor, async (tx) => {
+              await tx
+                .delete(schema.deliveryRemittanceOrders)
+                .where(
+                  and(
+                    eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, r.id),
+                    eq(schema.deliveryRemittanceOrders.orderId, updatedOrder.id),
+                  ),
+                );
+              await tx
+                .update(schema.deliveryRemittanceOutcomes)
+                .set({
+                  amount: sql`GREATEST(0, ${schema.deliveryRemittanceOutcomes.amount} - ${netRounded}::numeric)`,
+                  orderCount: sql`GREATEST(0, ${schema.deliveryRemittanceOutcomes.orderCount} - 1)`,
+                })
+                .where(
+                  and(
+                    eq(schema.deliveryRemittanceOutcomes.deliveryRemittanceId, r.id),
+                    eq(schema.deliveryRemittanceOutcomes.status, 'APPROVED'),
+                  ),
+                );
+            });
           }
         } catch (err) {
-          this.logger.warn(`GL payment reversal on retract for order ${updatedOrder.id} failed: ${err instanceof Error ? err.message : err}`);
+          // Deliberately NON-fatal (log, don't throw): this block runs inside
+          // executeTransitionSideEffects, whose caller REVERTS the status on throw
+          // (see ~5826). The GL reversal + batch reconcile run in their own txns
+          // (the GL service owns its tx and can't share ours), so throwing here
+          // would revert the status to REMITTED while leaving the GL already
+          // reversed — a worse divergence than the one we're guarding against.
+          // Instead surface it at ERROR (not warn) with an actionable message so an
+          // operator reconciles the batch manually; the GL is the source of truth.
+          this.logger.error(
+            `Un-remit reconciliation FAILED for order ${updatedOrder.id} — GL reversed but the remittance batch outcome may not be reconciled. Manual check required (detach the order from its batch + adjust the outcome amount): ${err instanceof Error ? err.message : err}`,
+          );
         }
       }
       if (prevPos >= 7 && nextPos < 7) {

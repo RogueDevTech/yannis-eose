@@ -1837,38 +1837,59 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       // in the same tx. graduateToOrders() no-ops when graduatedOrderId is set,
       // which previously left FU=DELIVERED while a retracked parent drifted.
       if (order.graduatedOrderId && newStatus !== 'DELETED') {
-        const parentPatch: Record<string, unknown> = {
-          status: newStatus,
-          updatedAt: new Date(),
-        };
-        if (newStatus === 'CONFIRMED') parentPatch.confirmedAt = new Date();
-        if (newStatus === 'AGENT_ASSIGNED') parentPatch.allocatedAt = new Date();
-        if (newStatus === 'DISPATCHED') parentPatch.dispatchedAt = new Date();
-        if (newStatus === 'DELIVERED') parentPatch.deliveredAt = new Date();
-        const mirrored = await tx
-          .update(schema.orders)
-          .set(parentPatch)
+        // Retrack hold: if Finance retracked the graduated parent (any category)
+        // and it hasn't been resolved, DO NOT let this mirror push it forward — that
+        // silently re-delivers a held order at the stale value (same bug class as
+        // the cart mirror). Skip while held; resumes once CS/HoCS resolves the retrack.
+        const [parentBefore] = await tx
+          .select({ valueHoldPending: schema.orders.valueHoldPending })
+          .from(schema.orders)
           .where(
             and(
               eq(schema.orders.id, order.graduatedOrderId),
               isNull(schema.orders.deletedAt),
             ),
           )
-          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
-        if (mirrored[0]) {
-          await tx.insert(schema.orderTimelineEvents).values({
-            orderId: mirrored[0].id,
-            eventType: (eventTypeMap[newStatus] ?? 'ORDER_VIEWED') as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
-            actorId: actor.id,
-            actorName: actor.name ?? null,
-            description: description ?? `Status synced from graduated follow-up order (${newStatus}).`,
-            metadata: { reason: 'FOLLOW_UP_SOURCE_MIRROR', followUpOrderId: orderId, previousStatus: order.status, newStatus },
-            branchId: mirrored[0].branchId ?? null,
-          });
-        } else {
+          .limit(1);
+
+        if (parentBefore?.valueHoldPending) {
           this.logger.warn(
-            `Follow-up order ${orderId} status → ${newStatus} but graduated parent ${order.graduatedOrderId} was not updated (missing or deleted)`,
+            `Follow-up order ${orderId} status → ${newStatus} NOT mirrored: graduated parent ${order.graduatedOrderId} is on a value hold (retracked for incorrect value, price not yet corrected).`,
           );
+        } else {
+          const parentPatch: Record<string, unknown> = {
+            status: newStatus,
+            updatedAt: new Date(),
+          };
+          if (newStatus === 'CONFIRMED') parentPatch.confirmedAt = new Date();
+          if (newStatus === 'AGENT_ASSIGNED') parentPatch.allocatedAt = new Date();
+          if (newStatus === 'DISPATCHED') parentPatch.dispatchedAt = new Date();
+          if (newStatus === 'DELIVERED') parentPatch.deliveredAt = new Date();
+          const mirrored = await tx
+            .update(schema.orders)
+            .set(parentPatch)
+            .where(
+              and(
+                eq(schema.orders.id, order.graduatedOrderId),
+                isNull(schema.orders.deletedAt),
+              ),
+            )
+            .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+          if (mirrored[0]) {
+            await tx.insert(schema.orderTimelineEvents).values({
+              orderId: mirrored[0].id,
+              eventType: (eventTypeMap[newStatus] ?? 'ORDER_VIEWED') as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
+              actorId: actor.id,
+              actorName: actor.name ?? null,
+              description: description ?? `Status synced from graduated follow-up order (${newStatus}).`,
+              metadata: { reason: 'FOLLOW_UP_SOURCE_MIRROR', followUpOrderId: orderId, previousStatus: order.status, newStatus },
+              branchId: mirrored[0].branchId ?? null,
+            });
+          } else {
+            this.logger.warn(
+              `Follow-up order ${orderId} status → ${newStatus} but graduated parent ${order.graduatedOrderId} was not updated (missing or deleted)`,
+            );
+          }
         }
       }
     });

@@ -787,38 +787,65 @@ export class CartOrdersService {
       // in the same tx. graduateToOrders() no-ops when graduatedOrderId is set,
       // which previously left cart=DELIVERED and parent=CONFIRMED (dashboard drift).
       if (order.graduatedOrderId && newStatus !== 'DELETED') {
-        const parentPatch: Record<string, unknown> = {
-          status: newStatus,
-          updatedAt: new Date(),
-        };
-        if (newStatus === 'CONFIRMED') parentPatch.confirmedAt = new Date();
-        if (newStatus === 'AGENT_ASSIGNED') parentPatch.allocatedAt = new Date();
-        if (newStatus === 'DISPATCHED') parentPatch.dispatchedAt = new Date();
-        if (newStatus === 'DELIVERED') parentPatch.deliveredAt = new Date();
-        const mirrored = await tx
-          .update(schema.orders)
-          .set(parentPatch)
+        // Retrack hold: if Finance retracked the graduated parent (any category)
+        // and it hasn't been resolved, DO NOT let the cart mirror push it forward —
+        // that is exactly how a held order gets silently re-delivered at the stale
+        // value. Skip the mirror entirely while held; it resumes once CS/HoCS
+        // resolves the retrack. Reads the current parent state so we can distinguish
+        // "on hold" (intentional skip) from "missing/deleted" (existing warning) below.
+        const [parentBefore] = await tx
+          .select({ valueHoldPending: schema.orders.valueHoldPending })
+          .from(schema.orders)
           .where(
             and(
               eq(schema.orders.id, order.graduatedOrderId),
               isNull(schema.orders.deletedAt),
             ),
           )
-          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
-        if (mirrored[0]) {
-          await tx.insert(schema.orderTimelineEvents).values({
-            orderId: mirrored[0].id,
-            eventType: (eventTypeMap[newStatus] ?? 'ORDER_VIEWED') as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
-            actorId: actor.id,
-            actorName: actor.name ?? null,
-            description: description ?? `Status synced from graduated cart order (${newStatus}).`,
-            metadata: { reason: 'CART_SOURCE_MIRROR', cartOrderId: orderId, previousStatus: order.status, newStatus },
-            branchId: mirrored[0].branchId ?? null,
-          });
-        } else {
+          .limit(1);
+
+        if (parentBefore?.valueHoldPending) {
+          // Skip ONLY the parent mirror-push; the cart order's own transition (and
+          // the rest of this tx / method) proceeds normally. The graduated parent
+          // stays put until CS/HoCS resolves the retrack, which clears the hold and
+          // lets a later cart transition mirror through.
           this.logger.warn(
-            `Cart order ${orderId} status → ${newStatus} but graduated parent ${order.graduatedOrderId} was not updated (missing or deleted)`,
+            `Cart order ${orderId} status → ${newStatus} NOT mirrored: graduated parent ${order.graduatedOrderId} is on a value hold (retracked for incorrect value, price not yet corrected).`,
           );
+        } else {
+          const parentPatch: Record<string, unknown> = {
+            status: newStatus,
+            updatedAt: new Date(),
+          };
+          if (newStatus === 'CONFIRMED') parentPatch.confirmedAt = new Date();
+          if (newStatus === 'AGENT_ASSIGNED') parentPatch.allocatedAt = new Date();
+          if (newStatus === 'DISPATCHED') parentPatch.dispatchedAt = new Date();
+          if (newStatus === 'DELIVERED') parentPatch.deliveredAt = new Date();
+          const mirrored = await tx
+            .update(schema.orders)
+            .set(parentPatch)
+            .where(
+              and(
+                eq(schema.orders.id, order.graduatedOrderId),
+                isNull(schema.orders.deletedAt),
+              ),
+            )
+            .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+          if (mirrored[0]) {
+            await tx.insert(schema.orderTimelineEvents).values({
+              orderId: mirrored[0].id,
+              eventType: (eventTypeMap[newStatus] ?? 'ORDER_VIEWED') as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
+              actorId: actor.id,
+              actorName: actor.name ?? null,
+              description: description ?? `Status synced from graduated cart order (${newStatus}).`,
+              metadata: { reason: 'CART_SOURCE_MIRROR', cartOrderId: orderId, previousStatus: order.status, newStatus },
+              branchId: mirrored[0].branchId ?? null,
+            });
+          } else {
+            this.logger.warn(
+              `Cart order ${orderId} status → ${newStatus} but graduated parent ${order.graduatedOrderId} was not updated (missing or deleted)`,
+            );
+          }
         }
       }
 
