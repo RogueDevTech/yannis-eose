@@ -84,7 +84,7 @@ sed -i '' 's/machine_type = "e2-standard-4"/machine_type = "e2-custom-2-4096"/' 
 # DATABASE_URL=postgresql://postgres:Yannis-eoseprod5866@34.51.148.220:5432/postgres?sslmode=require
 
 # NEW PROD DB
-
+Lets check for the 42 orders if cs did change the price at any point and it did not stick.
 # DATABASE_URL=postgresql://yannis_app:586686586686@34.39.26.212:5432/yannis?sslmode=require
 
 # export OLD_URL='postgresql://postgres:Yannis-eoseprod5866@34.51.148.220:5432/postgres'

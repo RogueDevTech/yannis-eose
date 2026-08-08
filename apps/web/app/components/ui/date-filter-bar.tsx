@@ -79,8 +79,6 @@ function formatPeriodLabel(
     if (startDate === yesterday) return 'Yesterday';
     const twoDaysAgo = toYMD(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2));
     if (startDate === twoDaysAgo) return '2 days ago';
-    const threeDaysAgo = toYMD(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 3));
-    if (startDate === threeDaysAgo) return '3 days ago';
     return new Date(startDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' });
   }
   // Preset matching only applies to whole-day ranges (no time refinement).
@@ -104,10 +102,14 @@ function formatPeriodLabel(
     const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
     if (startDate === toYMD(firstOfLastMonth) && endDate === toYMD(lastOfLastMonth)) return 'Last month';
+    // "Last 2/3 months" each record ONE calendar month (the month 2 or 3 back),
+    // not a cumulative multi-month span.
     const firstOf2MonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-    if (startDate === toYMD(firstOf2MonthsAgo) && endDate === toYMD(lastOfLastMonth)) return 'Last 2 months';
+    const lastOf2MonthsAgo = new Date(now.getFullYear(), now.getMonth() - 1, 0);
+    if (startDate === toYMD(firstOf2MonthsAgo) && endDate === toYMD(lastOf2MonthsAgo)) return 'Last 2 months';
     const firstOf3MonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-    if (startDate === toYMD(firstOf3MonthsAgo) && endDate === toYMD(lastOfLastMonth)) return 'Last 3 months';
+    const lastOf3MonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 0);
+    if (startDate === toYMD(firstOf3MonthsAgo) && endDate === toYMD(lastOf3MonthsAgo)) return 'Last 3 months';
   }
   const s = new Date(startDate);
   const e = new Date(endDate);
@@ -116,7 +118,7 @@ function formatPeriodLabel(
   return `${startBit} – ${endBit}`;
 }
 
-type DatePreset = 'today' | 'yesterday' | '2_days_ago' | '3_days_ago' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'last_2_months' | 'last_3_months' | 'this_quarter' | 'last_quarter' | 'this_year';
+type DatePreset = 'today' | 'yesterday' | '2_days_ago' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'last_2_months' | 'last_3_months' | 'this_quarter' | 'last_quarter' | 'this_year';
 
 type DraftSelectionId = DatePreset | 'all_time' | 'custom' | null;
 
@@ -129,7 +131,7 @@ function getActiveDraftSelectionId(
   if (draftPeriodAllTime) return 'all_time';
   if (!draftStart && !draftEnd) return null;
   if (!draftStart || !draftEnd) return 'custom';
-  const presets: DatePreset[] = ['today', 'this_month', 'yesterday', '2_days_ago', '3_days_ago', 'this_week', 'last_week', 'last_month', 'last_2_months', 'last_3_months', 'this_quarter', 'last_quarter', 'this_year'];
+  const presets: DatePreset[] = ['today', 'this_month', 'yesterday', '2_days_ago', 'this_week', 'last_week', 'last_month', 'last_2_months', 'last_3_months', 'this_quarter', 'last_quarter', 'this_year'];
   for (const p of presets) {
     const { startDate, endDate } = getPresetRange(p);
     if (draftStart === startDate && draftEnd === endDate) return p;
@@ -153,12 +155,6 @@ function getPresetRange(preset: DatePreset): { startDate: string; endDate: strin
     case '2_days_ago': {
       const d = new Date(now);
       d.setDate(now.getDate() - 2);
-      const ymd = toYMD(d);
-      return { startDate: ymd, endDate: ymd };
-    }
-    case '3_days_ago': {
-      const d = new Date(now);
-      d.setDate(now.getDate() - 3);
       const ymd = toYMD(d);
       return { startDate: ymd, endDate: ymd };
     }
@@ -192,13 +188,15 @@ function getPresetRange(preset: DatePreset): { startDate: string; endDate: strin
       return { startDate: toYMD(first), endDate: toYMD(last) };
     }
     case 'last_2_months': {
+      // Single calendar month, 2 months back (e.g. Aug → June 1–30). NOT a 2-month span.
       const first = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-      const last = new Date(now.getFullYear(), now.getMonth(), 0);
+      const last = new Date(now.getFullYear(), now.getMonth() - 1, 0);
       return { startDate: toYMD(first), endDate: toYMD(last) };
     }
     case 'last_3_months': {
+      // Single calendar month, 3 months back (e.g. Aug → May 1–31). NOT a 3-month span.
       const first = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-      const last = new Date(now.getFullYear(), now.getMonth(), 0);
+      const last = new Date(now.getFullYear(), now.getMonth() - 2, 0);
       return { startDate: toYMD(first), endDate: toYMD(last) };
     }
     case 'this_quarter': {
@@ -414,64 +412,84 @@ export function DateFilterBar({
                   </svg>
                 </button>
               </div>
-              <div className="flex flex-wrap gap-2">
+              {/* Presets grouped by granularity — Days, Weeks, Months, Quarter/Year —
+                  each group on its own row separated by a divider so options don't
+                  compete visually. Custom + All time sit in the last group. */}
+              <div className="flex flex-col gap-3">
                 {(
                   [
-                    { id: 'today' as const, label: 'Today' },
-                    { id: 'this_month' as const, label: 'This month' },
-                    { id: 'yesterday' as const, label: 'Yesterday' },
-                    { id: '2_days_ago' as const, label: '2 days ago' },
-                    { id: '3_days_ago' as const, label: '3 days ago' },
-                    { id: 'this_week' as const, label: 'This week' },
-                    { id: 'last_week' as const, label: 'Last week' },
-                    { id: 'last_month' as const, label: 'Last month' },
-                    { id: 'last_2_months' as const, label: 'Last 2 months' },
-                    { id: 'last_3_months' as const, label: 'Last 3 months' },
-                    { id: 'this_quarter' as const, label: 'This quarter' },
-                    { id: 'last_quarter' as const, label: 'Last quarter' },
-                    { id: 'this_year' as const, label: 'This year' },
-                    { id: 'all_time' as const, label: 'All time' },
+                    [
+                      { id: 'today', label: 'Today' },
+                      { id: 'yesterday', label: 'Yesterday' },
+                      { id: '2_days_ago', label: '2 days ago' },
+                    ],
+                    [
+                      { id: 'this_week', label: 'This week' },
+                      { id: 'last_week', label: 'Last week' },
+                    ],
+                    [
+                      { id: 'this_month', label: 'This month' },
+                      { id: 'last_month', label: 'Last month' },
+                      { id: 'last_2_months', label: 'Last 2 months' },
+                      { id: 'last_3_months', label: 'Last 3 months' },
+                    ],
+                    [
+                      { id: 'this_quarter', label: 'This quarter' },
+                      { id: 'last_quarter', label: 'Last quarter' },
+                      { id: 'this_year', label: 'This year' },
+                      { id: 'all_time', label: 'All time' },
+                    ],
                   ] as const
-                ).map(({ id, label }) => {
-                  const isActive = id === 'all_time' ? activeDraftId === 'all_time' : activeDraftId === id;
-                  return (
-                    <Button
-                      key={id}
-                      type="button"
-                      variant="secondary"
-                      size="md"
-                      aria-pressed={isActive}
-                      className={
-                        isActive
-                          ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-app-canvas bg-brand-500/10 text-brand-700 dark:bg-brand-900/30 dark:text-brand-200'
-                          : ''
-                      }
-                      onClick={() => {
-                        setDraftPreset(id);
-                        setCustomOpen(false);
-                      }}
-                    >
-                      {label}
-                    </Button>
-                  );
-                })}
-                {/* Custom — toggles the calendar/date inputs below. Hidden by default
-                    so the modal opens compact (presets only); the calendar appears
-                    only after the user explicitly initiates it. */}
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="md"
-                  aria-pressed={customOpen || activeDraftId === 'custom'}
-                  className={
-                    customOpen || activeDraftId === 'custom'
-                      ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-app-canvas bg-brand-500/10 text-brand-700 dark:bg-brand-900/30 dark:text-brand-200'
-                      : ''
-                  }
-                  onClick={() => setCustomOpen((v) => !v)}
-                >
-                  Custom…
-                </Button>
+                ).map((group, groupIdx) => (
+                  <div key={groupIdx}>
+                    {groupIdx > 0 && (
+                      <div className="mb-3 border-t border-app-border" aria-hidden="true" />
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {group.map(({ id, label }) => {
+                        const isActive = activeDraftId === id;
+                        return (
+                          <Button
+                            key={id}
+                            type="button"
+                            variant="secondary"
+                            size="md"
+                            aria-pressed={isActive}
+                            className={
+                              isActive
+                                ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-app-canvas bg-brand-500/10 text-brand-700 dark:bg-brand-900/30 dark:text-brand-200'
+                                : ''
+                            }
+                            onClick={() => {
+                              setDraftPreset(id);
+                              setCustomOpen(false);
+                            }}
+                          >
+                            {label}
+                          </Button>
+                        );
+                      })}
+                      {/* Custom — appended to the last group. Toggles the calendar/date
+                          inputs below; hidden by default so the modal opens compact. */}
+                      {groupIdx === 3 && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="md"
+                          aria-pressed={customOpen || activeDraftId === 'custom'}
+                          className={
+                            customOpen || activeDraftId === 'custom'
+                              ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-app-canvas bg-brand-500/10 text-brand-700 dark:bg-brand-900/30 dark:text-brand-200'
+                              : ''
+                          }
+                          onClick={() => setCustomOpen((v) => !v)}
+                        >
+                          Custom…
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
               {customOpen && (
                 <div className="flex flex-col gap-3 p-1">
