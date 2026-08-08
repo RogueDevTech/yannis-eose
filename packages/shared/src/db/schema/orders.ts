@@ -1,6 +1,6 @@
 import { uuid, pgTable, text, integer, numeric, jsonb, timestamp, boolean } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { orderStatusEnum, callStatusEnum, timelineEventTypeEnum } from './enums';
+import { orderStatusEnum, callStatusEnum, timelineEventTypeEnum, retrackCategoryEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { products } from './products';
@@ -42,18 +42,24 @@ export const orders = pgTable('orders', {
   /** Discount amount applied at delivery when 3PL marks DELIVERED/PARTIALLY_DELIVERED; order totalAmount is reduced by this. */
   deliveryDiscountAmount: numeric('delivery_discount_amount', { precision: 12, scale: 2 }),
   /**
-   * Value hold: set true when Finance retracks this order for a value mismatch
-   * (remitted cash != posted value). While true, the order CANNOT be re-delivered
-   * or re-remitted (manual or via CART_SOURCE_MIRROR) — CS must first correct the
-   * line price. Cleared automatically when a line-price correction is applied.
+   * Retrack hold: set true when Finance retracks this order (any category). While
+   * true, the order CANNOT be re-delivered or re-remitted (manual or via the cart /
+   * follow-up mirrors or the remittance cascades). Cleared ONLY by the explicit
+   * "Resolve retrack" action (CS/HoCS) — see retrackCategory for the reason.
+   * (Column name kept as value_hold_pending; it is now the general retrack hold.)
    */
   valueHoldPending: boolean('value_hold_pending').default(false).notNull(),
   /**
-   * Optional corrected amount Finance typed at retrack time. A hint that pre-fills
-   * the CS line-price correction form; does NOT clear the hold by itself (only an
-   * actual line-price correction does).
+   * Optional corrected amount Finance typed at retrack time (price/quantity
+   * categories). A hint that pre-fills the CS correction form; does NOT clear the
+   * hold by itself (only the Resolve retrack action does).
    */
   valueHoldHint: numeric('value_hold_hint', { precision: 12, scale: 2 }),
+  /**
+   * Category of the currently-open retrack hold (why Finance retracked). Null when
+   * no hold is open / after Resolve retrack. Drives the color-coded closer banner.
+   */
+  retrackCategory: retrackCategoryEnum('retrack_category'),
   /** Required receipt URL when 3PL resolves order (Resolve order modal). */
   resolveReceiptUrl: text('resolve_receipt_url'),
   parentOrderId: uuid('parent_order_id'),

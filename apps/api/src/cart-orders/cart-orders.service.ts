@@ -787,13 +787,12 @@ export class CartOrdersService {
       // in the same tx. graduateToOrders() no-ops when graduatedOrderId is set,
       // which previously left cart=DELIVERED and parent=CONFIRMED (dashboard drift).
       if (order.graduatedOrderId && newStatus !== 'DELETED') {
-        // Value hold: if Finance retracked the graduated parent for a value
-        // mismatch and its price hasn't been corrected yet, DO NOT let the cart
-        // mirror push it forward — that is exactly how a held order gets silently
-        // re-delivered at the stale value. Skip the mirror entirely while held; it
-        // resumes once a line-price correction clears the hold. Reads the current
-        // parent state so we can distinguish "on hold" (intentional skip) from
-        // "missing/deleted" (existing warning) below.
+        // Retrack hold: if Finance retracked the graduated parent (any category)
+        // and it hasn't been resolved, DO NOT let the cart mirror push it forward —
+        // that is exactly how a held order gets silently re-delivered at the stale
+        // value. Skip the mirror entirely while held; it resumes once CS/HoCS
+        // resolves the retrack. Reads the current parent state so we can distinguish
+        // "on hold" (intentional skip) from "missing/deleted" (existing warning) below.
         const [parentBefore] = await tx
           .select({ valueHoldPending: schema.orders.valueHoldPending })
           .from(schema.orders)
@@ -808,8 +807,8 @@ export class CartOrdersService {
         if (parentBefore?.valueHoldPending) {
           // Skip ONLY the parent mirror-push; the cart order's own transition (and
           // the rest of this tx / method) proceeds normally. The graduated parent
-          // stays put until its price is corrected, which clears the hold and lets
-          // a later cart transition mirror through.
+          // stays put until CS/HoCS resolves the retrack, which clears the hold and
+          // lets a later cart transition mirror through.
           this.logger.warn(
             `Cart order ${orderId} status → ${newStatus} NOT mirrored: graduated parent ${order.graduatedOrderId} is on a value hold (retracked for incorrect value, price not yet corrected).`,
           );

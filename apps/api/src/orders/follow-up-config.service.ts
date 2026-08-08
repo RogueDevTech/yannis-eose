@@ -1837,11 +1837,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       // in the same tx. graduateToOrders() no-ops when graduatedOrderId is set,
       // which previously left FU=DELIVERED while a retracked parent drifted.
       if (order.graduatedOrderId && newStatus !== 'DELETED') {
-        // Value hold: if Finance retracked the graduated parent for a value
-        // mismatch and its price hasn't been corrected yet, DO NOT let this mirror
-        // push it forward — that silently re-delivers a held order at the stale
-        // value (same bug class as the cart mirror). Skip while held; resumes once
-        // a line-price correction clears the hold.
+        // Retrack hold: if Finance retracked the graduated parent (any category)
+        // and it hasn't been resolved, DO NOT let this mirror push it forward — that
+        // silently re-delivers a held order at the stale value (same bug class as
+        // the cart mirror). Skip while held; resumes once CS/HoCS resolves the retrack.
         const [parentBefore] = await tx
           .select({ valueHoldPending: schema.orders.valueHoldPending })
           .from(schema.orders)

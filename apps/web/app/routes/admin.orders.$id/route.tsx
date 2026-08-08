@@ -1417,6 +1417,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true, intent: 'requestOrderRetrack' });
   }
 
+  if (intent === 'resolveRetrack') {
+    // Auth is enforced by OrdersService.resolveRetrack (assigned closer / HoCS /
+    // Admin / Finance); this handler only validates the note before forwarding.
+    const note = formData.get('note')?.toString()?.trim() ?? '';
+    if (note.length < 10) {
+      return json({ error: 'Resolution note must be at least 10 characters' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.resolveRetrack', {
+      method: 'POST',
+      cookie,
+      body: { orderId, note },
+    });
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Failed to resolve retrack');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true, intent: 'resolveRetrack' });
+  }
+
   if (intent === 'softDeleteOrder') {
     const allowedRoles = [
       'CS_CLOSER',
@@ -1502,6 +1521,30 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'retrackOrder') {
+    // Multi-hop retrack (e.g. REMITTED → CONFIRMED). Auth enforced per-hop server-side.
+    const targetStatus = formData.get('targetStatus')?.toString()?.trim() ?? '';
+    const reason = formData.get('reason')?.toString()?.trim() ?? '';
+    const retrackCategory = formData.get('retrackCategory')?.toString()?.trim() ?? '';
+    if (!targetStatus) return json({ error: 'Target status is required' }, { status: 400 });
+    if (reason.length < 10) return json({ error: 'Reason must be at least 10 characters' }, { status: 400 });
+    if (!retrackCategory) return json({ error: 'Retrack category is required' }, { status: 400 });
+    const body: Record<string, unknown> = { orderId, targetStatus, reason, retrackCategory };
+    const correctedStr = formData.get('correctedTotalAmount')?.toString()?.trim();
+    if (correctedStr) {
+      const corrected = parseFloat(correctedStr);
+      if (!Number.isNaN(corrected) && corrected > 0) body.correctedTotalAmount = corrected;
+    }
+    const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString()?.trim();
+    if (preferredDeliveryDate) body.preferredDeliveryDate = preferredDeliveryDate;
+    const res = await apiRequest<unknown>('/trpc/orders.retrackOrder', { method: 'POST', cookie, body });
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Failed to retrack order');
+      return json({ error: err, intent: 'retrackOrder' }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true, intent: 'retrackOrder' });
+  }
+
   if (intent === 'transition') {
     const newStatus = (formData.get('newStatus')?.toString() ?? '').trim();
     if (!newStatus) {
@@ -1575,11 +1618,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
       const discount = parseFloat(deliveryDiscountAmountStr);
       if (!Number.isNaN(discount) && discount >= 0) metadata['deliveryDiscountAmount'] = discount;
     }
-    // Direct value-retrack: a backward transition flagged as a value mismatch opens
-    // a value hold (blocks re-delivery until the price is corrected). The backend
-    // only acts on this when the transition is actually a retrack.
-    if (formData.get('retrackReasonKind')?.toString()?.trim() === 'value') {
-      metadata['retrackReasonKind'] = 'value';
+    // Direct retrack: the category opens the retrack hold (blocks re-delivery until
+    // resolved). The backend only acts on this when the transition is a retrack.
+    const retrackCategory = formData.get('retrackCategory')?.toString()?.trim();
+    if (retrackCategory) {
+      metadata['retrackCategory'] = retrackCategory;
       const correctedStr = formData.get('correctedTotalAmount')?.toString()?.trim();
       if (correctedStr) {
         const corrected = parseFloat(correctedStr);
