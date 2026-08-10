@@ -763,6 +763,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     'requestDeliveredOrderDeletion',
     'requestOrderRetrack',
     'transition', // Finance retrack uses direct transition — backend enforces hasFinanceAccess
+    'retrackOrder', // Multi-hop retrack for standard orders — backend enforces auth per hop
   ]);
   if (intent && !FINANCE_SELF_AUTHORIZED_INTENTS.has(intent) && !canManageOrderDetail(user)) {
     return json(
