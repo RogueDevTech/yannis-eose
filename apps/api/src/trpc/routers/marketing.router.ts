@@ -41,6 +41,7 @@ import {
   listMbFundTransfersSchema,
   type ListFundingInput,
   type ListFundingRequestsInput,
+  dateOrDateTimeOptional,
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -637,8 +638,8 @@ export const marketingRouter = router({
       z.object({
         mediaBuyerId: z.string().uuid().optional(),
         assignedCsId: z.string().uuid().optional(),
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
         /** When true, skip supervisor scope expansion — return only the caller's own metrics. */
         personalOnly: z.boolean().optional(),
       }),
@@ -759,8 +760,8 @@ export const marketingRouter = router({
     .input(
       z.object({
         mediaBuyerId: z.string().uuid().optional(),
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
         personalOnly: z.boolean().optional(),
         /** When set, returns per-form detail scoped to a single campaign (drill-in page). */
         campaignId: z.string().uuid().optional(),
@@ -836,8 +837,8 @@ export const marketingRouter = router({
     .input(
       z.object({
         period: z.enum(['this_month', 'all_time']).optional().default('this_month'),
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -865,8 +866,8 @@ export const marketingRouter = router({
     .input(
       z.object({
         period: z.enum(['this_month', 'all_time']).optional().default('this_month'),
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
         recentOrdersLimit: z.number().int().min(1).max(100).default(20),
         liveActivityLimit: z.number().int().min(1).max(200).default(60),
       }),
@@ -1416,8 +1417,8 @@ export const marketingRouter = router({
     .input(
       z.object({
         period: z.enum(['this_month', 'all_time']).optional().default('this_month'),
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -1777,8 +1778,8 @@ export const marketingRouter = router({
       z.object({
         page: z.number().int().min(1).default(1),
         limit: z.number().int().min(1).max(100).default(20),
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
         status: z.enum(['SENT', 'COMPLETED', 'DISPUTED']).optional(),
         receiverId: z.string().uuid().optional(),
         search: z.string().trim().max(200).optional(),
@@ -2202,8 +2203,8 @@ export const marketingRouter = router({
   crossFunnelStats: authedProcedure
     .input(
       z.object({
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
       }),
     )
     .query(async ({ input, ctx }) => {

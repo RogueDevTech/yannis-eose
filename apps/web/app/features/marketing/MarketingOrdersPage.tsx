@@ -507,7 +507,7 @@ export function MarketingOrdersPage({
       {
         key: 'actions',
         header: '',
-        align: 'center',
+        align: 'right',
         tight: true,
         mobileShowLabel: false,
         hideable: false,

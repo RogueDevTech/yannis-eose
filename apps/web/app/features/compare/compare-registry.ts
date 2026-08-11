@@ -815,12 +815,24 @@ function pad2(n: number): string {
 export function resolveComparePeriod(
   granularity: CompareGranularity,
   token: string,
+  timeWindow?: { from?: string; to?: string },
 ): ComparePeriod | null {
+  // Optional HH:MM time window (both ends, from < to). When present, we emit
+  // start/end as WAT (+01:00) datetimes so the backend's nigeriaDayStart/End pass
+  // them through verbatim (they honor any 'T'-bearing string). Blank = full day.
+  const from = timeWindow?.from ?? '';
+  const to = timeWindow?.to ?? '';
+  const validTime = /^\d{2}:\d{2}$/.test(from) && /^\d{2}:\d{2}$/.test(to) && from < to;
+  const timeLabel = validTime ? ` ${from}–${to}` : '';
+
   if (granularity === 'day') {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(token)) return null;
     const d = new Date(`${token}T00:00:00Z`);
     if (Number.isNaN(d.getTime())) return null;
-    const label = `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+    const label = `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}${timeLabel}`;
+    if (validTime) {
+      return { startDate: `${token}T${from}:00+01:00`, endDate: `${token}T${to}:00+01:00`, label };
+    }
     return { startDate: token, endDate: token, label };
   }
   // month
@@ -829,11 +841,15 @@ export function resolveComparePeriod(
   const year = Number(yStr);
   const month = Number(mStr); // 1-12
   if (!year || month < 1 || month > 12) return null;
-  const startDate = `${year}-${pad2(month)}-01`;
+  const firstDay = `${year}-${pad2(month)}-01`;
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const endDate = `${year}-${pad2(month)}-${pad2(lastDay)}`;
-  const label = `${MONTH_NAMES[month - 1]} ${year}`;
-  return { startDate, endDate, label };
+  const lastDate = `${year}-${pad2(month)}-${pad2(lastDay)}`;
+  const label = `${MONTH_NAMES[month - 1]} ${year}${timeLabel}`;
+  if (validTime) {
+    // Time window on a month = that time on the 1st day … that time on the last day.
+    return { startDate: `${firstDay}T${from}:00+01:00`, endDate: `${lastDate}T${to}:00+01:00`, label };
+  }
+  return { startDate: firstDay, endDate: lastDate, label };
 }
 
 /** Render a metric value per its kind. Kept framework-free so both server + client can use it. */

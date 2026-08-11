@@ -120,6 +120,8 @@ export const marketingFunding = pgTable('marketing_funding', {
   amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
   receiptUrl: text('receipt_url'),
   status: fundingStatusEnum('status').default('SENT').notNull(),
+  /** Free-text reason captured when the disbursement is sent, so reviewers can see why the money moved. Optional. */
+  notes: text('notes'),
   sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
   verifiedAt: timestamp('verified_at', { withTimezone: true }),
   /** When set, this ledger row was created by approving the linked funding request. */

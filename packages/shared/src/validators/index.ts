@@ -4,6 +4,9 @@
 
 export { z } from 'zod';
 
+// Shared date-range param validators (accept date OR datetime for time-of-day windows)
+export { dateOrDateTime, dateOrDateTimeOptional } from './date-params';
+
 // Order validators
 export {
   EDGE_FORM_ACTOR_ID,

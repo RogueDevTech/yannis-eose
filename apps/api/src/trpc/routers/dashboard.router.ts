@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { dateOrDateTimeOptional } from '@yannis/shared';
 import { router, permissionProcedure } from '../trpc';
 import type { OrdersService } from '../../orders/orders.service';
 import type { FinanceService } from '../../finance/finance.service';
@@ -301,8 +302,8 @@ export const dashboardRouter = router({
   ceoOverview: permissionProcedure('ceo.overview')
     .input(
       z.object({
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
       }).optional(),
     )
     .query(async ({ input, ctx }) => {
@@ -337,8 +338,8 @@ export const dashboardRouter = router({
   ceoOverviewBundle: permissionProcedure('ceo.overview')
     .input(
       z.object({
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
         /**
          * Which branch column drives the Branch Breakdown table:
          *   - `'marketing'` (default) — `orders.branch_id` (campaign attribution)

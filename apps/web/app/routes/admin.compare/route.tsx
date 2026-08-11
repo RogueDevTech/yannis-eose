@@ -51,15 +51,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const granularity = (url.searchParams.get('granularity') ?? 'month') as CompareGranularity;
   const aToken = url.searchParams.get('a') ?? '';
   const bToken = url.searchParams.get('b') ?? '';
-  const periodA = resolveComparePeriod(granularity, aToken);
-  const periodB = resolveComparePeriod(granularity, bToken);
+  // Optional per-period time window (HH:MM). Blank = full day/month.
+  const aFrom = url.searchParams.get('aFrom') ?? '';
+  const aTo = url.searchParams.get('aTo') ?? '';
+  const bFrom = url.searchParams.get('bFrom') ?? '';
+  const bTo = url.searchParams.get('bTo') ?? '';
+  const periodA = resolveComparePeriod(granularity, aToken, { from: aFrom, to: aTo });
+  const periodB = resolveComparePeriod(granularity, bToken, { from: bFrom, to: bTo });
 
-  // Missing/malformed periods, or the two periods being identical → send the user
-  // back to the source page (or dashboard) rather than showing a broken compare.
-  // Identical periods would give both funnel bars + table columns the same label,
-  // silently collapsing the chart to one series (the picker already prevents this;
-  // this guards a hand-edited URL).
-  if (!periodA || !periodB || aToken === bToken) {
+  // Missing/malformed periods, or the two periods being TRULY identical (same date
+  // AND same time window) → send the user back rather than showing a broken compare.
+  // Identical periods would give both funnel bars + table columns the same label.
+  const sameWindow = aToken === bToken && aFrom === bFrom && aTo === bTo;
+  if (!periodA || !periodB || sameWindow) {
     throw redirect(source.backTo ?? '/admin');
   }
 

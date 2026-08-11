@@ -857,6 +857,129 @@ export function UserDetailPage({
     onboardingFetcher.data,
   ]);
 
+  // Shared profile actions — rendered inline on desktop and inside the mobile
+  // Actions sheet. `close` dismisses the mobile sheet (no-op on desktop).
+  const renderProfileActions = (close: () => void) => (
+    <>
+      {isSelfView && (
+        <Link
+          to="/admin/settings"
+          onClick={() => close()}
+          className="btn-secondary btn-sm h-12 w-full justify-center inline-flex items-center"
+        >
+          Settings
+        </Link>
+      )}
+      {!isSelfView &&
+        !isSuperAdminProfile &&
+        (canOpenSettingsTab || canEditLimited) && (
+          <BranchScopedLink
+            to={`/hr/users/${user.id}/edit`}
+            actionLabel="editing this user"
+            prefetch="intent"
+            className="btn-secondary btn-sm h-12 flex items-center justify-center w-full"
+            onClick={() => close()}
+          >
+            Edit user
+          </BranchScopedLink>
+        )}
+      {showOnboardingTab && (isSelfView || viewerCanManageHrOnboarding) && (
+        <BranchScopedLink
+          to={isSelfView ? '/admin/onboarding' : `/hr/users/${user.id}/onboarding`}
+          actionLabel={isSelfView ? 'opening your onboarding' : 'opening staff onboarding'}
+          prefetch="intent"
+          className="btn-secondary btn-sm h-12 flex items-center justify-center w-full"
+          onClick={() => close()}
+        >
+          {isSelfView ? 'Your onboarding' : 'Open onboarding'}
+        </BranchScopedLink>
+      )}
+      {!isSelfView &&
+        viewerShowsMirror &&
+        (mirrorSubmitDisabled ? (
+          <Button type="button" variant="secondary" size="sm" disabled className="h-12 w-full justify-center">
+            Mirror user
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-12 w-full justify-center border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
+            loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
+            loadingText="Entering..."
+            onClick={() => {
+              close();
+              const form = document.getElementById('mirror-user-form') as HTMLFormElement | null;
+              form?.requestSubmit();
+            }}
+          >
+            Mirror user
+          </Button>
+        ))}
+      {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
+        <>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-12 w-full justify-center"
+            onClick={() => {
+              close();
+              setShowResetPassword(true);
+            }}
+          >
+            Reset Password
+          </Button>
+          {user.status === 'ACTIVE' && canDeactivateStaff && (
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              className="h-12 w-full justify-center"
+              onClick={() => {
+                close();
+                setShowDeactivateConfirm(true);
+              }}
+            >
+              Deactivate
+            </Button>
+          )}
+          {user.status === 'PENDING' && canDeletePendingStaff && (
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              className="h-12 w-full justify-center"
+              onClick={() => {
+                close();
+                setShowDeletePendingConfirm(true);
+              }}
+            >
+              Delete user
+            </Button>
+          )}
+          {(user.status === 'INACTIVE' ||
+            user.status === 'ARCHIVED' ||
+            (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-12 w-full justify-center text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300"
+              onClick={() => {
+                close();
+                setShowReactivateConfirm(true);
+              }}
+            >
+              Reactivate
+            </Button>
+          )}
+        </>
+      )}
+    </>
+  );
+
   return (
     <div className="w-full space-y-3">
       {/* Action feedback */}
@@ -914,138 +1037,21 @@ export function UserDetailPage({
           </div>
         </div>
 
-        {/* Action bar — desktop tools; mobile uses the hero kebab */}
+        {/* Action bar — desktop shows all actions inline; mobile uses the
+            Actions sheet (opened from MobileDateFilterRow via the bridge). */}
         <div className="hidden md:block border-t border-app-border bg-app-elevated px-4 sm:px-6 py-2">
           <PageHeaderMobileTools
             sheetTitle="Actions"
             triggerAriaLabel="Profile toolbar"
-            desktopActions
             desktop={
-              // Quick action only; all profile actions live in the Actions sheet.
-              <div className="flex flex-wrap items-center gap-2">
+              // Desktop: all profile actions render inline, no dropdown. Buttons
+              // size to content here (override the full-width sheet styling).
+              <div className="flex flex-wrap items-center gap-2 [&_.btn-secondary]:!w-auto [&_a.btn-secondary]:!w-auto [&_button]:!w-auto [&_.h-12]:!h-9 [&_a.h-12]:!h-9">
                 <PageRefreshButton />
+                {renderProfileActions(() => {})}
               </div>
             }
-            sheet={({ closeSheet }) => (
-              <>
-                {isSelfView && (
-                  <Link
-                    to="/admin/settings"
-                    onClick={() => closeSheet()}
-                    className="btn-secondary btn-sm h-12 w-full justify-center inline-flex items-center"
-                  >
-                    Settings
-                  </Link>
-                )}
-                {!isSelfView &&
-                  !isSuperAdminProfile &&
-                  (canOpenSettingsTab || canEditLimited) && (
-                    <BranchScopedLink
-                      to={`/hr/users/${user.id}/edit`}
-                      actionLabel="editing this user"
-                      prefetch="intent"
-                      className="btn-secondary btn-sm h-12 flex items-center justify-center w-full"
-                      onClick={() => closeSheet()}
-                    >
-                      Edit user
-                    </BranchScopedLink>
-                  )}
-                {showOnboardingTab && (isSelfView || viewerCanManageHrOnboarding) && (
-                  <BranchScopedLink
-                    to={isSelfView ? '/admin/onboarding' : `/hr/users/${user.id}/onboarding`}
-                    actionLabel={isSelfView ? 'opening your onboarding' : 'opening staff onboarding'}
-                    prefetch="intent"
-                    className="btn-secondary btn-sm h-12 flex items-center justify-center w-full"
-                    onClick={() => closeSheet()}
-                  >
-                    {isSelfView ? 'Your onboarding' : 'Open onboarding'}
-                  </BranchScopedLink>
-                )}
-                {!isSelfView &&
-                  viewerShowsMirror &&
-                  (mirrorSubmitDisabled ? (
-                    <Button type="button" variant="secondary" size="sm" disabled className="h-12 w-full justify-center">
-                      Mirror user
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="h-12 w-full justify-center border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
-                      loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
-                      loadingText="Entering..."
-                      onClick={() => {
-                        closeSheet();
-                        const form = document.getElementById('mirror-user-form') as HTMLFormElement | null;
-                        form?.requestSubmit();
-                      }}
-                    >
-                      Mirror user
-                    </Button>
-                  ))}
-                {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
-                  <>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="h-12 w-full justify-center"
-                      onClick={() => {
-                        closeSheet();
-                        setShowResetPassword(true);
-                      }}
-                    >
-                      Reset Password
-                    </Button>
-                    {user.status === 'ACTIVE' && canDeactivateStaff && (
-                      <Button
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        className="h-12 w-full justify-center"
-                        onClick={() => {
-                          closeSheet();
-                          setShowDeactivateConfirm(true);
-                        }}
-                      >
-                        Deactivate
-                      </Button>
-                    )}
-                    {user.status === 'PENDING' && canDeletePendingStaff && (
-                      <Button
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        className="h-12 w-full justify-center"
-                        onClick={() => {
-                          closeSheet();
-                          setShowDeletePendingConfirm(true);
-                        }}
-                      >
-                        Delete user
-                      </Button>
-                    )}
-                    {(user.status === 'INACTIVE' ||
-                      user.status === 'ARCHIVED' ||
-                      (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="h-12 w-full justify-center text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300"
-                        onClick={() => {
-                          closeSheet();
-                          setShowReactivateConfirm(true);
-                        }}
-                      >
-                        Reactivate
-                      </Button>
-                    )}
-                  </>
-                )}
-              </>
-            )}
+            sheet={({ closeSheet }) => renderProfileActions(closeSheet)}
           />
         </div>
       </div>

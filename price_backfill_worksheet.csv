@@ -1,0 +1,87 @@
+order_number,customer_name,status,current_price,category,suggested_correct_price,confidence,correct_price_FILL_HERE,note
+55628,Willy g bewu,REMITTED,120000,VALUE,59000,HIGH,,"value expected (120,000)is more than value remitted(59,000)"
+69050,Igbodo Peter,REMITTED,120000,VALUE,60000,HIGH,,"value remitted (60,000) is less than value expected(120,000)"
+41627,Josephine,DELIVERED,60000,VALUE,120000,HIGH,,"Value remitted(120,000)is more than value expected (60,000)"
+59728,Stanley,REMITTED,60000,VALUE,135000,HIGH,,"value remitted (135,000) is more than value expected(60,000)"
+65963,Nenemi Lynda,CONFIRMED,60000,VALUE,120000,HIGH,,"value remitted(120,000) is more than value expected(60,000)"
+69245,Egbon isaac,CONFIRMED,60000,VALUE,119000,HIGH,,"value received (119,000) is more than value expected(60,000)"
+47601,Vitus ezechukwu,DELIVERED,59500,VALUE,119500,HIGH,,"value expected(59,500) is less than value remitted(119,500)"
+76589,Theresa obimailo,DELIVERED,120000,VALUE,119000,MEDIUM,,"VALUE REMITTED IS 119,000"
+72692,Aishatmudassir,CONFIRMED,60000,VALUE,120000,MEDIUM,,"VALUE REMITTED IS 120,000"
+61017,Ven. Clelland E Nzeh,DELIVERED,60000,VALUE,120000,MEDIUM,,"value remitted is 120,000"
+72553,Sokoya Olugbenga,DELIVERED,60000,VALUE,100000,MEDIUM,,"value remitted is 100,000"
+55320,Okwy,CONFIRMED,59500,VALUE,90000,MEDIUM,,"value remitted is 90,000"
+73645,Ajayi Agboola,REMITTED,59500,VALUE,29500,MEDIUM,,"value remitted is 29,500"
+44574,EZE FRANCISCA,DELIVERED,59500,VALUE,238000,MEDIUM,,"value remitted is 238,000"
+70177,Julmond,REMITTED,370000,VALUE,,MANUAL,,Wrong pricing
+66640,Ekpendu Peter E,REMITTED,240000,VALUE,,MANUAL,,VALUE REMITTED IS MORE THAN VALUE EXPECTED
+69235,Theresa,CONFIRMED,135000,VALUE,,MANUAL,,Value remitted is lass than value posted
+55462,Chinedu Vincent,CONFIRMED,135000,VALUE,,MANUAL,,WRONG PRICE
+40012,Aderonke ishola,REMITTED,135000,VALUE,,MANUAL,,value remitted is more than value expected
+70465,Mrs Fairo,CONFIRMED,120000,VALUE,,MANUAL,,Value remitted is less than value posted
+50836,Mbaka titus,CONFIRMED,120000,VALUE,,MANUAL,,value remitted is less than value expected
+47968,Ibojor John Afe,REMITTED,120000,VALUE,,MANUAL,,VALUE REMITTED IS MORE THAN VALUE POSTED
+74718,Sholeye Kuburat,REMITTED,120000,VALUE,,MANUAL,,"value remitted is 120,000"
+65926,Pauline Osigwe,CONFIRMED,120000,VALUE,,MANUAL,,order value should be 120k
+71645,Ifeanyi,CONFIRMED,120000,VALUE,,MANUAL,,"value remitted is 120,000"
+70132,Julmond,REMITTED,120000,VALUE,,MANUAL,,Value remitted is more than value expected
+46679,Babalola bukola,REMITTED,120000,VALUE,,MANUAL,,VALUE REMITTED IS MORE THAN VALUE EXPECTED
+61137,Mr. Hope Ogechi,DELIVERED,120000,VALUE,,MANUAL,,"Value remitted (120,000) is greater than value expected(60,000)"
+77157,mrs Chidima Usen,CONFIRMED,119500,VALUE,,MANUAL,,value remitted is less than value posted
+42435,Obiora Egwuatu,CONFIRMED,119500,VALUE,,MANUAL,,WRONG VALUE
+53746,Bestman Jumbo-Nze,REMITTED,100000,VALUE,,MANUAL,,Wrong pricing
+42363,Arthur Odunukwe,DELIVERED,67000,VALUE,,MANUAL,,"VALUE EXPECTED (60,000)IS LESS THAN VALUE REMITTED(67,000)"
+70917,Celine,CONFIRMED,60000,VALUE,,MANUAL,,WRONG VALUE POSTED
+77479,IBIYEMI IYANIWURA GAFAR,DELIVERED,60000,VALUE,,MANUAL,,Wrong value
+42212,Uduak Mbong,CONFIRMED,60000,VALUE,,MANUAL,,Value remitted is more than posted
+51959,Tunji,CONFIRMED,60000,VALUE,,MANUAL,,VALUE remitted is more than value posted
+69443,Uzoma Benedeth Aniebue,DELIVERED,60000,VALUE,,MANUAL,,value is incorrect
+71340,Bright ogun,CONFIRMED,60000,VALUE,,MANUAL,,NOT REMITTED
+69466,Lucky oyeghe,DELIVERED,60000,VALUE,,MANUAL,,value remitted is more than expected
+36585,Ngozi Ekerekwu,CONFIRMED,60000,VALUE,,MANUAL,,VALUE REMITTED IS MORE THAN VALUE EXPECTED
+53134,Abu,REMITTED,60000,VALUE,,MANUAL,,VALUE REMITTED IS MORE THAN VALUE EXPECTED
+57262,Jimba Janet,CONFIRMED,60000,VALUE,,MANUAL,,value remitted is more than value expected
+41082,Jimba Janet,CONFIRMED,60000,VALUE,,MANUAL,,value remitted is more than value expected
+67693,Uchenna,REMITTED,60000,VALUE,,MANUAL,,Value expected is less than value expected
+67041,OYEWOLE RISKAT,AGENT_ASSIGNED,60000,VALUE,,MANUAL,,VALUE EXPECTED IS LESS THAN VALUE DELIVERED
+49139,Uwakwe Precious,CONFIRMED,60000,VALUE,,MANUAL,,value remitted is more than value expected
+41110,Lady Faith Ekpe,CONFIRMED,60000,VALUE,,MANUAL,,value remitted is more than value expected
+75774,Stella ofoegbu,DELIVERED,59500,VALUE,,MANUAL,,VALUE REMITTED IS MORE THAN POSTED
+71339,Mr Anthony Celestine,CONFIRMED,59500,VALUE,,MANUAL,,wrongly posted
+72432,Collins chukwuma,CONFIRMED,59500,VALUE,,MANUAL,,"value remitted is 59,500"
+39336,Ridwan,CONFIRMED,58000,VALUE,,MANUAL,,value remitted is less than exprcted
+40653,Lolo queen,REMITTED,33000,VALUE,,MANUAL,,VALUE REMITTED IS LESS THAN VALUE EXPECTED
+40991,Nnenna okoro,REMITTED,29000,VALUE,,MANUAL,,order value is incorrect
+61101,Glory Anana,REMITTED,29000,VALUE,,MANUAL,,Wrong pricing
+61110,Amaka,REMITTED,29000,VALUE,,MANUAL,,Wrong pricing
+72667,Aishat mudassir,DELIVERED,120000,REVIEW (qty/item affects price),,,,WRONG ITEM
+53999,Ismail Lawal,REMITTED,120000,REVIEW (qty/item affects price),,,,wrong quantity
+37882,Favour,REMITTED,119500,OTHER (confirm),,,,wrong
+72665,Ugwunna nwosu,CONFIRMED,135000,ATTRIBUTION (no price change expected),,,,wrong agent
+77631,Kelvin,CONFIRMED,120000,ATTRIBUTION (no price change expected),,,,wrong agent
+31240,Aniekwe Ngozi Regina,REMITTED,120000,ATTRIBUTION (no price change expected),,,,wrong agent
+63256,Obi Afam Charles,CONFIRMED,120000,ATTRIBUTION (no price change expected),,,,wrong agent
+69256,Francis Irabor,REMITTED,120000,ATTRIBUTION (no price change expected),,,,WRONG AGENT
+69926,Mr Ogbole Joe,CS_ENGAGED,120000,ATTRIBUTION (no price change expected),,,,wrong agent
+49617,Saidu Zubairu,CONFIRMED,119500,ATTRIBUTION (no price change expected),,,,WRONG CLOSER
+70878,Nse Umoh,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,wrong agent
+49824,Umoh glory orezi,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,wrong agent
+70964,Oluwadare Elizabeth,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,WRONG AGENT
+77169,OLUFEMI OLABANJI,DELIVERED,60000,ATTRIBUTION (no price change expected),,,,Wrong agent
+58016,Origbo Chidera,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,not delivered/wrong agent
+44158,Michael odunukwe,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,WRONG AGENT
+58000,Ikechukwu ifeanyi Emmanuel,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,wrong agent
+72182,Arinze Leticia ifeoma,REMITTED,60000,ATTRIBUTION (no price change expected),,,,wrong agent
+66830,Ogochukwu Ezibekwe juliana,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,wrong agent
+63673,Chiyenka onward Richard,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,wrong agent
+63663,Ubah Michael,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,wrong agent
+66422,Oladimeji,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,WRONG AGENT
+65890,Adetona adelani,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,"wrong agent,not tagged delivered"
+58004,Chris Adabanya,CONFIRMED,60000,ATTRIBUTION (no price change expected),,,,moved for a wrong agent
+36860,Okechukwu chukwuma,DELIVERED,59500,ATTRIBUTION (no price change expected),,,,wrong agent
+39173,Mu'azu Rufai,CONFIRMED,59500,ATTRIBUTION (no price change expected),,,,WRONG AGENT
+43507,Eric,DELIVERED,59500,ATTRIBUTION (no price change expected),,,,wrong agent
+69252,Bolu Alice,REMITTED,59500,ATTRIBUTION (no price change expected),,,,WRONG AGENT
+69447,Felix,CONFIRMED,59500,ATTRIBUTION (no price change expected),,,,moved for wrong agent
+69670,John Bosco,AGENT_ASSIGNED,29000,ATTRIBUTION (no price change expected),,,,WRONG AGENT
+63400,Okechukwu,CONFIRMED,29000,ATTRIBUTION (no price change expected),,,,wrong agent

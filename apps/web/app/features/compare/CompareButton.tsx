@@ -52,6 +52,12 @@ export function CompareButton({
   const [granularity, setGranularity] = useState<Granularity>('month');
   const [pointA, setPointA] = useState(thisMonthToken());
   const [pointB, setPointB] = useState(thisMonthToken());
+  // Optional per-period time window (HH:MM). Blank = full day/month (00:00–23:59).
+  // Applies to both granularities: for month, it's the time on the 1st/last day.
+  const [timeAFrom, setTimeAFrom] = useState('');
+  const [timeATo, setTimeATo] = useState('');
+  const [timeBFrom, setTimeBFrom] = useState('');
+  const [timeBTo, setTimeBTo] = useState('');
 
   // Which metrics to include — all on by default. Empty selection = compare all.
   const metricOptions = getCompareMetricOptions(source);
@@ -82,18 +88,28 @@ export function CompareButton({
   }
 
   const bothChosen = !!pointA && !!pointB;
-  const sameChoice = pointA === pointB;
+  // Two periods are "the same" only when BOTH the date token AND the time window
+  // match — so yesterday-morning vs yesterday-afternoon is a valid comparison.
+  const sameChoice =
+    pointA === pointB && timeAFrom === timeBFrom && timeATo === timeBTo;
   const noMetrics = metricOptions.length > 0 && selectedMetrics.size === 0;
   const allMetrics = selectedMetrics.size === metricOptions.length;
+  // A time window is invalid if only one end is set, or from >= to.
+  const badTime = (from: string, to: string) =>
+    (!!from !== !!to) || (!!from && !!to && from >= to);
+  const timeInvalid = badTime(timeAFrom, timeATo) || badTime(timeBFrom, timeBTo);
 
   function submit() {
-    if (!bothChosen || sameChoice || noMetrics) return;
+    if (!bothChosen || sameChoice || noMetrics || timeInvalid) return;
     const params = new URLSearchParams({
       source,
       granularity,
       a: pointA,
       b: pointB,
     });
+    // Per-period time window (HH:MM). Only sent when both ends are set.
+    if (timeAFrom && timeATo) { params.set('aFrom', timeAFrom); params.set('aTo', timeATo); }
+    if (timeBFrom && timeBTo) { params.set('bFrom', timeBFrom); params.set('bTo', timeBTo); }
     // Only send `metrics` when it's a real subset — omit when all are selected so
     // the URL stays clean and the compare page defaults to every metric.
     if (metricOptions.length > 0 && !allMetrics) {
@@ -157,6 +173,26 @@ export function CompareButton({
             </div>
           </div>
 
+          {/* Optional time window per period. Blank = full day/month. Applies to
+              both granularities (for month, it's the time on the 1st / last day). */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-app-fg-muted">
+              Time window <span className="text-2xs font-normal text-app-fg-muted">(optional; leave blank for full day)</span>
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex items-center gap-1.5">
+                <TextInput type="time" value={timeAFrom} onChange={(e) => setTimeAFrom(e.target.value)} aria-label="First period from time" />
+                <span className="text-xs text-app-fg-muted">to</span>
+                <TextInput type="time" value={timeATo} onChange={(e) => setTimeATo(e.target.value)} aria-label="First period to time" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <TextInput type="time" value={timeBFrom} onChange={(e) => setTimeBFrom(e.target.value)} aria-label="Second period from time" />
+                <span className="text-xs text-app-fg-muted">to</span>
+                <TextInput type="time" value={timeBTo} onChange={(e) => setTimeBTo(e.target.value)} aria-label="Second period to time" />
+              </div>
+            </div>
+          </div>
+
           {metricOptions.length > 0 && (
             <div>
               <div className="mb-1 flex items-center justify-between">
@@ -202,6 +238,11 @@ export function CompareButton({
               Select at least one metric to compare.
             </p>
           ) : null}
+          {timeInvalid ? (
+            <p className="text-2xs text-warning-700 dark:text-warning-300">
+              Set both a start and end time for a period, with the end after the start.
+            </p>
+          ) : null}
 
           <div className="flex gap-2 pt-1">
             <Button
@@ -209,7 +250,7 @@ export function CompareButton({
               variant="primary"
               size="sm"
               onClick={submit}
-              disabled={!bothChosen || sameChoice || noMetrics}
+              disabled={!bothChosen || sameChoice || noMetrics || timeInvalid}
             >
               Compare
             </Button>

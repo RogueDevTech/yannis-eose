@@ -273,6 +273,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'createFunding') {
     const receiptUrl = formData.get('receiptUrl')?.toString() || undefined;
+    const notes = formData.get('notes')?.toString().trim() || undefined;
     const res = await apiRequest<unknown>('/trpc/marketing.createFunding', {
       method: 'POST',
       cookie,
@@ -280,6 +281,7 @@ export async function action({ request }: ActionFunctionArgs) {
         receiverId: formData.get('receiverId')?.toString() ?? '',
         amount: formData.get('amount')?.toString() ?? '',
         ...(receiptUrl ? { receiptUrl } : {}),
+        ...(notes ? { notes } : {}),
       },
     });
     if (!res.ok) {

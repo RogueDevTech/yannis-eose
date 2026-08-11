@@ -1574,6 +1574,7 @@ export function DeliveryRemittancesPage({
                 {
                   key: 'locationName',
                   header: 'Location',
+                  defaultVisible: false,
                   className: 'max-w-[10rem] overflow-hidden text-ellipsis whitespace-nowrap',
                   cellTitle: (r) =>
                     r.locationName
@@ -1613,6 +1614,7 @@ export function DeliveryRemittancesPage({
                 {
                   key: 'deliveredAt',
                   header: 'Delivered',
+                  defaultVisible: false,
                   render: (r) => (
                     <span className="text-sm text-app-fg-muted">{formatDeliveredAt(r.deliveredAt)}</span>
                   ),
