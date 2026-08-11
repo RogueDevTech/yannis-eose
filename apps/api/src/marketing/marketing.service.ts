@@ -6072,19 +6072,27 @@ export class MarketingService {
     }
     // Duplicate type filter — campaign match takes priority (forms are 1:1 with MBs).
     // Same campaign = resubmission regardless of MB; cross-funnel requires different campaign + different MB.
+    //
+    // The winner campaign is read source-agnostically: the denormalized
+    // `original_campaign_id` (mig 0305) first, falling back to the legacy
+    // `orders` join for rows written before 0305. This is what makes follow-up
+    // and cart winners classify identically to orders winners — before 0305 the
+    // orders-only join returned NULL for them and they could never be tagged
+    // "resubmission" (and dropped out of the tab MBs were looking at).
+    const winnerCampaignId = sql`COALESCE(${schema.crossFunnelAttempts.originalCampaignId}, ${schema.orders.campaignId})`;
     const typeConditions: SQL[] = [];
     if (input.duplicateType === 'resubmission') {
       typeConditions.push(
-        sql`${schema.crossFunnelAttempts.campaignId} IS NOT DISTINCT FROM ${schema.orders.campaignId}`,
+        sql`${schema.crossFunnelAttempts.campaignId} IS NOT DISTINCT FROM ${winnerCampaignId}`,
       );
     } else if (input.duplicateType === 'same-mb') {
       typeConditions.push(
-        sql`${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${schema.orders.campaignId}`,
+        sql`${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${winnerCampaignId}`,
         sql`${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId}`,
       );
     } else if (input.duplicateType === 'cross-funnel') {
       typeConditions.push(
-        sql`${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${schema.orders.campaignId}`,
+        sql`${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${winnerCampaignId}`,
         or(
           sql`${schema.crossFunnelAttempts.mediaBuyerId} != ${schema.crossFunnelAttempts.originalMediaBuyerId}`,
           isNull(schema.crossFunnelAttempts.originalMediaBuyerId),
@@ -6123,13 +6131,16 @@ export class MarketingService {
         campaignId: schema.crossFunnelAttempts.campaignId,
         campaignName: campaignAlias.name,
         originalOrderId: schema.crossFunnelAttempts.originalOrderId,
+        originalOrderSource: schema.crossFunnelAttempts.originalOrderSource,
         originalMediaBuyerId: schema.crossFunnelAttempts.originalMediaBuyerId,
         originalMediaBuyerName: winnerAlias.name,
-        originalCampaignId: schema.orders.campaignId,
+        // Prefer the denormalized winner identity (source-agnostic, mig 0305);
+        // fall back to the legacy orders join for rows written before 0305.
+        originalCampaignId: sql<string | null>`COALESCE(${schema.crossFunnelAttempts.originalCampaignId}, ${schema.orders.campaignId})`,
         originalCampaignName: originalCampaignAlias.name,
-        originalOrderStatus: schema.orders.status,
+        originalOrderStatus: sql<string | null>`COALESCE(${schema.crossFunnelAttempts.originalOrderStatus}, ${schema.orders.status})`,
         originalOrderAmount: schema.orders.totalAmount,
-        originalOrderNumber: schema.orders.orderNumber,
+        originalOrderNumber: sql<number | null>`COALESCE(${schema.crossFunnelAttempts.originalOrderNumber}, ${schema.orders.orderNumber})`,
         originalOrderCreatedAt: schema.orders.createdAt,
         originalOrderPhone: schema.orders.customerPhone,
         originalOrderCustomerName: schema.orders.customerName,
@@ -6140,7 +6151,14 @@ export class MarketingService {
       .leftJoin(ownerAlias, eq(schema.crossFunnelAttempts.mediaBuyerId, ownerAlias.id))
       .leftJoin(schema.orders, eq(schema.crossFunnelAttempts.originalOrderId, schema.orders.id))
       .leftJoin(campaignAlias, eq(schema.crossFunnelAttempts.campaignId, campaignAlias.id))
-      .leftJoin(originalCampaignAlias, eq(schema.orders.campaignId, originalCampaignAlias.id))
+      // Resolve the winner campaign NAME from the source-agnostic denormalized
+      // id first, falling back to the legacy orders join for pre-0305 rows.
+      // Raw-SQL equality (not eq() with a raw left operand) so the ON clause
+      // renders unambiguously.
+      .leftJoin(
+        originalCampaignAlias,
+        sql`${originalCampaignAlias.id} = COALESCE(${schema.crossFunnelAttempts.originalCampaignId}, ${schema.orders.campaignId})`,
+      )
       .where(whereClause)
       .orderBy(desc(schema.crossFunnelAttempts.attemptedAt))
       .limit(limit)
@@ -6195,13 +6213,17 @@ export class MarketingService {
     //   same campaign = resubmission (regardless of MB attribution)
     //   different campaign + same MB = same-mb
     //   different campaign + different MB = cross-funnel
+    // Winner campaign, source-agnostic: denormalized original_campaign_id (mig
+    // 0305) with the legacy orders join as fallback for pre-0305 rows. Keeps
+    // follow-up / cart winners in the correct type bucket (see the list query).
+    const winnerCampaignId = sql`COALESCE(${schema.crossFunnelAttempts.originalCampaignId}, ${schema.orders.campaignId})`;
     const [totals = { totalAttempts: 0, uniqueCustomers: 0, resubmissions: 0, sameMb: 0, crossFunnel: 0 }] = await this.db
       .select({
         totalAttempts: count(),
         uniqueCustomers: sql<number>`COUNT(DISTINCT ${schema.crossFunnelAttempts.customerPhoneHash})`,
-        resubmissions: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.campaignId} IS NOT DISTINCT FROM ${schema.orders.campaignId})`,
-        sameMb: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${schema.orders.campaignId} AND ${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId})`,
-        crossFunnel: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${schema.orders.campaignId} AND (${schema.crossFunnelAttempts.mediaBuyerId} != ${schema.crossFunnelAttempts.originalMediaBuyerId} OR ${schema.crossFunnelAttempts.originalMediaBuyerId} IS NULL))`,
+        resubmissions: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.campaignId} IS NOT DISTINCT FROM ${winnerCampaignId})`,
+        sameMb: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${winnerCampaignId} AND ${schema.crossFunnelAttempts.mediaBuyerId} = ${schema.crossFunnelAttempts.originalMediaBuyerId})`,
+        crossFunnel: sql<number>`COUNT(*) FILTER (WHERE ${schema.crossFunnelAttempts.campaignId} IS DISTINCT FROM ${winnerCampaignId} AND (${schema.crossFunnelAttempts.mediaBuyerId} != ${schema.crossFunnelAttempts.originalMediaBuyerId} OR ${schema.crossFunnelAttempts.originalMediaBuyerId} IS NULL))`,
       })
       .from(schema.crossFunnelAttempts)
       .leftJoin(schema.orders, eq(schema.crossFunnelAttempts.originalOrderId, schema.orders.id))
