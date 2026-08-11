@@ -19,6 +19,8 @@ concurrency:
 
 env:
   NODE_VERSION: "20"
+  SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+  SLACK_DEPLOY_CHANNEL: deployment-alerts
 
 jobs:
   build:
@@ -26,6 +28,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Fires once per run, before the build starts. The per-platform deploy
+      # jobs each send their own pushed/succeeded/failed messages, so this is
+      # the single "a prod deploy has kicked off" signal.
+      - name: Notify Slack — deployment started
+        if: ${{ env.SLACK_BOT_TOKEN != '' }}
+        run: |
+          curl -sf -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-type: application/json; charset=utf-8' \
+            --data "{\"channel\":\"$SLACK_DEPLOY_CHANNEL\",\"text\":\":fire: Deployment to *Production* has begun for \`yannis-eose\`! :rocket:\"}" \
+            || echo "Slack notification failed (non-blocking)"
 
       # Loud diagnostic — same repo also runs deploy-dev.yml, so the prod
       # banner exists to make it impossible to confuse the two in the Actions
@@ -83,6 +97,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Get short commit SHA
+        id: commit
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Show resolved deploy platform (environment scope)
         run: 'echo "vars.DEPLOY_PLATFORM = ''${{ vars.DEPLOY_PLATFORM }}''"'
 
@@ -117,6 +135,15 @@ jobs:
           docker push $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG
           docker push $IMAGE_REGISTRY/yannis-eose-web:prod-latest
 
+      - name: Notify Slack — images pushed (GCP)
+        if: ${{ env.SLACK_BOT_TOKEN != '' }}
+        run: |
+          curl -sf -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-type: application/json; charset=utf-8' \
+            --data "{\"channel\":\"$SLACK_DEPLOY_CHANNEL\",\"text\":\":white_check_mark: Build for \`yannis-eose\` on *Production* (GCP) pushed to GCP Artifact Registry — deployment is now in progress and may take a few minutes. :hourglass_flowing_sand:\"}" \
+            || echo "Slack notification failed (non-blocking)"
+
       - name: Prepare VM deploy directory
         run: |
           gcloud compute ssh "${{ secrets.PROD_GCP_VM_NAME }}" \
@@ -148,6 +175,24 @@ jobs:
             --project "${{ secrets.PROD_GCP_PROJECT_ID }}" \
             --command "cd /opt/yannis-eose && chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-gcp-dev.sh ./refresh-env.sh ./refresh-env-gcp.sh ./run-migrations.sh && DEPLOY_PLATFORM='gcp' GCP_REGION='${{ env.PROD_GCP_REGION }}' GCP_PROJECT_ID='${{ secrets.PROD_GCP_PROJECT_ID }}' ARTIFACT_REPOSITORY_ID='${{ env.PROD_GCP_ARTIFACT_REPOSITORY_ID }}' RUNTIME_ENV_SECRET_NAME='${{ env.PROD_GCP_RUNTIME_ENV_SECRET_NAME }}' IMAGE_TAG='prod-latest' ./deploy-dev.sh"
 
+      - name: Notify Slack — deployment succeeded (GCP)
+        if: ${{ success() && env.SLACK_BOT_TOKEN != '' }}
+        run: |
+          curl -sf -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-type: application/json; charset=utf-8' \
+            --data "{\"channel\":\"$SLACK_DEPLOY_CHANNEL\",\"text\":\":tada: Deployment to *Production* (GCP) was successful for \`yannis-eose\`! :confetti_ball: (v\`${{ steps.commit.outputs.sha }}\`)\"}" \
+            || echo "Slack notification failed (non-blocking)"
+
+      - name: Notify Slack — deployment failed (GCP)
+        if: ${{ failure() && env.SLACK_BOT_TOKEN != '' }}
+        run: |
+          curl -sf -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-type: application/json; charset=utf-8' \
+            --data "{\"channel\":\"$SLACK_DEPLOY_CHANNEL\",\"text\":\":x: Deployment to *Production* (GCP) failed for \`yannis-eose\`. <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run to debug>\"}" \
+            || echo "Slack notification failed (non-blocking)"
+
   deploy-aws:
     name: Deploy to Prod (AWS)
     runs-on: ubuntu-latest
@@ -162,6 +207,10 @@ jobs:
       PROD_AWS_VM_SSH_USER: ${{ secrets.PROD_EC2_SSH_USER || 'ubuntu' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Get short commit SHA
+        id: commit
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Show resolved deploy platform (environment scope)
         run: 'echo "vars.DEPLOY_PLATFORM = ''${{ vars.DEPLOY_PLATFORM }}''"'
@@ -202,6 +251,15 @@ jobs:
           docker push $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG
           docker push $IMAGE_REGISTRY/yannis-eose-web:prod-latest
 
+      - name: Notify Slack — images pushed (AWS)
+        if: ${{ env.SLACK_BOT_TOKEN != '' }}
+        run: |
+          curl -sf -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-type: application/json; charset=utf-8' \
+            --data "{\"channel\":\"$SLACK_DEPLOY_CHANNEL\",\"text\":\":white_check_mark: Build for \`yannis-eose\` on *Production* (AWS) pushed to Amazon ECR — deployment is now in progress and may take a few minutes. :hourglass_flowing_sand:\"}" \
+            || echo "Slack notification failed (non-blocking)"
+
       - name: Copy deploy assets to EC2
         env:
           PROD_EC2_HOST: ${{ secrets.PROD_EC2_HOST }}
@@ -236,6 +294,24 @@ jobs:
             cd /opt/yannis-eose
             chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-aws-dev.sh ./refresh-env.sh ./refresh-env-aws.sh ./run-migrations.sh
             DEPLOY_PLATFORM='aws' AWS_REGION='${{ env.PROD_AWS_REGION }}' AWS_ACCOUNT_ID='${{ secrets.PROD_AWS_ACCOUNT_ID }}' SECRET_NAME='${{ env.PROD_AWS_RUNTIME_SECRET_NAME }}' IMAGE_TAG='prod-latest' ./deploy-dev.sh
+
+      - name: Notify Slack — deployment succeeded (AWS)
+        if: ${{ success() && env.SLACK_BOT_TOKEN != '' }}
+        run: |
+          curl -sf -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-type: application/json; charset=utf-8' \
+            --data "{\"channel\":\"$SLACK_DEPLOY_CHANNEL\",\"text\":\":tada: Deployment to *Production* (AWS) was successful for \`yannis-eose\`! :confetti_ball: (v\`${{ steps.commit.outputs.sha }}\`)\"}" \
+            || echo "Slack notification failed (non-blocking)"
+
+      - name: Notify Slack — deployment failed (AWS)
+        if: ${{ failure() && env.SLACK_BOT_TOKEN != '' }}
+        run: |
+          curl -sf -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-type: application/json; charset=utf-8' \
+            --data "{\"channel\":\"$SLACK_DEPLOY_CHANNEL\",\"text\":\":x: Deployment to *Production* (AWS) failed for \`yannis-eose\`. <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run to debug>\"}" \
+            || echo "Slack notification failed (non-blocking)"
 
   deploy-edge-worker:
     name: Deploy Edge Worker (production)

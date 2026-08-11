@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { dateOrDateTimeOptional } from './date-params';
 import { MAX_OFFER_TIER_IMAGES } from './products';
 import {
   FIXED_FIELD_ORDER_TOKENS,
@@ -285,8 +286,8 @@ export const listAdSpendSchema = z.object({
   mediaBuyerIds: z.array(z.string().uuid()).max(2000).optional(),
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
-  startDate: z.string().date().optional(),
-  endDate: z.string().date().optional(),
+  startDate: dateOrDateTimeOptional,
+  endDate: dateOrDateTimeOptional,
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
   category: expenseCategorySchema.optional(),
   excludeCategory: expenseCategorySchema.optional(),

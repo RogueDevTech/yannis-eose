@@ -1005,6 +1005,7 @@ export class MarketingService {
           receiverId: input.receiverId,
           amount: sql`${input.amount}::numeric`,
           receiptUrl: input.receiptUrl,
+          notes: input.notes?.trim() ? input.notes.trim() : null,
           status: 'SENT',
         })
         .returning();

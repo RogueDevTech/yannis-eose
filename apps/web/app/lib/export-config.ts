@@ -122,11 +122,12 @@ export const EXPORT_CONFIGS: Record<ExportReportKey, ExportConfig> = {
       { key: 'receiver', label: 'Receiver' },
       { key: 'amount', label: 'Amount' },
       { key: 'status', label: 'Status' },
+      { key: 'notes', label: 'Note' },
       { key: 'receipt', label: 'Receipt URL' },
       { key: 'date', label: 'Sent Date' },
       { key: 'verifiedAt', label: 'Verified Date' },
     ],
-    defaultColumns: ['id', 'sender', 'receiver', 'amount', 'status', 'date'],
+    defaultColumns: ['id', 'sender', 'receiver', 'amount', 'status', 'notes', 'date'],
   },
   inventory: {
     reportKey: 'inventory',

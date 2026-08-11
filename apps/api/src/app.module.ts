@@ -32,6 +32,7 @@ import { CartOrdersModule } from './cart-orders/cart-orders.module';
 import { UserFilterPreferencesModule } from './user-filter-preferences/user-filter-preferences.module';
 import { AiAssistantModule } from './ai-assistant/ai-assistant.module';
 import { AutomationModule } from './automation/automation.module';
+import { SlackModule } from './common/slack';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { AutomationModule } from './automation/automation.module';
     NotificationsModule, VoipModule, SettingsModule, CartModule,
     PermissionRequestsModule, PaymentsModule, OnboardingModule, CartOrdersModule,
     UserFilterPreferencesModule, AiAssistantModule, AutomationModule,
+    SlackModule,
   ],
   controllers: [AppController],
   providers: [

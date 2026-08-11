@@ -68,6 +68,8 @@ export interface DisbursementRecord {
   amount: string;
   receiptUrl: string | null;
   status: string;
+  /** Free-text reason the sender attached when creating the disbursement. */
+  notes?: string | null;
   sentAt: string;
   verifiedAt: string | null;
   senderName?: string | null;
@@ -192,6 +194,7 @@ function CreateDisbursementModal({
     const parsed = createFundingSchema.safeParse({
       receiverId: fdRead.get('receiverId')?.toString() ?? '',
       amount: fdRead.get('amount')?.toString() ?? '',
+      notes: fdRead.get('notes')?.toString() || undefined,
     });
     if (!parsed.success) {
       toast.error('Cannot send disbursement', parsed.error.issues[0]?.message ?? 'Check the form.');
@@ -253,6 +256,14 @@ function CreateDisbursementModal({
             <label className="block text-sm font-medium text-app-fg-muted mb-1">Amount (&#8358;)</label>
             <AmountInput name="amount" required placeholder="e.g. 50,000.00" className="input w-full" />
           </div>
+
+          <Textarea
+            label="Note (optional)"
+            name="notes"
+            rows={2}
+            maxLength={500}
+            placeholder="Why this disbursement? e.g. May ad budget top-up"
+          />
 
           <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('createFunding')} />
 
@@ -1536,6 +1547,12 @@ export function DisbursementsPage({
               <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Status</p>
               <StatusBadge status={fundingFlowRecord.status} />
             </div>
+            {fundingFlowRecord.notes ? (
+              <div className="space-y-0.5">
+                <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Note</p>
+                <p className="text-sm text-app-fg whitespace-pre-wrap break-words">{fundingFlowRecord.notes}</p>
+              </div>
+            ) : null}
           </div>
           {fundingFlowRecord.receiptUrl && (
             <div>
