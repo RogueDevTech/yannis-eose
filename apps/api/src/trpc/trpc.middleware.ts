@@ -8,6 +8,12 @@ import { canViewAllBranches } from '../common/authz';
 import { SessionStoreService } from '../auth/session-store.service';
 import { UserBundleCacheService } from '../auth/user-bundle-cache.service';
 import { BranchTeamsService } from '../branches/branch-teams.service';
+import {
+  SlackService,
+  SlackErrorBufferService,
+  YANNIS_EOSE_CHANNEL,
+  apiErrorTemplate,
+} from '../common/slack';
 
 @Injectable()
 export class TrpcMiddleware implements NestMiddleware {
@@ -17,6 +23,8 @@ export class TrpcMiddleware implements NestMiddleware {
     @Inject(SessionStoreService) private readonly sessionStore: SessionStoreService,
     private readonly userBundleCache: UserBundleCacheService,
     private readonly branchTeams: BranchTeamsService,
+    private readonly slack: SlackService,
+    private readonly slackErrorBuffer: SlackErrorBufferService,
   ) {}
 
   async use(req: Request, res: Response, _next: NextFunction) {
@@ -64,6 +72,7 @@ export class TrpcMiddleware implements NestMiddleware {
       onError: ({ path, error }) => {
         if (error.code === 'INTERNAL_SERVER_ERROR') {
           this.logger.error(`trpc_error path=${path ?? 'unknown'} ${error.message}`, error.stack);
+          this.reportErrorToSlack(path, error, req);
         }
       },
     });
@@ -76,6 +85,34 @@ export class TrpcMiddleware implements NestMiddleware {
 
     const responseBody = await fetchResponse.text();
     res.send(responseBody);
+  }
+
+  /**
+   * Records an internal API error into the daily digest buffer and fires a
+   * fire-and-forget Slack alert. Never awaited and never throws into the tRPC
+   * response path — alerting must not affect request handling.
+   */
+  private reportErrorToSlack(
+    path: string | undefined,
+    error: { message: string; code: string; stack?: string },
+    req: Request,
+  ): void {
+    const procedure = path ?? 'unknown';
+    this.slackErrorBuffer.record(procedure, error.message);
+
+    const user = (req as Request & { user?: SessionUser }).user;
+    const alert = apiErrorTemplate({
+      path: procedure,
+      code: error.code,
+      message: error.message,
+      userId: user?.id,
+      userRole: user?.role,
+      branchId: user?.currentBranchId ?? undefined,
+      stack: error.stack,
+    });
+    this.slack
+      .sendMessage(YANNIS_EOSE_CHANNEL, alert.message, alert.blocks, alert.attachments)
+      .catch(() => {});
   }
 
   /**

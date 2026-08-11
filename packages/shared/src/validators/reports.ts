@@ -93,7 +93,7 @@ export const reportColumnsByKey = {
     'attemptedAt',
     'originalOrderCreatedAt',
   ] as const,
-  disbursements: ['id', 'sender', 'receiver', 'amount', 'status', 'receipt', 'date', 'verifiedAt'] as const,
+  disbursements: ['id', 'sender', 'receiver', 'amount', 'status', 'notes', 'receipt', 'date', 'verifiedAt'] as const,
   inventory: ['product', 'location', 'stock', 'reserved', 'available', 'status', 'updated'] as const,
   finance_invoices: ['reference', 'orderId', 'amount', 'status', 'dueDate'] as const,
   logistics_locations: [

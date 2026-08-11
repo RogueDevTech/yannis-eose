@@ -21,6 +21,7 @@ import {
   approveDeliveryConfirmationSchema,
   rejectDeliveryConfirmationSchema,
   canonicalPermissionCode,
+  dateOrDateTimeOptional,
 } from '@yannis/shared';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
@@ -369,8 +370,8 @@ export const logisticsRouter = router({
         status: z.enum(['SENT', 'RECEIVED', 'DISPUTED']).optional(),
         logisticsLocationId: z.string().uuid().optional(),
         sentBy: z.string().uuid().optional(),
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
         search: z.string().trim().max(200).optional(),
         dateScope: z.enum(['createdAt', 'deliveredAt']).optional().default('createdAt'),
         /** When true, skip paginated records and only return summary + locations + users. */
@@ -463,8 +464,8 @@ export const logisticsRouter = router({
     .use(logisticsTeamOverviewGate)
     .input(
       z.object({
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
         productId: z.string().uuid().optional(),
       }),
     )

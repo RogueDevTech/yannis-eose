@@ -37,6 +37,7 @@ import {
   assignFollowUpOrderSchema,
   bulkAssignFollowUpOrdersSchema,
   transitionFollowUpOrderSchema,
+  dateOrDateTimeOptional,
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -1448,8 +1449,8 @@ export const ordersRouter = router({
     .input(
       z.object({
         period: z.enum(['this_month', 'all_time']).optional().default('this_month'),
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
       }),
     )
     .query(async ({ input, ctx }) =>
@@ -1754,8 +1755,8 @@ export const ordersRouter = router({
     .input(
       z.object({
         period: z.enum(['this_month', 'all_time']).optional().default('this_month'),
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
+        startDate: dateOrDateTimeOptional,
+        endDate: dateOrDateTimeOptional,
         inactiveThresholdMinutes: z.number().int().min(1).optional().default(10),
         /** Order category filter: funnel, offline, follow_up, cart, delivered_follow_up. */
         categories: z.array(z.enum(['funnel', 'offline', 'follow_up', 'cart', 'delivered_follow_up'])).optional(),
