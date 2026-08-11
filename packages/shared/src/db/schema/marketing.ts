@@ -207,10 +207,24 @@ export const crossFunnelAttempts = pgTable(
     campaignId: uuid('campaign_id').references(() => campaigns.id),
     /** Branch context for HoM scoping. Derived from campaign or MB at insert. */
     branchId: uuid('branch_id').references(() => branches.id),
-    /** The winning order (DB-level FK to orders.id). May be null if order was hard-deleted. */
+    /**
+     * The winning order id. POLYMORPHIC — it may reference a row in `orders`,
+     * `cart_orders`, or `follow_up_orders` (see originalOrderSource), and may be
+     * null if the order was hard-deleted. The orders-only DB foreign key that
+     * migration 0082 created here was dropped in migration 0305 precisely so
+     * non-orders winners are insertable; do NOT re-add a single-table FK.
+     */
     originalOrderId: uuid('original_order_id'),
+    /** Which table the winner lives in: 'orders' | 'cart_orders' | 'follow_up_orders'. */
+    originalOrderSource: text('original_order_source'),
     /** Denormalized — who got attribution. Useful for the MB to see "credited to X". */
     originalMediaBuyerId: uuid('original_media_buyer_id').references(() => users.id),
+    /** Denormalized winner campaign (source-agnostic). Prefer over joining to orders. */
+    originalCampaignId: uuid('original_campaign_id'),
+    /** Denormalized winner human order number (YNS-XXXXX) across all order tables. */
+    originalOrderNumber: integer('original_order_number'),
+    /** Denormalized winner lifecycle status at time of the blocked attempt. */
+    originalOrderStatus: text('original_order_status'),
     attemptedAt: timestamp('attempted_at', { withTimezone: true }).defaultNow().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },

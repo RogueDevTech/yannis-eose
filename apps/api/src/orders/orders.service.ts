@@ -2185,7 +2185,18 @@ export class OrdersService {
               mediaBuyerId: cfaMbId,
               campaignId: orderInput.campaignId ?? null,
               branchId: branchId ?? null,
-              winner: { id: winner.id, mediaBuyerId: winner.mediaBuyerId ?? '' },
+              // Denormalize the winner's identity (source table + campaign +
+              // number + status) so the cross-funnel page renders it correctly
+              // even when the winner lives in cart_orders / follow_up_orders and
+              // has no `orders` row to join to (mig 0305).
+              winner: {
+                id: winner.id,
+                mediaBuyerId: winner.mediaBuyerId ?? '',
+                source: winner.source,
+                campaignId: winner.campaignId,
+                orderNumber: winner.orderNumber,
+                status: winner.status,
+              },
             });
             // Notify the runner-up MB that their submission came in but matched an
             // existing order (so it did NOT become a second order). Without this, the
@@ -2614,7 +2625,14 @@ export class OrdersService {
         mediaBuyerId: input.mediaBuyerId ?? actorId,
         campaignId: input.campaignId ?? null,
         branchId: null,
-        winner: { id: existingWinner.id, mediaBuyerId: existingWinner.mediaBuyerId ?? actorId },
+        winner: {
+          id: existingWinner.id,
+          mediaBuyerId: existingWinner.mediaBuyerId ?? actorId,
+          source: existingWinner.source,
+          campaignId: existingWinner.campaignId,
+          orderNumber: existingWinner.orderNumber,
+          status: existingWinner.status,
+        },
       });
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -2997,7 +3015,14 @@ export class OrdersService {
         mediaBuyerId: input.mediaBuyerId ?? actorId,
         campaignId: input.campaignId ?? null,
         branchId: null,
-        winner: { id: existingWinner.id, mediaBuyerId: existingWinner.mediaBuyerId ?? actorId },
+        winner: {
+          id: existingWinner.id,
+          mediaBuyerId: existingWinner.mediaBuyerId ?? actorId,
+          source: existingWinner.source,
+          campaignId: existingWinner.campaignId,
+          orderNumber: existingWinner.orderNumber,
+          status: existingWinner.status,
+        },
       });
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -10614,14 +10639,30 @@ export class OrdersService {
     phoneHash: string,
     productIds: string[],
     opts?: { skipCartOrders?: boolean },
-  ): Promise<{ id: string; mediaBuyerId: string | null; status: string; createdAt: Date } | null> {
+  ): Promise<{
+    id: string;
+    mediaBuyerId: string | null;
+    status: string;
+    createdAt: Date;
+    source: 'orders' | 'cart_orders' | 'follow_up_orders';
+    campaignId: string | null;
+    orderNumber: number | null;
+  } | null> {
     if (!phoneHash || productIds.length === 0) return null;
 
     // 14-day window: same phone + overlapping product within 14 days = duplicate.
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
     // Step 1: find candidates across orders, cart_orders, and follow_up_orders.
-    type Candidate = { id: string; mediaBuyerId: string | null; status: string; createdAt: Date; source: 'orders' | 'cart_orders' | 'follow_up_orders' };
+    type Candidate = {
+      id: string;
+      mediaBuyerId: string | null;
+      status: string;
+      createdAt: Date;
+      campaignId: string | null;
+      orderNumber: number | null;
+      source: 'orders' | 'cart_orders' | 'follow_up_orders';
+    };
 
     const [orderCandidates, cartCandidates, followUpCandidates] = await Promise.all([
       this.db
@@ -10630,6 +10671,8 @@ export class OrdersService {
           mediaBuyerId: schema.orders.mediaBuyerId,
           status: schema.orders.status,
           createdAt: schema.orders.createdAt,
+          campaignId: schema.orders.campaignId,
+          orderNumber: schema.orders.orderNumber,
         })
         .from(schema.orders)
         .where(
@@ -10650,6 +10693,8 @@ export class OrdersService {
               mediaBuyerId: schema.cartOrders.mediaBuyerId,
               status: schema.cartOrders.status,
               createdAt: schema.cartOrders.createdAt,
+              campaignId: schema.cartOrders.campaignId,
+              orderNumber: schema.cartOrders.orderNumber,
             })
             .from(schema.cartOrders)
             .where(
@@ -10668,6 +10713,8 @@ export class OrdersService {
           mediaBuyerId: schema.followUpOrders.mediaBuyerId,
           status: schema.followUpOrders.status,
           createdAt: schema.followUpOrders.createdAt,
+          campaignId: schema.followUpOrders.campaignId,
+          orderNumber: schema.followUpOrders.orderNumber,
         })
         .from(schema.followUpOrders)
         .where(
@@ -10746,6 +10793,9 @@ export class OrdersService {
       mediaBuyerId: winner.mediaBuyerId,
       status: winner.status,
       createdAt: winner.createdAt,
+      source: winner.source,
+      campaignId: winner.campaignId,
+      orderNumber: winner.orderNumber,
     };
   }
 
@@ -10757,7 +10807,18 @@ export class OrdersService {
     mediaBuyerId: string;
     campaignId: string | null;
     branchId: string | null;
-    winner: { id: string; mediaBuyerId: string };
+    winner: {
+      id: string;
+      mediaBuyerId: string;
+      // Winner may live in orders / cart_orders / follow_up_orders. Denormalize
+      // its identity here so the cross-funnel read path never has to know which
+      // table it came from (mig 0305). Optional for back-compat with any caller
+      // that hasn't been updated — reads COALESCE over the legacy orders join.
+      source?: 'orders' | 'cart_orders' | 'follow_up_orders';
+      campaignId?: string | null;
+      orderNumber?: number | null;
+      status?: string | null;
+    };
   }): Promise<void> {
     try {
       await this.db.insert(schema.crossFunnelAttempts).values(
@@ -10773,7 +10834,11 @@ export class OrdersService {
           campaignId: args.campaignId,
           branchId: args.branchId,
           originalOrderId: args.winner.id,
+          originalOrderSource: args.winner.source ?? 'orders',
           originalMediaBuyerId: args.winner.mediaBuyerId,
+          originalCampaignId: args.winner.campaignId ?? null,
+          originalOrderNumber: args.winner.orderNumber ?? null,
+          originalOrderStatus: args.winner.status ?? null,
         })),
       );
       // Info log so monitoring can verify detection is firing without waiting
