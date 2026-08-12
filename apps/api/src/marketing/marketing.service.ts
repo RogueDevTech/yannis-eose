@@ -6138,7 +6138,7 @@ export class MarketingService {
         // fall back to the legacy orders join for rows written before 0305.
         originalCampaignId: sql<string | null>`COALESCE(${schema.crossFunnelAttempts.originalCampaignId}, ${schema.orders.campaignId})`,
         originalCampaignName: originalCampaignAlias.name,
-        originalOrderStatus: sql<string | null>`COALESCE(${schema.crossFunnelAttempts.originalOrderStatus}, ${schema.orders.status})`,
+        originalOrderStatus: sql<string | null>`COALESCE(${schema.crossFunnelAttempts.originalOrderStatus}, ${schema.orders.status}::text)`,
         originalOrderAmount: schema.orders.totalAmount,
         originalOrderNumber: sql<number | null>`COALESCE(${schema.crossFunnelAttempts.originalOrderNumber}, ${schema.orders.orderNumber})`,
         originalOrderCreatedAt: schema.orders.createdAt,
