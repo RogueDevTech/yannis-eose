@@ -105,6 +105,7 @@ export class TrpcMiddleware implements NestMiddleware {
       path: procedure,
       code: error.code,
       message: error.message,
+      page: this.pageFromReferer(req),
       userId: user?.id,
       userRole: user?.role,
       branchId: user?.currentBranchId ?? undefined,
@@ -113,6 +114,24 @@ export class TrpcMiddleware implements NestMiddleware {
     this.slack
       .sendMessage(YANNIS_EOSE_CHANNEL, alert.message, alert.blocks, alert.attachments)
       .catch(() => {});
+  }
+
+  /**
+   * Derives the originating app page from the request's Referer header (the URL
+   * of the page that fired the tRPC call), reduced to path + query so the alert
+   * reads like `/admin/marketing/cross-funnel`. Returns undefined when no usable
+   * referer is present (e.g. server-side/edge calls without a browser origin).
+   */
+  private pageFromReferer(req: Request): string | undefined {
+    const referer = req.headers.referer ?? req.headers.referrer;
+    const value = Array.isArray(referer) ? referer[0] : referer;
+    if (!value) return undefined;
+    try {
+      const parsed = new URL(value);
+      return `${parsed.pathname}${parsed.search}` || undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

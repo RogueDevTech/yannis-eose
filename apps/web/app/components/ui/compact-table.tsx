@@ -196,6 +196,23 @@ export interface CompactTableProps<T> {
    * lets the table sit in normal page flow, so the whole page scrolls as one.
    */
   scrollX?: boolean;
+  /**
+   * Desktop-only: pin the header row so column labels stay visible while the
+   * page scrolls down a long table. **On by default** for every table.
+   *
+   * The `<thead>` sticks at `top: var(--table-sticky-top, var(--header-height))`,
+   * i.e. just below the fixed app topbar in normal page flow. Any scroll-container
+   * context that isn't the page (e.g. a `<Modal>` body) sets `--table-sticky-top`
+   * to `0px` so the header pins flush to that container's top instead of 56px down.
+   *
+   * Pass `stickyHeader={false}` to opt a specific table out (e.g. tiny tables
+   * where a pinned header adds nothing).
+   *
+   * Note: enabling this drops the desktop `overflow-x-auto` wrapper (that wrapper
+   * would become the scroll container and defeat page-relative sticky). Wide,
+   * min-width tables therefore scroll horizontally at the page/card level.
+   */
+  stickyHeader?: boolean;
 }
 
 const ALIGN_CLASS: Record<CompactTableAlign, string> = {
@@ -480,6 +497,7 @@ export function CompactTable<T>({
   toolbarLeading,
   density = 'default',
   scrollX = true,
+  stickyHeader = true,
 }: CompactTableProps<T>) {
   const navigate = useNavigate();
   const hasRows = rows.length > 0;
@@ -685,7 +703,17 @@ export function CompactTable<T>({
   function renderHeaderSelection(): ReactNode {
     if (!selection?.onToggleAll) return null;
     return (
-      <th scope="col" className={`w-px ${selectPad}`}>
+      <th
+        scope="col"
+        className={[
+          `w-px ${selectPad}`,
+          stickyHeader
+            ? 'sticky top-[var(--table-sticky-top,var(--header-height))] z-20 bg-app-elevated shadow-[inset_0_-1px_0_0_rgb(var(--app-border))]'
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
         <Checkbox
           checked={allSelectableSelected}
           onChange={(e) => selection.onToggleAll!(e.target.checked)}
@@ -819,7 +847,12 @@ export function CompactTable<T>({
           ) : null}
         </div>
       )}
-      <div className={scrollX ? 'overflow-x-auto' : ''}>
+      {/* `overflow-x-auto` makes this div the scroll container, which pins a
+          sticky <thead> to the div (not the page) — so it scrolls off-screen.
+          When stickyHeader is on we drop the wrapper: the table sits in page
+          flow, sticky pins against the page, and any horizontal overflow of a
+          min-width table is handled by the page/card instead. */}
+      <div className={scrollX && !stickyHeader ? 'overflow-x-auto' : ''}>
       <table className="w-full text-sm">
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead className="border-b border-app-border bg-app-elevated">
@@ -833,6 +866,12 @@ export function CompactTable<T>({
                   className={[
                     `${headPad} font-semibold text-xs text-app-fg-muted uppercase tracking-wide whitespace-nowrap`,
                     alignClass,
+                    // Sticky header: pin each cell just below the fixed app topbar.
+                    // Background lives on the cell (not just <thead>) so rows don't
+                    // bleed through, plus a bottom border that scrolls with the pin.
+                    stickyHeader
+                      ? 'sticky top-[var(--table-sticky-top,var(--header-height))] z-20 bg-app-elevated shadow-[inset_0_-1px_0_0_rgb(var(--app-border))]'
+                      : '',
                     col.tight ? 'w-px' : '',
                     col.hideOnMobile ? 'hidden sm:table-cell' : '',
                     col.minWidth ?? '',
@@ -961,6 +1000,10 @@ export function CompactTable<T>({
   // `withCard` chrome is desktop-only — on mobile each row already renders as
   // its own elevated card, so a wrapping card would just double the chrome
   // and waste width (CEO mobile-density directive 2026-05-19).
+  // `list-panel` no longer sets `overflow-hidden`, so it is not a vertical
+  // scroll container and a sticky <thead> pins to the page as intended. See the
+  // `.list-panel` note in tailwind.css. Pages that wrap the table in their own
+  // `list-panel` (with `withCard={false}`) get the same behaviour for free.
   const wrapped = withCard ? (
     <div className={['list-panel', className].filter(Boolean).join(' ')}>{body}</div>
   ) : (

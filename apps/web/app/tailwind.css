@@ -271,8 +271,18 @@
      On mobile the chrome is dropped entirely so the search field and the
      per-row mobile cards run full-width (CEO mobile-density directive
      2026-05-19). Replaces hand-rolled `card p-0` wrappers around listings. */
+  /* NOTE: no `overflow-hidden` here on purpose. It used to clip the inner
+     table's corners to the rounded-xl, but it also clips BOTH axes and makes
+     this a scroll container, which traps a CompactTable's sticky <thead> inside
+     the panel so it scrolls out of view. We leave overflow visible so:
+       1. the sticky header pins to the PAGE (CompactTable stickyHeader), and
+       2. a table wider than the panel overflows to the page's horizontal
+          scroll (reachable) instead of being clipped off (unreachable).
+     A fitting table has nothing to overflow, so corners still look clean; only
+     an overflowing (wide) table shows square corners, which is the case we
+     want page-scrollable anyway. Keep in sync with CompactTable's stickyHeader. */
   .list-panel {
-    @apply md:bg-app-elevated md:rounded-xl md:border md:border-app-border md:shadow-card md:overflow-hidden md:text-app-fg;
+    @apply md:bg-app-elevated md:rounded-xl md:border md:border-app-border md:shadow-card md:text-app-fg;
   }
 
   .dark .list-panel {
