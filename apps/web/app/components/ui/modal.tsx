@@ -109,7 +109,10 @@ export function Modal({
       >
         <div
           className={[
-            'w-full max-h-[90dvh] overflow-y-auto',
+            // This is the modal's own scroll container. A CompactTable sticky
+            // header inside it should pin flush to the modal top, not 56px down
+            // (there is no app topbar in here), so reset the sticky offset to 0.
+            'w-full max-h-[90dvh] overflow-y-auto [--table-sticky-top:0px]',
             'rounded-t-2xl md:rounded-xl',
             'bg-app-elevated shadow-xl',
             'pb-[max(2.5rem,env(safe-area-inset-bottom))] md:pb-5',

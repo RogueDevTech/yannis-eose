@@ -5681,11 +5681,16 @@ export class OrdersService {
       updateFields['lockedBy'] = actor.id;
     }
 
-    // Save preferred delivery date on CONFIRMED (required — set by CS via confirm modal)
+    // Save preferred delivery date on CONFIRMED (required — set by CS via confirm modal).
+    // On a retrack (backward transition), the modal sends no date; only overwrite
+    // when one is actually provided so we don't wipe an existing scheduled date.
     if (newStatus === 'CONFIRMED') {
-      updateFields['preferredDeliveryDate'] = String(
+      const incomingPreferred = String(
         input.metadata?.preferredDeliveryDate ?? '',
       ).trim();
+      if (incomingPreferred) {
+        updateFields['preferredDeliveryDate'] = incomingPreferred;
+      }
     }
 
     // Clear lock when order moves past CS engagement.
@@ -9134,8 +9139,20 @@ export class OrdersService {
         const rawPreferred = metadata?.preferredDeliveryDate;
         const preferredTrimmed =
           typeof rawPreferred === 'string' ? rawPreferred.trim() : '';
-        // Skip delivery date validation on retrack — the order already has one
-        if (!preferredTrimmed && !order.preferredDeliveryDate) {
+        // A retrack is a backward transition (current status is past CONFIRMED).
+        // Compute it up front so the delivery-date gate below can bypass on retrack:
+        // the order was already confirmed before, and some legacy/offline/imported
+        // orders reached delivery without ever storing a preferredDeliveryDate, so
+        // demanding one on rollback dead-ends the retrack (the modal has no date field).
+        const CONFIRMED_POS = 3;
+        const RETRACK_STATUSES: Record<string, number> = {
+          AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
+        };
+        const isRetrackToConfirmed = (RETRACK_STATUSES[order.status] ?? -1) > CONFIRMED_POS;
+
+        // Skip delivery date validation on retrack — this is a rollback, not a
+        // fresh confirm, so a missing date must not block it.
+        if (!isRetrackToConfirmed && !preferredTrimmed && !order.preferredDeliveryDate) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
             message: 'Scheduled delivery date is required to confirm the order.',
@@ -9156,11 +9173,6 @@ export class OrdersService {
           !!order.branchId && !!actor.currentBranchId && order.branchId === actor.currentBranchId;
         // Retracks (backward transitions) always bypass the call gate — the order
         // was already confirmed before, requiring a new call makes no sense.
-        const CONFIRMED_POS = 3;
-        const RETRACK_STATUSES: Record<string, number> = {
-          AGENT_ASSIGNED: 4, DISPATCHED: 5, IN_TRANSIT: 6, DELIVERED: 7, REMITTED: 8,
-        };
-        const isRetrackToConfirmed = (RETRACK_STATUSES[order.status] ?? -1) > CONFIRMED_POS;
         const bypassCallGate =
           isRetrackToConfirmed ||
           actor.role === 'SUPER_ADMIN' ||

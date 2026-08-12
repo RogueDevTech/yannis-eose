@@ -6,6 +6,7 @@ export interface ApiErrorAlertData {
   path: string;
   code: string;
   message: string;
+  page?: string;
   userId?: string;
   userRole?: string;
   branchId?: string;
@@ -24,6 +25,7 @@ export function apiErrorTemplate(data: ApiErrorAlertData): SlackTemplateResult {
     summaryText: '`' + data.message + '`',
     fields: [
       { label: 'Procedure', value: '`' + data.path + '`' },
+      { label: 'Page', value: data.page ?? '—' },
       { label: 'Code', value: data.code },
       { label: 'User', value: data.userId ? `${data.userId}` : 'anonymous' },
       { label: 'Role', value: data.userRole ?? '—' },

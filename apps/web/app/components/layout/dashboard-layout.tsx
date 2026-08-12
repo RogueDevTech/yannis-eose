@@ -35,6 +35,7 @@ import {
 } from '~/contexts/login-modal-gate';
 import { SearchModal, useSearchShortcut } from '~/components/ui/search-modal';
 import { AiChatButton } from '~/components/ai-assistant/ai-chat';
+import { ScrollToTop } from '~/components/ui/scroll-to-top';
 
 interface Notification {
   id: string;
@@ -1681,6 +1682,7 @@ function DashboardLayoutInner({
           }
         />
       )}
+      <ScrollToTop />
       <AiChatButton user={user} />
     </div>
   );
