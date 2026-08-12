@@ -240,6 +240,11 @@ export const listDeliveryRemittanceEligibleOrdersSchema = z.object({
   search: z.string().trim().max(200).optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
+  // Which date column the startDate/endDate window filters on, so the Awaiting
+  // list matches the "Awaiting · Period" stat tile (which respects the same
+  // toggle). 'deliveredAt' is the correct scope for remittance timing; defaults
+  // to createdAt to mirror the tile's default.
+  dateScope: z.enum(['createdAt', 'deliveredAt']).optional(),
   orderIds: z.array(z.string().uuid()).max(200).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(500).default(100),

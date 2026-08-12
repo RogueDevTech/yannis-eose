@@ -3542,8 +3542,6 @@ export class LogisticsService implements OnModuleInit {
       conditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
 
-    // No date filter — eligible orders are always all-time (every unremitted
-    // delivered order is actionable). Date filters only apply to Remitted tab.
     // Company-group isolation via order's servicing branch
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       conditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
@@ -3552,6 +3550,19 @@ export class LogisticsService implements OnModuleInit {
     // When specific order IDs are requested, scope to exactly those
     if (input.orderIds && input.orderIds.length > 0) {
       conditions.push(inArray(schema.orders.id, input.orderIds));
+    }
+
+    // Date window — mirror the "Awaiting · Period" stat tile so the list rows and
+    // the tile agree. The tile filters on createdAt by default, or deliveredAt when
+    // the "By delivery date" toggle is on (dateScope='deliveredAt'); 'deliveredAt' is
+    // the correct scope for remittance timing (an order created in July but delivered
+    // in August is August's awaiting, not July's). Skip the window entirely when
+    // building a batch from explicit orderIds — those must never be dropped by date.
+    if (!(input.orderIds && input.orderIds.length > 0)) {
+      const eligibleDateCol =
+        input.dateScope === 'deliveredAt' ? schema.orders.deliveredAt : schema.orders.createdAt;
+      if (input.startDate) conditions.push(gte(eligibleDateCol, nigeriaDayStart(input.startDate)));
+      if (input.endDate) conditions.push(lte(eligibleDateCol, nigeriaDayEnd(input.endDate)));
     }
 
     // Anti-join: exclude orders already on any remittance batch.

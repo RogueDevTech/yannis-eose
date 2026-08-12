@@ -111,8 +111,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
   if (locationFilter) eligibleListBase.logisticsLocationId = locationFilter;
   if (eligibleQ) eligibleListBase.search = eligibleQ;
-  // Awaiting remittance shows ALL unremitted orders regardless of date —
-  // an old unremitted order is just as actionable as a recent one.
+  // Awaiting list is date-scoped to match the "Awaiting · Period" stat tile:
+  // same window + same date column (dateScope), so the rows and the tile agree.
+  // 'all_time' clears the window (shows every unremitted delivered order).
+  if (startDate) eligibleListBase.startDate = startDate;
+  if (endDate) eligibleListBase.endDate = endDate;
+  eligibleListBase.dateScope = dateScope;
 
   const eligibleListInput = JSON.stringify(eligibleListBase);
 
