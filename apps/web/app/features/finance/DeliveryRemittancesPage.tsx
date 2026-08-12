@@ -191,8 +191,18 @@ function formatDeliveredAt(iso: string | null): string {
   }
 }
 
+/**
+ * The amount to remit for an eligible order = the ORDER total, not the invoice
+ * total. The order header (and its line items) is authoritative; the auto-
+ * generated invoice can hold a STALE value — e.g. a DRAFT invoice created at
+ * order time that was never re-synced after a value correction / retrack.
+ * (Real case: order 69269 header ₦29,500 / line items ₦29,500, but its DRAFT
+ * invoice still read ₦58,000, inflating the batch total by ₦28,500 vs the
+ * "Awaiting · Period" tile which correctly sums order totals.) Using the order
+ * total keeps the row amount, the selection total, and the stat tile in sync.
+ */
 function eligibleLineAmount(o: EligibleOrder): number {
-  const raw = o.invoice?.totalAmount ?? o.totalAmount;
+  const raw = o.totalAmount;
   return raw != null && raw !== '' ? Number(raw) : 0;
 }
 
@@ -613,8 +623,9 @@ export function DeliveryRemittancesPage({
         align: 'right',
         nowrap: true,
         render: (o) => {
-          const raw = o.invoice?.totalAmount ?? o.totalAmount;
-          return raw != null && raw !== '' ? <NairaPrice amount={Number(raw)} /> : '—';
+          // Order total (authoritative) — matches the selection total + stat tile.
+          return o.totalAmount != null && o.totalAmount !== ''
+            ? <NairaPrice amount={eligibleLineAmount(o)} /> : '—';
         },
       },
       {
@@ -2001,9 +2012,9 @@ export function DeliveryRemittancesPage({
                     </p>
                   </button>
                   <div className="shrink-0 text-right">
-                    {o.invoice?.totalAmount != null || o.totalAmount != null ? (
+                    {o.totalAmount != null ? (
                       <NairaPrice
-                        amount={Number(o.invoice?.totalAmount ?? o.totalAmount)}
+                        amount={eligibleLineAmount(o)}
                         className="text-sm font-semibold text-app-fg tabular-nums"
                       />
                     ) : (
