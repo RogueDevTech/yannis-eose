@@ -4,6 +4,7 @@ import { PayrollBatchService } from './payroll-batch.service';
 import { PayrollMetricsService } from './payroll-metrics.service';
 import { PayrollComputeService } from './payroll-compute.service';
 import { PayrollConfigService } from './payroll-config.service';
+import { AttendanceService } from './attendance.service';
 import { EventsModule } from '../events/events.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { LedgerModule } from '../finance/ledger.module';
@@ -16,7 +17,8 @@ import { LedgerModule } from '../finance/ledger.module';
     PayrollMetricsService,
     PayrollComputeService,
     PayrollConfigService,
+    AttendanceService,
   ],
-  exports: [HrService, PayrollBatchService, PayrollMetricsService, PayrollComputeService, PayrollConfigService],
+  exports: [HrService, PayrollBatchService, PayrollMetricsService, PayrollComputeService, PayrollConfigService, AttendanceService],
 })
 export class HrModule {}

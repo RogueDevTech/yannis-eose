@@ -1,6 +1,7 @@
 import {
   attendanceGridSchema,
   markAttendanceSchema,
+  markAttendanceBulkSchema,
   attendanceSummarySchema,
   savePayRoleAttendanceConfigSchema,
   setUserAttendanceOverrideSchema,
@@ -32,6 +33,13 @@ export const attendanceRouter = router({
     .input(markAttendanceSchema)
     .mutation(async ({ input, ctx }) => {
       return getAttendanceService().mark(input, ctx.user);
+    }),
+
+  /** Bulk-mark one day for many staff (HR). */
+  markBulk: permissionProcedure('attendance.manage', 'hr.write')
+    .input(markAttendanceBulkSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getAttendanceService().markBulk(input, ctx.user);
     }),
 
   /** Monthly summary — self (any authed user) or, for HR, any staff member. */

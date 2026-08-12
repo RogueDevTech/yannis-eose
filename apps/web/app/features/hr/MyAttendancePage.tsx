@@ -5,9 +5,10 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import {
   type AttendanceSummaryData,
-  type AttendanceStatus,
   STATUS_LETTER,
   STATUS_LABEL,
+  STATUS_THEME,
+  MARK_CYCLE,
 } from './attendance-types';
 
 interface Props {
@@ -33,19 +34,6 @@ function shiftMonth(month: string, delta: number): string {
   const { y, m } = parseMonth(month);
   const d = new Date(Date.UTC(y, m - 1 + delta, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
-function dayTone(status: AttendanceStatus): string {
-  switch (status) {
-    case 'ABSENT':
-      return 'bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300';
-    case 'OFF_DUTY':
-      return 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
-    case 'SICK':
-      return 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300';
-    default:
-      return 'bg-app-muted text-app-fg-muted';
-  }
 }
 
 export function MyAttendancePage({ summary, month }: Props) {
@@ -126,7 +114,7 @@ export function MyAttendancePage({ summary, month }: Props) {
                   <div
                     key={day.date}
                     title={`${day.date}: ${STATUS_LABEL[day.status]}${day.remark ? ` — ${day.remark}` : ''}`}
-                    className={`flex aspect-square flex-col items-center justify-center rounded-md text-xs ${dayTone(day.status)}`}
+                    className={`flex aspect-square flex-col items-center justify-center rounded-md text-xs ${STATUS_THEME[day.status].cell}`}
                   >
                     <span className="font-medium">{d}</span>
                     <span className="text-[0.65rem] opacity-80">{STATUS_LETTER[day.status]}</span>
@@ -135,10 +123,9 @@ export function MyAttendancePage({ summary, month }: Props) {
               })}
             </div>
             <div className="mt-3 flex flex-wrap gap-3 text-xs text-app-fg-muted">
-              <LegendDot label="Present (P)" className="bg-app-muted" />
-              <LegendDot label="Absent (A)" className="bg-red-200 dark:bg-red-900" />
-              <LegendDot label="Off duty (O)" className="bg-amber-200 dark:bg-amber-900" />
-              <LegendDot label="Sick (S)" className="bg-blue-200 dark:bg-blue-900" />
+              {MARK_CYCLE.map((s) => (
+                <LegendDot key={s} label={`${STATUS_LABEL[s]} (${STATUS_LETTER[s]})`} className={STATUS_THEME[s].dot} />
+              ))}
             </div>
           </div>
         </>

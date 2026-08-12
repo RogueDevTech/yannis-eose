@@ -10,18 +10,35 @@ import {
   type AttendanceConfig,
   type AttendanceGridInput,
   type MarkAttendanceInput,
+  type MarkAttendanceBulkInput,
   type AttendanceSummaryInput,
   type SavePayRoleAttendanceConfigInput,
   type SetUserAttendanceOverrideInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { isAdminLevel } from '../common/authz';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 type Db = PostgresJsDatabase<typeof schema>;
 
-/** Roles that may edit the master sheet + attendance config. */
-const HR_MANAGE_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HR_MANAGER']);
+/**
+ * Whether the actor may edit attendance. Permission-code first (never a raw role
+ * set — that would ignore RBAC grants and lock out custom role templates); admins
+ * bypass via isAdminLevel(), matching the rest of the platform.
+ */
+function canManageAttendance(actor: SessionUser): boolean {
+  if (isAdminLevel(actor)) return true;
+  const codes = actor.permissions ?? [];
+  return codes.includes('attendance.manage') || codes.includes('hr.write');
+}
+
+/** Whether the actor may VIEW any staff's attendance (master sheet / others). */
+function canReadAllAttendance(actor: SessionUser): boolean {
+  if (isAdminLevel(actor)) return true;
+  const codes = actor.permissions ?? [];
+  return codes.includes('attendance.read') || codes.includes('attendance.manage') || codes.includes('hr.read');
+}
 
 /** Inclusive [firstDay, lastDay] for a YYYY-MM month, as YYYY-MM-DD strings (WAT day keys). */
 function monthBounds(month: string): { start: string; end: string; days: number } {
@@ -33,15 +50,16 @@ function monthBounds(month: string): { start: string; end: string; days: number 
   return { start: `${y}-${mm}-01`, end: `${y}-${mm}-${String(days).padStart(2, '0')}`, days };
 }
 
+
 @Injectable()
 export class AttendanceService {
   constructor(@Inject(DRIZZLE) private readonly db: Db) {}
 
   private assertCanManage(actor: SessionUser) {
-    if (!HR_MANAGE_ROLES.has(actor.role)) {
+    if (!canManageAttendance(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Only HR can edit attendance.',
+        message: 'You do not have permission to edit attendance.',
       });
     }
   }
@@ -67,6 +85,9 @@ export class AttendanceService {
     ];
     if (branchScope.length) {
       staffConds.push(inArray(schema.users.primaryBranchId, branchScope as string[]));
+    }
+    if (input.role) {
+      staffConds.push(eq(schema.users.role, input.role as typeof schema.users.role.enumValues[number]));
     }
     if (input.search) {
       staffConds.push(sql`${schema.users.name} ILIKE ${'%' + input.search + '%'}`);
@@ -129,19 +150,20 @@ export class AttendanceService {
 
     const rows: GridRow[] = staff.map((s) => {
       const cells = byStaff.get(s.id) ?? new Map();
+      // Default-Unchecked model: ONLY marked days count. An unmarked day is blank
+      // (neither present nor absent) and is excluded from counts + the %.
       let present = 0, absent = 0, off = 0, sick = 0;
-      for (let d = 1; d <= days; d++) {
-        const key = `${input.month}-${String(d).padStart(2, '0')}`;
-        const cell = cells.get(key);
-        const status = cell?.status ?? 'PRESENT';
-        if (status === 'ABSENT') absent++;
-        else if (status === 'OFF_DUTY') off++;
-        else if (status === 'SICK') sick++;
-        else present++;
+      for (const cell of cells.values()) {
+        if (cell.status === 'ABSENT') absent++;
+        else if (cell.status === 'OFF_DUTY') off++;
+        else if (cell.status === 'SICK') sick++;
+        else if (cell.status === 'PRESENT') present++;
       }
-      // Attendance % — OFF counts present-equivalent (HR decision); ABSENT lowers it.
-      const numerator = present + off + sick; // only absent hurts
-      const pct = days > 0 ? Math.round((numerator / days) * 100) : 100;
+      // Attendance % over MARKED days only — OFF/SICK/PRESENT count toward it,
+      // only ABSENT lowers it. Blank (unmarked) days are not in the denominator.
+      const marked = present + absent + off + sick;
+      const numerator = present + off + sick;
+      const pct = marked > 0 ? Math.round((numerator / marked) * 100) : 100;
 
       const roleCfg = s.payRoleId ? roleConfigById.get(s.payRoleId) ?? null : null;
       const enabled = resolveAttendanceEnabled(roleCfg?.enabled ?? false, s.override ?? null);
@@ -161,7 +183,13 @@ export class AttendanceService {
       };
     });
 
-    return { month: input.month, days, staff: rows };
+    // Status filter: keep only staff with >= 1 day marked with a requested status.
+    const wanted = input.statuses && input.statuses.length ? new Set(input.statuses) : null;
+    const filtered = wanted
+      ? rows.filter((r) => Object.values(r.exceptions).some((c) => wanted.has(c.status as never)))
+      : rows;
+
+    return { month: input.month, days, staff: filtered };
   }
 
   /** Upsert one staff/day cell. HR only. Actor-stamped + audited via history trigger. */
@@ -214,11 +242,59 @@ export class AttendanceService {
     });
   }
 
+  /** Bulk-mark one day for many staff (HR). One tx; each row upserted + audited. */
+  async markBulk(input: MarkAttendanceBulkInput, actor: SessionUser) {
+    this.assertCanManage(actor);
+    const ids = [...new Set(input.staffIds)];
+
+    // Resolve branch + group for every staff member in one query.
+    const staffRows = await this.db
+      .select({
+        id: schema.users.id,
+        branchId: schema.branches.id,
+        groupId: schema.branches.groupId,
+      })
+      .from(schema.users)
+      .leftJoin(schema.branches, eq(schema.branches.id, schema.users.primaryBranchId))
+      .where(inArray(schema.users.id, ids));
+    const scopeById = new Map(staffRows.map((r) => [r.id, { branchId: r.branchId, groupId: r.groupId }]));
+
+    return withActor(this.db, actor, async (tx) => {
+      for (const staffId of ids) {
+        const scope = scopeById.get(staffId);
+        if (!scope) continue; // skip unknown ids rather than fail the whole batch
+        await tx
+          .insert(schema.attendanceRecords)
+          .values({
+            id: uuidv7(),
+            staffId,
+            attendanceDate: input.attendanceDate,
+            status: input.status,
+            remark: input.remark ?? null,
+            branchId: scope.branchId ?? null,
+            groupId: scope.groupId ?? null,
+            markedBy: actor.id,
+          })
+          .onConflictDoUpdate({
+            target: [schema.attendanceRecords.staffId, schema.attendanceRecords.attendanceDate],
+            set: {
+              status: input.status,
+              remark: input.remark ?? null,
+              markedBy: actor.id,
+              markedAt: sql`now()`,
+              updatedAt: sql`now()`,
+            },
+          });
+      }
+      return { success: true, count: ids.length };
+    });
+  }
+
   /** Monthly summary for one staff member (self-view or HR). */
   async summary(input: AttendanceSummaryInput, actor: SessionUser) {
     const staffId = input.staffId ?? actor.id;
-    // Staff may only view their own; HR may view anyone.
-    if (staffId !== actor.id && !HR_MANAGE_ROLES.has(actor.role)) {
+    // Staff may only view their own; HR/admins may view anyone.
+    if (staffId !== actor.id && !canReadAllAttendance(actor)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only view your own attendance.' });
     }
     const { start, end, days } = monthBounds(input.month);
@@ -239,25 +315,35 @@ export class AttendanceService {
       );
     const byDay = new Map(records.map((r) => [String(r.attendanceDate).slice(0, 10), r]));
 
+    // Staff config + employment window (needed for countable-day tallying).
+    const [u] = await this.db
+      .select({
+        payRoleId: schema.users.payRoleId,
+        override: schema.users.attendanceAffectsPay,
+        dateOfJoining: schema.users.dateOfJoining,
+        exitDate: schema.users.exitDate,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, staffId))
+      .limit(1);
+
     let present = 0, absent = 0, off = 0, sick = 0;
     const calendar: Array<{ date: string; status: string; remark: string | null }> = [];
     for (let d = 1; d <= days; d++) {
       const date = `${input.month}-${String(d).padStart(2, '0')}`;
       const rec = byDay.get(date);
-      const status = rec?.status ?? 'PRESENT';
-      if (status === 'ABSENT') absent++;
-      else if (status === 'OFF_DUTY') off++;
-      else if (status === 'SICK') sick++;
-      else present++;
+      // Default-Unchecked: unmarked days are 'NONE' (blank) and don't count.
+      const status = rec?.status ?? 'NONE';
+      if (rec) {
+        if (status === 'ABSENT') absent++;
+        else if (status === 'OFF_DUTY') off++;
+        else if (status === 'SICK') sick++;
+        else if (status === 'PRESENT') present++;
+      }
       calendar.push({ date, status, remark: rec?.remark ?? null });
     }
 
     // Base eligibility for this staff (role config + override).
-    const [u] = await this.db
-      .select({ payRoleId: schema.users.payRoleId, override: schema.users.attendanceAffectsPay })
-      .from(schema.users)
-      .where(eq(schema.users.id, staffId))
-      .limit(1);
     let roleCfg: AttendanceConfig | null = null;
     if (u?.payRoleId) {
       const [r] = await this.db
@@ -281,7 +367,10 @@ export class AttendanceService {
         absent,
         offDuty: off,
         sick,
-        attendancePct: days > 0 ? Math.round(((present + off + sick) / days) * 100) : 100,
+        attendancePct:
+          present + absent + off + sick > 0
+            ? Math.round(((present + off + sick) / (present + absent + off + sick)) * 100)
+            : 100,
       },
       eligibility: {
         gated: enabled,
@@ -295,13 +384,23 @@ export class AttendanceService {
   /** Save a pay role's attendance config (bands + on/off). HR only. Audited. */
   async savePayRoleConfig(input: SavePayRoleAttendanceConfigInput, actor: SessionUser) {
     this.assertCanManage(actor);
+    // Company isolation: a pay role belongs to a company (group). Non-admins may
+    // only touch roles in their active company; admins are unscoped. Without this,
+    // an HR manager in company A could rewrite company B's pay rules by id.
+    const groupId = actor.activeGroupId ?? null;
+    const scopeByGroup = !isAdminLevel(actor);
+    if (scopeByGroup && !groupId) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Select a company before editing attendance rules.' });
+    }
     return withActor(this.db, actor, async (tx) => {
+      const conds = [eq(schema.payrollPayRoles.id, input.payRoleId)];
+      if (scopeByGroup && groupId) conds.push(eq(schema.payrollPayRoles.groupId, groupId));
       const res = await tx
         .update(schema.payrollPayRoles)
         .set({ attendanceConfig: input.config as AttendanceConfig, updatedAt: sql`now()` })
-        .where(eq(schema.payrollPayRoles.id, input.payRoleId))
+        .where(and(...conds))
         .returning({ id: schema.payrollPayRoles.id });
-      if (res.length === 0) throw new TRPCError({ code: 'NOT_FOUND', message: 'Pay role not found.' });
+      if (res.length === 0) throw new TRPCError({ code: 'NOT_FOUND', message: 'Pay role not found in your company.' });
       return { success: true };
     });
   }

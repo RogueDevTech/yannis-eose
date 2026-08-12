@@ -1078,6 +1078,7 @@ export class UsersService {
         taxStatus: schema.users.taxStatus,
         flatMonthlyAmount: schema.users.flatMonthlyAmount,
         annualRent: schema.users.annualRent,
+        tin: schema.users.tin,
         reportsToUserId: schema.users.reportsToUserId,
         crmLinked: schema.users.crmLinked,
         onboardingPayrollStatus: schema.users.onboardingPayrollStatus,

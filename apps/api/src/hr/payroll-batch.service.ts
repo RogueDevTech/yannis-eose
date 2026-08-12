@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { eq, ne, and, or, desc, gte, lte, isNull, isNotNull, ilike, count, sum, inArray, sql, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { computePaye, db as schema } from '@yannis/shared';
+import { computePaye, computeSupplementaryBalance, db as schema } from '@yannis/shared';
 import type {
   GenerateBatchInput,
   GenerateBatchesBulkInput,
@@ -259,6 +259,8 @@ interface PayoutRow {
   allowancesTotal?: number;
   grossPay?: number;
   payeTax?: number;
+  statutoryTotal?: number;
+  statutoryBreakdown?: Array<{ name: string; amount: number }>;
   employerPayeSubsidy?: number;
   netPay?: number;
   metricsSnapshot?: unknown;
@@ -1012,6 +1014,8 @@ export class PayrollBatchService {
           allowancesTotal: sql`${(computed.allowancesTotal ?? 0).toFixed(2)}::numeric`,
           grossPay: sql`${(computed.grossPay ?? computed.totalPayout).toFixed(2)}::numeric`,
           payeTax: sql`${(computed.payeTax ?? 0).toFixed(2)}::numeric`,
+          statutoryTotal: sql`${(computed.statutoryTotal ?? 0).toFixed(2)}::numeric`,
+          statutoryBreakdown: computed.statutoryBreakdown ?? [],
           employerPayeSubsidy: sql`${(computed.employerPayeSubsidy ?? 0).toFixed(2)}::numeric`,
           netPay: sql`${(computed.netPay ?? computed.totalPayout).toFixed(2)}::numeric`,
           // Fold proration detail into the metrics snapshot jsonb (no schema
@@ -1149,8 +1153,8 @@ export class PayrollBatchService {
         const addOnsTotal = Number(contractorAddOnRows[0]?.total ?? 0);
 
         const grossPay = fee + addOnsTotal;
-        const deductionsTotal = paye.employeePaye + clawbackTotal;
-        const netPay = Math.max(0, grossPay - paye.employeePaye - clawbackTotal);
+        const deductionsTotal = paye.employeePaye + paye.statutoryTotal + clawbackTotal;
+        const netPay = Math.max(0, grossPay - paye.employeePaye - paye.statutoryTotal - clawbackTotal);
         const inserted = await tx
           .insert(schema.payoutRecords)
           .values({
@@ -1167,6 +1171,8 @@ export class PayrollBatchService {
             allowancesTotal: sql`0::numeric`,
             grossPay: sql`${grossPay.toFixed(2)}::numeric`,
             payeTax: sql`${paye.employeePaye.toFixed(2)}::numeric`,
+            statutoryTotal: sql`${paye.statutoryTotal.toFixed(2)}::numeric`,
+            statutoryBreakdown: paye.statutoryBreakdown ?? [],
             employerPayeSubsidy: sql`${paye.employerSubsidy.toFixed(2)}::numeric`,
             netPay: sql`${netPay.toFixed(2)}::numeric`,
             payRoleName: contractor.name,
@@ -1445,6 +1451,23 @@ export class PayrollBatchService {
       return plan;
     };
 
+    // --- 6b) Batched attendance eligibility (Track C) so preview == generation. -
+    // Pre-warm the pay-role cache for every referenced role, then resolve every
+    // member's attendance eligibility in a fixed number of queries.
+    const referencedPayRoleIds = [
+      ...new Set(staff.map((s) => s.payRoleId).filter((x): x is string => !!x)),
+    ];
+    await Promise.all(referencedPayRoleIds.map((id) => loadPayRoleCached(id)));
+    const attendanceByStaff = await this.payrollCompute.resolveAttendanceEligibilityBatched(
+      tx,
+      staff.map((s) => ({
+        id: s.id,
+        roleConfig: s.payRoleId ? payRoleCache.get(s.payRoleId)?.attendanceConfig ?? null : null,
+      })),
+      periodStart,
+      periodEnd,
+    );
+
     // --- 7) Compute each member's line IN MEMORY, folding in adjustments. ------
     for (const member of staff) {
       const branchInfo = memberBranchByUser.get(member.id);
@@ -1503,7 +1526,12 @@ export class PayrollBatchService {
         periodStart,
         periodEnd,
         metrics,
-        { plan: plan ? { planName: plan.planName, rules: plan.rules } : null, payRole, taxConfig },
+        {
+          plan: plan ? { planName: plan.planName, rules: plan.rules } : null,
+          payRole,
+          taxConfig,
+          attendanceEligibility: attendanceByStaff.get(member.id) ?? null,
+        },
       );
 
       if (!computed) {
@@ -1538,6 +1566,8 @@ export class PayrollBatchService {
         allowancesTotal: computed.allowancesTotal,
         grossPay,
         payeTax: computed.payeTax,
+        statutoryTotal: computed.statutoryTotal,
+        statutoryBreakdown: computed.statutoryBreakdown,
         employerPayeSubsidy: computed.employerPayeSubsidy,
         netPay,
         metricsSnapshot: computed.metricsSnapshot,
@@ -1782,7 +1812,7 @@ export class PayrollBatchService {
         const clawbackTotal = clawbackByContractor.get(contractor.id) ?? 0;
         const addOnsTotal = addOnByContractor.get(contractor.id) ?? 0;
         const grossPay = fee + addOnsTotal;
-        const net = Math.max(0, grossPay - paye.employeePaye - clawbackTotal);
+        const net = Math.max(0, grossPay - paye.employeePaye - paye.statutoryTotal - clawbackTotal);
         rows.push({
           staffId: contractor.id,
           staffName: contractor.name,
@@ -1790,7 +1820,7 @@ export class PayrollBatchService {
           baseSalary: fee,
           performanceBonus: 0,
           addOnsTotal,
-          deductionsTotal: paye.employeePaye + clawbackTotal,
+          deductionsTotal: paye.employeePaye + paye.statutoryTotal + clawbackTotal,
           grossPay,
           payeTax: paye.employeePaye,
           totalPayout: net,
@@ -2030,8 +2060,16 @@ export class PayrollBatchService {
         grossPay: number;
         payeTax: number;
       }>;
+      // Track A/B readiness: staff enumerated for the batch but for whom NO salary
+      // config resolves (no pay-role/plan and no flat rate). Generation currently
+      // drops them silently to ₦0; surface them so HR fixes the config first.
+      const missingConfigStaff: Array<{ staffId: string; staffName: string; staffRole: string }> = [];
       for (const member of staff) {
-        const computed = (await this.computePayoutForMember(tx, member, periodStart, periodEnd, input.periodMonth))
+        const raw = await this.computePayoutForMember(tx, member, periodStart, periodEnd, input.periodMonth);
+        if (raw == null) {
+          missingConfigStaff.push({ staffId: member.id, staffName: member.name, staffRole: member.role });
+        }
+        const computed = raw
           ?? { baseSalary: 0, performanceBonus: 0, addOnsTotal: 0, deductionsTotal: 0, totalPayout: 0 };
         rows.push({
           staffId: member.id,
@@ -2052,6 +2090,9 @@ export class PayrollBatchService {
         staffCount: rows.length,
         totalAmount: rows.reduce((acc, row) => acc + row.totalPayout, 0),
         rows: rows.sort((a, b) => b.totalPayout - a.totalPayout),
+        // Readiness warning (Track B): non-empty → HR should set salary config for
+        // these staff and re-preview before generating (they'd generate at ₦0 base).
+        missingConfigStaff,
       };
     });
   }
@@ -2154,6 +2195,8 @@ export class PayrollBatchService {
       allowancesTotal: computed.allowancesTotal,
       grossPay,
       payeTax: computed.payeTax,
+      statutoryTotal: computed.statutoryTotal,
+      statutoryBreakdown: computed.statutoryBreakdown,
       employerPayeSubsidy: computed.employerPayeSubsidy,
       netPay,
       metricsSnapshot: computed.metricsSnapshot,
@@ -2286,6 +2329,8 @@ export class PayrollBatchService {
       grossPay,
       netPay: totalPayout,
       payeTax: 0,
+      statutoryTotal: 0,
+      statutoryBreakdown: [],
     };
   }
 
@@ -3283,6 +3328,81 @@ export class PayrollBatchService {
   }
 
   /**
+   * PAYE Remittance Export (Track D#5) — the schedule HR submits to the Revenue
+   * Office. One row per taxable staff payout for a batch (or a whole month),
+   * carrying Name, TIN, Role, Phone, Gross, statutory deductions (Rent Relief,
+   * Pension, NHIS …), Net, and PAYE. Exempt staff correctly show PAYE ₦0.
+   */
+  async exportPayeRemittance(
+    input: { batchId?: string; periodMonth?: string; branchId?: string | null },
+    viewer: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    // Read-level gate: anyone who can read payroll reports can export the schedule.
+    if (
+      !(
+        viewer.role === 'SUPER_ADMIN' ||
+        viewer.role === 'SUPPORT' ||
+        (viewer.permissions ?? []).includes('hr.read') ||
+        (viewer.permissions ?? []).includes('hr.write')
+      )
+    ) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have access to payroll reports.' });
+    }
+    if (!input.batchId && !input.periodMonth) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Provide a batchId or a periodMonth.' });
+    }
+
+    const conditions: SQL[] = [isNotNull(schema.payoutRecords.staffId)];
+    if (input.batchId) conditions.push(eq(schema.payoutRecords.batchId, input.batchId));
+    if (input.periodMonth) conditions.push(eq(schema.payrollBatches.periodMonth, input.periodMonth));
+    if (input.branchId) conditions.push(eq(schema.payrollBatches.branchId, input.branchId));
+    if (effectiveBranchIds?.length) conditions.push(payrollBranchScope(effectiveBranchIds, viewer));
+
+    const rows = await this.db
+      .select({
+        staffName: schema.users.name,
+        staffRole: schema.users.role,
+        tin: schema.users.tin,
+        phone: schema.users.phone,
+        grossPay: schema.payoutRecords.grossPay,
+        payeTax: schema.payoutRecords.payeTax,
+        netPay: schema.payoutRecords.netPay,
+        statutoryBreakdown: schema.payoutRecords.statutoryBreakdown,
+        statutoryTotal: schema.payoutRecords.statutoryTotal,
+        metricsSnapshot: schema.payoutRecords.metricsSnapshot,
+        periodMonth: schema.payrollBatches.periodMonth,
+      })
+      .from(schema.payoutRecords)
+      .innerJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
+      .innerJoin(schema.users, eq(schema.users.id, schema.payoutRecords.staffId))
+      .where(and(...conditions))
+      .orderBy(schema.users.name);
+
+    return {
+      periodMonth: input.periodMonth ?? (rows[0] ? String(rows[0].periodMonth) : null),
+      rows: rows.map((r) => {
+        const statutory = (r.statutoryBreakdown as Array<{ name: string; amount: number }> | null) ?? [];
+        // Rent relief isn't a cash deduction but HR lists it on the schedule; pull
+        // it from the metrics snapshot's relief breakdown when present.
+        const snap = r.metricsSnapshot as { reliefBreakdown?: Array<{ name: string; amount: number }> } | null;
+        return {
+          staffName: r.staffName,
+          tin: r.tin ?? '',
+          role: r.staffRole,
+          phone: r.phone ?? '',
+          grossPay: Number(r.grossPay ?? 0),
+          statutoryDeductions: statutory,
+          statutoryTotal: Number(r.statutoryTotal ?? 0),
+          reliefBreakdown: snap?.reliefBreakdown ?? [],
+          netPay: Number(r.netPay ?? 0),
+          payeTax: Number(r.payeTax ?? 0),
+        };
+      }),
+    };
+  }
+
+  /**
    * Per-payout deduction reasons for payslips. `deductionsTotal` on a payout is a
    * single collapsed number; the human-readable reasons live in
    * `earnings_adjustments` (category DEDUCTION / CLAWBACK, linked by payout_id).
@@ -4132,6 +4252,375 @@ export class PayrollBatchService {
     return updated[0] ?? null;
   }
 
+  // ── Supplementary payroll (Track A) ────────────────────────────────────────
+  //
+  // A SUPPLEMENTARY batch completes an ALREADY-PAID original month. For each staff
+  // paid in that month it recomputes the CORRECT figures with today's config and
+  // pays only the outstanding balance:
+  //   grossBalance   = max(0, intendedGross   − alreadyPaidGross)
+  //   remainingPAYE  = max(0, correctPAYE     − alreadyDeductedPAYE)
+  //   netPayable     = grossBalance − remainingPAYE
+  // This keeps statutory PAYE records accurate instead of taxing the top-up as a
+  // fresh (untaxed) payment.
+
+  /**
+   * Resolve every staff member paid in the original period and compute what (if
+   * anything) is still owed to complete their salary + PAYE. Read-only.
+   */
+  private async computeSupplementaryLines(
+    tx: TxLike,
+    periodMonth: string,
+    branchId: string | null,
+    // 'underpaid' (default) returns only staff still owed money (supplementary
+    // run). 'all' returns EVERY settled staff classified under/over/exact for the
+    // reconciliation report (Track B) — including excess (overpaid) staff.
+    mode: 'underpaid' | 'all' = 'underpaid',
+  ) {
+    const { periodStart, periodEnd } = nigeriaMonthWindow(periodMonth);
+
+    // Paid-to-date per staff for the month, AGGREGATED across ALL payouts for the
+    // period — the original batch AND any prior SUPPLEMENTARY top-ups. Prior
+    // supplementary payments MUST count as "already paid" or a second run would
+    // recompute the same balance and pay it again (double payment). One row per
+    // staff via GROUP BY; the sums are the total already settled for the month.
+    const originals = await tx
+      .select({
+        staffId: schema.payoutRecords.staffId,
+        paidGross: sql<string>`COALESCE(SUM(${schema.payoutRecords.grossPay}), 0)`,
+        paidPaye: sql<string>`COALESCE(SUM(${schema.payoutRecords.payeTax}), 0)`,
+        paidStatutory: sql<string>`COALESCE(SUM(${schema.payoutRecords.statutoryTotal}), 0)`,
+        role: schema.users.role,
+        name: schema.users.name,
+        payRoleId: schema.users.payRoleId,
+        commissionPlanId: schema.users.commissionPlanId,
+        salaryBasis: schema.users.salaryBasis,
+        taxStatus: schema.users.taxStatus,
+        flatMonthlyAmount: schema.users.flatMonthlyAmount,
+        annualRent: schema.users.annualRent,
+        dateOfJoining: schema.users.dateOfJoining,
+        exitDate: schema.users.exitDate,
+        primaryBranchId: schema.users.primaryBranchId,
+      })
+      .from(schema.payoutRecords)
+      .innerJoin(schema.payrollBatches, eq(schema.payoutRecords.batchId, schema.payrollBatches.id))
+      .innerJoin(schema.users, eq(schema.payoutRecords.staffId, schema.users.id))
+      .where(
+        and(
+          eq(schema.payrollBatches.periodMonth, periodMonth),
+          isNotNull(schema.payoutRecords.staffId),
+          branchId ? eq(schema.users.primaryBranchId, branchId) : sql`true`,
+        ),
+      )
+      .groupBy(
+        schema.payoutRecords.staffId,
+        schema.users.role,
+        schema.users.name,
+        schema.users.payRoleId,
+        schema.users.commissionPlanId,
+        schema.users.salaryBasis,
+        schema.users.taxStatus,
+        schema.users.flatMonthlyAmount,
+        schema.users.annualRent,
+        schema.users.dateOfJoining,
+        schema.users.exitDate,
+        schema.users.primaryBranchId,
+      );
+
+    const results: Array<{
+      staffId: string;
+      name: string;
+      role: string;
+      expectedGross: number;
+      paidGross: number;
+      grossBalance: number;
+      correctPaye: number;
+      paidPaye: number;
+      remainingPaye: number;
+      correctStatutory: number;
+      paidStatutory: number;
+      remainingStatutory: number;
+      netPayable: number;
+      /** Reconciliation classification (mode 'all'). */
+      status?: 'UNDERPAID' | 'OVERPAID' | 'OK';
+      /** Excess gross paid over intended (mode 'all'; 0 when not overpaid). */
+      excessGross?: number;
+    }> = [];
+
+    for (const orig of originals) {
+      if (!orig.staffId) continue;
+      // Recompute the INTENDED line for the same period with today's (correct)
+      // config — this is the authoritative "what they should have been paid".
+      const intended = await this.payrollCompute.computeForMember(
+        tx,
+        {
+          id: orig.staffId,
+          role: orig.role,
+          commissionPlanId: orig.commissionPlanId,
+          payRoleId: orig.payRoleId,
+          salaryBasis: orig.salaryBasis,
+          taxStatus: orig.taxStatus,
+          flatMonthlyAmount: orig.flatMonthlyAmount,
+          annualRent: orig.annualRent,
+          dateOfJoining: orig.dateOfJoining,
+          exitDate: orig.exitDate,
+        },
+        periodStart,
+        periodEnd,
+        null,
+        orig.primaryBranchId,
+      );
+      if (!intended) continue;
+
+      const expectedGross = intended.grossPay;
+      const paidGross = Number(orig.paidGross ?? 0);
+      const correctPaye = intended.payeTax;
+      const paidPaye = Number(orig.paidPaye ?? 0);
+      const correctStatutory = intended.statutoryTotal;
+      const paidStatutory = Number(orig.paidStatutory ?? 0);
+
+      const { grossBalance, remainingPaye, remainingStatutory, netPayable } =
+        computeSupplementaryBalance({
+          expectedGross,
+          paidGross,
+          correctPaye,
+          paidPaye,
+          correctStatutory,
+          paidStatutory,
+        });
+
+      const isUnderpaid =
+        grossBalance > 0.005 || remainingPaye > 0.005 || remainingStatutory > 0.005;
+      const excessGross = Math.max(0, paidGross - expectedGross);
+      const isOverpaid = excessGross > 0.005;
+
+      if (mode === 'underpaid') {
+        // Supplementary run: only staff still owed money.
+        if (!isUnderpaid) continue;
+      }
+      // mode 'all' (reconciliation): keep everyone, classified below.
+
+      results.push({
+        staffId: orig.staffId,
+        name: orig.name,
+        role: orig.role,
+        expectedGross,
+        paidGross,
+        grossBalance,
+        correctPaye,
+        paidPaye,
+        remainingPaye,
+        correctStatutory,
+        paidStatutory,
+        remainingStatutory,
+        netPayable,
+        status: isUnderpaid ? 'UNDERPAID' : isOverpaid ? 'OVERPAID' : 'OK',
+        excessGross,
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * Payroll reconciliation report (Track B) — for an already-settled month, the
+   * correct vs actually-paid comparison for every staff member, flagging
+   * UNDERPAID (feeds supplementary payroll) and OVERPAID (excess to recover).
+   * Read-only.
+   */
+  async payrollReconciliation(
+    input: { periodMonth: string; branchId?: string | null },
+    actor: SessionUser,
+  ) {
+    // Read gate: payroll-report readers.
+    if (
+      !(
+        actor.role === 'SUPER_ADMIN' ||
+        actor.role === 'SUPPORT' ||
+        (actor.permissions ?? []).includes('hr.read') ||
+        (actor.permissions ?? []).includes('hr.write')
+      )
+    ) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have access to payroll reports.' });
+    }
+    const branchId = input.branchId ?? null;
+    const rows = await withActorAndBranch(
+      this.db,
+      { id: actor.id, currentBranchId: branchId },
+      (tx) => this.computeSupplementaryLines(tx, input.periodMonth, branchId, 'all'),
+    );
+    return {
+      periodMonth: input.periodMonth,
+      rows,
+      underpaidCount: rows.filter((r) => r.status === 'UNDERPAID').length,
+      overpaidCount: rows.filter((r) => r.status === 'OVERPAID').length,
+      totalOwed: rows.reduce((acc, r) => acc + r.netPayable, 0),
+      totalExcess: rows.reduce((acc, r) => acc + (r.excessGross ?? 0), 0),
+    };
+  }
+
+  /** Preview affected (underpaid) staff for a supplementary run. Read-only. */
+  async previewSupplementaryBatch(
+    input: { periodMonth: string; branchId?: string | null },
+    actor: SessionUser,
+  ) {
+    const branchId = input.branchId ?? null;
+    this.assertCanRunSupplementary(actor, branchId);
+    // Wrap in an actor-scoped tx so the compute path has a tx handle (read-only).
+    const lines = await withActorAndBranch(
+      this.db,
+      { id: actor.id, currentBranchId: branchId },
+      (tx) => this.computeSupplementaryLines(tx, input.periodMonth, branchId),
+    );
+    return {
+      periodMonth: input.periodMonth,
+      affected: lines,
+      totalNetPayable: lines.reduce((acc, l) => acc + l.netPayable, 0),
+      totalRemainingPaye: lines.reduce((acc, l) => acc + l.remainingPaye, 0),
+    };
+  }
+
+  /**
+   * Generate a SUPPLEMENTARY batch that pays the outstanding balance for the
+   * confirmed affected staff. Goes through the normal DRAFT lifecycle + GL.
+   */
+  async generateSupplementaryBatch(
+    input: { periodMonth: string; branchId?: string | null; staffIds?: string[]; runLabel?: string },
+    actor: SessionUser,
+  ) {
+    const branchId = input.branchId ?? null;
+    this.assertCanRunSupplementary(actor, branchId);
+
+    return withActorAndBranch(this.db, { id: actor.id, currentBranchId: branchId }, async (tx) => {
+      await this.lockPayrollSlot(
+        tx,
+        `supp:${input.periodMonth}:${branchId ?? 'org'}:${input.runLabel ?? ''}`,
+      );
+
+      // Guard against a second, duplicate supplementary batch stacking on top of an
+      // unpaid one for the same period+branch. computeSupplementaryLines already
+      // counts PAID supplementary top-ups as settled (so a re-run after payment
+      // yields 0 balance), but between generate and payment a naive re-run would
+      // create a SECOND unpaid batch paying the same balance again. Block it: HR
+      // should submit/pay or delete the open one first.
+      const openSupp = (
+        await tx
+          .select({ id: schema.payrollBatches.id, status: schema.payrollBatches.status })
+          .from(schema.payrollBatches)
+          .where(
+            and(
+              eq(schema.payrollBatches.scopeType, 'SUPPLEMENTARY'),
+              eq(schema.payrollBatches.periodMonth, input.periodMonth),
+              branchId
+                ? eq(schema.payrollBatches.branchId, branchId)
+                : isNull(schema.payrollBatches.branchId),
+              ne(schema.payrollBatches.status, 'PAID'),
+            ),
+          )
+          .limit(1)
+      )[0];
+      if (openSupp) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `An unpaid supplementary batch for this period already exists (${openSupp.status}). Submit, pay, or delete it before generating another.`,
+        });
+      }
+
+      let lines = await this.computeSupplementaryLines(tx, input.periodMonth, branchId);
+      if (input.staffIds?.length) {
+        const wanted = new Set(input.staffIds);
+        lines = lines.filter((l) => wanted.has(l.staffId));
+      }
+      if (lines.length === 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'No underpaid staff found for this period. Nothing to supplement.',
+        });
+      }
+
+      const { periodStart, periodEnd } = nigeriaMonthWindow(input.periodMonth);
+      const runLabel = input.runLabel ?? `Supplementary ${input.periodMonth.slice(0, 7)}`;
+
+      const inserted = await tx
+        .insert(schema.payrollBatches)
+        .values({
+          branchId,
+          periodMonth: input.periodMonth,
+          department: null,
+          status: 'DRAFT',
+          preparedBy: actor.id,
+          preparedAt: new Date(),
+          scopeType: 'SUPPLEMENTARY',
+          scopeBranchIds: branchId ? [branchId] : null,
+          scopeEmployeeIds: lines.map((l) => l.staffId),
+          referencesPeriod: input.periodMonth,
+          runLabel,
+        })
+        .returning();
+      const batch = inserted[0];
+      if (!batch) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create supplementary batch' });
+
+      // One payout line per affected staff — base = gross balance, paye = remaining
+      // PAYE, so the derivation is auditable from the metrics snapshot.
+      const rows = lines.map((l) => ({
+        batchId: batch.id,
+        staffId: l.staffId,
+        periodStart,
+        periodEnd,
+        baseSalary: sql`${l.grossBalance.toFixed(2)}::numeric`,
+        performanceBonus: sql`0::numeric`,
+        addOnsTotal: sql`0::numeric`,
+        deductionsTotal: sql`${(l.remainingPaye + l.remainingStatutory).toFixed(2)}::numeric`,
+        allowancesTotal: sql`0::numeric`,
+        grossPay: sql`${l.grossBalance.toFixed(2)}::numeric`,
+        statutoryTotal: sql`${l.remainingStatutory.toFixed(2)}::numeric`,
+        statutoryBreakdown: [],
+        payeTax: sql`${l.remainingPaye.toFixed(2)}::numeric`,
+        employerPayeSubsidy: sql`0::numeric`,
+        netPay: sql`${l.netPayable.toFixed(2)}::numeric`,
+        totalPayout: sql`${l.netPayable.toFixed(2)}::numeric`,
+        // Full derivation for the payslip + audit.
+        metricsSnapshot: {
+          supplementary: {
+            referencesPeriod: input.periodMonth,
+            expectedGross: l.expectedGross,
+            paidGross: l.paidGross,
+            grossBalance: l.grossBalance,
+            correctPaye: l.correctPaye,
+            paidPaye: l.paidPaye,
+            remainingPaye: l.remainingPaye,
+            correctStatutory: l.correctStatutory,
+            paidStatutory: l.paidStatutory,
+            remainingStatutory: l.remainingStatutory,
+          },
+        },
+        bonusBreakdown: null,
+        lineStatus: 'OK' as const,
+        payRoleName: null,
+        status: 'DRAFT' as const,
+      }));
+
+      await tx.insert(schema.payoutRecords).values(rows);
+      await this.recomputeBatchTotals(tx, batch.id);
+
+      return { batchId: batch.id, staffCount: lines.length };
+    });
+  }
+
+  /** Authz gate for supplementary runs — org-wide needs hr.write; branch-pinned allows that branch's preparer. */
+  private assertCanRunSupplementary(actor: SessionUser, branchId: string | null) {
+    const hasHrWrite =
+      actor.role === 'SUPER_ADMIN' ||
+      actor.role === 'SUPPORT' ||
+      (actor.permissions ?? []).includes('hr.write');
+    if (!branchId) {
+      if (!hasHrWrite) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only HR or an admin can run an org-wide supplementary payroll.' });
+      }
+    } else if (!hasHrWrite && actor.currentBranchId !== branchId) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only run a supplementary payroll for your own branch.' });
+    }
+  }
+
   private async recomputeBatchTotals(tx: TxLike, batchId: string) {
     const payouts = await tx
       .select()
@@ -4215,6 +4704,7 @@ export class PayrollBatchService {
     if (!d) {
       if (scopeType === 'CONTRACTORS') return 'Contractors';
       if (scopeType === 'ALL') return 'All staff & contractors';
+      if (scopeType === 'SUPPLEMENTARY') return 'Supplementary';
       return 'Payroll';
     }
     if (d === 'CS') return 'Customer Service';

@@ -12,6 +12,8 @@ import {
   setSettlementConfigSchema,
   generateBatchSchema,
   generateBatchesBulkSchema,
+  previewSupplementaryBatchSchema,
+  generateSupplementaryBatchSchema,
   previewSelectionSchema,
   submitBatchSchema,
   deleteBatchSchema,
@@ -52,6 +54,8 @@ import {
   bulkPayslipPdfSchema,
   exportPayRunDraftSchema,
   exportBankUploadSchema,
+  exportPayeRemittanceSchema,
+  payrollReconciliationSchema,
   canonicalPermissionCode,
   legacyAliasesForCanonical,
 } from '@yannis/shared';
@@ -358,6 +362,21 @@ export const hrRouter = router({
       return getPayrollBatchService().generateBatchesBulk(input, ctx.user);
     }),
 
+  // Supplementary payroll (Track A) — preview underpaid staff for an already-paid
+  // period, then generate a SUPPLEMENTARY batch that pays the outstanding balance
+  // (salary + remaining PAYE). Service enforces its own authz gate.
+  previewSupplementaryBatch: authedProcedure
+    .input(previewSupplementaryBatchSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollBatchService().previewSupplementaryBatch(input, ctx.user);
+    }),
+
+  generateSupplementaryBatch: authedProcedure
+    .input(generateSupplementaryBatchSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollBatchService().generateSupplementaryBatch(input, ctx.user);
+    }),
+
   submitBatch: authedProcedure
     .input(submitBatchSchema)
     .mutation(async ({ input, ctx }) => {
@@ -455,6 +474,20 @@ export const hrRouter = router({
     .input(exportBankUploadSchema)
     .query(async ({ input, ctx }) => {
       return getPayrollBatchService().exportBankUpload(input, ctx.user, ctx.effectiveBranchIds);
+    }),
+
+  // PAYE Remittance Export (Track D#5) — the schedule for the Revenue Office.
+  exportPayeRemittance: permissionProcedure('hr.read')
+    .input(exportPayeRemittanceSchema)
+    .query(async ({ input, ctx }) => {
+      return getPayrollBatchService().exportPayeRemittance(input, ctx.user, ctx.effectiveBranchIds);
+    }),
+
+  // Payroll reconciliation (Track B) — correct vs paid for a settled month.
+  payrollReconciliation: permissionProcedure('hr.read')
+    .input(payrollReconciliationSchema)
+    .query(async ({ input, ctx }) => {
+      return getPayrollBatchService().payrollReconciliation(input, ctx.user);
     }),
 
   getPayslip: authedProcedure

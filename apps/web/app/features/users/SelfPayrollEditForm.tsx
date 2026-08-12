@@ -37,6 +37,7 @@ export function SelfPayrollEditForm({
     taxStatus: editingUser.taxStatus ?? 'STANDARD_PAYE',
     flatMonthlyAmount: editingUser.flatMonthlyAmount ?? '',
     annualRent: editingUser.annualRent ?? '',
+    tin: editingUser.tin ?? '',
   });
 
   const isSaving =

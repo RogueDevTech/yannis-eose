@@ -26,6 +26,13 @@ const monthSchema = z
 export const attendanceGridSchema = z.object({
   month: monthSchema,
   branchId: z.string().uuid().optional(),
+  /** Filter to a single user role (enum value, e.g. MEDIA_BUYER). */
+  role: z.string().trim().max(40).optional(),
+  /**
+   * Show only staff who have at least one day this month marked with one of
+   * these statuses (e.g. ['ABSENT'] → everyone with any absence). Omit = all staff.
+   */
+  statuses: z.array(attendanceStatusSchema).max(4).optional(),
   search: z.string().trim().max(120).optional(),
 });
 export type AttendanceGridInput = z.infer<typeof attendanceGridSchema>;
@@ -38,6 +45,15 @@ export const markAttendanceSchema = z.object({
   remark: z.string().trim().max(500).optional(),
 });
 export type MarkAttendanceInput = z.infer<typeof markAttendanceSchema>;
+
+/** Bulk-mark one day for many staff at once (HR). */
+export const markAttendanceBulkSchema = z.object({
+  staffIds: z.array(z.string().uuid()).min(1).max(500),
+  attendanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+  status: attendanceStatusSchema,
+  remark: z.string().trim().max(500).optional(),
+});
+export type MarkAttendanceBulkInput = z.infer<typeof markAttendanceBulkSchema>;
 
 /** Monthly summary for one staff member (staff self-view or HR). */
 export const attendanceSummarySchema = z.object({

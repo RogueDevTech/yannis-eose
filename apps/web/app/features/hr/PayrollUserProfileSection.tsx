@@ -13,6 +13,8 @@ export interface PayrollProfileValues {
   flatMonthlyAmount: string;
   /** Declared annual rent (₦) for PAYE rent relief. */
   annualRent: string;
+  /** Tax identification number (TIN). */
+  tin: string;
   reportsToUserId?: string | null;
   crmLinked?: boolean;
 }
@@ -203,6 +205,21 @@ export function PayrollUserProfileSection({
           />
           <p className="text-xs text-app-fg-muted mt-1">
             Used for rent relief (typically 20% of this amount, capped). Leave blank if none.
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-app-fg-muted mb-1">Tax ID (TIN)</label>
+          <input
+            type="text"
+            name="tin"
+            className="input"
+            disabled={disabled}
+            value={values.tin}
+            onChange={(e) => onChange({ tin: e.target.value })}
+            placeholder="e.g. 12345678-0001"
+          />
+          <p className="text-xs text-app-fg-muted mt-1">
+            Optional tax identification number.
           </p>
         </div>
       </div>

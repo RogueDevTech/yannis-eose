@@ -646,6 +646,10 @@ export {
   bulkAssignContractorsToPayRoleSchema,
   markBatchPaidExtendedSchema,
   generateBatchExtendedSchema,
+  previewSupplementaryBatchSchema,
+  generateSupplementaryBatchSchema,
+  exportPayeRemittanceSchema,
+  payrollReconciliationSchema,
   listPayslipsSchema,
   payrollRegisterSchema,
   payrollReportRangeSchema,
@@ -707,6 +711,10 @@ export type {
   GetContractorInput,
   ListContractorsInput,
   ListContractorPayoutsInput,
+  PreviewSupplementaryBatchInput,
+  GenerateSupplementaryBatchInput,
+  ExportPayeRemittanceInput,
+  PayrollReconciliationInput,
 } from './payroll';
 
 // Staff Onboarding validators
@@ -869,3 +877,6 @@ export type {
   UpdateAutomationRuleInput,
   ToggleAutomationRuleInput,
 } from './push';
+
+// Attendance (Track C)
+export * from './attendance';

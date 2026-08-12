@@ -165,6 +165,7 @@ export interface EditingUser {
   taxStatus?: string;
   flatMonthlyAmount?: string;
   annualRent?: string;
+  tin?: string;
   reportsToUserId?: string | null;
   crmLinked?: boolean;
 }
@@ -558,6 +559,7 @@ export function UserCreatePage({
     taxStatus: editingUser?.taxStatus ?? 'STANDARD_PAYE',
     flatMonthlyAmount: editingUser?.flatMonthlyAmount ?? '',
     annualRent: editingUser?.annualRent ?? '',
+    tin: editingUser?.tin ?? '',
     reportsToUserId: editingUser?.reportsToUserId ?? null,
     crmLinked: editingUser?.crmLinked ?? true,
   });
@@ -574,6 +576,7 @@ export function UserCreatePage({
       taxStatus: editingUser.taxStatus ?? prev.taxStatus,
       flatMonthlyAmount: editingUser.flatMonthlyAmount ?? prev.flatMonthlyAmount,
       annualRent: editingUser.annualRent ?? prev.annualRent,
+      tin: editingUser.tin ?? prev.tin,
       reportsToUserId: editingUser.reportsToUserId ?? prev.reportsToUserId ?? null,
       crmLinked: editingUser.crmLinked ?? prev.crmLinked,
     }));
@@ -585,6 +588,7 @@ export function UserCreatePage({
     editingUser?.taxStatus,
     editingUser?.flatMonthlyAmount,
     editingUser?.annualRent,
+    editingUser?.tin,
     editingUser?.reportsToUserId,
     editingUser?.crmLinked,
   ]);

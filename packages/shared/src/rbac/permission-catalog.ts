@@ -113,6 +113,10 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   // (e.g. a Stock Manager) see and pay batches without seeing the whole HR module.
   { code: 'payroll.batches.view', resource: 'payroll.batches', action: 'view', description: 'View payroll batches (Payroll page) without full HR read access' },
   { code: 'hr.approveAdjustment', resource: 'hr', action: 'approveAdjustment', description: 'Approve HR adjustments' },
+  // Attendance (Track C). `attendance.manage` gates the master sheet edits +
+  // per-role/per-user config; the staff self-view is open to any authed user.
+  { code: 'attendance.read', resource: 'attendance', action: 'read', description: 'View the attendance master sheet + any staff attendance' },
+  { code: 'attendance.manage', resource: 'attendance', action: 'manage', description: 'Edit attendance records + configure attendance pay rules' },
   { code: 'payroll.config.read', resource: 'payroll', action: 'config.read', description: 'View payroll config (roles, products, tax bands)' },
   { code: 'payroll.config.write', resource: 'payroll', action: 'config.write', description: 'Edit payroll config (Rule Builder, products, tax bands)' },
   { code: 'payroll.run.prepare', resource: 'payroll', action: 'run.prepare', description: 'Prepare and submit payroll pay runs' },
@@ -569,6 +573,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'hr.read',
     'hr.write',
     'hr.approveAdjustment',
+    'attendance.read',
+    'attendance.manage',
     'users.read',
     'users.create',
     'users.update',

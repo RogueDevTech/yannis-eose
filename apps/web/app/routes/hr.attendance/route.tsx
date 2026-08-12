@@ -13,7 +13,7 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { AttendancePage } from '~/features/hr/AttendancePage';
 import { PayrollConfigLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
-import type { AttendanceGridData, PayRoleConfigRow } from '~/features/hr/attendance-types';
+import type { AttendanceGridData } from '~/features/hr/attendance-types';
 
 export const meta: MetaFunction = () => [{ title: 'Attendance — Yannis EOSE' }];
 
@@ -33,28 +33,40 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const month = url.searchParams.get('month') ?? currentMonth();
   const search = url.searchParams.get('search') ?? undefined;
+  const branchId = url.searchParams.get('branchId') ?? undefined;
+  const role = url.searchParams.get('role') ?? undefined;
+  const statusesParam = url.searchParams.get('statuses') ?? '';
+  const statuses = statusesParam ? statusesParam.split(',').filter(Boolean) : [];
 
   const pageData = (async () => {
     const input: Record<string, unknown> = { month };
     if (search) input.search = search;
+    if (branchId && branchId !== 'ALL') input.branchId = branchId;
+    if (role && role !== 'ALL') input.role = role;
+    if (statuses.length) input.statuses = statuses;
     const inputEnc = encodeURIComponent(JSON.stringify(input));
-    const [gridRes, rolesRes] = await Promise.all([
-      apiRequest<unknown>(`/trpc/attendance.grid?input=${inputEnc}`, { method: 'GET', cookie }),
-      apiRequest<unknown>('/trpc/hr.listPayRoles', { method: 'GET', cookie }),
-    ]);
+    const gridRes = await apiRequest<unknown>(`/trpc/attendance.grid?input=${inputEnc}`, {
+      method: 'GET',
+      cookie,
+    });
     const grid = gridRes.ok
       ? ((gridRes.data as { result?: { data?: AttendanceGridData } })?.result?.data ?? null)
       : null;
-    const payRoles = rolesRes.ok
-      ? ((rolesRes.data as { result?: { data?: PayRoleConfigRow[] } })?.result?.data ?? [])
-      : [];
     const perms = user.permissions ?? [];
     const canManage =
       perms.includes('attendance.manage') ||
       user.role === 'SUPER_ADMIN' ||
       user.role === 'ADMIN' ||
       user.role === 'HR_MANAGER';
-    return { grid, payRoles, canManage, month, search: search ?? '' };
+    return {
+      grid,
+      canManage,
+      month,
+      search: search ?? '',
+      branchId: branchId ?? 'ALL',
+      role: role ?? 'ALL',
+      statuses,
+    };
   })();
 
   return defer({ pageData });
@@ -87,45 +99,20 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true, intent });
   }
 
-  if (intent === 'savePayRoleAttendanceConfig') {
-    const payRoleId = formData.get('payRoleId')?.toString();
-    const enabled = formData.get('enabled')?.toString() === 'true';
-    const bandsJson = formData.get('bandsJson')?.toString()?.trim();
-    let bands: unknown[] = [];
-    try {
-      if (bandsJson) {
-        const parsed: unknown = JSON.parse(bandsJson);
-        if (Array.isArray(parsed)) bands = parsed;
-      }
-    } catch {
-      return json({ error: 'Invalid absence bands' }, { status: 400 });
-    }
-    const res = await apiRequest<unknown>('/trpc/attendance.savePayRoleConfig', {
-      method: 'POST',
-      cookie,
-      body: { payRoleId, config: { enabled, bands } },
-    });
-    if (!res.ok) {
-      return json(
-        { error: extractApiErrorMessage(res.data, 'Failed to save attendance rules') },
-        { status: safeStatus(res.status) },
-      );
-    }
-    return json({ success: true, intent });
-  }
+  if (intent === 'markAttendanceBulk') {
+    const staffIds = (formData.get('staffIds')?.toString() ?? '').split(',').filter(Boolean);
+    const body: Record<string, unknown> = {
+      staffIds,
+      attendanceDate: formData.get('attendanceDate')?.toString(),
+      status: formData.get('status')?.toString(),
+    };
+    const remark = formData.get('remark')?.toString()?.trim();
+    if (remark) body.remark = remark;
 
-  if (intent === 'setUserAttendanceOverride') {
-    const staffId = formData.get('staffId')?.toString();
-    const raw = formData.get('attendanceAffectsPay')?.toString();
-    const attendanceAffectsPay = raw === 'inherit' ? null : raw === 'true';
-    const res = await apiRequest<unknown>('/trpc/attendance.setUserOverride', {
-      method: 'POST',
-      cookie,
-      body: { staffId, attendanceAffectsPay },
-    });
+    const res = await apiRequest<unknown>('/trpc/attendance.markBulk', { method: 'POST', cookie, body });
     if (!res.ok) {
       return json(
-        { error: extractApiErrorMessage(res.data, 'Failed to set override') },
+        { error: extractApiErrorMessage(res.data, 'Failed to bulk mark attendance') },
         { status: safeStatus(res.status) },
       );
     }
@@ -142,10 +129,12 @@ export default function AttendanceRoute() {
       {(data) => (
         <AttendancePage
           grid={data.grid}
-          payRoles={data.payRoles}
           canManage={data.canManage}
           month={data.month}
           search={data.search}
+          branchId={data.branchId}
+          role={data.role}
+          statuses={data.statuses}
         />
       )}
     </CachedAwait>

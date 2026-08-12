@@ -886,8 +886,12 @@ export class HrService {
       totalOrders,
       returnedCount,
       deliveryRate,
+      /** Team delivery rate for Heads (null for non-Head staff with no reportees). */
+      teamDeliveryRate: metrics?.teamDr ?? null,
       baseSalary,
       performanceBonus,
+      /** Per-line breakdown of how the performance bonus was computed. */
+      bonusBreakdown: computed?.bonusBreakdown ?? [],
       allowancesTotal,
       addOnsTotal,
       penalties,

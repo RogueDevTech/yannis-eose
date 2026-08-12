@@ -160,14 +160,40 @@ export const payeReliefSchema = z.object({
   cap: z.number().min(0).nullable().optional(),
 });
 
+/**
+ * Statutory deduction (Pension, NHIS, ...) taken off gross BEFORE PAYE.
+ * Config-driven per company group so HR can tune rates without a deploy — mirrors
+ * the reliefs pattern. `basis`:
+ *  - PERCENT_OF_MONTHLY_GROSS: `rate`% of monthly gross, per month.
+ *  - FLAT_MONTHLY: fixed `amount` per month.
+ * Optional monthly `cap`. These reduce the "net before PAYE" used by the
+ * low-income exemption AND appear on payslips / the PAYE remittance export.
+ */
+export const payeStatutoryDeductionSchema = z.object({
+  name: z.string().min(1),
+  basis: z.enum(['PERCENT_OF_MONTHLY_GROSS', 'FLAT_MONTHLY']),
+  rate: z.number().min(0).max(100).default(0),
+  amount: z.number().min(0).optional(),
+  cap: z.number().min(0).nullable().optional(),
+});
+
 export const payeBandConfigSchema = z.object({
   taxFreeThreshold: z.number().min(0),
   bands: z.array(payeBandRowSchema).min(1),
   reliefs: z.array(payeReliefSchema).default([]),
+  /** Pension / NHIS etc. taken off gross before PAYE. Empty = none. */
+  statutoryDeductions: z.array(payeStatutoryDeductionSchema).default([]),
+  /**
+   * HR low-income PAYE exemption (monthly). When gross < threshold OR
+   * net-before-PAYE < threshold, monthly PAYE is 0. HR policy: ₦66,667
+   * (≈ the ₦800k/yr tax-free floor / 12). Omit/0 disables the exemption.
+   */
+  lowIncomeExemptionMonthly: z.number().min(0).default(0),
 });
 
 export type PayeBandConfig = z.infer<typeof payeBandConfigSchema>;
 export type PayeReliefConfig = z.infer<typeof payeReliefSchema>;
+export type PayeStatutoryDeductionConfig = z.infer<typeof payeStatutoryDeductionSchema>;
 
 export const saveTaxBandConfigSchema = z.object({
   id: z.string().uuid().optional(),
@@ -175,6 +201,8 @@ export const saveTaxBandConfigSchema = z.object({
   taxFreeThreshold: z.number().min(0),
   bands: z.array(payeBandRowSchema).min(1),
   reliefs: z.array(payeReliefSchema).default([]),
+  statutoryDeductions: z.array(payeStatutoryDeductionSchema).default([]),
+  lowIncomeExemptionMonthly: z.number().min(0).default(0),
   effectiveFrom: z.string().datetime().or(z.string().date()),
 });
 
@@ -318,6 +346,8 @@ export const updatePayrollProfileSchema = z.object({
   flatMonthlyAmount: z.coerce.number().min(0).optional(),
   /** Declared annual rent (₦) for PERCENT_OF_ANNUAL_RENT relief. */
   annualRent: z.coerce.number().min(0).nullable().optional(),
+  /** Tax Identification Number (TIN) for the PAYE remittance report. */
+  tin: z.string().trim().max(50).nullable().optional(),
 });
 
 /**
@@ -355,6 +385,49 @@ export const markBatchPaidExtendedSchema = z.object({
   disbursementDate: z.string().date().optional(),
   proofOfPaymentUrl: z.string().url().optional(),
 });
+
+// ── Supplementary payroll (Track A) ──────────────────────────────────────────
+// Preview which staff were UNDERPAID in an already-settled original period, and
+// how much salary + PAYE is still owed to complete it.
+export const previewSupplementaryBatchSchema = z.object({
+  /** The ORIGINAL month being completed (YYYY-MM-01). */
+  periodMonth: z.string().regex(/^\d{4}-\d{2}-01$/),
+  /** Optional branch scope; omit for org-wide (hr.write only). */
+  branchId: z.string().uuid().nullable().optional(),
+});
+
+// Generate the supplementary batch for the confirmed set of affected staff.
+export const generateSupplementaryBatchSchema = z.object({
+  periodMonth: z.string().regex(/^\d{4}-\d{2}-01$/),
+  branchId: z.string().uuid().nullable().optional(),
+  /** Staff the HR user confirmed to include. Empty = all detected as underpaid. */
+  staffIds: z.array(z.string().uuid()).optional(),
+  runLabel: z.string().max(200).optional(),
+});
+
+export type PreviewSupplementaryBatchInput = z.infer<typeof previewSupplementaryBatchSchema>;
+export type GenerateSupplementaryBatchInput = z.infer<typeof generateSupplementaryBatchSchema>;
+
+// PAYE Remittance Export (Track D#5) — the schedule submitted to the Revenue Office.
+export const exportPayeRemittanceSchema = z
+  .object({
+    batchId: z.string().uuid().optional(),
+    periodMonth: z.string().regex(/^\d{4}-\d{2}-01$/).optional(),
+    branchId: z.string().uuid().nullable().optional(),
+  })
+  .refine((v) => v.batchId || v.periodMonth, {
+    message: 'Provide a batchId or a periodMonth.',
+  });
+
+export type ExportPayeRemittanceInput = z.infer<typeof exportPayeRemittanceSchema>;
+
+// Payroll reconciliation report (Track B) — correct vs paid for a settled month.
+export const payrollReconciliationSchema = z.object({
+  periodMonth: z.string().regex(/^\d{4}-\d{2}-01$/),
+  branchId: z.string().uuid().nullable().optional(),
+});
+
+export type PayrollReconciliationInput = z.infer<typeof payrollReconciliationSchema>;
 
 export const generateBatchExtendedSchema = z.object({
   branchId: z.string().uuid(),

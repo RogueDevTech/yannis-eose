@@ -77,12 +77,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const inputEnc = encodeURIComponent(JSON.stringify(input));
     const rangeEnc = encodeURIComponent(JSON.stringify(rangeInput));
 
-    const [registerRes, costBranchRes, costRoleRes, trendRes, branchesRes] = await Promise.all([
+    // PAYE Remittance export needs a concrete month. Only fetch it when a
+    // single month is selected (fromMonth is a valid 'YYYY-MM-01').
+    const canExportRemittance = /^\d{4}-\d{2}-01$/.test(fromMonth);
+    const remittanceInput: Record<string, string> = { periodMonth: fromMonth };
+    if (input.branchId) remittanceInput.branchId = input.branchId;
+    const remittanceEnc = encodeURIComponent(JSON.stringify(remittanceInput));
+
+    // Reconciliation export needs a concrete month, same as PAYE Remittance.
+    const canExportReconciliation = /^\d{4}-\d{2}-01$/.test(fromMonth);
+    const reconciliationInput: Record<string, string> = { periodMonth: fromMonth };
+    if (input.branchId) reconciliationInput.branchId = input.branchId;
+    const reconciliationEnc = encodeURIComponent(JSON.stringify(reconciliationInput));
+
+    const [registerRes, costBranchRes, costRoleRes, trendRes, branchesRes, remittanceRes, reconciliationRes] = await Promise.all([
       apiRequest<unknown>(`/trpc/hr.payrollRegister?input=${inputEnc}`, { method: 'GET', cookie }),
       apiRequest<unknown>(`/trpc/hr.payrollCostByBranch?input=${rangeEnc}`, { method: 'GET', cookie }),
       apiRequest<unknown>(`/trpc/hr.payrollCostByRoleCategory?input=${rangeEnc}`, { method: 'GET', cookie }),
       apiRequest<unknown>(`/trpc/hr.payrollTrend?input=${rangeEnc}`, { method: 'GET', cookie }),
       apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
+      canExportRemittance
+        ? apiRequest<unknown>(`/trpc/hr.exportPayeRemittance?input=${remittanceEnc}`, { method: 'GET', cookie })
+        : Promise.resolve(null),
+      canExportReconciliation
+        ? apiRequest<unknown>(`/trpc/hr.payrollReconciliation?input=${reconciliationEnc}`, { method: 'GET', cookie })
+        : Promise.resolve(null),
     ]);
 
     const rows = registerRes.ok
@@ -101,6 +120,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
           : []) ?? []) as PayrollReportsPageProps['costByRole'],
       trend:
         ((trendRes.ok ? (trendRes.data as { result?: { data?: unknown[] } })?.result?.data : []) ?? []) as PayrollReportsPageProps['trend'],
+      payeRemittance:
+        (remittanceRes && remittanceRes.ok
+          ? ((remittanceRes.data as { result?: { data?: PayrollReportsPageProps['payeRemittance'] } })?.result?.data ?? null)
+          : null) as PayrollReportsPageProps['payeRemittance'],
+      reconciliation:
+        (reconciliationRes && reconciliationRes.ok
+          ? ((reconciliationRes.data as { result?: { data?: PayrollReportsPageProps['reconciliation'] } })?.result?.data ?? null)
+          : null) as PayrollReportsPageProps['reconciliation'],
       branches: (branchesRes.ok
         ? ((branchesRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? [])
         : []),

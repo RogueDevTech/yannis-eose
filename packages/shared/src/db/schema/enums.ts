@@ -333,12 +333,27 @@ export const payrollBatchScopeTypeEnum = pgEnum('payroll_batch_scope_type', [
   // Null-scope batches (branch_id / department NULL). Migration 0287.
   'CONTRACTORS',
   'ALL',
+  // Supplementary batch — pays the outstanding balance (salary + remaining PAYE)
+  // to complete an ALREADY-PAID original period. References that period. Mig 0308.
+  'SUPPLEMENTARY',
 ]);
 
 export const payrollPayslipLineStatusEnum = pgEnum('payroll_payslip_line_status', [
   'OK',
   'NEEDS_ATTENTION',
   'MANUALLY_OVERRIDDEN',
+]);
+
+/**
+ * Daily attendance status (Track C). Only ABSENT affects pay; OFF_DUTY and SICK
+ * are recorded but never reduce base salary. A day with no record defaults to
+ * PRESENT (HR marks exceptions only) — see attendance_records.
+ */
+export const attendanceStatusEnum = pgEnum('attendance_status', [
+  'PRESENT',
+  'ABSENT',
+  'OFF_DUTY',
+  'SICK',
 ]);
 
 export const recordStatusEnum = pgEnum('record_status', [

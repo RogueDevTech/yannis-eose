@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { Button } from '~/components/ui/button';
@@ -59,6 +60,32 @@ interface PayrollPreview {
   staffCount: number;
   totalAmount: number;
   rows: PreviewRow[];
+  /** Staff with no resolvable salary config (would generate at ₦0 base). */
+  missingConfigStaff?: Array<{ staffId: string; staffName: string; staffRole: string }>;
+}
+
+/** One underpaid staff member surfaced by a supplementary (Track A) preview. */
+interface SupplementaryRow {
+  staffId: string;
+  name: string;
+  role: string;
+  expectedGross: number;
+  paidGross: number;
+  grossBalance: number;
+  correctPaye: number;
+  paidPaye: number;
+  remainingPaye: number;
+  correctStatutory: number;
+  paidStatutory: number;
+  remainingStatutory: number;
+  netPayable: number;
+}
+
+interface SupplementaryPreview {
+  periodMonth: string;
+  affected: SupplementaryRow[];
+  totalNetPayable: number;
+  totalRemainingPaye: number;
 }
 
 /** Grand-total preview across a whole selection (fan-out / contractors / all). */
@@ -221,9 +248,16 @@ export function PayrollGeneratePage({ branches, viewer, unassignedStaffCount = 0
   const fetcher = useFetcher();
   const previewFetcher = useFetcher<{ success?: boolean; preview?: PayrollPreview | null; error?: string }>();
   const selectionFetcher = useFetcher<{ success?: boolean; selectionPreview?: SelectionPreview | null; error?: string }>();
+  const supplementaryFetcher = useFetcher<{ success?: boolean; supplementaryPreview?: SupplementaryPreview | null; error?: string }>();
   const surface = useFetcherActionSurface(fetcher);
   const previewSurface = useFetcherActionSurface(previewFetcher);
   const selectionSurface = useFetcherActionSurface(selectionFetcher);
+  const supplementarySurface = useFetcherActionSurface(supplementaryFetcher);
+
+  /** Standard = normal draft run. Supplementary = complete an underpaid settled month. */
+  const [mode, setMode] = useState<'STANDARD' | 'SUPPLEMENTARY'>('STANDARD');
+  const [supplementaryPreview, setSupplementaryPreview] = useState<SupplementaryPreview | null>(null);
+  const [supplementarySelectedIds, setSupplementarySelectedIds] = useState<Set<string>>(new Set());
 
   const firstNow = new Date();
   const [monthMm, setMonthMm] = useState(() => String(firstNow.getMonth() + 1).padStart(2, '0'));
@@ -375,6 +409,17 @@ export function PayrollGeneratePage({ branches, viewer, unassignedStaffCount = 0
       if (d.selectionPreview) setSelectionPreview(d.selectionPreview);
     }
   }, [selectionFetcher.data]);
+
+  useEffect(() => {
+    if (supplementaryFetcher.data && typeof supplementaryFetcher.data === 'object') {
+      const d = supplementaryFetcher.data as { supplementaryPreview?: SupplementaryPreview };
+      if (d.supplementaryPreview) {
+        setSupplementaryPreview(d.supplementaryPreview);
+        // Default: every affected member selected.
+        setSupplementarySelectedIds(new Set(d.supplementaryPreview.affected.map((r) => r.staffId)));
+      }
+    }
+  }, [supplementaryFetcher.data]);
 
   useEffect(() => {
     if (previewFetcher.data && (previewFetcher.data as { error?: string }).error) {
@@ -546,6 +591,68 @@ export function PayrollGeneratePage({ branches, viewer, unassignedStaffCount = 0
   // CONTRACTORS pins to a single branch only when exactly one is selected.
   const contractorsBranchId = branchIds.length === 1 ? branchIds[0] : '';
 
+  // ── Supplementary (Track A) ──────────────────────────────────────────────
+  // Supplementary scope: complete an already-settled month for underpaid staff.
+  // Reuses the same Month/Year picker; branch is optional (org-wide if omitted).
+  const supplementaryPeriodMonth = periodMonth.slice(0, 10);
+  // Optional branch pin: reuse the first selected real branch, else org-wide.
+  const supplementaryBranchId = isBranchScoped
+    ? viewer.currentBranchId ?? ''
+    : branchIds.length === 1
+      ? branchIds[0] ?? ''
+      : '';
+  const supplementaryPreviewing = supplementaryFetcher.state === 'submitting';
+  const supplementaryGenerating =
+    fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'generateSupplementaryBatch';
+  const supplementaryAllSelected =
+    !!supplementaryPreview &&
+    supplementaryPreview.affected.length > 0 &&
+    supplementaryPreview.affected.every((r) => supplementarySelectedIds.has(r.staffId));
+
+  const runSupplementaryPreview = () => {
+    setSupplementaryPreview(null);
+    setSupplementarySelectedIds(new Set());
+    const fd = new FormData();
+    fd.set('intent', 'previewSupplementaryBatch');
+    fd.set('periodMonth', supplementaryPeriodMonth);
+    if (supplementaryBranchId) fd.set('branchId', supplementaryBranchId);
+    supplementaryFetcher.submit(fd, { method: 'post', action: '/hr/payroll/generate' });
+  };
+
+  const supplementaryColumns: CompactTableColumn<SupplementaryRow>[] = useMemo(
+    () => [
+      {
+        key: 'member',
+        header: 'Member',
+        render: (r) => (
+          <div>
+            <p className="font-medium text-app-fg">{r.name}</p>
+            <RoleBadge role={r.role} size="sm" />
+          </div>
+        ),
+      },
+      { key: 'expectedGross', header: 'Expected gross', align: 'right', nowrap: true, render: (r) => <NairaPrice amount={r.expectedGross} /> },
+      { key: 'paidGross', header: 'Paid gross', align: 'right', nowrap: true, render: (r) => <NairaPrice amount={r.paidGross} /> },
+      {
+        key: 'grossBalance', header: 'Gross balance', align: 'right', nowrap: true,
+        cellClassName: 'text-success-600 dark:text-success-400',
+        render: (r) => <NairaPrice amount={r.grossBalance} />,
+      },
+      { key: 'correctPaye', header: 'Correct PAYE', align: 'right', nowrap: true, render: (r) => <NairaPrice amount={r.correctPaye} /> },
+      { key: 'paidPaye', header: 'PAYE deducted', align: 'right', nowrap: true, render: (r) => <NairaPrice amount={r.paidPaye} /> },
+      {
+        key: 'remainingPaye', header: 'Remaining PAYE', align: 'right', nowrap: true,
+        cellClassName: 'text-danger-600 dark:text-danger-400',
+        render: (r) => (Number(r.remainingPaye) > 0 ? <>−<NairaPrice amount={r.remainingPaye} /></> : 'N/A'),
+      },
+      {
+        key: 'netPayable', header: 'Net supplementary', align: 'right', nowrap: true,
+        render: (r) => (<span className="font-semibold"><NairaPrice amount={r.netPayable} /></span>),
+      },
+    ],
+    [],
+  );
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -554,7 +661,33 @@ export function PayrollGeneratePage({ branches, viewer, unassignedStaffCount = 0
         backTo="/hr/payroll"
       />
 
-      {(previewError ?? previewActionError) && (
+      {/* Mode switch: standard draft run vs supplementary (complete an underpaid,
+          already-settled month). */}
+      <div className="inline-flex rounded-lg border border-app-border bg-app-canvas p-0.5">
+        {(
+          [
+            { value: 'STANDARD' as const, label: 'Standard' },
+            { value: 'SUPPLEMENTARY' as const, label: 'Supplementary' },
+          ]
+        ).map((m) => (
+          <button
+            key={m.value}
+            type="button"
+            onClick={() => setMode(m.value)}
+            className={[
+              'px-4 h-9 rounded-md text-sm font-medium transition-colors',
+              mode === m.value
+                ? 'bg-brand-500 text-white'
+                : 'text-app-fg-muted hover:text-app-fg',
+            ].join(' ')}
+            aria-pressed={mode === m.value}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'STANDARD' && (previewError ?? previewActionError) && (
         <PageNotification
           variant="error"
           title="Preview failed"
@@ -569,7 +702,7 @@ export function PayrollGeneratePage({ branches, viewer, unassignedStaffCount = 0
         />
       )}
 
-      {(surface.errorMatchingIntent(['generateBatch', 'generateBatchesBulk']) ?? generateActionError) && (
+      {mode === 'STANDARD' && (surface.errorMatchingIntent(['generateBatch', 'generateBatchesBulk']) ?? generateActionError) && (
         <PageNotification
           variant="error"
           title="Could not generate"
@@ -585,6 +718,38 @@ export function PayrollGeneratePage({ branches, viewer, unassignedStaffCount = 0
         />
       )}
 
+      {mode === 'SUPPLEMENTARY' && (
+        <SupplementaryGenerate
+          formatMonthLabel={formatMonthLabel}
+          monthMm={monthMm}
+          yearYyyy={yearYyyy}
+          setMonthMm={setMonthMm}
+          setYearYyyy={setYearYyyy}
+          yearOptions={yearOptions}
+          isBranchScoped={isBranchScoped}
+          branchOptions={branchOptions.filter((o) => o.value !== NO_BRANCH_SENTINEL)}
+          branchIds={branchIds}
+          setBranchIds={setBranchIds}
+          supplementaryBranchId={supplementaryBranchId}
+          runLabel={runLabel}
+          setRunLabel={setRunLabel}
+          columns={supplementaryColumns}
+          preview={supplementaryPreview}
+          setPreview={setSupplementaryPreview}
+          selectedIds={supplementarySelectedIds}
+          setSelectedIds={setSupplementarySelectedIds}
+          allSelected={supplementaryAllSelected}
+          previewing={supplementaryPreviewing}
+          generating={supplementaryGenerating}
+          onPreview={runSupplementaryPreview}
+          previewError={supplementarySurface.errorMatchingIntent('previewSupplementaryBatch')}
+          generateError={surface.errorMatchingIntent('generateSupplementaryBatch')}
+          periodMonth={supplementaryPeriodMonth}
+          fetcher={fetcher}
+        />
+      )}
+
+      {mode === 'STANDARD' && (
       <div className="card space-y-5">
         <fetcher.Form method="post" id="payroll-generate-form" className="space-y-5">
           <input
@@ -906,6 +1071,28 @@ export function PayrollGeneratePage({ branches, viewer, unassignedStaffCount = 0
               {isSingleSlot ? (
                 <ModalFetcherInlineError message={previewSurface.errorMatchingIntent('previewBatch')} />
               ) : null}
+              {isSingleSlot && preview && (preview.missingConfigStaff?.length ?? 0) > 0 ? (
+                <div className="rounded-md border border-warning-300 dark:border-warning-700 bg-warning-50 dark:bg-warning-900/20 px-3 py-2 text-warning-800 dark:text-warning-200">
+                  <p className="text-xs font-semibold">
+                    {preview.missingConfigStaff!.length}{' '}
+                    {preview.missingConfigStaff!.length === 1 ? 'staff member has' : 'staff have'} no
+                    salary config: they will generate at ₦0 base. Set their pay role or flat salary, then
+                    preview again.
+                  </p>
+                  <ul className="mt-1 space-y-0.5 text-xs">
+                    {preview.missingConfigStaff!.slice(0, 8).map((s) => (
+                      <li key={s.staffId} className="truncate">
+                        {s.staffName} ({s.staffRole})
+                      </li>
+                    ))}
+                    {preview.missingConfigStaff!.length > 8 ? (
+                      <li className="text-warning-700 dark:text-warning-300">
+                        and {preview.missingConfigStaff!.length - 8} more
+                      </li>
+                    ) : null}
+                  </ul>
+                </div>
+              ) : null}
               {isSingleSlot && preview ? (
                 preview.rows.length > 0 ? (
                   <CompactTable
@@ -956,6 +1143,7 @@ export function PayrollGeneratePage({ branches, viewer, unassignedStaffCount = 0
           )}
         </fetcher.Form>
       </div>
+      )}
 
       <ConfirmActionModal
         open={showGenerateConfirm}
@@ -1009,6 +1197,263 @@ export function PayrollGeneratePage({ branches, viewer, unassignedStaffCount = 0
           setShowGenerateConfirm(false);
         }}
       />
+    </div>
+  );
+}
+
+/**
+ * Supplementary (Track A) generate section. Lists staff who were UNDERPAID in an
+ * already-settled month, lets HR deselect members, and generates a DRAFT
+ * supplementary batch that completes the shortfall. Reuses the page's Month/Year
+ * picker, branch picker, CompactTable, and NairaPrice components.
+ */
+function SupplementaryGenerate({
+  formatMonthLabel,
+  monthMm,
+  yearYyyy,
+  setMonthMm,
+  setYearYyyy,
+  yearOptions,
+  isBranchScoped,
+  branchOptions,
+  branchIds,
+  setBranchIds,
+  supplementaryBranchId,
+  runLabel,
+  setRunLabel,
+  columns,
+  preview,
+  setPreview,
+  selectedIds,
+  setSelectedIds,
+  allSelected,
+  previewing,
+  generating,
+  onPreview,
+  previewError,
+  generateError,
+  periodMonth,
+  fetcher,
+}: {
+  formatMonthLabel: string;
+  monthMm: string;
+  yearYyyy: string;
+  setMonthMm: (v: string) => void;
+  setYearYyyy: (v: string) => void;
+  yearOptions: Array<{ value: string; label: string }>;
+  isBranchScoped: boolean;
+  branchOptions: Array<{ value: string; label: string }>;
+  branchIds: string[];
+  setBranchIds: (next: string[]) => void;
+  supplementaryBranchId: string;
+  runLabel: string;
+  setRunLabel: (v: string) => void;
+  columns: CompactTableColumn<SupplementaryRow>[];
+  preview: SupplementaryPreview | null;
+  setPreview: Dispatch<SetStateAction<SupplementaryPreview | null>>;
+  selectedIds: Set<string>;
+  setSelectedIds: Dispatch<SetStateAction<Set<string>>>;
+  allSelected: boolean;
+  previewing: boolean;
+  generating: boolean;
+  onPreview: () => void;
+  previewError: string | null;
+  generateError: string | null;
+  periodMonth: string;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const affected = preview?.affected ?? [];
+  const selectedCount = affected.filter((r) => selectedIds.has(r.staffId)).length;
+  const canGenerate = !generating && affected.length > 0 && selectedCount > 0;
+  const [dismissedError, setDismissedError] = useState(false);
+  const shownError = dismissedError ? null : generateError || previewError;
+  useEffect(() => {
+    if (generateError || previewError) setDismissedError(false);
+  }, [generateError, previewError]);
+
+  const toggleOne = (rowId: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(rowId);
+      else next.delete(rowId);
+      return next;
+    });
+  };
+  const toggleAll = (checked: boolean) => {
+    setSelectedIds(checked ? new Set(affected.map((r) => r.staffId)) : new Set());
+  };
+
+  const submitGenerate = () => {
+    const fd = new FormData();
+    fd.set('intent', 'generateSupplementaryBatch');
+    fd.set('periodMonth', periodMonth);
+    if (supplementaryBranchId) fd.set('branchId', supplementaryBranchId);
+    // Omit staffIds when all are selected — the backend then covers everyone.
+    if (!allSelected) {
+      for (const r of affected) {
+        if (selectedIds.has(r.staffId)) fd.append('staffIds', r.staffId);
+      }
+    }
+    if (runLabel) fd.set('runLabel', runLabel);
+    invalidateCachedLoader('/hr/payroll');
+    fetcher.submit(fd, { method: 'post', action: '/hr/payroll/generate' });
+  };
+
+  return (
+    <div className="card space-y-5">
+      <div>
+        <h3 className="text-sm font-semibold text-app-fg">Supplementary run</h3>
+        <p className="text-xs text-app-fg-muted mt-0.5">
+          Complete an already-settled month for staff who were underpaid. Preview the shortfall, then
+          generate a draft batch.
+        </p>
+      </div>
+
+      {shownError && (
+        <PageNotification
+          variant="error"
+          title={generateError ? 'Could not generate' : 'Preview failed'}
+          message={typeof shownError === 'string' ? shownError : ''}
+          onDismiss={() => setDismissedError(true)}
+        />
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 items-end">
+        {!isBranchScoped ? (
+          <FormSelect
+            label="Branch (optional)"
+            name="_supBranchUi"
+            value={branchIds.length === 1 ? branchIds[0] : ''}
+            onChange={(e) => {
+              setBranchIds(e.target.value ? [e.target.value] : []);
+              setPreview(null);
+            }}
+            options={[{ value: '', label: 'All branches' }, ...branchOptions]}
+          />
+        ) : null}
+        <FormSelect
+          label="Month"
+          name="_supMonthUi"
+          required
+          options={MONTH_OPTIONS}
+          value={monthMm}
+          onChange={(e) => {
+            setMonthMm(e.target.value);
+            setPreview(null);
+          }}
+        />
+        <FormSelect
+          label="Year"
+          name="_supYearUi"
+          required
+          options={yearOptions}
+          value={yearYyyy}
+          onChange={(e) => {
+            setYearYyyy(e.target.value);
+            setPreview(null);
+          }}
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={previewing}
+          loading={previewing}
+          loadingText="Previewing…"
+          className="h-10 md:h-9 w-full"
+          onClick={onPreview}
+        >
+          Preview
+        </Button>
+      </div>
+
+      {preview ? (
+        affected.length > 0 ? (
+          <div className="space-y-3">
+            {/* Summary strip: totals from the preview. */}
+            <div className="rounded-md border border-app-border bg-app-hover px-3 py-2.5 text-sm text-app-fg-muted">
+              <span className="font-medium text-app-fg tabular-nums">{selectedCount}</span> of{' '}
+              <span className="font-medium text-app-fg tabular-nums">{affected.length}</span> underpaid{' '}
+              {affected.length === 1 ? 'member' : 'members'} selected for{' '}
+              <span className="font-medium text-app-fg">{formatMonthLabel}</span>
+              {' · '}
+              Net payable:{' '}
+              <span className="font-semibold text-app-fg tabular-nums">
+                <NairaPrice amount={preview.totalNetPayable} />
+              </span>
+              {' · '}
+              Remaining PAYE:{' '}
+              <span className="font-semibold text-app-fg tabular-nums">
+                <NairaPrice amount={preview.totalRemainingPaye} />
+              </span>
+            </div>
+
+            <CompactTable
+              withCard={false}
+              columns={columns}
+              rows={affected}
+              rowKey={(r) => r.staffId}
+              selection={{
+                selectedIds,
+                onToggle: toggleOne,
+                onToggleAll: toggleAll,
+                getRowId: (r) => r.staffId,
+              }}
+              renderMobileCard={(r, _i, { rowSelection }) => (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {rowSelection}
+                      <p className="text-sm font-semibold text-app-fg leading-snug truncate">{r.name}</p>
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold text-app-fg tabular-nums">
+                      <NairaPrice amount={r.netPayable} />
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <RoleBadge role={r.role} size="sm" />
+                  </div>
+                  <p className="text-xs text-app-fg-muted tabular-nums">
+                    Balance <NairaPrice amount={r.grossBalance} />
+                    {Number(r.remainingPaye) > 0 ? (
+                      <>
+                        {' · '}
+                        <span className="text-danger-600 dark:text-danger-400">
+                          PAYE −<NairaPrice amount={r.remainingPaye} />
+                        </span>
+                      </>
+                    ) : null}
+                  </p>
+                </div>
+              )}
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+              <TextInput
+                label="Run label (optional)"
+                name="_supRunLabelUi"
+                value={runLabel}
+                onChange={(e) => setRunLabel(e.target.value)}
+                placeholder="e.g. April 2026 supplementary"
+              />
+              <Button
+                type="button"
+                variant="primary"
+                disabled={!canGenerate}
+                loading={generating}
+                loadingText="Generating…"
+                className="h-10 md:h-9 w-full"
+                onClick={submitGenerate}
+              >
+                Generate supplementary batch
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-app-fg-muted rounded-md border border-app-border bg-app-hover px-3 py-2.5">
+            No underpaid staff found for this period.
+          </p>
+        )
+      ) : null}
     </div>
   );
 }

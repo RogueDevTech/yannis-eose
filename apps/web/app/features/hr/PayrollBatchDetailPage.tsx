@@ -366,6 +366,22 @@ export function PayoutDetailSections({
     if (!p || !p.periodDays || p.activeDays >= p.periodDays) return null;
     return p;
   })();
+  // Supplementary (Track A) lines carry a `.supplementary` block that records the
+  // shortfall being completed from an already-settled month.
+  const supplementary = (() => {
+    const snap = payout.metricsSnapshot as {
+      supplementary?: {
+        referencesPeriod?: string;
+        expectedGross?: number | string;
+        paidGross?: number | string;
+        grossBalance?: number | string;
+        correctPaye?: number | string;
+        paidPaye?: number | string;
+        remainingPaye?: number | string;
+      };
+    } | null;
+    return snap?.supplementary ?? null;
+  })();
   const hasBank =
     !!payout.payoutBankName ||
     !!payout.payoutBankCode ||
@@ -550,6 +566,50 @@ export function PayoutDetailSections({
           </div>
         </div>
       </div>
+
+      {supplementary ? (
+        <div className="card space-y-3 border-brand-200 dark:border-brand-800">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
+            Supplementary
+            {supplementary.referencesPeriod
+              ? `: completing ${formatMonth(supplementary.referencesPeriod)}`
+              : ''}
+          </h4>
+          <p className="text-2xs text-app-fg-muted">
+            This payout tops up an already-settled month. It pays the balance below, not a fresh salary.
+          </p>
+          <ul className="space-y-2.5 text-sm">
+            {(
+              [
+                { label: 'Expected gross', value: Number(supplementary.expectedGross ?? 0) },
+                { label: 'Already paid gross', value: Number(supplementary.paidGross ?? 0) },
+              ]
+            ).map((l) => (
+              <li key={l.label} className="flex items-baseline justify-between gap-3">
+                <span className="text-app-fg-muted">{l.label}</span>
+                <span className="tabular-nums font-medium text-app-fg">
+                  <NairaPrice amount={l.value} />
+                </span>
+              </li>
+            ))}
+            <li className="flex items-baseline justify-between gap-3 border-t border-app-border pt-2.5">
+              <span className="font-semibold text-app-fg">Gross balance</span>
+              <span className="tabular-nums font-semibold text-success-600 dark:text-success-400">
+                <NairaPrice amount={Number(supplementary.grossBalance ?? 0)} />
+              </span>
+            </li>
+            {Number(supplementary.remainingPaye ?? 0) > 0 ? (
+              <li className="flex items-baseline justify-between gap-3">
+                <span className="text-app-fg-muted">Remaining PAYE</span>
+                <span className="tabular-nums font-medium text-danger-600 dark:text-danger-400">
+                  {'−'}
+                  <NairaPrice amount={Number(supplementary.remainingPaye)} />
+                </span>
+              </li>
+            ) : null}
+          </ul>
+        </div>
+      ) : null}
 
       {adjustments.length > 0 ? (
         <div className="card space-y-3">
