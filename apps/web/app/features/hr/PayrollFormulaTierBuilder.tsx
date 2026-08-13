@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { FormSelect } from '~/components/ui/form-select';
@@ -172,6 +172,11 @@ export interface FormulaPreviewResult {
     baseSalary: number;
     performanceBonus: number;
     grossBeforeAdjustments: number;
+    /** Per-line explanation of how the bonus was reached (which tier + math). */
+    bonusBreakdown?: Array<{ label: string; amount: number; productId?: string; productName?: string }>;
+    deliveryRate?: number;
+    teamDeliveryRate?: number;
+    cpa?: number | null;
   };
   payePreview: { monthlyPaye: number; employeePaye: number };
 }
@@ -248,6 +253,18 @@ export function PayrollFormulaTierBuilder({
     return out;
   }, [flatBaseSalary, baseTiers, bonusTiers, penaltyPerReturn]);
 
+  const samples = useMemo<FormulaPreviewSamples>(
+    () => ({
+      individualDr: Number(sampleDr) || 0,
+      teamDr: Number(sampleTeamDr) || 0,
+      cpa: Number(sampleCpa) || 0,
+      deliveredCount: Number(sampleDelivered) || 0,
+      returnedCount: Number(sampleReturned) || 0,
+      targetMet: sampleTargetMet,
+    }),
+    [sampleDr, sampleTeamDr, sampleCpa, sampleDelivered, sampleReturned, sampleTargetMet],
+  );
+
   /** Which sample inputs to show: driven only by metrics/kinds currently on the form. */
   const sampleFields = useMemo(() => {
     // Include both each tier's primary metric and any AND extra-condition metrics,
@@ -277,6 +294,18 @@ export function PayrollFormulaTierBuilder({
     bonusTiers.length > 0 ||
     Number(flatBaseSalary) > 0 ||
     Number(penaltyPerReturn) > 0;
+
+  // Live preview: recompute automatically (debounced) whenever the formula or the
+  // sample inputs change, so HR never sees a stale/fixed bonus. The manual
+  // "Preview" button remains for an explicit refresh. onPreview is stable
+  // (useCallback in the parent) so it's safe in the dep array.
+  const onPreviewRef = useRef(onPreview);
+  onPreviewRef.current = onPreview;
+  useEffect(() => {
+    if (!showSamplePreview) return;
+    const t = setTimeout(() => onPreviewRef.current(formula, samples), 350);
+    return () => clearTimeout(t);
+  }, [formula, samples, showSamplePreview]);
 
   const gapWarning = useMemo(() => {
     const drTiers = baseTiers.filter((t) => t.metric === 'INDIVIDUAL_DR').sort((a, b) => a.threshold - b.threshold);
@@ -628,44 +657,66 @@ export function PayrollFormulaTierBuilder({
             size="sm"
             loading={previewLoading}
             loadingText="Previewing…"
-            onClick={() =>
-              onPreview(formula, {
-                individualDr: Number(sampleDr) || 0,
-                teamDr: Number(sampleTeamDr) || 0,
-                cpa: Number(sampleCpa) || 0,
-                deliveredCount: Number(sampleDelivered) || 0,
-                returnedCount: Number(sampleReturned) || 0,
-                targetMet: sampleTargetMet,
-              })
-            }
+            onClick={() => onPreview(formula, samples)}
           >
-            Preview against sample metrics
+            Refresh preview
           </Button>
-          {previewResult ? (
-            <div className="text-sm text-app-fg-muted space-y-1">
-              <p>
-                Base: <NairaPrice amount={previewResult.formulaResult.baseSalary} /> · Bonus:{' '}
-                <NairaPrice amount={previewResult.formulaResult.performanceBonus} /> · Gross:{' '}
-                <NairaPrice amount={previewResult.formulaResult.grossBeforeAdjustments} />
-              </p>
-              <p>
-                Est. PAYE: <NairaPrice amount={previewResult.payePreview.employeePaye} /> · Net:{' '}
-                <NairaPrice
-                  amount={
-                    previewResult.formulaResult.grossBeforeAdjustments -
-                    previewResult.payePreview.employeePaye
-                  }
-                />
-              </p>
-              <p className="font-semibold text-app-fg pt-1 border-t border-app-border">
-                Total payout:{' '}
-                <NairaPrice
-                  amount={
-                    previewResult.formulaResult.grossBeforeAdjustments -
-                    previewResult.payePreview.employeePaye
-                  }
-                />
-              </p>
+          {/* Insufficient data: a PER_ORDER tier needs a delivered-order count. */}
+          {bonusTiers.some((t) => t.kind === 'PER_ORDER') && samples.deliveredCount <= 0 ? (
+            <p className="text-sm text-warning-700 dark:text-warning-400">
+              Insufficient data to calculate bonus: a per-order tier is configured but Sample Delivered Orders is 0.
+            </p>
+          ) : previewResult ? (
+            <div className={`space-y-2 text-sm transition-opacity ${previewLoading ? 'opacity-50' : ''}`}>
+              {/* Performance-bonus explanation: which tier matched + the math. */}
+              <div className="rounded-md border border-app-border bg-app-hover/40 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Performance bonus</p>
+                {previewResult.formulaResult.bonusBreakdown?.length ? (
+                  <ul className="mt-1.5 space-y-1">
+                    {previewResult.formulaResult.bonusBreakdown.map((line, i) => (
+                      <li key={i} className="flex items-center justify-between gap-3 text-app-fg">
+                        <span className="min-w-0 truncate text-app-fg-muted">{line.label}</span>
+                        <span className="shrink-0 tabular-nums"><NairaPrice amount={line.amount} /></span>
+                      </li>
+                    ))}
+                    <li className="flex items-center justify-between gap-3 border-t border-app-border pt-1 font-semibold text-app-fg">
+                      <span>Total bonus</span>
+                      <span className="tabular-nums"><NairaPrice amount={previewResult.formulaResult.performanceBonus} /></span>
+                    </li>
+                  </ul>
+                ) : (
+                  <p className="mt-1 text-app-fg-muted">
+                    No bonus tier matched these sample metrics: bonus is{' '}
+                    <NairaPrice amount={previewResult.formulaResult.performanceBonus} />.
+                  </p>
+                )}
+              </div>
+
+              <div className="text-app-fg-muted space-y-1">
+                <p>
+                  Base: <NairaPrice amount={previewResult.formulaResult.baseSalary} /> · Bonus:{' '}
+                  <NairaPrice amount={previewResult.formulaResult.performanceBonus} /> · Gross:{' '}
+                  <NairaPrice amount={previewResult.formulaResult.grossBeforeAdjustments} />
+                </p>
+                <p>
+                  Est. PAYE: <NairaPrice amount={previewResult.payePreview.employeePaye} /> · Net:{' '}
+                  <NairaPrice
+                    amount={
+                      previewResult.formulaResult.grossBeforeAdjustments -
+                      previewResult.payePreview.employeePaye
+                    }
+                  />
+                </p>
+                <p className="font-semibold text-app-fg pt-1 border-t border-app-border">
+                  Total payout:{' '}
+                  <NairaPrice
+                    amount={
+                      previewResult.formulaResult.grossBeforeAdjustments -
+                      previewResult.payePreview.employeePaye
+                    }
+                  />
+                </p>
+              </div>
             </div>
           ) : null}
         </div>
