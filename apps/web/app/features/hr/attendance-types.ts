@@ -22,6 +22,8 @@ export interface AttendanceGridRow {
   staffId: string;
   name: string;
   role: string;
+  branchId: string | null;
+  branchName: string | null;
   /** Only exception days are present; a missing day = PRESENT. Keyed YYYY-MM-DD. */
   exceptions: Record<string, { status: AttendanceStatus; remark: string | null }>;
   summary: AttendanceSummaryCounts;
@@ -45,6 +47,9 @@ export interface AttendanceCalendarDay {
 export interface AttendanceSummaryData {
   month: string;
   days: number;
+  staffId: string;
+  staffName: string | null;
+  staffRole: string | null;
   calendar: AttendanceCalendarDay[];
   summary: AttendanceSummaryCounts;
   eligibility: {

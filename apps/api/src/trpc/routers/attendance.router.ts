@@ -2,6 +2,7 @@ import {
   attendanceGridSchema,
   markAttendanceSchema,
   markAttendanceBulkSchema,
+  markAttendanceRangeSchema,
   attendanceSummarySchema,
   savePayRoleAttendanceConfigSchema,
   setUserAttendanceOverrideSchema,
@@ -40,6 +41,13 @@ export const attendanceRouter = router({
     .input(markAttendanceBulkSchema)
     .mutation(async ({ input, ctx }) => {
       return getAttendanceService().markBulk(input, ctx.user);
+    }),
+
+  /** Mark a date range for one staff member in one call (HR). */
+  markRange: permissionProcedure('attendance.manage', 'hr.write')
+    .input(markAttendanceRangeSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getAttendanceService().markRange(input, ctx.user);
     }),
 
   /** Monthly summary — self (any authed user) or, for HR, any staff member. */

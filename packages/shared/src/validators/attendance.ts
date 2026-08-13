@@ -55,6 +55,23 @@ export const markAttendanceBulkSchema = z.object({
 });
 export type MarkAttendanceBulkInput = z.infer<typeof markAttendanceBulkSchema>;
 
+/**
+ * Mark an inclusive date RANGE for ONE staff member (HR). Used by "mark whole
+ * month" — one call instead of N. `onlyBlank` skips days already marked.
+ */
+export const markAttendanceRangeSchema = z
+  .object({
+    staffId: z.string().uuid(),
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+    status: attendanceStatusSchema,
+    remark: z.string().trim().max(500).optional(),
+    /** When true, only fill days with no existing record. */
+    onlyBlank: z.boolean().optional(),
+  })
+  .refine((v) => v.startDate <= v.endDate, { message: 'startDate must be on or before endDate', path: ['endDate'] });
+export type MarkAttendanceRangeInput = z.infer<typeof markAttendanceRangeSchema>;
+
 /** Monthly summary for one staff member (staff self-view or HR). */
 export const attendanceSummarySchema = z.object({
   month: monthSchema,

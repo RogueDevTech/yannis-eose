@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { Button } from '~/components/ui/button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -40,6 +41,7 @@ export function AttendanceConfigPage({ payRoles }: Props) {
 
 function RoleConfigCard({ role }: { role: PayRoleConfigRow }) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const [open, setOpen] = useState(false); // accordion collapsed by default
   const [enabled, setEnabled] = useState<boolean>(role.attendanceConfig?.enabled ?? false);
   const [bands, setBands] = useState<AbsenceBand[]>(
     role.attendanceConfig?.bands?.length ? role.attendanceConfig.bands : DEFAULT_BANDS,
@@ -54,22 +56,41 @@ function RoleConfigCard({ role }: { role: PayRoleConfigRow }) {
   }
 
   return (
-    <div className="card p-4">
-      <fetcher.Form method="post" className="space-y-3">
+    <div className="card overflow-hidden p-0">
+      {/* Accordion header — always visible, click to expand the rules body. */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition hover:bg-app-muted/40"
+      >
+        <div className="flex items-center gap-2">
+          <svg
+            className={`h-4 w-4 shrink-0 text-app-fg-muted transition-transform ${open ? 'rotate-90' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+          <h3 className="text-sm font-semibold text-app-fg">{role.name}</h3>
+          {enabled ? (
+            <StatusBadge status="On" variant="success" size="sm" pill label="Attendance affects pay" />
+          ) : (
+            <StatusBadge status="Off" variant="neutral" size="sm" pill label="Not affected" />
+          )}
+        </div>
+      </button>
+
+      {open && (
+      <fetcher.Form method="post" className="space-y-3 border-t border-app-border px-4 py-3">
         <input type="hidden" name="intent" value="savePayRoleAttendanceConfig" />
         <input type="hidden" name="payRoleId" value={role.id} />
         <input type="hidden" name="enabled" value={String(enabled)} />
         <input type="hidden" name="bandsJson" value={JSON.stringify(sortedBands)} />
 
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-app-fg">{role.name}</h3>
-            {enabled ? (
-              <StatusBadge status="On" variant="success" size="sm" pill label="Attendance affects pay" />
-            ) : (
-              <StatusBadge status="Off" variant="neutral" size="sm" pill label="Not affected" />
-            )}
-          </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <label className="flex cursor-pointer items-center gap-2 text-sm">
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="h-4 w-4" />
             Attendance affects pay
@@ -126,11 +147,12 @@ function RoleConfigCard({ role }: { role: PayRoleConfigRow }) {
         {fetcher.data?.error && <p className="text-sm text-red-600">{fetcher.data.error}</p>}
 
         <div className="flex justify-end">
-          <TableActionButton variant="primary" type="submit" disabled={fetcher.state !== 'idle'}>
+          <Button variant="primary" type="submit" disabled={fetcher.state !== 'idle'}>
             {fetcher.state !== 'idle' ? 'Saving…' : 'Save'}
-          </TableActionButton>
+          </Button>
         </div>
       </fetcher.Form>
+      )}
     </div>
   );
 }

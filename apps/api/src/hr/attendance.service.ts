@@ -11,6 +11,7 @@ import {
   type AttendanceGridInput,
   type MarkAttendanceInput,
   type MarkAttendanceBulkInput,
+  type MarkAttendanceRangeInput,
   type AttendanceSummaryInput,
   type SavePayRoleAttendanceConfigInput,
   type SetUserAttendanceOverrideInput,
@@ -18,6 +19,7 @@ import {
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { isAdminLevel } from '../common/authz';
+import { nigeriaToday } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 type Db = PostgresJsDatabase<typeof schema>;
@@ -48,6 +50,28 @@ function monthBounds(month: string): { start: string; end: string; days: number 
   const days = new Date(Date.UTC(y, m, 0)).getUTCDate(); // day 0 of next month = last day of this
   const mm = String(m).padStart(2, '0');
   return { start: `${y}-${mm}-01`, end: `${y}-${mm}-${String(days).padStart(2, '0')}`, days };
+}
+
+/**
+ * Reject a mark date that is in the future (past today, WAT) or outside a staff
+ * member's employment window. Lexical YYYY-MM-DD comparison (valid, zero-padded).
+ * Throws a TRPCError; callers pass the staff's joining/exit (may be null).
+ */
+function assertMarkableDate(
+  date: string,
+  joining: string | null | undefined,
+  exit: string | null | undefined,
+): void {
+  const today = nigeriaToday();
+  if (date > today) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot mark attendance for a future date.' });
+  }
+  if (joining && date < joining.slice(0, 10)) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Date is before the staff member joined.' });
+  }
+  if (exit && date > exit.slice(0, 10)) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Date is after the staff member exited.' });
+  }
 }
 
 
@@ -100,11 +124,13 @@ export class AttendanceService {
         role: schema.users.role,
         payRoleId: schema.users.payRoleId,
         primaryBranchId: schema.users.primaryBranchId,
+        branchName: schema.branches.name,
         dateOfJoining: schema.users.dateOfJoining,
         exitDate: schema.users.exitDate,
         override: schema.users.attendanceAffectsPay,
       })
       .from(schema.users)
+      .leftJoin(schema.branches, eq(schema.branches.id, schema.users.primaryBranchId))
       .where(and(...staffConds))
       .orderBy(asc(schema.users.name));
 
@@ -175,6 +201,8 @@ export class AttendanceService {
         staffId: s.id,
         name: s.name,
         role: s.role,
+        branchId: s.primaryBranchId ?? null,
+        branchName: s.branchName ?? null,
         exceptions: Object.fromEntries(cells),
         summary: { present, absent, offDuty: off, sick, attendancePct: pct },
         attendanceGated: enabled,
@@ -198,11 +226,17 @@ export class AttendanceService {
 
     // Stamp branch/group from the staff member so the grid + summaries scope correctly.
     const [staff] = await this.db
-      .select({ id: schema.users.id, primaryBranchId: schema.users.primaryBranchId })
+      .select({
+        id: schema.users.id,
+        primaryBranchId: schema.users.primaryBranchId,
+        dateOfJoining: schema.users.dateOfJoining,
+        exitDate: schema.users.exitDate,
+      })
       .from(schema.users)
       .where(eq(schema.users.id, input.staffId))
       .limit(1);
     if (!staff) throw new TRPCError({ code: 'NOT_FOUND', message: 'Staff not found.' });
+    assertMarkableDate(input.attendanceDate, staff.dateOfJoining, staff.exitDate);
 
     let branchId: string | null = staff.primaryBranchId ?? null;
     let groupId: string | null = null;
@@ -247,22 +281,36 @@ export class AttendanceService {
     this.assertCanManage(actor);
     const ids = [...new Set(input.staffIds)];
 
-    // Resolve branch + group for every staff member in one query.
+    // A future date is invalid for everyone — reject up front.
+    if (input.attendanceDate > nigeriaToday()) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot mark attendance for a future date.' });
+    }
+
+    // Resolve branch + group + employment window for every staff member in one query.
     const staffRows = await this.db
       .select({
         id: schema.users.id,
         branchId: schema.branches.id,
         groupId: schema.branches.groupId,
+        dateOfJoining: schema.users.dateOfJoining,
+        exitDate: schema.users.exitDate,
       })
       .from(schema.users)
       .leftJoin(schema.branches, eq(schema.branches.id, schema.users.primaryBranchId))
       .where(inArray(schema.users.id, ids));
-    const scopeById = new Map(staffRows.map((r) => [r.id, { branchId: r.branchId, groupId: r.groupId }]));
+    const scopeById = new Map(
+      staffRows.map((r) => [r.id, { branchId: r.branchId, groupId: r.groupId, joining: r.dateOfJoining, exit: r.exitDate }]),
+    );
 
+    let count = 0;
     return withActor(this.db, actor, async (tx) => {
       for (const staffId of ids) {
         const scope = scopeById.get(staffId);
         if (!scope) continue; // skip unknown ids rather than fail the whole batch
+        // Skip staff for whom the day is outside their employment window.
+        if (scope.joining && input.attendanceDate < scope.joining.slice(0, 10)) continue;
+        if (scope.exit && input.attendanceDate > scope.exit.slice(0, 10)) continue;
+        count++;
         await tx
           .insert(schema.attendanceRecords)
           .values({
@@ -286,7 +334,105 @@ export class AttendanceService {
             },
           });
       }
-      return { success: true, count: ids.length };
+      return { success: true, count };
+    });
+  }
+
+  /**
+   * Mark an inclusive date range for ONE staff member in a single tx (HR).
+   * Powers "mark whole month". Clamps the range to [joining, min(exit, today)]
+   * and, when `onlyBlank`, skips days that already have a record.
+   */
+  async markRange(input: MarkAttendanceRangeInput, actor: SessionUser) {
+    this.assertCanManage(actor);
+
+    const [staff] = await this.db
+      .select({
+        id: schema.users.id,
+        primaryBranchId: schema.users.primaryBranchId,
+        dateOfJoining: schema.users.dateOfJoining,
+        exitDate: schema.users.exitDate,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, input.staffId))
+      .limit(1);
+    if (!staff) throw new TRPCError({ code: 'NOT_FOUND', message: 'Staff not found.' });
+
+    // Clamp: never mark the future or outside employment.
+    const today = nigeriaToday();
+    const lowerBound = staff.dateOfJoining ? staff.dateOfJoining.slice(0, 10) : input.startDate;
+    const upperCandidates = [input.endDate, today];
+    if (staff.exitDate) upperCandidates.push(staff.exitDate.slice(0, 10));
+    const start = input.startDate > lowerBound ? input.startDate : lowerBound;
+    const end = upperCandidates.reduce((a, b) => (b < a ? b : a));
+    if (start > end) return { success: true, count: 0 };
+
+    let branchId: string | null = staff.primaryBranchId ?? null;
+    let groupId: string | null = null;
+    if (branchId) {
+      const [b] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, branchId))
+        .limit(1);
+      groupId = b?.groupId ?? null;
+    }
+
+    // Enumerate the day strings in [start, end].
+    const dates: string[] = [];
+    {
+      const s = new Date(`${start}T00:00:00Z`);
+      const e = new Date(`${end}T00:00:00Z`);
+      for (let t = s.getTime(); t <= e.getTime(); t += 86_400_000) {
+        dates.push(new Date(t).toISOString().slice(0, 10));
+      }
+    }
+
+    // When onlyBlank, drop days that already have a record.
+    let targetDates = dates;
+    if (input.onlyBlank) {
+      const existing = await this.db
+        .select({ d: schema.attendanceRecords.attendanceDate })
+        .from(schema.attendanceRecords)
+        .where(
+          and(
+            eq(schema.attendanceRecords.staffId, input.staffId),
+            gte(schema.attendanceRecords.attendanceDate, start),
+            lte(schema.attendanceRecords.attendanceDate, end),
+          ),
+        );
+      const have = new Set(existing.map((r) => String(r.d).slice(0, 10)));
+      targetDates = dates.filter((d) => !have.has(d));
+    }
+
+    if (targetDates.length === 0) return { success: true, count: 0 };
+
+    return withActor(this.db, actor, async (tx) => {
+      for (const attendanceDate of targetDates) {
+        await tx
+          .insert(schema.attendanceRecords)
+          .values({
+            id: uuidv7(),
+            staffId: input.staffId,
+            attendanceDate,
+            status: input.status,
+            remark: input.remark ?? null,
+            branchId,
+            groupId,
+            markedBy: actor.id,
+          })
+          .onConflictDoUpdate({
+            target: [schema.attendanceRecords.staffId, schema.attendanceRecords.attendanceDate],
+            set: {
+              status: input.status,
+              remark: input.remark ?? null,
+              markedBy: actor.id,
+              markedAt: sql`now()`,
+              updatedAt: sql`now()`,
+            },
+          });
+      }
+      return { success: true, count: targetDates.length };
     });
   }
 
@@ -318,6 +464,8 @@ export class AttendanceService {
     // Staff config + employment window (needed for countable-day tallying).
     const [u] = await this.db
       .select({
+        name: schema.users.name,
+        role: schema.users.role,
         payRoleId: schema.users.payRoleId,
         override: schema.users.attendanceAffectsPay,
         dateOfJoining: schema.users.dateOfJoining,
@@ -361,6 +509,9 @@ export class AttendanceService {
     return {
       month: input.month,
       days,
+      staffId,
+      staffName: u?.name ?? null,
+      staffRole: u?.role ?? null,
       calendar,
       summary: {
         present,
@@ -424,6 +575,8 @@ interface GridRow {
   staffId: string;
   name: string;
   role: string;
+  branchId: string | null;
+  branchName: string | null;
   exceptions: Record<string, { status: string; remark: string | null }>;
   summary: { present: number; absent: number; offDuty: number; sick: number; attendancePct: number };
   attendanceGated: boolean;

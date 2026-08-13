@@ -24,6 +24,26 @@ function currentMonth(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
+/** Last day-of-month for a YYYY-MM string. */
+function daysInMonth(month: string): number {
+  const parts = month.split('-');
+  const y = Number(parts[0]);
+  const m = Number(parts[1]);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+/** Global date filter → the single month the attendance grid shows (YYYY-MM). */
+function monthFromDateFilter(url: URL): string {
+  // The global DateFilterBar drives `startDate` (YYYY-MM-DD). Attendance is a
+  // single-month grid, so we take the start of the selected range as the month.
+  const startDate = url.searchParams.get('startDate') ?? '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return startDate.slice(0, 7);
+  // Legacy `?month=YYYY-MM` bookmarks still work; else current month.
+  const legacy = url.searchParams.get('month') ?? '';
+  if (/^\d{4}-\d{2}$/.test(legacy)) return legacy;
+  return currentMonth();
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, { roles: VIEWER_ROLES, permission: 'attendance.read' });
   const user = await getCurrentUser(request);
@@ -31,7 +51,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const url = new URL(request.url);
-  const month = url.searchParams.get('month') ?? currentMonth();
+  const month = monthFromDateFilter(url);
   const search = url.searchParams.get('search') ?? undefined;
   const branchId = url.searchParams.get('branchId') ?? undefined;
   const role = url.searchParams.get('role') ?? undefined;
@@ -62,6 +82,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       grid,
       canManage,
       month,
+      // Reflect the current range in the global DateFilterBar. When only a legacy
+      // `?month` (or nothing) is set, default the bar to that whole month.
+      startDate: url.searchParams.get('startDate') ?? `${month}-01`,
+      endDate: url.searchParams.get('endDate') ?? `${month}-${String(daysInMonth(month)).padStart(2, '0')}`,
       search: search ?? '',
       branchId: branchId ?? 'ALL',
       role: role ?? 'ALL',
@@ -131,6 +155,8 @@ export default function AttendanceRoute() {
           grid={data.grid}
           canManage={data.canManage}
           month={data.month}
+          startDate={data.startDate}
+          endDate={data.endDate}
           search={data.search}
           branchId={data.branchId}
           role={data.role}
