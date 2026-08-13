@@ -15,7 +15,9 @@ import type { AttendanceGridData } from '~/features/hr/attendance-types';
 
 export const meta: MetaFunction = () => [{ title: 'Attendance report: Yannis EOSE' }];
 
-const VIEWER_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HR_MANAGER'];
+// Branch Admin sees the report too — the underlying attendance.grid data is
+// branch-scoped server-side (effectiveBranchIds), so they only see their branch.
+const VIEWER_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HR_MANAGER', 'BRANCH_ADMIN'];
 
 /** Today as YYYY-MM-DD (server clock). */
 function today(): string {

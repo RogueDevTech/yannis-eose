@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { SearchInput } from '~/components/ui/search-input';
 import { EmptyState } from '~/components/ui/empty-state';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { useFetcherToast } from '~/components/ui/toast';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { DEFAULT_ATTENDANCE_POLICY, type AttendancePolicyInput } from '@yannis/shared';
 
 export interface ExcludableStaff {
@@ -50,6 +52,8 @@ export function AttendanceConfigPage({ policy, staff }: Props) {
 /** Exclude specific staff from attendance tracking (dropped from grid/reports). */
 function ExcludeStaffCard({ staff }: { staff: ExcludableStaff[] }) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const formRef = useRef<HTMLFormElement>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Staged local selection: the set of staffIds that should be EXCLUDED. Seeded
@@ -58,6 +62,8 @@ function ExcludeStaffCard({ staff }: { staff: ExcludableStaff[] }) {
     () => new Set(staff.filter((s) => s.excluded).map((s) => s.id)),
   );
   useFetcherToast(fetcher.data, { successMessage: 'Exclusions saved' });
+  // Keep the confirm modal open (loading) until the save resolves, then close.
+  useCloseOnFetcherSuccess(fetcher, () => setConfirmOpen(false), { intent: 'setUsersExcludedBulk' });
 
   const term = search.trim().toLowerCase();
   const filtered = term
@@ -115,6 +121,20 @@ function ExcludeStaffCard({ staff }: { staff: ExcludableStaff[] }) {
         <SearchInput value={search} onChange={setSearch} placeholder="Search staff…" className="w-full sm:w-56" />
       </div>
 
+      {/* Save on its own action bar (same design as the grid's selection bar). */}
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-brand-300 bg-brand-50 px-4 py-2.5 dark:border-brand-800 dark:bg-brand-950/30">
+        <span className="text-sm font-medium">{excludedCount} excluded</span>
+        {dirty && <span className="text-xs text-app-fg-muted">Unsaved changes</span>}
+        <fetcher.Form ref={formRef} method="post" className="ml-auto">
+          <input type="hidden" name="intent" value="setUsersExcludedBulk" />
+          <input type="hidden" name="scopeIds" value={staff.map((s) => s.id).join(',')} />
+          <input type="hidden" name="excludedIds" value={[...excludedIds].join(',')} />
+          <Button variant="primary" size="sm" type="button" onClick={() => setConfirmOpen(true)} disabled={!dirty || fetcher.state !== 'idle'}>
+            {fetcher.state !== 'idle' ? 'Saving…' : 'Save exclusions'}
+          </Button>
+        </fetcher.Form>
+      </div>
+
       {filtered.length === 0 ? (
         <EmptyState title="No staff" description={term ? 'No staff match your search.' : 'No active staff.'} variant="card" />
       ) : (
@@ -167,16 +187,16 @@ function ExcludeStaffCard({ staff }: { staff: ExcludableStaff[] }) {
         </div>
       )}
 
-      {/* Single Save reconciles every staged change at once. */}
-      <fetcher.Form method="post" className="flex items-center justify-end gap-2 border-t border-app-border pt-3">
-        <input type="hidden" name="intent" value="setUsersExcludedBulk" />
-        <input type="hidden" name="scopeIds" value={staff.map((s) => s.id).join(',')} />
-        <input type="hidden" name="excludedIds" value={[...excludedIds].join(',')} />
-        {dirty && <span className="text-xs text-app-fg-muted">Unsaved changes</span>}
-        <Button variant="primary" type="submit" disabled={!dirty || fetcher.state !== 'idle'}>
-          {fetcher.state !== 'idle' ? 'Saving…' : 'Save exclusions'}
-        </Button>
-      </fetcher.Form>
+      <ConfirmActionModal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        variant="warning"
+        title="Save attendance exclusions?"
+        description={`${excludedCount} staff will be excluded from attendance. Excluded staff won't appear in the grid, counts, report, or auto-absent.`}
+        confirmLabel="Save exclusions"
+        loading={fetcher.state !== 'idle'}
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
     </div>
   );
 }
@@ -184,6 +204,8 @@ function ExcludeStaffCard({ staff }: { staff: ExcludableStaff[] }) {
 /** Work days + strict rules (lock previous days, auto-absent cutoff). */
 function PolicyCard({ policy }: { policy: AttendancePolicyInput }) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const formRef = useRef<HTMLFormElement>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const init = policy ?? DEFAULT_ATTENDANCE_POLICY;
   const [workDays, setWorkDays] = useState<number[]>(init.workDays);
   const [lockPreviousDays, setLockPreviousDays] = useState<boolean>(init.lockPreviousDays);
@@ -191,6 +213,7 @@ function PolicyCard({ policy }: { policy: AttendancePolicyInput }) {
   const [autoAbsentCutoff, setAutoAbsentCutoff] = useState<string>(init.autoAbsentCutoff);
 
   useFetcherToast(fetcher.data, { successMessage: 'Attendance policy saved' });
+  useCloseOnFetcherSuccess(fetcher, () => setConfirmOpen(false), { intent: 'saveAttendancePolicy' });
 
   function toggleDay(d: number) {
     setWorkDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b)));
@@ -200,7 +223,7 @@ function PolicyCard({ policy }: { policy: AttendancePolicyInput }) {
 
   return (
     <div className="card space-y-4 p-4">
-      <fetcher.Form method="post" className="space-y-4">
+      <fetcher.Form ref={formRef} method="post" className="space-y-4">
         <input type="hidden" name="intent" value="saveAttendancePolicy" />
         <input type="hidden" name="policyJson" value={JSON.stringify(payload)} />
 
@@ -276,11 +299,22 @@ function PolicyCard({ policy }: { policy: AttendancePolicyInput }) {
         {fetcher.data?.error && <p className="text-sm text-red-600">{fetcher.data.error}</p>}
 
         <div className="flex justify-end border-t border-app-border pt-3">
-          <Button variant="primary" type="submit" disabled={fetcher.state !== 'idle' || workDays.length === 0}>
+          <Button variant="primary" type="button" onClick={() => setConfirmOpen(true)} disabled={fetcher.state !== 'idle' || workDays.length === 0}>
             {fetcher.state !== 'idle' ? 'Saving…' : 'Save policy'}
           </Button>
         </div>
       </fetcher.Form>
+
+      <ConfirmActionModal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        variant="warning"
+        title="Save attendance policy?"
+        description="This updates the work days and strict rules for everyone. Locking and auto-absent affect what can be marked and may auto-mark unmarked staff Absent after the cutoff."
+        confirmLabel="Save policy"
+        loading={fetcher.state !== 'idle'}
+        onConfirm={() => formRef.current?.requestSubmit()}
+      />
     </div>
   );
 }

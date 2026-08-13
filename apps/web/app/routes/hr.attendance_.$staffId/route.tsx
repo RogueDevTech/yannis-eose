@@ -12,7 +12,7 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { StaffAttendanceDetailPage } from '~/features/hr/StaffAttendanceDetailPage';
-import { PayrollConfigLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
+import { StaffAttendanceDetailLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type { AttendanceSummaryData } from '~/features/hr/attendance-types';
 
 export const meta: MetaFunction = () => [{ title: 'Staff attendance: Yannis EOSE' }];
@@ -128,7 +128,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 export default function StaffAttendanceDetailRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<PayrollConfigLoadingShell />} loaderShell={{}} deferredKey="pageData">
+    <CachedAwait resolve={pageData} fallback={<StaffAttendanceDetailLoadingShell />} loaderShell={{}} deferredKey="pageData">
       {(data) => (
         <StaffAttendanceDetailPage summary={data.summary} canManage={data.canManage} month={data.month} startDate={data.startDate} endDate={data.endDate} />
       )}

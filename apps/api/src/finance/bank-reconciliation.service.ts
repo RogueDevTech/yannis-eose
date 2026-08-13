@@ -188,6 +188,7 @@ export class BankReconciliationService {
           debit: schema.glEntries.debit,
           credit: schema.glEntries.credit,
           remarks: schema.glEntries.remarks,
+          groupId: schema.glEntries.groupId,
         })
         .from(schema.glEntries)
         .where(eq(schema.glEntries.id, input.glEntryId))
@@ -196,6 +197,8 @@ export class BankReconciliationService {
       if (!glEntry) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'GL entry not found.' });
       }
+      // The matched GL entry must belong to the same company as the recon line.
+      assertGroupInScope(glEntry.groupId, activeGroupId, { message: 'This GL entry is outside your active company.' });
 
       const glAmount = Number(glEntry.debit) - Number(glEntry.credit);
 
@@ -216,17 +219,25 @@ export class BankReconciliationService {
     });
   }
 
-  async unmatchLine(input: UnmatchLineInput, actor: Actor) {
+  async unmatchLine(input: UnmatchLineInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [line] = await tx
-        .select()
+        .select({
+          id: schema.bankReconLines.id,
+          groupId: schema.bankReconciliations.groupId,
+        })
         .from(schema.bankReconLines)
+        .innerJoin(
+          schema.bankReconciliations,
+          eq(schema.bankReconciliations.id, schema.bankReconLines.reconciliationId),
+        )
         .where(eq(schema.bankReconLines.id, input.lineId))
         .limit(1);
 
       if (!line) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation line not found.' });
       }
+      assertGroupInScope(line.groupId, activeGroupId, { message: 'This reconciliation is outside your active company.' });
 
       const [updated] = await tx
         .update(schema.bankReconLines)
@@ -245,7 +256,7 @@ export class BankReconciliationService {
     });
   }
 
-  async completeReconciliation(input: CompleteBankReconciliationInput, actor: Actor) {
+  async completeReconciliation(input: CompleteBankReconciliationInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [recon] = await tx
         .select()
@@ -256,6 +267,7 @@ export class BankReconciliationService {
       if (!recon) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation not found.' });
       }
+      assertGroupInScope(recon.groupId, activeGroupId, { message: 'This reconciliation is outside your active company.' });
 
       if (recon.status === 'COMPLETED') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Reconciliation already completed.' });
@@ -325,7 +337,7 @@ export class BankReconciliationService {
     };
   }
 
-  async getReconciliation(input: GetBankReconciliationInput) {
+  async getReconciliation(input: GetBankReconciliationInput, activeGroupId?: string | null) {
     const [recon] = await this.db
       .select({
         id: schema.bankReconciliations.id,
@@ -350,6 +362,7 @@ export class BankReconciliationService {
     if (!recon) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation not found.' });
     }
+    assertGroupInScope(recon.groupId, activeGroupId, { message: 'This reconciliation is outside your active company.' });
 
     const lines = await this.db
       .select()

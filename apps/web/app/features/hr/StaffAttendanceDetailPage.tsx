@@ -18,6 +18,7 @@ import {
   STATUS_THEME,
   MARK_CYCLE,
   WEEKDAY_HEADERS,
+  workDayLayout,
 } from './attendance-types';
 
 interface Props {
@@ -95,6 +96,19 @@ export function StaffAttendanceDetailPage({ summary, canManage, month, startDate
     });
   }, [summary, overrides]);
 
+  // Work-day layout: only configured work days are shown as columns.
+  const wd = useMemo(() => workDayLayout(summary?.workDays), [summary?.workDays]);
+  const workCalendar = useMemo(
+    () => calendar.filter((d) => wd.colOf(new Date(`${d.date}T00:00:00Z`).getUTCDay()) !== -1),
+    [calendar, wd],
+  );
+  // Leading blanks = the work-column index of the month's first shown work day.
+  const workBlanks = useMemo(() => {
+    const first = workCalendar[0];
+    if (!first) return 0;
+    return wd.colOf(new Date(`${first.date}T00:00:00Z`).getUTCDay());
+  }, [workCalendar, wd]);
+
   const counts = useMemo(() => {
     let present = 0, absent = 0, offDuty = 0, sick = 0;
     for (const d of calendar) {
@@ -143,14 +157,15 @@ export function StaffAttendanceDetailPage({ summary, canManage, month, startDate
         <h3 className="mb-3 text-sm font-semibold text-app-fg">
           Daily record{canManage ? ': tap a day to mark' : ''}
         </h3>
-        {/* Fixed cell size so the calendar stays compact (doesn't stretch full-width). */}
+        {/* Fixed cell size so the calendar stays compact. Only CONFIGURED work
+            days are shown — non-work days are dropped as columns entirely. */}
         <div className="w-fit">
-          <div className="mb-1 grid grid-cols-7 gap-1.5 text-center text-[0.65rem] font-medium text-app-fg-muted">
-            {WEEKDAY_HEADERS.map((d) => <span key={d} className="w-10">{d}</span>)}
+          <div className="mb-1 grid gap-1.5 text-center text-[0.65rem] font-medium text-app-fg-muted" style={{ gridTemplateColumns: `repeat(${wd.cols}, 2.5rem)` }}>
+            {wd.labels.map((d) => <span key={d} className="w-10">{d}</span>)}
           </div>
-          <div className="grid grid-cols-7 gap-1.5">
-            {Array.from({ length: blanks }, (_, i) => <div key={`b${i}`} className="h-10 w-10" />)}
-            {calendar.map((day) => {
+          <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${wd.cols}, 2.5rem)` }}>
+            {Array.from({ length: workBlanks }, (_, i) => <div key={`b${i}`} className="h-10 w-10" />)}
+            {workCalendar.map((day) => {
               const dnum = Number(day.date.slice(8, 10));
               const status = day.status as CellStatus;
               return (

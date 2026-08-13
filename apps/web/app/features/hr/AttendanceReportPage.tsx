@@ -140,7 +140,7 @@ export function AttendanceReportPage({ grid, mode, date, startDate, endDate, mon
     if (statusFilter === 'ALL') return rows;
     if (isRange) {
       return rows.filter((r) => {
-        const c = rangeCounts(r, startDate, endDate);
+        const c = rangeCounts(r, startDate, endDate, workDays);
         if (statusFilter === 'PRESENT') return c.present > 0;
         if (statusFilter === 'ABSENT') return c.absent > 0;
         if (statusFilter === 'OFF_DUTY') return c.offDuty > 0;
@@ -192,7 +192,7 @@ export function AttendanceReportPage({ grid, mode, date, startDate, endDate, mon
     if (!isRange) return tally(rows, date);
     const acc: DayCounts = { present: 0, absent: 0, offDuty: 0, sick: 0, notMarked: 0 };
     for (const r of rows) {
-      const c = rangeCounts(r, startDate, endDate);
+      const c = rangeCounts(r, startDate, endDate, workDays);
       acc.present += c.present;
       acc.absent += c.absent;
       acc.offDuty += c.offDuty;
@@ -208,7 +208,7 @@ export function AttendanceReportPage({ grid, mode, date, startDate, endDate, mon
     if (!isRange) return tally(grp, date);
     const acc: DayCounts = { present: 0, absent: 0, offDuty: 0, sick: 0, notMarked: 0 };
     for (const r of grp) {
-      const c = rangeCounts(r, startDate, endDate);
+      const c = rangeCounts(r, startDate, endDate, workDays);
       acc.present += c.present;
       acc.absent += c.absent;
       acc.offDuty += c.offDuty;
@@ -399,7 +399,7 @@ export function AttendanceReportPage({ grid, mode, date, startDate, endDate, mon
                             )}
                           </tr>
                           {open && group.rows.map((r) => {
-                            const rc = isRange ? rangeCounts(r, startDate, endDate) : null;
+                            const rc = isRange ? rangeCounts(r, startDate, endDate, workDays) : null;
                             return (
                               <tr key={r.staffId} className="border-t border-app-border/60">
                                 <td className="truncate px-3 py-2 font-medium text-app-fg">{r.name}</td>
@@ -451,7 +451,7 @@ export function AttendanceReportPage({ grid, mode, date, startDate, endDate, mon
                         {open && (
                           <div className="divide-y divide-app-border/60">
                             {group.rows.map((r) => {
-                              const rc = isRange ? rangeCounts(r, startDate, endDate) : null;
+                              const rc = isRange ? rangeCounts(r, startDate, endDate, workDays) : null;
                               return (
                                 <div key={r.staffId} className="flex items-center justify-between gap-2 p-3">
                                   <div className="min-w-0">

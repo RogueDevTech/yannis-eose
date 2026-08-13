@@ -5,7 +5,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
-import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -1033,6 +1033,55 @@ export function StaffOnboardingDocsLoadingShell() {
           emptyTitle="Loading…"
           emptyDescription=""
         />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Skeleton for the Staff Attendance detail page (`/hr/attendance/$staffId`).
+ * Mirrors its layout: header (name + role) → 5-stat strip → the daily-record
+ * calendar card (7-col weekday grid + ~35 day cells + status legend).
+ */
+export function StaffAttendanceDetailLoadingShell() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title="Staff attendance"
+        description="Loading attendance…"
+        backTo="/hr/attendance"
+        mobileInlineActions
+      />
+
+      {/* Summary stat strip (Present / Absent / Off duty / Sick / Attendance). */}
+      <OverviewStatStripSkeleton count={5} />
+
+      {/* Daily-record calendar card. */}
+      <div className="card p-4">
+        <div className="mb-3 h-4 w-28 rounded bg-app-hover animate-pulse" aria-hidden />
+        <div className="w-fit">
+          {/* Weekday headers */}
+          <div className="mb-1 grid grid-cols-7 gap-1.5">
+            {Array.from({ length: 7 }, (_, i) => (
+              <div key={`h${i}`} className="mx-auto h-2.5 w-6 rounded bg-app-hover animate-pulse" aria-hidden />
+            ))}
+          </div>
+          {/* Day cells (5 weeks × 7) */}
+          <div className="grid grid-cols-7 gap-1.5">
+            {Array.from({ length: 35 }, (_, i) => (
+              <div key={`d${i}`} className="h-10 w-10 rounded-md bg-app-hover animate-pulse" aria-hidden />
+            ))}
+          </div>
+        </div>
+        {/* Legend */}
+        <div className="mt-3 flex flex-wrap gap-3">
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={`l${i}`} className="flex items-center gap-1.5">
+              <div className="h-3 w-3 rounded bg-app-hover animate-pulse" aria-hidden />
+              <div className="h-2.5 w-16 rounded bg-app-hover animate-pulse" aria-hidden />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

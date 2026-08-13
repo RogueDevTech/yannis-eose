@@ -50,6 +50,10 @@ export interface AttendanceSummaryData {
   staffId: string;
   staffName: string | null;
   staffRole: string | null;
+  /** When true, this staff member is not tracked for attendance (hide the card). */
+  excluded?: boolean;
+  /** Company work days (0=Sun..6=Sat); non-work days are hidden on the calendar. */
+  workDays: number[];
   calendar: AttendanceCalendarDay[];
   summary: AttendanceSummaryCounts;
   eligibility: {
@@ -123,8 +127,10 @@ export const STATUS_THEME: Record<
   },
   NONE: {
     // Blank/unmarked: an empty dashed box that clearly invites a click to mark.
-    // Visible (not faint) so HR can see exactly which days still need marking.
-    cell: 'bg-app-muted/40 text-transparent border-2 border-dashed border-app-border hover:border-brand-400',
+    // Bright near-white dashed border for maximum visibility, and it doesn't clash
+    // with any status colour (green/red/amber/blue). Darker on light mode so it
+    // stays visible there too.
+    cell: 'bg-app-muted/40 text-transparent border-2 border-dashed border-gray-500 hover:border-gray-700 dark:border-white/70 dark:hover:border-white',
     dot: 'bg-app-border',
     badgeVariant: 'neutral',
   },
@@ -172,6 +178,43 @@ export function weeksOfMonth(year: number, month1: number): WeekCell[][] {
 }
 
 export const WEEKDAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/** getUTCDay() (0=Sun..6=Sat) for each Mon-first column index 0..6. */
+const MON_FIRST_WEEKDAY = [1, 2, 3, 4, 5, 6, 0];
+
+/**
+ * Work-day calendar layout, so per-staff calendars show ONLY the configured
+ * work days (e.g. Mon–Fri) — non-work days are dropped as columns entirely.
+ *
+ * Given the company `workDays` (getUTCDay values 0..6), returns the Mon-first
+ * ordered list of work weekdays + their short labels, and a helper to map a
+ * date's weekday to its column index (or -1 when it's a non-work day).
+ */
+export function workDayLayout(workDays: number[] | null | undefined): {
+  labels: string[];
+  /** getUTCDay values of the work columns, Mon-first. */
+  weekdays: number[];
+  cols: number;
+  /** Column index (0-based) of a getUTCDay value, or -1 if it isn't a work day. */
+  colOf: (utcDay: number) => number;
+} {
+  const set = new Set(workDays && workDays.length ? workDays : [1, 2, 3, 4, 5]);
+  const weekdays: number[] = [];
+  const labels: string[] = [];
+  MON_FIRST_WEEKDAY.forEach((wd, i) => {
+    if (set.has(wd)) {
+      weekdays.push(wd);
+      labels.push(WEEKDAY_HEADERS[i]!);
+    }
+  });
+  const colByWeekday = new Map(weekdays.map((wd, idx) => [wd, idx]));
+  return {
+    labels,
+    weekdays,
+    cols: weekdays.length,
+    colOf: (utcDay: number) => colByWeekday.get(utcDay) ?? -1,
+  };
+}
 
 /**
  * Maps a Monday-anchored column slot (0=Mon … 6=Sun) to the JS getUTCDay weekday

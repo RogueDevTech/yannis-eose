@@ -42,7 +42,7 @@ export const financeRouter = router({
   updateInvoiceStatus: permissionProcedure('finance.read')
     .input(updateInvoiceStatusSchema)
     .mutation(async ({ input, ctx }) => {
-      return getFinanceService().updateInvoiceStatus(input, ctx.user.id);
+      return getFinanceService().updateInvoiceStatus(input, ctx.user.id, ctx.effectiveBranchIds);
     }),
 
   getInvoice: authedProcedure
@@ -224,8 +224,8 @@ export const financeRouter = router({
 
   budgetUtilization: permissionProcedure('finance.read')
     .input(z.object({ budgetId: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getFinanceService().getBudgetUtilization(input.budgetId);
+    .query(async ({ input, ctx }) => {
+      return getFinanceService().getBudgetUtilization(input.budgetId, ctx.activeGroupId);
     }),
 
   // Overdue auto-flagging

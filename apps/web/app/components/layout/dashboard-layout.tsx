@@ -488,7 +488,9 @@ const navStructure: NavGroupDef[] = [
   {
     group: 'HR',
     items: [
-      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'hr.read' },
+      // Branch Admin's two core features are Users (their branch) + Attendance,
+      // so they're role-allowlisted here in addition to the hr.read permission.
+      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: ['hr.read', 'users.read'], roles: ['BRANCH_ADMIN'] },
       {
         label: 'Staff Onboarding',
         href: '/hr/staff-onboarding-documents',
@@ -509,6 +511,7 @@ const navStructure: NavGroupDef[] = [
         href: '/hr/attendance',
         icon: SidebarIcons.hr,
         permission: ['attendance.read', 'attendance.manage'],
+        roles: ['BRANCH_ADMIN'],
       },
       {
         label: 'Payroll Config',

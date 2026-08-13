@@ -40,6 +40,8 @@ interface Props {
   grid: AttendanceGridData | null;
   policy: AttendancePolicyInput;
   canManage: boolean;
+  /** HR/admin only — gates the Configure button (attendance policy). Branch admins: false. */
+  canConfigure: boolean;
   month: string; // YYYY-MM
   startDate: string; // YYYY-MM-DD (global date filter)
   endDate: string; // YYYY-MM-DD (global date filter)
@@ -65,12 +67,17 @@ function shiftMonth(month: string, delta: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-type ViewMode = 'daily' | 'weekly' | 'monthly';
+type ViewMode = 'daily' | 'weekly';
 const VIEW_MODES: Array<{ value: ViewMode; label: string }> = [
   { value: 'daily', label: 'Daily' },
   { value: 'weekly', label: 'Weekly' },
-  { value: 'monthly', label: 'Monthly' },
 ];
+
+/** Index of the week (in weeksOfMonth) that contains a given day-of-month. */
+function weekIndexOfDay(weeks: Array<Array<{ day: number; inMonth: boolean }>>, day: number): number {
+  const idx = weeks.findIndex((w) => w.some((c) => c.inMonth && c.day === day));
+  return idx >= 0 ? idx : 0;
+}
 
 /** Today's day-of-month if the viewed month is the current one; else 1. */
 function defaultDayForMonth(month: string): number {
@@ -160,7 +167,7 @@ function branchTotals(rows: AttendanceGridRow[]): { present: number; absent: num
   );
 }
 
-export function AttendancePage({ grid, policy, canManage, month, startDate, endDate, search, branchId, role, statuses }: Props) {
+export function AttendancePage({ grid, policy, canManage, canConfigure, month, startDate, endDate, search, branchId, role, statuses }: Props) {
   const [, setSearchParams] = useSearchParams();
   const markFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const bulkFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -175,6 +182,9 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [editing, setEditing] = useState<{ row: AttendanceGridRow; date: string; current: CellStatus } | null>(null);
+  // Shown when a locked / non-work day is tapped: a modal explaining why it can't
+  // be marked (instead of a transient toast).
+  const [lockNotice, setLockNotice] = useState<string | null>(null);
 
   const revalidator = useRevalidator();
   const location = useLocation();
@@ -437,7 +447,20 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
     if (!isWorkDay(date)) return true;
     if (policy.lockPreviousDays && date < nowLagos.today) return true;
     if (policy.autoAbsentEnabled && date === nowLagos.today && nowLagos.hhmm >= policy.autoAbsentCutoff) return true;
+    if (date > nowLagos.today) return true; // can't mark the future
     return false;
+  }
+  /** Specific reason a cell can't be marked (for the click-explainer toast). Empty = editable. */
+  function lockReasonFor(date: string): string {
+    if (!isWorkDay(date)) return 'This is not a work day. Adjust work days in Attendance rules.';
+    if (date > nowLagos.today) return 'You cannot mark attendance for a future date.';
+    if (policy.lockPreviousDays && date < nowLagos.today) {
+      return 'Previous days are locked. Turn off "Lock previous days" in Attendance rules to edit past days.';
+    }
+    if (policy.autoAbsentEnabled && date === nowLagos.today && nowLagos.hhmm >= policy.autoAbsentCutoff) {
+      return `Today is locked after the ${policy.autoAbsentCutoff} cutoff.`;
+    }
+    return '';
   }
 
   const staff = grid?.staff ?? [];
@@ -493,67 +516,49 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
     });
   }
 
-  const renderStaffCard = (row: AttendanceGridRow) => (
-    <div className="flex items-center gap-3">
-      {canManage && (
-        <input
-          type="checkbox"
-          checked={selected.has(row.staffId)}
-          onChange={() => toggleOne(row.staffId)}
-          aria-label={`Select ${row.name}`}
-          className="h-4 w-4 shrink-0"
-        />
-      )}
-
-      {/* Name + role: the primary content, hugs the left. */}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <Link to={`/hr/attendance/${row.staffId}`} className="truncate font-medium text-app-fg">
-            {row.name}
-          </Link>
-          {row.baseAtRisk && <StatusBadge status="At risk" variant="danger" size="sm" pill label={`-${row.deductionPercent}%`} />}
+  // Mobile card = a peek. The whole card is tappable: in DAILY it opens the mark
+  // modal for the selected day; in WEEKLY it opens the staff's full record (where
+  // any day can be marked). No checkbox — bulk selection stays desktop-only.
+  const renderStaffCard = (row: AttendanceGridRow) => {
+    const dayStatus = statusFor(row, selectedDay);
+    const openPeek = () => {
+      if (viewMode === 'daily') {
+        setEditing({ row, date: dateFor(selectedDay), current: dayStatus });
+      }
+    };
+    const content = (
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate font-medium text-app-fg">{row.name}</span>
+            {row.baseAtRisk && <StatusBadge status="At risk" variant="danger" size="sm" pill label={`-${row.deductionPercent}%`} />}
+          </div>
+          <div className="mt-1">
+            <RoleBadge role={row.role} size="sm" />
+          </div>
         </div>
-        <div className="mt-0.5 flex items-center gap-2">
-          <RoleBadge role={row.role} size="sm" />
-          <span className="flex gap-1.5 text-[0.7rem] tabular-nums text-app-fg-muted">
-            <span className="text-green-600 dark:text-green-400">{row.summary.present}P</span>
-            <span className="font-semibold text-red-600 dark:text-red-400">{row.summary.absent}A</span>
-            <span className="text-amber-600 dark:text-amber-400">{row.summary.offDuty}O</span>
-            <span className="text-blue-600 dark:text-blue-400">{row.summary.sick}S</span>
+        {/* Right: the selected day's status pill (daily). */}
+        {viewMode === 'daily' && (
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_THEME[dayStatus].cell}`}>
+            <span className={`h-2 w-2 rounded-full ${STATUS_THEME[dayStatus].dot}`} />
+            {STATUS_LABEL[dayStatus]}
           </span>
-        </div>
+        )}
+        <svg className="h-4 w-4 shrink-0 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
       </div>
-
-      {/* Day cell(s): hug the right. Daily = one cell; weekly = the work-day strip
-          (non-work days hidden entirely). */}
-      {viewMode !== 'monthly' && (
-        <div className="flex shrink-0 gap-1">
-          {(viewMode === 'daily'
-            ? [{ day: selectedDay, inMonth: true }]
-            : weekDays.filter((_, slot) => workDaySet.has(WEEKDAY_INDEX[slot]!))
-          ).map((cell, slot) =>
-            !cell.inMonth ? (
-              <span key={slot} className="flex h-9 w-9 items-center justify-center rounded text-[0.65rem] text-app-fg-muted/40">
-                {cell.day}
-              </span>
-            ) : (
-              <button
-                key={slot}
-                type="button"
-                disabled={!canManage}
-                onClick={() => setEditing({ row, date: dateFor(cell.day), current: statusFor(row, cell.day) })}
-                title={`${dateFor(cell.day)}: ${STATUS_LABEL[statusFor(row, cell.day)]}`}
-                className={`flex h-9 w-9 flex-col items-center justify-center rounded text-[0.65rem] ${STATUS_THEME[statusFor(row, cell.day)].cell} ${canManage ? 'cursor-pointer' : 'cursor-default'}`}
-              >
-                <span>{cell.day}</span>
-                <span className="font-medium">{STATUS_LETTER[statusFor(row, cell.day)]}</span>
-              </button>
-            ),
-          )}
-        </div>
-      )}
-    </div>
-  );
+    );
+    return viewMode === 'daily' ? (
+      <button type="button" onClick={openPeek} className="w-full text-left">
+        {content}
+      </button>
+    ) : (
+      <Link to={`/hr/attendance/${row.staffId}`} className="block">
+        {content}
+      </Link>
+    );
+  };
 
   // ── Table columns ────────────────────────────────────────────
   const columns: CompactTableColumn<AttendanceGridRow>[] = useMemo(() => {
@@ -612,19 +617,22 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
       const nonWork = !isWorkDay(date);
       const locked = isLocked(date);
       const editable = canManage && !locked;
-      const lockReason = nonWork
-        ? 'Not a work day'
-        : locked
-          ? 'Locked (past cutoff / previous day)'
-          : '';
+      const lockReason = lockReasonFor(date);
+      // Locked cells stay CLICKABLE (not disabled) so tapping them explains WHY
+      // via a modal — a disabled button swallows the click and gives no feedback.
+      // Only genuinely non-manageable viewers get a truly disabled cell.
       return (
         <button
           type="button"
-          disabled={!editable}
-          onClick={() => setEditing({ row, date, current: status })}
+          disabled={!canManage}
+          onClick={() =>
+            editable
+              ? setEditing({ row, date, current: status })
+              : setLockNotice(lockReason || 'This day is locked.')
+          }
           title={`${row.name}, ${date}: ${STATUS_LABEL[status]}${time ? ` (marked ${time})` : ''}${lockReason ? ` (${lockReason})` : ''}`}
           className={`inline-flex h-6 w-6 items-center justify-center rounded-md text-xs font-semibold ${STATUS_THEME[status].cell} ${
-            editable ? 'cursor-pointer' : 'cursor-not-allowed'
+            editable ? 'cursor-pointer' : 'cursor-help'
           } ${nonWork ? 'opacity-30' : locked ? 'opacity-60' : ''} ${!isBlank && editable ? 'hover:ring-2 hover:ring-brand-400' : ''}`}
         >
           {STATUS_LETTER[status]}
@@ -667,36 +675,6 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
               ),
           })),
       );
-    } else {
-      // Monthly: per-status count columns (no per-day cells).
-      cols.push(
-        { key: 'p', header: 'Present', align: 'center', render: (row) => <span className="tabular-nums text-green-600 dark:text-green-400">{row.summary.present}</span> },
-        { key: 'a', header: 'Absent', align: 'center', render: (row) => <span className="font-semibold tabular-nums text-red-600 dark:text-red-400">{row.summary.absent}</span> },
-        { key: 'o', header: 'Off duty', align: 'center', render: (row) => <span className="tabular-nums text-amber-600 dark:text-amber-400">{row.summary.offDuty}</span> },
-        { key: 's', header: 'Sick', align: 'center', render: (row) => <span className="tabular-nums text-blue-600 dark:text-blue-400">{row.summary.sick}</span> },
-        { key: 'pct', header: '%', align: 'center', render: (row) => <span className="tabular-nums">{row.summary.attendancePct}%</span> },
-      );
-    }
-
-    // Compact P/A/O/S summary column on daily + weekly (monthly already has them).
-    if (viewMode !== 'monthly') {
-      cols.push({
-        key: 'summary',
-        header: 'P / A / O / S',
-        align: 'center',
-        mobileLabel: 'Summary',
-        render: (row) => (
-          <div className="flex items-center justify-center gap-1 text-xs tabular-nums">
-            <span className="text-green-600 dark:text-green-400" title="Present">{row.summary.present}</span>
-            <span className="text-app-fg-muted">/</span>
-            <span className="font-semibold text-red-600 dark:text-red-400" title="Absent">{row.summary.absent}</span>
-            <span className="text-app-fg-muted">/</span>
-            <span className="text-amber-600 dark:text-amber-400" title="Off duty">{row.summary.offDuty}</span>
-            <span className="text-app-fg-muted">/</span>
-            <span className="text-blue-600 dark:text-blue-400" title="Sick">{row.summary.sick}</span>
-          </div>
-        ),
-      });
     }
 
     // View action: always the LAST column, as a text link.
@@ -728,7 +706,7 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
             <Link to={`/hr/attendance/report?startDate=${reportDate}&endDate=${reportDate}`} className="btn-secondary btn-sm">
               Report
             </Link>
-            {canManage && (
+            {canConfigure && (
               <Link to="/hr/attendance/config" className="btn-primary btn-sm">
                 Configure
               </Link>
@@ -816,7 +794,12 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
               <button
                 key={vm.value}
                 type="button"
-                onClick={() => setViewMode(vm.value)}
+                onClick={() => {
+                  // Switching to Weekly lands on the week containing the currently
+                  // selected day (usually today), not week 1.
+                  if (vm.value === 'weekly') setWeekIndex(weekIndexOfDay(weeks, selectedDay));
+                  setViewMode(vm.value);
+                }}
                 className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
                   viewMode === vm.value ? 'bg-brand-500 text-white' : 'text-app-fg-muted hover:text-app-fg'
                 }`}
@@ -831,7 +814,7 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
             <button
               type="button"
               onClick={() => setDayPickerOpen(true)}
-              className="inline-flex min-w-[6rem] items-center justify-center gap-2 rounded-lg border border-app-border bg-app-muted/40 px-4 py-2 text-sm font-semibold text-app-fg transition hover:bg-app-muted"
+              className={`${CONTROL_HEIGHT_CLASS} inline-flex min-w-[6rem] items-center justify-center gap-2 rounded-lg bg-app-elevated px-4 text-sm font-semibold text-app-fg shadow-sm transition hover:bg-app-muted`}
             >
               <span>{dailyLabel(month, selectedDay)}</span>
               <svg className="h-3.5 w-3.5 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -843,7 +826,7 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
             <button
               type="button"
               onClick={() => setWeekPickerOpen(true)}
-              className="inline-flex items-center gap-2 rounded-lg border border-app-border bg-app-muted/40 px-4 py-2 text-sm font-semibold text-app-fg transition hover:bg-app-muted"
+              className={`${CONTROL_HEIGHT_CLASS} inline-flex items-center gap-2 rounded-lg bg-app-elevated px-4 text-sm font-semibold text-app-fg shadow-sm transition hover:bg-app-muted`}
             >
               <span>Week {safeWeekIndex + 1} of {weeks.length}</span>
               <span className="text-xs font-normal text-app-fg-muted">{weekRangeLabel(month, weekDays)}</span>
@@ -852,17 +835,6 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
               </svg>
             </button>
           )}
-          {viewMode === 'monthly' && (
-            <span className="text-sm font-medium text-app-fg-muted">Whole-month totals</span>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-3 text-xs text-app-fg-muted">
-          {MARK_CYCLE.map((s) => (
-            <span key={s} className="flex items-center gap-1.5">
-              <span className={`h-3 w-3 rounded ${STATUS_THEME[s].dot}`} />
-              {STATUS_LABEL[s]} ({STATUS_LETTER[s]})
-            </span>
-          ))}
         </div>
       </div>
 
@@ -907,13 +879,10 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
               {branchGroups.map((group) => {
                 const open = expandedBranches.has(group.key);
                 const allInGroupSelected = group.rows.every((r) => selected.has(r.staffId));
-                const totals = branchTotals(group.rows);
-                // Show a branch-totals cell in the P/A/O/S summary column
-                // (daily/weekly). Monthly has per-status columns instead.
-                const showTotals = viewMode !== 'monthly';
-                // Trailing cells after the label: [totals?][view (always)]. Label
-                // spans everything between the leading checkbox and those cells.
-                const labelSpan = columns.length - (canManage ? 1 : 0) - (showTotals ? 1 : 0) - 1;
+                // No summary column any more, so no trailing totals cell. The
+                // label spans everything between the leading checkbox and the
+                // trailing View column.
+                const labelSpan = columns.length - (canManage ? 1 : 0) - 1;
                 return (
                   <tbody key={group.key} className="border-b border-app-border last:border-b-0">
                     <tr className="border-y border-app-border bg-app-hover/80 dark:bg-app-hover/60">
@@ -949,22 +918,17 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
                           <span className="rounded-full bg-app-elevated px-1.5 py-0.5 text-xs font-medium text-app-fg-muted">{group.rows.length}</span>
                         </button>
                       </td>
-                      {/* Branch totals in the trailing summary column (daily/weekly). */}
-                      {showTotals && (
-                        <td className="px-3 py-1.5 text-center">
-                          <div className="flex items-center justify-center gap-1 text-xs font-medium tabular-nums">
-                            <span className="text-green-600 dark:text-green-400" title="Present">{totals.present}</span>
-                            <span className="text-app-fg-muted">/</span>
-                            <span className="font-semibold text-red-600 dark:text-red-400" title="Absent">{totals.absent}</span>
-                            <span className="text-app-fg-muted">/</span>
-                            <span className="text-amber-600 dark:text-amber-400" title="Off duty">{totals.offDuty}</span>
-                            <span className="text-app-fg-muted">/</span>
-                            <span className="text-blue-600 dark:text-blue-400" title="Sick">{totals.sick}</span>
-                          </div>
-                        </td>
-                      )}
-                      {/* Empty cell under the trailing View column. */}
-                      <td className="px-3 py-1.5" />
+                      {/* Trailing cell: right-edge expand/collapse text toggle. */}
+                      <td className="px-3 py-1.5 text-right">
+                        <button
+                          type="button"
+                          onClick={() => toggleBranch(group.key)}
+                          aria-expanded={open}
+                          className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+                        >
+                          {open ? 'Collapse' : 'Expand'}
+                        </button>
+                      </td>
                     </tr>
                     {open &&
                       group.rows.map((row, i) => (
@@ -991,19 +955,9 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
           <div className="space-y-3 md:hidden">
             {branchGroups.map((group) => {
               const open = expandedBranches.has(group.key);
-              const allInGroupSelected = group.rows.every((r) => selected.has(r.staffId));
               return (
                 <div key={group.key} className="overflow-hidden rounded-lg border border-app-border">
                   <div className="flex items-center gap-2 bg-app-hover/80 px-3 py-2 dark:bg-app-hover/60">
-                    {canManage && (
-                      <input
-                        type="checkbox"
-                        checked={allInGroupSelected}
-                        onChange={(e) => selectBranch(group.rows, e.target.checked)}
-                        aria-label={`Select all in ${group.name}`}
-                        className="h-4 w-4 shrink-0"
-                      />
-                    )}
                     <button
                       type="button"
                       onClick={() => toggleBranch(group.key)}
@@ -1022,8 +976,9 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
                       <span className="text-sm font-semibold text-app-fg">{group.name}</span>
                       <span className="rounded-full bg-app-elevated px-1.5 py-0.5 text-xs font-medium text-app-fg-muted">{group.rows.length}</span>
                     </button>
-                    {/* Branch totals (compact) as the group's at-a-glance stat. */}
-                    {(() => {
+                    {/* Branch month totals: only in weekly/monthly (a daily view is
+                        about one day, so month totals would mislead). */}
+                    {viewMode !== 'daily' && (() => {
                       const t = branchTotals(group.rows);
                       return (
                         <span className="flex shrink-0 gap-1 text-[0.7rem] tabular-nums">
@@ -1079,14 +1034,36 @@ export function AttendancePage({ grid, policy, canManage, month, startDate, endD
         )}
       </Modal>
 
+      {/* Locked-day notice modal */}
+      <Modal open={!!lockNotice} onClose={() => setLockNotice(null)} maxWidth="max-w-sm">
+        <div className="space-y-4 p-5 sm:p-6">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+              </svg>
+            </span>
+            <div>
+              <h2 className="text-base font-semibold text-app-fg">Cannot mark this day</h2>
+              <p className="mt-1 text-sm text-app-fg-muted">{lockNotice}</p>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="primary" size="sm" onClick={() => setLockNotice(null)}>Got it</Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Bulk mark modal */}
       <Modal open={bulkOpen} onClose={() => { if (bulkFetcher.state !== 'idle') return; setBulkOpen(false); }} maxWidth="max-w-sm">
         <BulkMarkForm
+          key={`${bulkOpen}-${selectedDay}`}
           fetcher={bulkFetcher}
           count={selected.size}
           staffIds={[...selected]}
           month={month}
           maxDay={grid?.days ?? 31}
+          initialDay={selectedDay}
           onCancel={() => setBulkOpen(false)}
         />
       </Modal>
@@ -1198,6 +1175,7 @@ function BulkMarkForm({
   staffIds,
   month,
   maxDay,
+  initialDay,
   onCancel,
 }: {
   fetcher: ReturnType<typeof useFetcher<{ success?: boolean; error?: string }>>;
@@ -1205,10 +1183,12 @@ function BulkMarkForm({
   staffIds: string[];
   month: string;
   maxDay: number;
+  /** Default day = the day the page is currently viewing. */
+  initialDay: number;
   onCancel: () => void;
 }) {
   const [status, setStatus] = useState<AttendanceStatus>('PRESENT');
-  const [day, setDay] = useState<number>(1);
+  const [day, setDay] = useState<number>(() => Math.min(Math.max(1, initialDay), maxDay));
   const date = `${month}-${String(day).padStart(2, '0')}`;
 
   return (

@@ -145,7 +145,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // gated by the stricter `users.create` / `users.update` on their own
   // routes + the action below, so viewing here grants no management power.
   const user = await requirePermissionOrRoles(request, {
-    roles: ['FINANCE_OFFICER', 'HR_MANAGER'],
+    // BRANCH_ADMIN is view-only here (see canManageUsers below) — role-admitted so
+    // they can always reach their branch roster even if the permission snapshot lags.
+    roles: ['FINANCE_OFFICER', 'HR_MANAGER', 'BRANCH_ADMIN'],
     permission: ['users.read', 'users.staff.view', 'users.staff.create', 'users.staff.update', 'users.staff.deactivate'],
   });
   const cookie = getSessionCookie(request);

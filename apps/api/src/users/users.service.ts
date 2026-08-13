@@ -1167,6 +1167,12 @@ export class UsersService {
   ): boolean {
     if (!actor) return false;
     if (actor.role === 'SUPER_ADMIN' || isAdminLevelRole(actor.role)) return true;
+    // Branch Admin is a branch-scoped role: they see ONLY their branch's staff,
+    // never the company-wide roster (which would surface unbranched org users like
+    // Accountant / Auditor / Finance Officer). Their `users.read` grant is meant
+    // to be auto-scoped by effectiveBranchIds — so force branch scoping here even
+    // though they hold a users.staff view permission. (CEO 2026-08-13 slim role.)
+    if (actor.role === 'BRANCH_ADMIN') return false;
     // HR_MANAGER is org-wide only when no branch is selected (CEO 2026-05-19).
     if (actor.role === 'HR_MANAGER') return !currentBranchId;
     if (actor.role === 'FINANCE_OFFICER') return true;
@@ -1333,18 +1339,24 @@ export class UsersService {
       // selected: scope_global covers ADMIN (visible within its own company) as
       // well as SUPER_ADMIN/SUPPORT. Company crossing is handled by the
       // group-scoped paths above, which stay SUPER_ADMIN/SUPPORT-only.
-      conditions.push(
-        or(
-          sql<boolean>`EXISTS (
+      // EXCEPTION: Branch Admin sees ONLY users with an actual branch MEMBERSHIP
+      // (a user_branches row) in their branch — NOT primary_branch_id-only
+      // attachments and NOT scope_global org users. Org roles (Accountant/Auditor/
+      // Finance/Head Logistics, all scope_global) are HR-only and must not appear
+      // on a BA's roster, even when seeded with a primary_branch_id (CEO 2026-08-13).
+      const membershipClause = sql<boolean>`EXISTS (
             SELECT 1
             FROM user_branches ub
             WHERE ub.user_id = ${schema.users.id}
               AND ub.branch_id = ${branchFilter}
-          )`,
-          eq(schema.users.primaryBranchId, branchFilter),
-          eq(schema.users.scopeGlobal, true),
-        )!,
-      );
+          )`;
+      if (actor?.role === 'BRANCH_ADMIN') {
+        conditions.push(membershipClause);
+      } else {
+        conditions.push(
+          or(membershipClause, eq(schema.users.primaryBranchId, branchFilter), eq(schema.users.scopeGlobal, true))!,
+        );
+      }
     } else if (
       !skipBranchScope &&
       !currentBranchId &&
@@ -1355,20 +1367,27 @@ export class UsersService {
       // scoped to a set of branches via effectiveBranchIds. Include primary
       // branch as well as user_branches membership. Org-wide admin-class users
       // (scope_global) are unbranched and can't be matched by branch IDs, so
-      // include them explicitly or they vanish from the company roster.
-      conditions.push(
-        or(
-          inArray(
-            schema.users.id,
-            this.db
-              .select({ userId: schema.userBranches.userId })
-              .from(schema.userBranches)
-              .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
-          ),
-          inArray(schema.users.primaryBranchId, effectiveBranchIds),
-          eq(schema.users.scopeGlobal, true),
-        )!,
+      // include them explicitly or they vanish from the company roster. Branch
+      // Admin is the exception: MEMBERSHIP only — no primary-branch-only matches
+      // and no scope_global org users (those are HR-only).
+      const membershipInScope = inArray(
+        schema.users.id,
+        this.db
+          .select({ userId: schema.userBranches.userId })
+          .from(schema.userBranches)
+          .where(inArray(schema.userBranches.branchId, effectiveBranchIds)),
       );
+      if (actor?.role === 'BRANCH_ADMIN') {
+        conditions.push(membershipInScope);
+      } else {
+        conditions.push(
+          or(
+            membershipInScope,
+            inArray(schema.users.primaryBranchId, effectiveBranchIds),
+            eq(schema.users.scopeGlobal, true),
+          )!,
+        );
+      }
     } else if (
       !skipBranchScope &&
       actor &&

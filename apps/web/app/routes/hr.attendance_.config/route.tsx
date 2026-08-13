@@ -7,7 +7,7 @@ import {
   apiRequest,
   getCurrentUser,
   getSessionCookie,
-  requirePermissionOrRoles,
+  requireRole,
   safeStatus,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -17,10 +17,13 @@ import { DEFAULT_ATTENDANCE_POLICY, type AttendancePolicyInput } from '@yannis/s
 
 export const meta: MetaFunction = () => [{ title: 'Attendance config: Yannis EOSE' }];
 
-const MANAGE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HR_MANAGER'];
+// Attendance policy config is HR/admin only — NOT branch admins. Role-restricted
+// (no `attendance.manage` fallback, which branch admins hold for marking). SUPER_ADMIN
+// / SUPPORT bypass automatically inside requireRole.
+const CONFIG_ROLES = ['ADMIN', 'HR_MANAGER'];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermissionOrRoles(request, { roles: MANAGE_ROLES, permission: 'attendance.manage' });
+  await requireRole(request, CONFIG_ROLES);
   const user = await getCurrentUser(request);
   if (!user) throw redirect('/auth');
   const cookie = getSessionCookie(request);
@@ -46,6 +49,9 @@ export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
+  // Config mutations are HR/admin only — same role gate as the loader (branch
+  // admins hold attendance.manage for marking but must not edit policy).
+  await requireRole(request, CONFIG_ROLES);
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();

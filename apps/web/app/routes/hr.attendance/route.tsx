@@ -19,7 +19,7 @@ import { DEFAULT_ATTENDANCE_POLICY, type AttendancePolicyInput } from '@yannis/s
 
 export const meta: MetaFunction = () => [{ title: 'Attendance: Yannis EOSE' }];
 
-const VIEWER_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HR_MANAGER'];
+const VIEWER_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HR_MANAGER', 'BRANCH_ADMIN'];
 
 /** Today in Africa/Lagos as YYYY-MM-DD. Attendance defaults to today. */
 function today(): string {
@@ -80,10 +80,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       user.role === 'SUPER_ADMIN' ||
       user.role === 'ADMIN' ||
       user.role === 'HR_MANAGER';
+    // Attendance POLICY config (the Configure button + page) is HR/admin only —
+    // NOT branch admins, who can mark attendance but not edit the rules.
+    const canConfigure =
+      user.role === 'SUPER_ADMIN' ||
+      user.role === 'SUPPORT' ||
+      user.role === 'ADMIN' ||
+      user.role === 'HR_MANAGER';
     return {
       grid,
       policy,
       canManage,
+      canConfigure,
       month,
       // Attendance defaults to TODAY, not the whole month: the daily view derives
       // its selected day from `startDate`, so a fresh visit lands on today. Any
@@ -159,6 +167,7 @@ export default function AttendanceRoute() {
           grid={data.grid}
           policy={data.policy}
           canManage={data.canManage}
+          canConfigure={data.canConfigure}
           month={data.month}
           startDate={data.startDate}
           endDate={data.endDate}

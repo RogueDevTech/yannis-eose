@@ -69,6 +69,11 @@ export function UserAttendanceCard({ staffId, canManage = false }: Props) {
   }, [staffId, month]);
 
   if (state === 'error') return null;
+  // Wait for the summary before rendering: staff excluded from attendance
+  // tracking don't need the card at all, and gating on 'ready' avoids a flash
+  // of the card that then disappears for excluded staff.
+  if (state !== 'ready') return null;
+  if (data?.excluded) return null;
 
   return (
     <>

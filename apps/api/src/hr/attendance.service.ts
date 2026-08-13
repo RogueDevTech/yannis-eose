@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { uuidv7 } from 'uuidv7';
 import {
@@ -200,8 +200,44 @@ export class AttendanceService {
       eq(schema.users.attendanceExcluded, false), // excluded staff are not tracked
       sql`(${schema.users.payRoleId} IS NOT NULL OR ${schema.users.flatMonthlyAmount} IS NOT NULL)`,
     ];
-    if (branchScope.length) {
-      staffConds.push(inArray(schema.users.primaryBranchId, branchScope as string[]));
+    const membershipInScope = (branches: string[]) =>
+      inArray(
+        schema.users.id,
+        this.db
+          .select({ userId: schema.userBranches.userId })
+          .from(schema.userBranches)
+          .where(inArray(schema.userBranches.branchId, branches)),
+      );
+    // For a Branch Admin, we group every staff row under the BA's OWN branch
+    // (their servicing branch), not the staff's marketing primary_branch — so a
+    // PH-member whose primary is Abuja still shows under "Port Harcourt".
+    let baViewBranch: { id: string; name: string | null } | null = null;
+    if (actor.role === 'BRANCH_ADMIN') {
+      // Branch Admin sees ONLY their own branch's MEMBERSHIP staff — never the
+      // whole company, and never unbranched org roles (Auditor/Head Logistics/
+      // etc.) that happen to carry a primary_branch. Scope strictly to their
+      // branch memberships (branchIds), intersected with any allowed set.
+      const baBranches = (actor.branchIds ?? []).filter(Boolean);
+      const scope = allowed.length ? baBranches.filter((b) => allowed.includes(b)) : baBranches;
+      if (scope.length === 0) {
+        return { month: input.month, days, staff: [] as GridRow[] };
+      }
+      staffConds.push(membershipInScope(scope));
+      const branchId = scope[0]!;
+      const [b] = await this.db
+        .select({ id: schema.branches.id, name: schema.branches.name })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, branchId))
+        .limit(1);
+      baViewBranch = { id: branchId, name: b?.name ?? null };
+    } else if (branchScope.length) {
+      // Match by primary branch OR user_branches MEMBERSHIP — a staff member's
+      // marketing/primary branch can differ from the branch they're staffed in
+      // (e.g. an MB whose primary is Abuja but who is a member of Port Harcourt).
+      // Primary-only filtering silently dropped those staff from the grid.
+      staffConds.push(
+        or(inArray(schema.users.primaryBranchId, branchScope as string[]), membershipInScope(branchScope as string[]))!,
+      );
     }
     if (input.role) {
       staffConds.push(eq(schema.users.role, input.role as typeof schema.users.role.enumValues[number]));
@@ -302,8 +338,9 @@ export class AttendanceService {
         staffId: s.id,
         name: s.name,
         role: s.role,
-        branchId: s.primaryBranchId ?? null,
-        branchName: s.branchName ?? null,
+        // Branch Admin: group under THEIR branch, not the staff's primary branch.
+        branchId: baViewBranch ? baViewBranch.id : (s.primaryBranchId ?? null),
+        branchName: baViewBranch ? baViewBranch.name : (s.branchName ?? null),
         exceptions: Object.fromEntries(cells),
         summary: { present, absent, offDuty: off, sick, attendancePct: pct },
         attendanceGated: enabled,
@@ -595,6 +632,7 @@ export class AttendanceService {
         role: schema.users.role,
         payRoleId: schema.users.payRoleId,
         override: schema.users.attendanceAffectsPay,
+        excluded: schema.users.attendanceExcluded,
         dateOfJoining: schema.users.dateOfJoining,
         exitDate: schema.users.exitDate,
       })
@@ -633,12 +671,17 @@ export class AttendanceService {
       ? computeAttendanceEligibility({ absences: absent, config: { enabled: true, bands: roleCfg?.bands ?? [] } })
       : null;
 
+    // Work days from the company policy, so the calendar can hide non-work days.
+    const policy = await this.getPolicy(actor);
+
     return {
       month: input.month,
       days,
       staffId,
       staffName: u?.name ?? null,
       staffRole: u?.role ?? null,
+      excluded: !!u?.excluded,
+      workDays: policy.workDays,
       calendar,
       summary: {
         present,

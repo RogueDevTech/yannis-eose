@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
+import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -67,9 +68,33 @@ export function PayrollBankPayExportModal({
     return rows;
   }, [monthlyPayrolls, branchById]);
 
+  // Month filter (YYYY-MM). Distinct months present, newest first, each with its
+  // display label for the picker.
+  const monthOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const b of flatBatches) {
+      const ym = String(b.periodMonth).slice(0, 7);
+      if (!map.has(ym)) map.set(ym, formatBankPayPeriod(b.periodMonth));
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([value, label]) => ({ value, label }));
+  }, [flatBatches]);
+
+  // Default to the CURRENT month when it has batches; else the most recent month.
+  const currentYm = new Date().toISOString().slice(0, 7);
+  const defaultMonth =
+    monthOptions.find((m) => m.value === currentYm)?.value ?? monthOptions[0]?.value ?? 'ALL';
+  const [monthFilter, setMonthFilter] = useState<string>(defaultMonth);
+
+  const visibleBatches = useMemo(
+    () => (monthFilter === 'ALL' ? flatBatches : flatBatches.filter((b) => String(b.periodMonth).slice(0, 7) === monthFilter)),
+    [flatBatches, monthFilter],
+  );
+
   const exportableIds = useMemo(
-    () => flatBatches.filter((b) => isExportable(b.status)).map((b) => b.id),
-    [flatBatches],
+    () => visibleBatches.filter((b) => isExportable(b.status)).map((b) => b.id),
+    [visibleBatches],
   );
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -86,7 +111,12 @@ export function PayrollBankPayExportModal({
       setPreviewDoc(null);
       setMode('one_file');
       setFormat('csv');
+    } else {
+      // On open, snap the month filter to the current month (or most recent).
+      setMonthFilter(defaultMonth);
     }
+    // defaultMonth is derived from monthOptions; re-run when the modal opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {
@@ -183,6 +213,21 @@ export function PayrollBankPayExportModal({
           </p>
         </div>
 
+        {/* Month filter — defaults to the current month so the list isn't the
+            whole all-time history. Only shown when more than one month exists. */}
+        {monthOptions.length > 1 ? (
+          <FormSelect
+            label="Month"
+            value={monthFilter}
+            onChange={(e) => {
+              setMonthFilter(e.target.value);
+              setSelected(new Set()); // reset selection when the filter changes
+            }}
+            options={[{ value: 'ALL', label: 'All months' }, ...monthOptions]}
+            wrapperClassName="w-full sm:w-56"
+          />
+        ) : null}
+
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="secondary" size="sm" onClick={() => setSelected(new Set(exportableIds))}>
             Select all ready
@@ -193,10 +238,10 @@ export function PayrollBankPayExportModal({
         </div>
 
         <div className="max-h-64 overflow-y-auto rounded-md border border-app-border divide-y divide-app-border">
-          {flatBatches.length === 0 ? (
-            <p className="p-3 text-sm text-app-fg-muted">No batches in the current filters.</p>
+          {visibleBatches.length === 0 ? (
+            <p className="p-3 text-sm text-app-fg-muted">No batches for the selected month.</p>
           ) : (
-            flatBatches.map((batch) => {
+            visibleBatches.map((batch) => {
               const ready = isExportable(batch.status);
               const checked = selected.has(batch.id);
               return (

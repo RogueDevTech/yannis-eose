@@ -523,19 +523,19 @@ export const generalLedgerRouter = router({
   matchBankReconLine: permissionProcedure('accounting.write')
     .input(matchLineSchema)
     .mutation(async ({ input, ctx }) => {
-      return getBankReconciliationService().matchLine(input, { id: ctx.user.id });
+      return getBankReconciliationService().matchLine(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   unmatchBankReconLine: permissionProcedure('accounting.write')
     .input(unmatchLineSchema)
     .mutation(async ({ input, ctx }) => {
-      return getBankReconciliationService().unmatchLine(input, { id: ctx.user.id });
+      return getBankReconciliationService().unmatchLine(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   completeBankReconciliation: permissionProcedure('accounting.write')
     .input(completeBankReconciliationSchema)
     .mutation(async ({ input, ctx }) => {
-      return getBankReconciliationService().completeReconciliation(input, { id: ctx.user.id });
+      return getBankReconciliationService().completeReconciliation(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   listBankReconciliations: permissionProcedure('accounting.read', 'finance.audit.read')
@@ -549,8 +549,8 @@ export const generalLedgerRouter = router({
 
   getBankReconciliation: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(getBankReconciliationSchema)
-    .query(async ({ input }) => {
-      return getBankReconciliationService().getReconciliation(input);
+    .query(async ({ input, ctx }) => {
+      return getBankReconciliationService().getReconciliation(input, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   // ─── Phase 6E: Consolidated Multi-Company Reports ────────────────────

@@ -75,10 +75,19 @@ export function createContext(req: Request, res: Response): TrpcContext {
       // a single branch is selected. Pages like HR Users need this for
       // company-wide queries even when currentBranchId is set.
       effectiveBranchIds = selected;
+    } else if (currentBranchId && !canViewAllBranches(user)) {
+      // A branch-SCOPED user (e.g. Branch Admin) has a single branch selected but
+      // selectedBranchIds is empty — the /auth/me backfill deliberately skips
+      // selectedBranchIds when a single branch is selected. The selected branch IS
+      // the unambiguous scope; use it directly. Without this the empty-group
+      // fallback below matched NOTHING and emptied branch-scoped lists like the
+      // attendance grid (which scopes only by effectiveBranchIds). Restricted to
+      // non-all-branches users so admins' company-wide roster is untouched.
+      effectiveBranchIds = [currentBranchId];
     } else if (activeGroupId) {
-      // A company IS selected but selectedBranchIds is empty — stale session
-      // or race before /auth/me backfill runs. Use a non-matching UUID so
-      // IN-based filters return zero rows rather than leaking org-wide data.
+      // A company IS selected ("All branches") but selectedBranchIds is empty —
+      // stale session or race before /auth/me backfill runs. Use a non-matching
+      // UUID so IN-based filters return zero rows rather than leaking org-wide.
       effectiveBranchIds = ['00000000-0000-0000-0000-000000000000'];
     } else if (currentBranchId === null && !canViewAllBranches(user)) {
       // Non-global user at "All branches" without a company selection —
