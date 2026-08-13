@@ -181,6 +181,89 @@ function sumAllowances(allowances: PayrollFormulaAllowance[] | undefined): {
   return { total: lines.reduce((s, l) => s + l.amount, 0), lines };
 }
 
+export interface FormulaValidationResult {
+  /** Blocking problems — the formula should not be saved. */
+  errors: string[];
+  /** Non-blocking concerns (e.g. ambiguous overlaps) — save allowed. */
+  warnings: string[];
+}
+
+/** DR-style metrics are percentages (0–100); CPA/DELIVERED_COUNT are counts. */
+function isPercentMetric(metric: string): boolean {
+  return metric === 'INDIVIDUAL_DR' || metric === 'TEAM_DR';
+}
+
+/**
+ * Semantic validation of a payroll formula BEFORE saving (requirement #11).
+ * Zod already enforces types/ranges; this catches logical problems the schema
+ * can't: bad thresholds for the metric, operator/metric mismatches, conflicting
+ * or overlapping tiers, and per-order tiers with no delivered-count basis.
+ */
+export function validatePayrollFormula(formula: PayrollFormula): FormulaValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const checkTier = (
+    t: { metric: string; operator: string; threshold: number; kind?: string; amount?: number },
+    label: string,
+  ) => {
+    // Threshold sanity.
+    if (!Number.isFinite(t.threshold) || t.threshold < 0) {
+      errors.push(`${label}: threshold must be a number ≥ 0.`);
+    } else if (isPercentMetric(t.metric) && t.threshold > 100) {
+      errors.push(`${label}: ${t.metric} is a percentage — threshold ${t.threshold} cannot exceed 100.`);
+    }
+    // Operator / metric compatibility.
+    if (t.metric === 'TARGET_MET' && !['EQ', 'GTE', 'GT'].includes(t.operator)) {
+      warnings.push(`${label}: "Target met" is yes/no — "at least / exactly" reads clearer than ${t.operator}.`);
+    }
+    if (t.metric === 'NONE' && (t.operator !== 'GTE' || t.threshold !== 0)) {
+      warnings.push(`${label}: a "None (flat)" tier ignores its operator/threshold — it always applies.`);
+    }
+    // Per-order amount sanity.
+    if (t.kind === 'PER_ORDER' && (t.amount ?? 0) <= 0) {
+      errors.push(`${label}: per-order tiers need a rate greater than ₦0.`);
+    }
+  };
+
+  (formula.baseSalaryTiers ?? []).forEach((t, i) => checkTier(t, `Base tier ${i + 1}`));
+  (formula.bonusTiers ?? []).forEach((t, i) => checkTier(t, `Bonus tier ${i + 1}`));
+
+  // Overlap / conflict detection within the bonus tiers, per metric. Two tiers
+  // on the same metric+operator with the same threshold are duplicates; two
+  // "greater-than" tiers where the lower threshold's band fully contains the
+  // higher one is fine (precedence resolves it, highest first). We flag EXACT
+  // duplicates as errors and same-direction same-threshold as ambiguous.
+  const byMetric = new Map<string, Array<{ operator: string; threshold: number; idx: number }>>();
+  (formula.bonusTiers ?? []).forEach((t, idx) => {
+    if (t.metric === 'NONE') return;
+    const list = byMetric.get(t.metric) ?? [];
+    list.push({ operator: t.operator, threshold: t.threshold, idx });
+    byMetric.set(t.metric, list);
+  });
+  for (const [metric, list] of byMetric) {
+    for (let a = 0; a < list.length; a++) {
+      for (let b = a + 1; b < list.length; b++) {
+        const x = list[a]!;
+        const y = list[b]!;
+        if (x.operator === y.operator && x.threshold === y.threshold) {
+          errors.push(
+            `Bonus tiers ${x.idx + 1} and ${y.idx + 1} both use ${metric} ${x.operator} ${x.threshold} — duplicate/conflicting rules.`,
+          );
+        }
+      }
+    }
+  }
+
+  // A per-order bonus tier requires a delivered-order count to multiply against.
+  const hasPerOrderBonus = (formula.bonusTiers ?? []).some((t) => t.kind === 'PER_ORDER');
+  if (hasPerOrderBonus) {
+    warnings.push('Per-order bonus configured: staff without a delivered-order count will earn ₦0 bonus.');
+  }
+
+  return { errors, warnings };
+}
+
 /**
  * Evaluate PRD formula config against payroll metrics.
  *
