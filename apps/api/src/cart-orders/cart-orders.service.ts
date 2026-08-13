@@ -8,6 +8,7 @@ import { DRIZZLE, PG_CLIENT_RAW } from '../database/database.module';
 import type postgres from 'postgres';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isTransitionAllowed } from '../orders/order-state-machine';
@@ -469,7 +470,8 @@ export class CartOrdersService {
 
   // ── Assign to CS ─────────────────────────────────────────────────────
 
-  async assignToCS(orderId: string, closerId: string, actor: SessionUser) {
+  async assignToCS(orderId: string, closerId: string, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertCartOrderInScope(orderId, effectiveBranchIds);
     const [order] = await this.db
       .select({ id: schema.cartOrders.id, servicingBranchId: schema.cartOrders.servicingBranchId })
       .from(schema.cartOrders)
@@ -514,14 +516,26 @@ export class CartOrdersService {
 
   // ── Bulk Assign ──────────────────────────────────────────────────────
 
-  async bulkAssign(orderIds: string[], closerIds: string[], actor: SessionUser) {
-    const cartOrders = await this.db
+  async bulkAssign(orderIds: string[], closerIds: string[], actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    const cartOrdersRaw = await this.db
       .select({
         id: schema.cartOrders.id,
+        branchId: schema.cartOrders.branchId,
         servicingBranchId: schema.cartOrders.servicingBranchId,
       })
       .from(schema.cartOrders)
       .where(inArray(schema.cartOrders.id, orderIds));
+
+    // Company isolation: drop any cart order outside the caller's active
+    // company rather than failing the whole batch. Org-wide callers keep all.
+    const cartOrders =
+      effectiveBranchIds == null
+        ? cartOrdersRaw
+        : cartOrdersRaw.filter(
+            (o) =>
+              (o.servicingBranchId != null && effectiveBranchIds.includes(o.servicingBranchId)) ||
+              (o.branchId != null && effectiveBranchIds.includes(o.branchId)),
+          );
 
     // Resolve closer names + branches in parallel
     const uniqueCloserIds = [...new Set(closerIds)];
@@ -596,7 +610,9 @@ export class CartOrdersService {
     actor: SessionUser,
     note?: string,
     metadata?: Record<string, unknown>,
+    effectiveBranchIds?: string[] | null,
   ) {
+    await this.assertCartOrderInScope(orderId, effectiveBranchIds);
     const [order] = await this.db
       .select()
       .from(schema.cartOrders)
@@ -1598,7 +1614,35 @@ export class CartOrdersService {
 
   // ── Get Single Cart Order ────────────────────────────────────────────
 
-  async getById(id: string) {
+  /**
+   * Company-isolation guard: assert the cart order (by id) belongs to the
+   * caller's active company. In scope when EITHER its servicing branch OR its
+   * marketing branch is in `effectiveBranchIds`. Org-wide callers (null) bypass.
+   * Throws NOT_FOUND for a missing id, FORBIDDEN for a cross-company id.
+   */
+  private async assertCartOrderInScope(
+    id: string,
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    if (effectiveBranchIds == null) return; // org-wide
+    const [row] = await this.db
+      .select({
+        branchId: schema.cartOrders.branchId,
+        servicingBranchId: schema.cartOrders.servicingBranchId,
+      })
+      .from(schema.cartOrders)
+      .where(eq(schema.cartOrders.id, id))
+      .limit(1);
+    if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart order not found' });
+    assertEntityInScopeAny(
+      [row.servicingBranchId, row.branchId],
+      effectiveBranchIds,
+      { message: 'This cart order is not in your company.' },
+    );
+  }
+
+  async getById(id: string, effectiveBranchIds?: string[] | null) {
+    await this.assertCartOrderInScope(id, effectiveBranchIds);
     const [order] = await this.db
       .select()
       .from(schema.cartOrders)
@@ -1697,7 +1741,8 @@ export class CartOrdersService {
 
   // ── Update Cart Order Details ────────────────────────────────────────
 
-  async update(input: UpdateCartOrderInput, actor: SessionUser) {
+  async update(input: UpdateCartOrderInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertCartOrderInScope(input.orderId, effectiveBranchIds);
     const [order] = await this.db
       .select({ id: schema.cartOrders.id, servicingBranchId: schema.cartOrders.servicingBranchId })
       .from(schema.cartOrders)
@@ -1749,7 +1794,9 @@ export class CartOrdersService {
     items: Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>,
     totalAmount: number,
     actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ) {
+    await this.assertCartOrderInScope(orderId, effectiveBranchIds);
     const [order] = await this.db
       .select({ id: schema.cartOrders.id, status: schema.cartOrders.status, servicingBranchId: schema.cartOrders.servicingBranchId })
       .from(schema.cartOrders)
@@ -1805,7 +1852,8 @@ export class CartOrdersService {
   // ── Initiate Call ─────────────────────────────────────────────────────
   // Mirrors orders.initiateCall: transitions to CS_ENGAGED + records MANUAL_CALL.
 
-  async initiateCall(orderId: string, actor: SessionUser) {
+  async initiateCall(orderId: string, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertCartOrderInScope(orderId, effectiveBranchIds);
     const [order] = await this.db
       .select({ id: schema.cartOrders.id, status: schema.cartOrders.status, servicingBranchId: schema.cartOrders.servicingBranchId })
       .from(schema.cartOrders)

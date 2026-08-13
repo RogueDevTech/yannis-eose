@@ -495,6 +495,8 @@ export class PayrollConfigService {
           taxFreeThreshold: sql`${input.taxFreeThreshold}::numeric`,
           bands: input.bands,
           reliefs: input.reliefs,
+          statutoryDeductions: input.statutoryDeductions,
+          lowIncomeExemptionMonthly: sql`${input.lowIncomeExemptionMonthly}::numeric`,
           effectiveFrom: new Date(input.effectiveFrom),
           createdBy: actor.id,
         })
@@ -557,6 +559,8 @@ export class PayrollConfigService {
       taxFreeThreshold: Number(row.taxFreeThreshold),
       bands: row.bands as ReturnType<typeof defaultPayeBandConfig>['bands'],
       reliefs: row.reliefs as ReturnType<typeof defaultPayeBandConfig>['reliefs'],
+      statutoryDeductions: (row.statutoryDeductions as ReturnType<typeof defaultPayeBandConfig>['statutoryDeductions']) ?? [],
+      lowIncomeExemptionMonthly: Number(row.lowIncomeExemptionMonthly ?? 0),
     };
   }
 
@@ -799,6 +803,7 @@ export class PayrollConfigService {
       crmLinked?: boolean;
       flatMonthlyAmount?: number;
       annualRent?: number | null;
+      tin?: string | null;
     },
     actor: SessionUser,
   ) {
@@ -828,6 +833,7 @@ export class PayrollConfigService {
                   input.annualRent == null ? null : sql`${input.annualRent}::numeric`,
               }
             : {}),
+          ...(input.tin !== undefined ? { tin: input.tin } : {}),
           updatedAt: new Date(),
         })
         .where(eq(schema.users.id, input.userId))

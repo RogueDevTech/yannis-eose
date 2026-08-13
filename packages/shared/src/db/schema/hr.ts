@@ -16,6 +16,7 @@ import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { branches } from './branches';
 import { products } from './products';
+import type { AttendanceConfig } from '../../hr/attendance-eligibility';
 
 // Table 17: commission_plans — JSONB commission rules
 export const commissionPlans = pgTable('commission_plans', {
@@ -59,6 +60,16 @@ export const payrollPayRoles = pgTable('payroll_pay_roles', {
   deliveredMetricSource: payrollDeliveredMetricSourceEnum('delivered_metric_source')
     .default('FUNNEL')
     .notNull(),
+  /**
+   * Attendance-based base-salary eligibility (Track C). JSONB
+   * `{ enabled: boolean, bands: [{ minAbsences, deductionPercent }] }`.
+   * Default OFF ({enabled:false}) — attendance never affects pay until HR turns
+   * it on for the role. Only ABSENT count matters; see attendance-eligibility.ts.
+   */
+  attendanceConfig: jsonb('attendance_config')
+    .$type<AttendanceConfig>()
+    .default({ enabled: false, bands: [] })
+    .notNull(),
   active: boolean('active').default(true).notNull(),
   ...temporalColumns,
   ...timestampColumns,
@@ -90,6 +101,12 @@ export const payrollTaxBandConfigs = pgTable('payroll_tax_band_configs', {
   taxFreeThreshold: numeric('tax_free_threshold', { precision: 14, scale: 2 }).default('800000').notNull(),
   bands: jsonb('bands').notNull().default([]),
   reliefs: jsonb('reliefs').notNull().default([]),
+  /** Pension/NHIS etc. taken off gross before PAYE (config-driven, per company). */
+  statutoryDeductions: jsonb('statutory_deductions').notNull().default([]),
+  /** HR low-income PAYE exemption (monthly). gross/net below this → PAYE 0. 0 = off. */
+  lowIncomeExemptionMonthly: numeric('low_income_exemption_monthly', { precision: 14, scale: 2 })
+    .default('66667')
+    .notNull(),
   effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull(),
   effectiveTo: timestamp('effective_to', { withTimezone: true }),
   createdBy: uuid('created_by')
@@ -162,6 +179,15 @@ export const payrollBatches = pgTable('payroll_batches', {
   includeContractors: boolean('include_contractors').default(false).notNull(),
   runLabel: text('run_label'),
 
+  /**
+   * SUPPLEMENTARY batches only. The ORIGINAL period (YYYY-MM-01) being completed —
+   * the supplementary pays the outstanding salary + remaining PAYE for this month,
+   * using the original month's intended salary to recompute correct PAYE.
+   */
+  referencesPeriod: date('references_period'),
+  /** Optional pointer to the specific original batch being completed (audit link). */
+  referencesBatchId: uuid('references_batch_id'),
+
   /** Head/HR who initially generated the batch (null = system auto-generated). */
   preparedBy: uuid('prepared_by').references(() => users.id),
   preparedAt: timestamp('prepared_at', { withTimezone: true }),
@@ -218,6 +244,10 @@ export const payoutRecords = pgTable('payout_records', {
   bonusBreakdown: jsonb('bonus_breakdown'),
   allowancesTotal: numeric('allowances_total', { precision: 12, scale: 2 }).default('0').notNull(),
   grossPay: numeric('gross_pay', { precision: 12, scale: 2 }).default('0').notNull(),
+  /** Total monthly statutory deductions (Pension/NHIS) taken off gross before PAYE. */
+  statutoryTotal: numeric('statutory_total', { precision: 12, scale: 2 }).default('0').notNull(),
+  /** Per-item statutory breakdown ([{name, amount}]) for payslips + PAYE remittance export. */
+  statutoryBreakdown: jsonb('statutory_breakdown').default([]),
   payeTax: numeric('paye_tax', { precision: 12, scale: 2 }).default('0').notNull(),
   employerPayeSubsidy: numeric('employer_paye_subsidy', { precision: 12, scale: 2 }).default('0').notNull(),
   netPay: numeric('net_pay', { precision: 12, scale: 2 }).default('0').notNull(),

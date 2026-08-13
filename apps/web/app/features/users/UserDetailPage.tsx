@@ -48,6 +48,7 @@ import {
   toPayslipPdfInput,
   type PayslipApiRow,
 } from '~/features/hr/payslip-mappers';
+import { UserAttendanceCard } from '~/features/hr/UserAttendanceCard';
 import type {
   UserDetail,
   UserDetailPageProps,
@@ -133,6 +134,7 @@ export function UserDetailPage({
   isSelfView = false,
   showOnboardingTab = false,
   viewerCanManageHrOnboarding = false,
+  viewerCanManageAttendance = false,
   overviewOnboardingSlice = null,
   overviewPermissionsSlice = null,
   usersBasePath = '/hr/users',
@@ -1076,6 +1078,10 @@ export function UserDetailPage({
           description="Membership dates and onboarding"
           onClick={() => setOpenModal('account')}
         />
+        {/* Attendance summary (current month): opens the calendar in a READ-ONLY
+            modal. Marking is done on the attendance page (by HR / Branch Admin),
+            never from a user's own profile — so this is always view-only. */}
+        <UserAttendanceCard staffId={user.id} canManage={false} />
         {isMarketingRole && (
           <SectionCard
             label="Marketing Performance"

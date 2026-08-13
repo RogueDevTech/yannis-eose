@@ -215,6 +215,65 @@ export async function action({ request }: ActionFunctionArgs) {
     throw redirect('/hr/payroll');
   }
 
+  if (intent === 'previewSupplementaryBatch') {
+    const rawMonth = formData.get('periodMonth')?.toString() ?? '';
+    const periodMonth = normalizePeriodMonth(rawMonth);
+    const branchId = formData.get('branchId')?.toString() || undefined;
+    const res = await apiRequest<unknown>('/trpc/hr.previewSupplementaryBatch', {
+      method: 'POST',
+      cookie,
+      // Recomputes correct pay per staff for an already-settled month, so give it
+      // a generous budget like the other preview endpoints.
+      timeoutMs: 120_000,
+      body: {
+        periodMonth,
+        branchId: branchId ?? null,
+      },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to preview supplementary batch') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    const supplementaryPreview = unwrapTrpcMutation<unknown>(res.data) ?? null;
+    return json({ success: true, supplementaryPreview });
+  }
+
+  if (intent === 'generateSupplementaryBatch') {
+    const rawMonth = formData.get('periodMonth')?.toString() ?? '';
+    const periodMonth = normalizePeriodMonth(rawMonth);
+    const branchId = formData.get('branchId')?.toString() || undefined;
+    const staffIds = Array.from(formData.getAll('staffIds'))
+      .map((v) => v.toString().trim())
+      .filter(Boolean);
+    const res = await apiRequest<unknown>('/trpc/hr.generateSupplementaryBatch', {
+      method: 'POST',
+      cookie,
+      timeoutMs: 180_000,
+      body: {
+        periodMonth,
+        branchId: branchId ?? null,
+        // Omit staffIds entirely when every affected member is selected — the
+        // backend then includes all underpaid staff for the period.
+        staffIds: staffIds.length > 0 ? staffIds : undefined,
+        runLabel: formData.get('runLabel')?.toString() || undefined,
+      },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to generate supplementary batch') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    const payload = unwrapTrpcMutation<{ batchId?: string }>(res.data);
+    const batchId = payload?.batchId;
+    if (batchId) {
+      throw redirect(`/hr/payroll-batch/${encodeURIComponent(batchId)}`);
+    }
+    throw redirect('/hr/payroll');
+  }
+
   if (intent === 'generateBatchesBulk') {
     const rawMonth = formData.get('periodMonth')?.toString() ?? '';
     const periodMonth = normalizePeriodMonth(rawMonth);

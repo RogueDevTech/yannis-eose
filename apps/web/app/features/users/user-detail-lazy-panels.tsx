@@ -87,8 +87,31 @@ export function UserDetailEarningsOutlookCard({
               />
               <StatRow label="Returns" value={preview.returnedCount.toLocaleString()} />
               <StatRow label="Delivery rate" value={`${preview.deliveryRate.toFixed(1)}%`} />
+              {preview.teamDeliveryRate != null ? (
+                <StatRow
+                  label="Team delivery rate"
+                  value={`${preview.teamDeliveryRate.toFixed(1)}%`}
+                />
+              ) : null}
               <StatRow label="Base salary (estimate)" value="" amount={preview.baseSalary} variant="subtotal" />
               <StatRow label="Performance bonus (estimate)" value="" amount={preview.performanceBonus} />
+              {preview.bonusBreakdown && preview.bonusBreakdown.length > 0 ? (
+                preview.bonusBreakdown.map((line, i) => (
+                  <StatRow
+                    key={`bonus-${i}-${line.label}`}
+                    label={line.label}
+                    value=""
+                    amount={line.amount}
+                    indent
+                  />
+                ))
+              ) : preview.performanceBonus === 0 ? (
+                <StatRow
+                  label="No performance bonus this period"
+                  value=""
+                  indent
+                />
+              ) : null}
               {(preview.allowancesTotal ?? 0) > 0 ? (
                 <StatRow label="Allowances" value="" amount={preview.allowancesTotal ?? 0} />
               ) : null}

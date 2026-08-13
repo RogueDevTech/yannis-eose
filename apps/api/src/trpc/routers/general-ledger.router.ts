@@ -184,13 +184,13 @@ export const generalLedgerRouter = router({
           message: 'Only administrators, finance officers, or accountants can reject journal entries.',
         });
       }
-      return getGeneralLedgerService().rejectJournalEntry(input, { id: ctx.user.id });
+      return getGeneralLedgerService().rejectJournalEntry(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   reverseJournalEntry: permissionProcedure('accounting.write')
     .input(reverseJournalEntrySchema)
     .mutation(async ({ input, ctx }) => {
-      return getGeneralLedgerService().reverseJournalEntry(input, { id: ctx.user.id });
+      return getGeneralLedgerService().reverseJournalEntry(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   listJournalEntries: permissionProcedure('accounting.read', 'finance.audit.read')
@@ -204,8 +204,8 @@ export const generalLedgerRouter = router({
 
   getJournalEntry: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(getJournalEntrySchema)
-    .query(async ({ input }) => {
-      return getGeneralLedgerService().getJournalEntry(input);
+    .query(async ({ input, ctx }) => {
+      return getGeneralLedgerService().getJournalEntry(input, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   // ─── Accounts (Chart of Accounts) ────────────────────────────────────────
@@ -220,8 +220,8 @@ export const generalLedgerRouter = router({
 
   getAccountLedger: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(getAccountLedgerSchema)
-    .query(async ({ input }) => {
-      return getGeneralLedgerService().getAccountLedger(input);
+    .query(async ({ input, ctx }) => {
+      return getGeneralLedgerService().getAccountLedger(input, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   createAccount: permissionProcedure('accounting.write')
@@ -236,19 +236,19 @@ export const generalLedgerRouter = router({
   updateAccount: permissionProcedure('accounting.write')
     .input(updateAccountSchema)
     .mutation(async ({ input, ctx }) => {
-      return getGeneralLedgerService().updateAccount(input, { id: ctx.user.id });
+      return getGeneralLedgerService().updateAccount(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   deactivateAccount: permissionProcedure('accounting.write')
     .input(deactivateAccountSchema)
     .mutation(async ({ input, ctx }) => {
-      return getGeneralLedgerService().deactivateAccount(input, { id: ctx.user.id });
+      return getGeneralLedgerService().deactivateAccount(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   reactivateAccount: permissionProcedure('accounting.write')
     .input(reactivateAccountSchema)
     .mutation(async ({ input, ctx }) => {
-      return getGeneralLedgerService().reactivateAccount(input, { id: ctx.user.id });
+      return getGeneralLedgerService().reactivateAccount(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   // ─── Fiscal Years ────────────────────────────────────────────────────────
@@ -273,7 +273,7 @@ export const generalLedgerRouter = router({
   closeFiscalYear: permissionProcedure('accounting.write')
     .input(closeFiscalYearSchema)
     .mutation(async ({ input, ctx }) => {
-      return getGeneralLedgerService().closeFiscalYear(input, { id: ctx.user.id });
+      return getGeneralLedgerService().closeFiscalYear(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   /** Reopen a closed fiscal year. SuperAdmin-only gate in the router. */
@@ -287,7 +287,7 @@ export const generalLedgerRouter = router({
           message: 'Only administrators can reopen a closed fiscal year.',
         });
       }
-      return getGeneralLedgerService().reopenFiscalYear(input, { id: ctx.user.id });
+      return getGeneralLedgerService().reopenFiscalYear(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   // ─── Trial Balance ─────────────────────────────────────────────────────────
@@ -495,6 +495,7 @@ export const generalLedgerRouter = router({
       return getGeneralLedgerService().generateWhtCertificate(
         input.deductionId,
         { id: ctx.user.id },
+        resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role),
       );
     }),
 
@@ -522,19 +523,19 @@ export const generalLedgerRouter = router({
   matchBankReconLine: permissionProcedure('accounting.write')
     .input(matchLineSchema)
     .mutation(async ({ input, ctx }) => {
-      return getBankReconciliationService().matchLine(input, { id: ctx.user.id });
+      return getBankReconciliationService().matchLine(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   unmatchBankReconLine: permissionProcedure('accounting.write')
     .input(unmatchLineSchema)
     .mutation(async ({ input, ctx }) => {
-      return getBankReconciliationService().unmatchLine(input, { id: ctx.user.id });
+      return getBankReconciliationService().unmatchLine(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   completeBankReconciliation: permissionProcedure('accounting.write')
     .input(completeBankReconciliationSchema)
     .mutation(async ({ input, ctx }) => {
-      return getBankReconciliationService().completeReconciliation(input, { id: ctx.user.id });
+      return getBankReconciliationService().completeReconciliation(input, { id: ctx.user.id }, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   listBankReconciliations: permissionProcedure('accounting.read', 'finance.audit.read')
@@ -548,8 +549,8 @@ export const generalLedgerRouter = router({
 
   getBankReconciliation: permissionProcedure('accounting.read', 'finance.audit.read')
     .input(getBankReconciliationSchema)
-    .query(async ({ input }) => {
-      return getBankReconciliationService().getReconciliation(input);
+    .query(async ({ input, ctx }) => {
+      return getBankReconciliationService().getReconciliation(input, resolveGroupId(undefined, ctx.activeGroupId, ctx.user.role));
     }),
 
   // ─── Phase 6E: Consolidated Multi-Company Reports ────────────────────

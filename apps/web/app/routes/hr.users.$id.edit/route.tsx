@@ -153,6 +153,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       taxStatus: user.taxStatus ?? 'STANDARD_PAYE',
       flatMonthlyAmount: user.flatMonthlyAmount ? String(Number(user.flatMonthlyAmount)) : '',
       annualRent: user.annualRent != null ? String(Number(user.annualRent)) : '',
+      tin: user.tin ?? '',
     };
     return { kind: 'ok', editingUser, isSelfPayrollOnly: isSelf };
   })();
@@ -297,6 +298,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
           : formData.has('annualRent')
             ? null
             : undefined,
+        tin: formData.get('tin')?.toString()?.trim()
+          ? formData.get('tin')!.toString().trim()
+          : formData.has('tin')
+            ? null
+            : undefined,
       },
     });
     if (!res.ok) {
@@ -325,6 +331,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
         annualRent: formData.get('annualRent')?.toString()?.trim()
           ? Number(formData.get('annualRent'))
           : formData.has('annualRent')
+            ? null
+            : undefined,
+        tin: formData.get('tin')?.toString()?.trim()
+          ? formData.get('tin')!.toString().trim()
+          : formData.has('tin')
             ? null
             : undefined,
       },
@@ -589,6 +600,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
         annualRent: formData.get('annualRent')?.toString()?.trim()
           ? Number(formData.get('annualRent'))
           : formData.has('annualRent')
+            ? null
+            : undefined,
+        tin: formData.get('tin')?.toString()?.trim()
+          ? formData.get('tin')!.toString().trim()
+          : formData.has('tin')
             ? null
             : undefined,
       },

@@ -12,6 +12,7 @@ import {
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { assertGroupInScope } from '../common/db/assert-entity-in-scope';
 import { GeneralLedgerService, type PostVoucherLine } from './general-ledger.service';
 
 type Drizzle = PostgresJsDatabase<typeof schema>;
@@ -104,7 +105,7 @@ export class AssetRegisterService {
     };
   }
 
-  async getAsset(input: GetAssetInput) {
+  async getAsset(input: GetAssetInput, activeGroupId?: string | null) {
     const [asset] = await this.db
       .select()
       .from(schema.fixedAssets)
@@ -113,6 +114,7 @@ export class AssetRegisterService {
     if (!asset) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Fixed asset not found.' });
     }
+    assertGroupInScope(asset.groupId, activeGroupId, { message: 'This asset is outside your active company.' });
 
     const depreciationSchedule = await this.db
       .select()
@@ -136,7 +138,7 @@ export class AssetRegisterService {
    *
    * The entry always balances: proceeds + accDep ± gainLoss = cost.
    */
-  async disposeAsset(input: DisposeAssetInput, actor: Actor) {
+  async disposeAsset(input: DisposeAssetInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [asset] = await tx
         .select()
@@ -146,6 +148,7 @@ export class AssetRegisterService {
       if (!asset) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Fixed asset not found.' });
       }
+      assertGroupInScope(asset.groupId, activeGroupId, { message: 'This asset is outside your active company.' });
       if (asset.status === 'DISPOSED') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Asset is already disposed.' });
       }

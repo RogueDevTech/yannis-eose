@@ -105,6 +105,28 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
+  /**
+   * Company-isolation guard for single-entity GL operations that take a raw id.
+   * `activeGroupId` is the caller's active company (already resolved by the
+   * router's `resolveGroupId`, which returns null for SUPER_ADMIN/SUPPORT →
+   * org-wide bypass). When set, the target row's `groupId` MUST match, else the
+   * caller is reaching into another company's ledger. Mirrors the inline check
+   * in `approveJournalEntry`.
+   */
+  private assertGroupMatch(
+    rowGroupId: string | null | undefined,
+    activeGroupId: string | null | undefined,
+    entity = 'record',
+  ): void {
+    if (activeGroupId == null) return; // org-wide (SuperAdmin / Support)
+    if (rowGroupId !== activeGroupId) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `This ${entity} is outside your active company.`,
+      });
+    }
+  }
+
   // ─── Boot: seed the Chart of Accounts for every company ────────────────────
 
   async onApplicationBootstrap(): Promise<void> {
@@ -1653,7 +1675,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
    * Reject a DRAFT journal entry: validates it's in DRAFT status, flips to
    * CANCELLED, and stores the rejection reason. No GL lines are posted.
    */
-  async rejectJournalEntry(input: RejectJournalEntryInput, actor: Actor) {
+  async rejectJournalEntry(input: RejectJournalEntryInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [header] = await tx
         .select()
@@ -1663,6 +1685,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (!header) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Journal entry not found.' });
       }
+      this.assertGroupMatch(header.groupId, activeGroupId, 'journal entry');
       if (header.status !== 'DRAFT') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -1788,7 +1811,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
    * mark the original CANCELLED. Original gl_entries are never mutated — the
    * reversal rows net the original to zero.
    */
-  async reverseJournalEntry(input: ReverseJournalEntryInput, actor: Actor) {
+  async reverseJournalEntry(input: ReverseJournalEntryInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [original] = await tx
         .select()
@@ -1798,6 +1821,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (!original) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Journal entry not found.' });
       }
+      this.assertGroupMatch(original.groupId, activeGroupId, 'journal entry');
       if (original.status === 'CANCELLED') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Journal entry is already cancelled.' });
       }
@@ -1896,7 +1920,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     };
   }
 
-  async getJournalEntry(input: GetJournalEntryInput) {
+  async getJournalEntry(input: GetJournalEntryInput, activeGroupId?: string | null) {
     const [header] = await this.db
       .select()
       .from(schema.journalEntries)
@@ -1905,6 +1929,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     if (!header) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Journal entry not found.' });
     }
+    this.assertGroupMatch(header.groupId, activeGroupId, 'journal entry');
 
     const lines = await this.db
       .select({
@@ -1972,16 +1997,17 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     });
   }
 
-  async updateAccount(input: UpdateAccountInput, actor: Actor) {
+  async updateAccount(input: UpdateAccountInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [existing] = await tx
-        .select({ id: schema.accounts.id })
+        .select({ id: schema.accounts.id, groupId: schema.accounts.groupId })
         .from(schema.accounts)
         .where(eq(schema.accounts.id, input.accountId))
         .limit(1);
       if (!existing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Account not found.' });
       }
+      this.assertGroupMatch(existing.groupId, activeGroupId, 'account');
       const [updated] = await tx
         .update(schema.accounts)
         .set({ name: input.name })
@@ -1991,16 +2017,17 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     });
   }
 
-  async deactivateAccount(input: DeactivateAccountInput, actor: Actor) {
+  async deactivateAccount(input: DeactivateAccountInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [existing] = await tx
-        .select({ id: schema.accounts.id, isActive: schema.accounts.isActive })
+        .select({ id: schema.accounts.id, isActive: schema.accounts.isActive, groupId: schema.accounts.groupId })
         .from(schema.accounts)
         .where(eq(schema.accounts.id, input.accountId))
         .limit(1);
       if (!existing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Account not found.' });
       }
+      this.assertGroupMatch(existing.groupId, activeGroupId, 'account');
       if (!existing.isActive) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Account is already inactive.' });
       }
@@ -2013,16 +2040,17 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     });
   }
 
-  async reactivateAccount(input: ReactivateAccountInput, actor: Actor) {
+  async reactivateAccount(input: ReactivateAccountInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [existing] = await tx
-        .select({ id: schema.accounts.id, isActive: schema.accounts.isActive })
+        .select({ id: schema.accounts.id, isActive: schema.accounts.isActive, groupId: schema.accounts.groupId })
         .from(schema.accounts)
         .where(eq(schema.accounts.id, input.accountId))
         .limit(1);
       if (!existing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Account not found.' });
       }
+      this.assertGroupMatch(existing.groupId, activeGroupId, 'account');
       if (existing.isActive) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Account is already active.' });
       }
@@ -2080,13 +2108,14 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     });
   }
 
-  async closeFiscalYear(input: CloseFiscalYearInput, actor: Actor) {
+  async closeFiscalYear(input: CloseFiscalYearInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       // Lock the row FOR UPDATE to prevent concurrent postings while closing.
       const [existing] = await tx
         .select({
           id: schema.fiscalYears.id,
           status: schema.fiscalYears.status,
+          groupId: schema.fiscalYears.groupId,
         })
         .from(schema.fiscalYears)
         .where(eq(schema.fiscalYears.id, input.fiscalYearId))
@@ -2095,6 +2124,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (!existing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Fiscal year not found.' });
       }
+      this.assertGroupMatch(existing.groupId, activeGroupId, 'fiscal year');
       if (existing.status === 'CLOSED') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Fiscal year is already closed.' });
       }
@@ -2115,7 +2145,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
    * because reopening an earlier period while a later one is locked
    * would break the sequential close invariant.
    */
-  async reopenFiscalYear(input: ReopenFiscalYearInput, actor: Actor) {
+  async reopenFiscalYear(input: ReopenFiscalYearInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [existing] = await tx
         .select({
@@ -2130,6 +2160,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
       if (!existing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Fiscal year not found.' });
       }
+      this.assertGroupMatch(existing.groupId, activeGroupId, 'fiscal year');
       if (existing.status === 'OPEN') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Fiscal year is already open.' });
       }
@@ -3018,8 +3049,18 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     };
   }
 
-  async generateWhtCertificate(deductionId: string, actor: Actor) {
+  async generateWhtCertificate(deductionId: string, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
+      const [target] = await tx
+        .select({ id: schema.whtDeductions.id, groupId: schema.whtDeductions.groupId })
+        .from(schema.whtDeductions)
+        .where(eq(schema.whtDeductions.id, deductionId))
+        .limit(1);
+      if (!target) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'WHT deduction not found.' });
+      }
+      this.assertGroupMatch(target.groupId, activeGroupId, 'WHT deduction');
+
       const [row] = await tx
         .update(schema.whtDeductions)
         .set({ certificateGenerated: true, updatedAt: new Date() })
@@ -3320,7 +3361,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
 
   // ─── Account Ledger (sub-ledger detail) ────────────────────────────────────
 
-  async getAccountLedger(input: GetAccountLedgerInput) {
+  async getAccountLedger(input: GetAccountLedgerInput, activeGroupId?: string | null) {
     // 1. Fetch the account row
     const [account] = await this.db
       .select({
@@ -3333,6 +3374,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
         isActive: schema.accounts.isActive,
         balance: schema.accounts.balance,
         parentAccountId: schema.accounts.parentAccountId,
+        groupId: schema.accounts.groupId,
       })
       .from(schema.accounts)
       .where(eq(schema.accounts.id, input.accountId))
@@ -3341,6 +3383,7 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     if (!account) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Account not found.' });
     }
+    this.assertGroupMatch(account.groupId, activeGroupId, 'account');
 
     // 2. Build date conditions for GL entries
     const dateConds: SQL[] = [eq(schema.glEntries.accountId, input.accountId)];

@@ -3,7 +3,7 @@ import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { apiRequest, getSessionCookie, requirePermission, requireStaffAccountsAccess } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles } from '~/lib/api.server';
 import { isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { UsersListPage } from '~/features/users/UsersListPage';
@@ -139,7 +139,17 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requireStaffAccountsAccess(request);
+  // VIEW-only gate for the roster: `users.read` (branch-scoped server-side via
+  // effectiveBranchIds) admits BRANCH_ADMIN to see the users in their branch,
+  // alongside the staff-account managers. Create / edit / deactivate remain
+  // gated by the stricter `users.create` / `users.update` on their own
+  // routes + the action below, so viewing here grants no management power.
+  const user = await requirePermissionOrRoles(request, {
+    // BRANCH_ADMIN is view-only here (see canManageUsers below) — role-admitted so
+    // they can always reach their branch roster even if the permission snapshot lags.
+    roles: ['FINANCE_OFFICER', 'HR_MANAGER', 'BRANCH_ADMIN'],
+    permission: ['users.read', 'users.staff.view', 'users.staff.create', 'users.staff.update', 'users.staff.deactivate'],
+  });
   const cookie = getSessionCookie(request);
 
   // Staff-accounts export carries sensitive payout/bank fields — gated on `hr.export`.
@@ -258,6 +268,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       canExport,
       /** Branch picker only renders for admin-class actors who legitimately see every branch. */
       canPickBranch: isAdminLevel(user),
+      /** Management controls (Add User / edit / import) — hidden for view-only
+       *  roles like BRANCH_ADMIN who reach this page via `users.read` only. */
+      canManageUsers:
+        isAdminLevel(user) ||
+        ['FINANCE_OFFICER', 'HR_MANAGER'].includes(user.role) ||
+        actorPerms.has(canonicalPermissionCode('users.create')) ||
+        actorPerms.has(canonicalPermissionCode('users.update')) ||
+        actorPerms.has(canonicalPermissionCode('users.staff.create')) ||
+        actorPerms.has(canonicalPermissionCode('users.staff.update')),
     },
     usersPromise,
   });
@@ -280,6 +299,7 @@ export default function UsersRoute() {
           branchParam={usersShell.branchParam}
           canPickBranch={usersShell.canPickBranch}
           canExport={usersShell.canExport}
+          canManageUsers={usersShell.canManageUsers}
         />
       }
       loaderShell={{ usersShell }}
@@ -294,6 +314,7 @@ export default function UsersRoute() {
           canPickBranch={usersShell.canPickBranch}
           usersPromise={roster}
           canExport={usersShell.canExport}
+          canManageUsers={usersShell.canManageUsers}
         />
       )}
     </CachedAwait>

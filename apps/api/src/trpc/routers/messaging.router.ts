@@ -20,6 +20,7 @@ import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { db as schema, canonicalPermissionCode } from '@yannis/shared';
 import { CacheService } from '../../common/cache/cache.service';
 import { withActor } from '../../common/db/with-actor';
+import { assertEntityInScopeAny } from '../../common/db/assert-entity-in-scope';
 
 /** Injected from {@link TrpcModule}; Redis cache for {@link messagingRouter}.templates.list */
 let messagingCacheService: CacheService | null = null;
@@ -265,6 +266,26 @@ export const messagingRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = getDb();
 
+      // Resolve the template's branch up front for both the company-isolation
+      // gate (all editors) and the created-by gate (non-org-wide editors).
+      const [existing] = await db
+        .select({
+          createdBy: schema.messageTemplates.createdBy,
+          branchId: schema.messageTemplates.branchId,
+        })
+        .from(schema.messageTemplates)
+        .where(eq(schema.messageTemplates.id, input.templateId))
+        .limit(1);
+      if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Template not found' });
+
+      // Company isolation: a branch-owned template must be in the caller's
+      // active company. Branchless (global/shared) templates stay editable by
+      // permitted editors regardless of company selection.
+      assertEntityInScopeAny([existing.branchId], ctx.effectiveBranchIds, {
+        message: 'This template is not in your company.',
+        denyBranchlessWhenScoped: false,
+      });
+
       // Without org-wide Sales scope, you may only edit templates you created.
       const editorPerms = (ctx.user.permissions ?? []).map((p) => canonicalPermissionCode(p));
       const hasOrgWideTemplateEdit =
@@ -272,12 +293,6 @@ export const messagingRouter = router({
         ctx.user.role === 'HEAD_OF_CS' ||
         editorPerms.includes(canonicalPermissionCode('cs.scope.global'));
       if (!hasOrgWideTemplateEdit) {
-        const [existing] = await db
-          .select({ createdBy: schema.messageTemplates.createdBy })
-          .from(schema.messageTemplates)
-          .where(eq(schema.messageTemplates.id, input.templateId))
-          .limit(1);
-        if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Template not found' });
         if (existing.createdBy !== ctx.user.id) {
           throw new TRPCError({
             code: 'FORBIDDEN',
@@ -331,6 +346,8 @@ export const messagingRouter = router({
           customerPhone: schema.orders.customerPhone,
           deliveryAddress: schema.orders.deliveryAddress,
           status: schema.orders.status,
+          branchId: schema.orders.branchId,
+          servicingBranchId: schema.orders.servicingBranchId,
         })
         .from(schema.orders)
         .where(eq(schema.orders.id, input.orderId))
@@ -338,6 +355,12 @@ export const messagingRouter = router({
 
       const order = orderRows[0];
       if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+      // Company isolation: never message another company's customer by orderId.
+      assertEntityInScopeAny(
+        [order.servicingBranchId, order.branchId],
+        ctx.effectiveBranchIds,
+        { message: 'This order is not in your company.' },
+      );
 
       if (!order.customerPhone) {
         throw new TRPCError({
@@ -505,6 +528,10 @@ export const messagingRouter = router({
       const location = locationRows[0];
       const template = templateRows[0];
       if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+      // Company isolation: never share another company's order (customer PII) to logistics.
+      assertEntityInScopeAny([order.branchId], ctx.effectiveBranchIds, {
+        message: 'This order is not in your company.',
+      });
       if (!location) throw new TRPCError({ code: 'NOT_FOUND', message: 'Logistics location not found' });
       if (!template) throw new TRPCError({ code: 'NOT_FOUND', message: 'Template not found' });
       if (template.status === 'ARCHIVED') {
@@ -609,8 +636,35 @@ export const messagingRouter = router({
 
   outboxList: permissionProcedure('orders.read')
     .input(z.object({ orderId: z.string().uuid() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = getDb();
+      // Company isolation: outbound bodies contain customer PII — verify the
+      // order is in the caller's company before returning its message history.
+      if (ctx.effectiveBranchIds != null) {
+        const [ord] = await db
+          .select({
+            branchId: schema.orders.branchId,
+            servicingBranchId: schema.orders.servicingBranchId,
+          })
+          .from(schema.orders)
+          .where(eq(schema.orders.id, input.orderId))
+          .limit(1);
+        // A missing order in the orders table may be a follow-up order; fall back.
+        if (ord) {
+          assertEntityInScopeAny([ord.servicingBranchId, ord.branchId], ctx.effectiveBranchIds, {
+            message: 'This order is not in your company.',
+          });
+        } else {
+          const [fu] = await db
+            .select({ branchId: schema.followUpOrders.servicingBranchId })
+            .from(schema.followUpOrders)
+            .where(eq(schema.followUpOrders.id, input.orderId))
+            .limit(1);
+          assertEntityInScopeAny([fu?.branchId], ctx.effectiveBranchIds, {
+            message: 'This order is not in your company.',
+          });
+        }
+      }
       return db
         .select({
           id: schema.outboundMessages.id,

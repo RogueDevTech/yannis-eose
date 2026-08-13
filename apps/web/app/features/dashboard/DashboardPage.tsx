@@ -45,6 +45,7 @@ const KNOWN_ROLES = [
   'TPL_MANAGER',
   'STOCK_MANAGER',
   'HR_MANAGER',
+  'BRANCH_ADMIN',
 ] as const;
 
 export function DashboardPage({
@@ -175,6 +176,7 @@ export function DashboardPage({
       {(role === 'HEAD_OF_LOGISTICS' || role === 'LOGISTICS_MANAGER' || role === 'TPL_MANAGER') && <LogisticsDashboard data={data} role={role} />}
       {(role === 'STOCK_MANAGER') && <WarehouseDashboard data={data} />}
       {(role === 'HR_MANAGER') && <HRDashboard naira={naira} />}
+      {(role === 'BRANCH_ADMIN') && <BranchAdminDashboard />}
 
       {/* Unknown role: generic fallback */}
       {role && !isKnownRole && <GenericFallbackDashboard />}
@@ -216,6 +218,7 @@ function getRoleDescription(role: string | null) {
     TPL_MANAGER: 'Your 3PL location stock and deliveries.',
     STOCK_MANAGER: 'Stock levels and inventory movements.',
     HR_MANAGER: 'Payroll overview and pending actions.',
+    BRANCH_ADMIN: 'Mark and review attendance for your branch.',
   };
   return descriptions[role] ?? "Here's an overview of your business.";
 }
@@ -242,6 +245,55 @@ function GenericFallbackDashboard() {
         >
           Settings
         </Link>
+      </div>
+    </div>
+  );
+}
+
+// ── Branch Admin Dashboard ───────────────────────────────
+// Branch Admin is a slim role focused on ATTENDANCE (worked with HR) + seeing
+// their branch roster. Their landing page leads straight into attendance instead
+// of the generic Welcome card.
+function BranchAdminDashboard() {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="card">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
+            <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008z" />
+            </svg>
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-app-fg">Attendance</h2>
+            <p className="text-sm text-app-fg-muted mt-1">
+              Mark and review daily attendance for your branch, and keep the master sheet up to date with HR.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {/* Branch Admin marks their branch's staff, not themselves — no "My Attendance". */}
+              <Link to="/hr/attendance" prefetch="intent" className="btn-primary btn-sm">Open Attendance</Link>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-lg bg-app-hover flex items-center justify-center shrink-0">
+            <svg className="w-5 h-5 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+            </svg>
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-app-fg">Branch staff</h2>
+            <p className="text-sm text-app-fg-muted mt-1">
+              View the users in your branch.
+            </p>
+            <div className="mt-4">
+              <Link to="/hr/users" prefetch="intent" className="btn-secondary btn-sm">View staff</Link>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

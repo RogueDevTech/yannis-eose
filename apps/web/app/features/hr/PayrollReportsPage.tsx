@@ -20,6 +20,8 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { exportToCsv } from '~/lib/csv-export';
+import { downloadPayeRemittanceCsv, type PayeRemittanceDoc } from '~/lib/paye-remittance-csv';
+import { downloadPayrollReconciliationCsv, type PayrollReconciliationDoc } from '~/lib/payroll-reconciliation-csv';
 import type { PayrollRegisterRow } from './payroll-prd-types';
 import { batchScopeLabel } from './payroll-constants';
 
@@ -42,6 +44,8 @@ export interface PayrollReportsPageProps {
     staffCount: number;
   }>;
   branches: Array<{ id: string; name: string }>;
+  payeRemittance: PayeRemittanceDoc | null;
+  reconciliation: PayrollReconciliationDoc | null;
   filters: {
     startDate: string;
     endDate: string;
@@ -75,7 +79,7 @@ const DEPARTMENT_OPTIONS = [
   { value: 'OPERATIONS', label: 'Operations' },
 ];
 
-export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, branches, filters }: PayrollReportsPageProps) {
+export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, branches, payeRemittance, reconciliation, filters }: PayrollReportsPageProps) {
   const [, setSearchParams] = useSearchParams();
 
   const status = filters.status || 'ALL';
@@ -246,6 +250,26 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
     );
   };
 
+  const remittanceDisabled = !payeRemittance || !payeRemittance.rows?.length;
+
+  const handleExportRemittance = () => {
+    if (!payeRemittance) return;
+    downloadPayeRemittanceCsv(
+      payeRemittance,
+      `paye-remittance-${payeRemittance.periodMonth?.slice(0, 7) ?? 'export'}.csv`,
+    );
+  };
+
+  const reconciliationDisabled = !reconciliation || !reconciliation.rows?.length;
+
+  const handleExportReconciliation = () => {
+    if (!reconciliation) return;
+    downloadPayrollReconciliationCsv(
+      reconciliation,
+      `payroll-reconciliation-${reconciliation.periodMonth?.slice(0, 7) ?? 'export'}.csv`,
+    );
+  };
+
   const sheetFilters = (
     <div className="space-y-3">
       <FormSelect
@@ -296,21 +320,63 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
                 <Button variant="secondary" size="sm" onClick={handleExport} disabled={!rows.length}>
                   Export CSV
                 </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleExportRemittance}
+                  disabled={remittanceDisabled}
+                >
+                  PAYE Remittance
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleExportReconciliation}
+                  disabled={reconciliationDisabled}
+                >
+                  Reconciliation
+                </Button>
               </div>
             }
             sheet={({ closeSheet }) => (
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-12 w-full justify-center"
-                disabled={!rows.length}
-                onClick={() => {
-                  closeSheet();
-                  handleExport();
-                }}
-              >
-                Export CSV
-              </Button>
+              <div className="space-y-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  disabled={!rows.length}
+                  onClick={() => {
+                    closeSheet();
+                    handleExport();
+                  }}
+                >
+                  Export CSV
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  disabled={remittanceDisabled}
+                  onClick={() => {
+                    closeSheet();
+                    handleExportRemittance();
+                  }}
+                >
+                  PAYE Remittance
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-12 w-full justify-center"
+                  disabled={reconciliationDisabled}
+                  onClick={() => {
+                    closeSheet();
+                    handleExportReconciliation();
+                  }}
+                >
+                  Reconciliation
+                </Button>
+              </div>
             )}
           />
         }

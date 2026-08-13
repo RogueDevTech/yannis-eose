@@ -47,12 +47,23 @@ export type PayeReliefRow = {
   cap?: number | null;
 };
 
+export type PayeStatutoryRow = {
+  name: string;
+  basis: 'PERCENT_OF_MONTHLY_GROSS' | 'FLAT_MONTHLY' | string;
+  rate: number;
+  amount?: number | null;
+  cap?: number | null;
+};
+
 export type TaxBandConfig = {
   id: string;
   label: string;
   taxFreeThreshold: string;
   bands: PayeBandRow[];
   reliefs: PayeReliefRow[];
+  statutoryDeductions?: PayeStatutoryRow[];
+  /** Monthly ₦ threshold; below it PAYE is ₦0. 0 disables. Drizzle numeric → string. */
+  lowIncomeExemptionMonthly?: string | number;
   effectiveFrom: string;
   effectiveTo: string | null;
 };

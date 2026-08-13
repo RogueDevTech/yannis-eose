@@ -132,6 +132,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         permsSetForOnboarding.has(canonicalPermissionCode(c)),
       );
 
+    // Attendance marking rights: admin-level, HR_MANAGER, or holds attendance.manage.
+    const viewerCanManageAttendance =
+      isAdminLevel(currentUser) ||
+      currentUser?.role === 'HR_MANAGER' ||
+      permsSetForOnboarding.has(canonicalPermissionCode('attendance.manage'));
+
     // ── Mirror UI flags ──
     const mirrorEligibility = bundle.mirrorEligibility as {
       allowed: boolean;
@@ -188,6 +194,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       isSelfView,
       showOnboardingTab,
       viewerCanManageHrOnboarding,
+      viewerCanManageAttendance,
       // Page bundle data — replaces client-side resource route fetchers
       bundleProducts: (bundle.products ?? []) as UserDetailLoaderData['bundleProducts'],
       bundleRoleTemplates: (bundle.roleTemplates ?? []) as UserDetailLoaderData['bundleRoleTemplates'],

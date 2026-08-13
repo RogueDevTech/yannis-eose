@@ -7569,10 +7569,14 @@ export class MarketingService {
         .select({
           campaignId: schema.campaignViews.campaignId,
           name: sql<string | null>`MAX(${schema.campaigns.name})`,
+          // Owning media buyer's name (for HoM / supervisor views — see the
+          // `showMediaBuyer` gate below). MAX() to survive the group-by.
+          mediaBuyerName: sql<string | null>`MAX(${schema.users.name})`,
           landings: sql<number>`COUNT(DISTINCT ${schema.campaignViews.sessionId})`,
         })
         .from(schema.campaignViews)
         .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.campaignViews.campaignId))
+        .leftJoin(schema.users, eq(schema.users.id, schema.campaigns.mediaBuyerId))
         .where(viewWhere)
         .groupBy(schema.campaignViews.campaignId)
         .orderBy(sql`COUNT(DISTINCT ${schema.campaignViews.sessionId}) DESC`)
@@ -7605,12 +7609,14 @@ export class MarketingService {
         .select({
           campaignId: schema.campaignViews.campaignId,
           name: sql<string | null>`MAX(${schema.campaigns.name})`,
+          mediaBuyerName: sql<string | null>`MAX(${schema.users.name})`,
           views: sql<number>`COUNT(DISTINCT ${schema.campaignViews.sessionId})`,
           rawViews: count(),
           avgDwellMs: sql<number | null>`AVG(${schema.campaignViews.dwellMs}) FILTER (WHERE ${schema.campaignViews.dwellMs} IS NOT NULL)`,
         })
         .from(schema.campaignViews)
         .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.campaignViews.campaignId))
+        .leftJoin(schema.users, eq(schema.users.id, schema.campaigns.mediaBuyerId))
         .where(viewWhere)
         .groupBy(schema.campaignViews.campaignId)
         .orderBy(sql`COUNT(DISTINCT ${schema.campaignViews.sessionId}) DESC`),
@@ -7659,6 +7665,11 @@ export class MarketingService {
       formRows.map((r) => r.campaignId).filter((id): id is string => !!id),
     );
 
+    // Show the owning media buyer's name beside each form ONLY for team-wide
+    // viewers (HoM / supervisor / admin). An individual MB scopes to their own
+    // `mediaBuyerId`, so every form is theirs and the name is noise.
+    const showMediaBuyer = !mediaBuyerId;
+
     return {
       statStrip: {
         rawLandings,
@@ -7678,6 +7689,10 @@ export class MarketingService {
       topForms: topFormRows.map((r) => ({
         campaignId: r.campaignId,
         label: r.name ?? 'Unknown form',
+        // Only surface the owning MB for team-wide viewers (HoM / supervisor /
+        // admin). An individual MB (mediaBuyerId set) sees only their own forms,
+        // so the name would be redundant — null it out.
+        mediaBuyerName: showMediaBuyer ? (r.mediaBuyerName ?? null) : null,
         count: Number(r.landings),
       })),
       forms: (() => {
@@ -7691,6 +7706,7 @@ export class MarketingService {
           return {
             campaignId: r.campaignId,
             label: r.name ?? 'Unknown form',
+            mediaBuyerName: showMediaBuyer ? (r.mediaBuyerName ?? null) : null,
             productName: productNameByCampaign.get(r.campaignId) ?? null,
             views,
             rawViews: Number(r.rawViews),

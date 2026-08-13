@@ -3,7 +3,11 @@
  * Finance must confirm band thresholds against official publications before live use.
  */
 
-import type { PayeBandConfig, PayeReliefConfig } from '../validators/payroll';
+import type {
+  PayeBandConfig,
+  PayeReliefConfig,
+  PayeStatutoryDeductionConfig,
+} from '../validators/payroll';
 
 export interface PayeCalcInput {
   monthlyGross: number;
@@ -25,6 +29,41 @@ export interface PayeCalcResult {
   employerSubsidy: number;
   employeePaye: number;
   reliefBreakdown: Array<{ name: string; amount: number }>;
+  /** Monthly statutory deductions (Pension, NHIS, ...) taken off gross before PAYE. */
+  statutoryBreakdown: Array<{ name: string; amount: number }>;
+  /** Total monthly statutory deductions. */
+  statutoryTotal: number;
+  /** Monthly gross minus statutory deductions — the basis for the low-income exemption. */
+  netBeforePaye: number;
+  /** True when the low-income exemption zeroed PAYE for this staff. */
+  exempt: boolean;
+}
+
+/** Monthly statutory deductions (Pension/NHIS) off gross, before PAYE. */
+function computeStatutory(
+  monthlyGross: number,
+  deductions: PayeStatutoryDeductionConfig[] | undefined,
+): { total: number; breakdown: Array<{ name: string; amount: number }> } {
+  const breakdown: Array<{ name: string; amount: number }> = [];
+  let total = 0;
+  for (const d of deductions ?? []) {
+    let amount = 0;
+    switch (d.basis) {
+      case 'PERCENT_OF_MONTHLY_GROSS':
+        amount = monthlyGross * (d.rate / 100);
+        break;
+      case 'FLAT_MONTHLY':
+        amount = d.amount ?? 0;
+        break;
+      default:
+        amount = 0;
+    }
+    if (d.cap != null) amount = Math.min(amount, d.cap);
+    amount = Math.max(0, amount);
+    total += amount;
+    breakdown.push({ name: d.name, amount });
+  }
+  return { total, breakdown };
 }
 
 function applyReliefs(
@@ -92,6 +131,16 @@ export function computePaye(
   input: PayeCalcInput,
   config: PayeBandConfig,
 ): PayeCalcResult {
+  // Statutory deductions (Pension, NHIS, ...) come off gross for EVERYONE, even
+  // GROSS_NO_DEDUCTION staff (that flag only exempts them from PAYE, not from
+  // statutory contributions), and they define the "net before PAYE" used by the
+  // low-income exemption below.
+  const { total: statutoryTotal, breakdown: statutoryBreakdown } = computeStatutory(
+    input.monthlyGross,
+    config.statutoryDeductions,
+  );
+  const netBeforePaye = input.monthlyGross - statutoryTotal;
+
   if (input.taxStatus === 'GROSS_NO_DEDUCTION') {
     return {
       monthlyGross: input.monthlyGross,
@@ -102,6 +151,33 @@ export function computePaye(
       employerSubsidy: 0,
       employeePaye: 0,
       reliefBreakdown: [],
+      statutoryBreakdown,
+      statutoryTotal,
+      netBeforePaye,
+      exempt: false,
+    };
+  }
+
+  // HR low-income exemption: if monthly gross < threshold OR net-before-PAYE <
+  // threshold, no PAYE is due. Threshold 0 disables the rule.
+  const exemptionThreshold = Number(config.lowIncomeExemptionMonthly ?? 0);
+  const exempt =
+    exemptionThreshold > 0 &&
+    (input.monthlyGross < exemptionThreshold || netBeforePaye < exemptionThreshold);
+  if (exempt) {
+    return {
+      monthlyGross: input.monthlyGross,
+      annualGross: input.monthlyGross * 12,
+      chargeableAnnual: 0,
+      annualTax: 0,
+      monthlyPaye: 0,
+      employerSubsidy: 0,
+      employeePaye: 0,
+      reliefBreakdown: [],
+      statutoryBreakdown,
+      statutoryTotal,
+      netBeforePaye,
+      exempt: true,
     };
   }
 
@@ -132,6 +208,10 @@ export function computePaye(
     employerSubsidy,
     employeePaye,
     reliefBreakdown: breakdown,
+    statutoryBreakdown,
+    statutoryTotal,
+    netBeforePaye,
+    exempt: false,
   };
 }
 
@@ -150,5 +230,43 @@ export function defaultPayeBandConfig(): PayeBandConfig {
       // HR policy: 20% of the employee's declared annual rent, capped at ₦500k/yr.
       { name: 'Annual Rent Relief (20%)', basis: 'PERCENT_OF_ANNUAL_RENT', rate: 20, cap: 500_000 },
     ],
+    // Pension/NHIS are OFF by default so we never silently start deducting from
+    // net pay — HR enables them per company in the tax-band config. The
+    // low-income exemption IS on by default: HR policy is staff earning below
+    // ₦66,667/mo pay no PAYE (≈ the ₦800k/yr tax-free floor / 12).
+    statutoryDeductions: [],
+    lowIncomeExemptionMonthly: 66_667,
   };
+}
+
+/**
+ * Supplementary payroll balance (Track A). Given what a staff member SHOULD have
+ * been paid for a period (intended) versus what they were ACTUALLY paid, compute
+ * the outstanding balance to pay now — completing the original salary while
+ * collecting the remaining PAYE/statutory, instead of taxing the top-up afresh.
+ *
+ * All amounts are monthly ₦. Balances floor at 0 (never claw back via a
+ * supplementary run — overpayment is a separate reconciliation concern).
+ */
+export function computeSupplementaryBalance(input: {
+  expectedGross: number;
+  paidGross: number;
+  correctPaye: number;
+  paidPaye: number;
+  correctStatutory?: number;
+  paidStatutory?: number;
+}): {
+  grossBalance: number;
+  remainingPaye: number;
+  remainingStatutory: number;
+  netPayable: number;
+} {
+  const grossBalance = Math.max(0, input.expectedGross - input.paidGross);
+  const remainingPaye = Math.max(0, input.correctPaye - input.paidPaye);
+  const remainingStatutory = Math.max(
+    0,
+    (input.correctStatutory ?? 0) - (input.paidStatutory ?? 0),
+  );
+  const netPayable = Math.max(0, grossBalance - remainingPaye - remainingStatutory);
+  return { grossBalance, remainingPaye, remainingStatutory, netPayable };
 }
