@@ -8,12 +8,18 @@ import {
   computeProration,
   defaultPayeBandConfig,
   resolveFormulaFromRules,
+  computeAttendanceEligibility,
+  resolveAttendanceEnabled,
+  countAbsencesInWindow,
   type PayeBandConfig,
   type PayrollFormula,
   type PayrollMetrics,
   type ProrationResult,
+  type AttendanceConfig,
+  type AttendanceEligibilityResult,
 } from '@yannis/shared';
 import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
+import { nigeriaCalendarDate } from '../common/utils/date-range';
 import { PayrollMetricsService } from './payroll-metrics.service';
 
 type TxLike = PostgresJsDatabase<typeof schema>;
@@ -25,6 +31,10 @@ export interface ComputedPayslipLine {
   deductionsTotal: number;
   allowancesTotal: number;
   grossPay: number;
+  /** Monthly statutory deductions (Pension/NHIS) taken off gross before PAYE. */
+  statutoryTotal: number;
+  /** Per-item statutory breakdown for payslips + PAYE remittance export. */
+  statutoryBreakdown: Array<{ name: string; amount: number }>;
   payeTax: number;
   employerPayeSubsidy: number;
   netPay: number;
@@ -39,6 +49,17 @@ export interface ComputedPayslipLine {
     periodDays: number;
     fraction: number;
     reason: ProrationResult['reason'];
+  } | null;
+  /**
+   * Attendance-based base-salary reduction applied AFTER proration (Track C).
+   * null when attendance doesn't affect this staff (role OFF / override OFF) or
+   * no absences crossed a band. Snapshotted for the payslip + readiness panel.
+   */
+  attendance?: {
+    absences: number;
+    deductionPercent: number;
+    baseFraction: number;
+    reason: string | null;
   } | null;
 }
 
@@ -124,6 +145,18 @@ export class PayrollComputeService {
       }
     }
 
+    // Attendance-based base eligibility (Track C). Resolve the role's config +
+    // the per-user override, and count ABSENT days in the period. Only staff on a
+    // role with attendance ON (and not overridden OFF) are gated. Computed here in
+    // the DB-reading path; the pure in-memory twin receives the result pre-resolved.
+    const attendanceEligibility = await this.resolveAttendanceEligibility(
+      tx,
+      member.id,
+      member.payRoleId ?? null,
+      periodStart,
+      periodEnd,
+    );
+
     const metrics = await this.metricsService.getStaffMetrics(
       {
         staffId: member.id,
@@ -190,8 +223,12 @@ export class PayrollComputeService {
     // Prorate fixed pay by active-days fraction; bonus/penalty stay as-earned.
     const proratedBase = formulaResult.baseSalary * proration.fraction;
     const proratedAllowances = formulaResult.allowancesTotal * proration.fraction;
+    // Attendance gate is ABSOLUTE and applies AFTER proration: it multiplies the
+    // already-prorated base. PAYE then follows the reduced base (no separate
+    // "remove PAYE"). Only base is affected — bonus/allowances/penalty untouched.
+    const gatedBase = proratedBase * attendanceEligibility.baseFraction;
     const grossBeforeAdj =
-      proratedBase + formulaResult.performanceBonus + proratedAllowances - formulaResult.penalties;
+      gatedBase + formulaResult.performanceBonus + proratedAllowances - formulaResult.penalties;
 
     const taxConfig = await this.loadTaxConfig(tx, groupId);
     const paye = computePaye(
@@ -204,18 +241,22 @@ export class PayrollComputeService {
       taxConfig,
     );
 
-    const netPay = grossBeforeAdj - paye.employeePaye;
+    const netPay = grossBeforeAdj - paye.employeePaye - paye.statutoryTotal;
     const lineStatus = metrics.missingData ? 'NEEDS_ATTENTION' : 'OK';
 
-    if (netPay <= 0 && formulaResult.penalties <= 0 && proratedBase <= 0) return null;
+    // Drop guard checks the GATED base — a fully-gated staff with no bonus/penalty
+    // is correctly dropped, same as an inactive (prorated-to-zero) member.
+    if (netPay <= 0 && formulaResult.penalties <= 0 && gatedBase <= 0) return null;
 
     return {
-      baseSalary: proratedBase,
+      baseSalary: gatedBase,
       performanceBonus: formulaResult.performanceBonus,
       addOnsTotal: 0,
       deductionsTotal: formulaResult.penalties,
       allowancesTotal: proratedAllowances,
       grossPay: grossBeforeAdj,
+      statutoryTotal: paye.statutoryTotal,
+      statutoryBreakdown: paye.statutoryBreakdown,
       payeTax: paye.employeePaye,
       employerPayeSubsidy: paye.employerSubsidy,
       netPay,
@@ -232,7 +273,170 @@ export class PayrollComputeService {
             reason: proration.reason,
           }
         : null,
+      attendance: attendanceEligibility.baseReduced
+        ? {
+            absences: attendanceEligibility.absences,
+            deductionPercent: attendanceEligibility.deductionPercent,
+            baseFraction: attendanceEligibility.baseFraction,
+            reason: attendanceEligibility.reason,
+          }
+        : null,
     };
+  }
+
+  /**
+   * Resolve a staff member's attendance-based base eligibility for a period.
+   * Reads the pay role's `attendanceConfig` + the user's `attendanceAffectsPay`
+   * override, counts ABSENT days in [periodStart, periodEnd], and returns the
+   * resulting base fraction. When attendance is OFF (role default OFF and no
+   * force-ON override), returns a not-evaluated result (baseFraction = 1).
+   *
+   * Kept in the DB-reading path only; `computeForMemberInMemory` receives the
+   * result pre-resolved via `opts.attendanceEligibility` so it stays pure.
+   */
+  private async resolveAttendanceEligibility(
+    tx: TxLike,
+    staffId: string,
+    payRoleId: string | null,
+    periodStart: Date,
+    periodEnd: Date,
+  ): Promise<AttendanceEligibilityResult> {
+    const notEvaluated: AttendanceEligibilityResult = {
+      evaluated: false,
+      absences: 0,
+      matchedBand: null,
+      deductionPercent: 0,
+      baseFraction: 1,
+      baseReduced: false,
+      reason: null,
+    };
+
+    // Role config (default OFF) + per-user override.
+    let roleConfig: AttendanceConfig | null = null;
+    if (payRoleId) {
+      const [row] = await tx
+        .select({ attendanceConfig: schema.payrollPayRoles.attendanceConfig })
+        .from(schema.payrollPayRoles)
+        .where(eq(schema.payrollPayRoles.id, payRoleId))
+        .limit(1);
+      roleConfig = (row?.attendanceConfig as AttendanceConfig | undefined) ?? null;
+    }
+
+    const [userRow] = await tx
+      .select({ override: schema.users.attendanceAffectsPay })
+      .from(schema.users)
+      .where(eq(schema.users.id, staffId))
+      .limit(1);
+
+    const enabled = resolveAttendanceEnabled(roleConfig?.enabled ?? false, userRow?.override ?? null);
+    if (!enabled) return notEvaluated;
+
+    // Count ABSENT records in the period window (date-only comparison).
+    const startDay = this.toDateOnly(periodStart);
+    const endDay = this.toDateOnly(periodEnd);
+    const records = await tx
+      .select({ status: schema.attendanceRecords.status })
+      .from(schema.attendanceRecords)
+      .where(
+        and(
+          eq(schema.attendanceRecords.staffId, staffId),
+          gte(schema.attendanceRecords.attendanceDate, startDay),
+          sql`${schema.attendanceRecords.attendanceDate} <= ${endDay}`,
+        ),
+      );
+
+    const absences = countAbsencesInWindow(records);
+    return computeAttendanceEligibility({
+      absences,
+      config: { enabled: true, bands: roleConfig?.bands ?? [] },
+    });
+  }
+
+  /**
+   * Format a WAT-window Date to its `YYYY-MM-DD` calendar day in Africa/Lagos.
+   * MUST NOT use `toISOString().slice(0,10)` — periodStart/End are WAT-midnight
+   * instants whose UTC date is the PREVIOUS day, which would shift the absence
+   * window off by one at both boundaries (the documented WAT-midnight trap).
+   */
+  private toDateOnly(d: Date): string {
+    return nigeriaCalendarDate(d);
+  }
+
+  /**
+   * BATCHED attendance eligibility for the preview fast path — resolves every
+   * staff member's eligibility in a fixed number of queries (2), not N. The
+   * caller supplies each member's resolved role attendance config (from its own
+   * pay-role cache). Returns a Map keyed by staffId; absent staff → not-evaluated.
+   *
+   * Preview MUST use this so its numbers match generation (which uses the
+   * per-member `resolveAttendanceEligibility`). Same math, batched I/O.
+   */
+  async resolveAttendanceEligibilityBatched(
+    tx: TxLike,
+    members: Array<{ id: string; roleConfig: AttendanceConfig | null }>,
+    periodStart: Date,
+    periodEnd: Date,
+  ): Promise<Map<string, AttendanceEligibilityResult>> {
+    const notEvaluated = (): AttendanceEligibilityResult => ({
+      evaluated: false,
+      absences: 0,
+      matchedBand: null,
+      deductionPercent: 0,
+      baseFraction: 1,
+      baseReduced: false,
+      reason: null,
+    });
+
+    const out = new Map<string, AttendanceEligibilityResult>();
+    for (const m of members) out.set(m.id, notEvaluated());
+
+    const allIds = members.map((m) => m.id);
+    if (allIds.length === 0) return out;
+
+    // Per-user override for everyone (a force-ON can gate even a role-OFF member).
+    const overrideRows = await tx
+      .select({ id: schema.users.id, override: schema.users.attendanceAffectsPay })
+      .from(schema.users)
+      .where(inArray(schema.users.id, allIds));
+    const overrideById = new Map(overrideRows.map((r) => [r.id, r.override]));
+
+    // Resolve which members are effectively ON, then count their absences in one query.
+    const configById = new Map(members.map((m) => [m.id, m.roleConfig]));
+    const enabledIds = allIds.filter((id) =>
+      resolveAttendanceEnabled(configById.get(id)?.enabled ?? false, overrideById.get(id) ?? null),
+    );
+    if (enabledIds.length === 0) return out;
+
+    const startDay = this.toDateOnly(periodStart);
+    const endDay = this.toDateOnly(periodEnd);
+    const absenceRows = await tx
+      .select({
+        staffId: schema.attendanceRecords.staffId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(schema.attendanceRecords)
+      .where(
+        and(
+          inArray(schema.attendanceRecords.staffId, enabledIds),
+          eq(schema.attendanceRecords.status, 'ABSENT'),
+          gte(schema.attendanceRecords.attendanceDate, startDay),
+          sql`${schema.attendanceRecords.attendanceDate} <= ${endDay}`,
+        ),
+      )
+      .groupBy(schema.attendanceRecords.staffId);
+    const absencesById = new Map(absenceRows.map((r) => [r.staffId, Number(r.count)]));
+
+    for (const id of enabledIds) {
+      const cfg = configById.get(id);
+      out.set(
+        id,
+        computeAttendanceEligibility({
+          absences: absencesById.get(id) ?? 0,
+          config: { enabled: true, bands: cfg?.bands ?? [] },
+        }),
+      );
+    }
+    return out;
   }
 
   /**
@@ -269,8 +473,23 @@ export class PayrollComputeService {
       /** Pay-role name + defaultTaxStatus (from the pay-role row), when payRoleId set. */
       payRole?: { name: string | null; defaultTaxStatus: string | null } | null;
       taxConfig: PayeBandConfig;
+      /**
+       * Attendance eligibility, pre-resolved by the caller (DB-reading) so this
+       * twin stays pure. Omit / null → attendance doesn't affect this member
+       * (baseFraction 1). MUST be the same result `computeForMember` would derive.
+       */
+      attendanceEligibility?: AttendanceEligibilityResult | null;
     },
   ): ComputedPayslipLine | null {
+    const attendanceEligibility: AttendanceEligibilityResult = resolved.attendanceEligibility ?? {
+      evaluated: false,
+      absences: 0,
+      matchedBand: null,
+      deductionPercent: 0,
+      baseFraction: 1,
+      baseReduced: false,
+      reason: null,
+    };
     const useFlatRate =
       !member.payRoleId &&
       member.salaryBasis === 'FLAT_RATE' &&
@@ -314,8 +533,11 @@ export class PayrollComputeService {
 
     const proratedBase = formulaResult.baseSalary * proration.fraction;
     const proratedAllowances = formulaResult.allowancesTotal * proration.fraction;
+    // Attendance gate — IDENTICAL to the DB-reading path: multiply the prorated
+    // base by the eligibility fraction; PAYE follows the reduced base.
+    const gatedBase = proratedBase * attendanceEligibility.baseFraction;
     const grossBeforeAdj =
-      proratedBase + formulaResult.performanceBonus + proratedAllowances - formulaResult.penalties;
+      gatedBase + formulaResult.performanceBonus + proratedAllowances - formulaResult.penalties;
 
     const paye = computePaye(
       {
@@ -327,18 +549,20 @@ export class PayrollComputeService {
       resolved.taxConfig,
     );
 
-    const netPay = grossBeforeAdj - paye.employeePaye;
+    const netPay = grossBeforeAdj - paye.employeePaye - paye.statutoryTotal;
     const lineStatus = metrics.missingData ? 'NEEDS_ATTENTION' : 'OK';
 
-    if (netPay <= 0 && formulaResult.penalties <= 0 && proratedBase <= 0) return null;
+    if (netPay <= 0 && formulaResult.penalties <= 0 && gatedBase <= 0) return null;
 
     return {
-      baseSalary: proratedBase,
+      baseSalary: gatedBase,
       performanceBonus: formulaResult.performanceBonus,
       addOnsTotal: 0,
       deductionsTotal: formulaResult.penalties,
       allowancesTotal: proratedAllowances,
       grossPay: grossBeforeAdj,
+      statutoryTotal: paye.statutoryTotal,
+      statutoryBreakdown: paye.statutoryBreakdown,
       payeTax: paye.employeePaye,
       employerPayeSubsidy: paye.employerSubsidy,
       netPay,
@@ -353,6 +577,14 @@ export class PayrollComputeService {
             periodDays: proration.periodDays,
             fraction: proration.fraction,
             reason: proration.reason,
+          }
+        : null,
+      attendance: attendanceEligibility.baseReduced
+        ? {
+            absences: attendanceEligibility.absences,
+            deductionPercent: attendanceEligibility.deductionPercent,
+            baseFraction: attendanceEligibility.baseFraction,
+            reason: attendanceEligibility.reason,
           }
         : null,
     };
@@ -373,7 +605,7 @@ export class PayrollComputeService {
       { monthlyGross: proratedAmount, taxStatus: taxStatus as 'STANDARD_PAYE' | 'GROSS_NO_DEDUCTION', annualRent },
       taxConfig,
     );
-    const netPay = proratedAmount - paye.employeePaye;
+    const netPay = proratedAmount - paye.employeePaye - paye.statutoryTotal;
     return {
       baseSalary: proratedAmount,
       performanceBonus: 0,
@@ -381,6 +613,8 @@ export class PayrollComputeService {
       deductionsTotal: 0,
       allowancesTotal: 0,
       grossPay: proratedAmount,
+      statutoryTotal: paye.statutoryTotal,
+      statutoryBreakdown: paye.statutoryBreakdown,
       payeTax: paye.employeePaye,
       employerPayeSubsidy: 0,
       netPay,
@@ -416,7 +650,7 @@ export class PayrollComputeService {
       { monthlyGross: proratedAmount, taxStatus: taxStatus as 'STANDARD_PAYE' | 'GROSS_NO_DEDUCTION', annualRent },
       taxConfig,
     );
-    const netPay = proratedAmount - paye.employeePaye;
+    const netPay = proratedAmount - paye.employeePaye - paye.statutoryTotal;
     return {
       baseSalary: proratedAmount,
       performanceBonus: 0,
@@ -424,6 +658,8 @@ export class PayrollComputeService {
       deductionsTotal: 0,
       allowancesTotal: 0,
       grossPay: proratedAmount,
+      statutoryTotal: paye.statutoryTotal,
+      statutoryBreakdown: paye.statutoryBreakdown,
       payeTax: paye.employeePaye,
       employerPayeSubsidy: 0,
       netPay,
@@ -455,12 +691,14 @@ export class PayrollComputeService {
     name: string | null;
     defaultTaxStatus: string | null;
     deliveredMetricSource: 'FUNNEL' | 'RECOVERY_COMBINED';
+    attendanceConfig: AttendanceConfig | null;
   } | null> {
     const [row] = await tx
       .select({
         name: schema.payrollPayRoles.name,
         defaultTaxStatus: schema.payrollPayRoles.defaultTaxStatus,
         deliveredMetricSource: schema.payrollPayRoles.deliveredMetricSource,
+        attendanceConfig: schema.payrollPayRoles.attendanceConfig,
       })
       .from(schema.payrollPayRoles)
       .where(eq(schema.payrollPayRoles.id, payRoleId))
@@ -471,6 +709,7 @@ export class PayrollComputeService {
       defaultTaxStatus: row.defaultTaxStatus,
       deliveredMetricSource:
         row.deliveredMetricSource === 'RECOVERY_COMBINED' ? 'RECOVERY_COMBINED' : 'FUNNEL',
+      attendanceConfig: (row.attendanceConfig as AttendanceConfig | undefined) ?? null,
     };
   }
 
@@ -566,6 +805,9 @@ export class PayrollComputeService {
       taxFreeThreshold: Number(row.taxFreeThreshold),
       bands: row.bands as PayeBandConfig['bands'],
       reliefs: row.reliefs as PayeBandConfig['reliefs'],
+      statutoryDeductions:
+        (row.statutoryDeductions as PayeBandConfig['statutoryDeductions']) ?? [],
+      lowIncomeExemptionMonthly: Number(row.lowIncomeExemptionMonthly ?? 0),
     };
   }
 }

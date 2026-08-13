@@ -98,6 +98,8 @@ export const users = pgTable('users', {
   crmLinked: boolean('crm_linked').default(true).notNull(),
   onboardingPayrollStatus: payrollOnboardingStatusEnum('onboarding_payroll_status').default('NOT_APPLICABLE'),
   payrollEmployeeId: text('payroll_employee_id'),
+  /** Tax Identification Number (TIN) — for the PAYE remittance report to the Revenue Office. */
+  tin: text('tin'),
   bankVerificationStatus: text('bank_verification_status').default('UNVERIFIED'),
   /**
    * Declared ANNUAL rent (₦). Drives the PAYE "Annual Rent Relief" (20% of this,
@@ -110,6 +112,19 @@ export const users = pgTable('users', {
   exitDate: date('exit_date'),
   /** Standardized reason recorded when an employee exits. */
   exitReason: employeeExitReasonEnum('exit_reason'),
+  /**
+   * Per-user override for attendance-based pay eligibility (Track C). NULL =
+   * inherit the pay role's `attendance_config.enabled`. true = force ON,
+   * false = force OFF. Bands always come from the role. See
+   * resolveAttendanceEnabled() in attendance-eligibility.ts.
+   */
+  attendanceAffectsPay: boolean('attendance_affects_pay'),
+  /**
+   * When true, the staff member is EXCLUDED from attendance entirely: dropped
+   * from the grid, counts, report, and the auto-absent cron. Distinct from
+   * attendanceAffectsPay (which only governs pay eligibility for tracked staff).
+   */
+  attendanceExcluded: boolean('attendance_excluded').notNull().default(false),
   ...temporalColumns,
   ...timestampColumns,
 });

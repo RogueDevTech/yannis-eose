@@ -19,6 +19,7 @@ import type {
 import { DRIZZLE, PG_CLIENT } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
+import { assertEntityInScopeAny, assertGroupInScope } from '../common/db/assert-entity-in-scope';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { uuidv7 } from 'uuidv7';
@@ -81,8 +82,39 @@ export class FinanceService {
   // Invoices
   // ============================================
 
-  async updateInvoiceStatus(input: UpdateInvoiceStatusInput, actorId: string) {
+  async updateInvoiceStatus(
+    input: UpdateInvoiceStatusInput,
+    actorId: string,
+    effectiveBranchIds?: string[] | null,
+  ) {
     return withActor(this.db, { id: actorId }, async (tx) => {
+      // Company isolation: invoices carry no branch of their own, so scope via
+      // the linked order's branch. Invoices with no order (rare) are only
+      // reachable org-wide.
+      if (effectiveBranchIds != null) {
+        const [inv] = await tx
+          .select({ orderId: schema.invoices.orderId })
+          .from(schema.invoices)
+          .where(eq(schema.invoices.id, input.invoiceId))
+          .limit(1);
+        if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+        let branchIds: Array<string | null | undefined> = [null];
+        if (inv.orderId) {
+          const [ord] = await tx
+            .select({
+              branchId: schema.orders.branchId,
+              servicingBranchId: schema.orders.servicingBranchId,
+            })
+            .from(schema.orders)
+            .where(eq(schema.orders.id, inv.orderId))
+            .limit(1);
+          if (ord) branchIds = [ord.servicingBranchId, ord.branchId];
+        }
+        assertEntityInScopeAny(branchIds, effectiveBranchIds, {
+          message: 'This invoice is not in your company.',
+        });
+      }
+
       const rows = await tx
         .update(schema.invoices)
         .set({ status: input.status })
@@ -1106,7 +1138,7 @@ export class FinanceService {
     });
   }
 
-  async getBudgetUtilization(budgetId: string) {
+  async getBudgetUtilization(budgetId: string, activeGroupId?: string | null) {
     const budgetRows = await this.db
       .select()
       .from(schema.budgets)
@@ -1117,6 +1149,7 @@ export class FinanceService {
     if (!budget) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Budget not found' });
     }
+    assertGroupInScope(budget.groupId, activeGroupId, { message: 'This budget is outside your active company.' });
 
     const [approvedRows, committedRows] = await Promise.all([
       this.db

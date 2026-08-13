@@ -118,7 +118,12 @@ interface NavGroupDef {
 const navStructure: NavGroupDef[] = [
   {
     group: null,
-    items: [{ label: 'Dashboard', href: '/admin', icon: SidebarIcons.dashboard }],
+    items: [
+      { label: 'Dashboard', href: '/admin', icon: SidebarIcons.dashboard },
+      // Branch Admin marks their branch's staff on the attendance page, not
+      // their own attendance — hide the self-service "My Attendance" from them.
+      { label: 'My Attendance', href: '/attendance/me', icon: SidebarIcons.hr, excludeRoles: ['BRANCH_ADMIN'] },
+    ],
   },
   {
     group: 'MARKETING',
@@ -483,7 +488,9 @@ const navStructure: NavGroupDef[] = [
   {
     group: 'HR',
     items: [
-      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'hr.read' },
+      // Branch Admin's two core features are Users (their branch) + Attendance,
+      // so they're role-allowlisted here in addition to the hr.read permission.
+      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: ['hr.read', 'users.read'], roles: ['BRANCH_ADMIN'] },
       {
         label: 'Staff Onboarding',
         href: '/hr/staff-onboarding-documents',
@@ -498,6 +505,13 @@ const navStructure: NavGroupDef[] = [
         // (e.g. a finance approver outside HR). Either grants the link.
         permission: ['hr.read', 'payroll.batches.view'],
         roles: ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'FINANCE_OFFICER'],
+      },
+      {
+        label: 'Attendance',
+        href: '/hr/attendance',
+        icon: SidebarIcons.hr,
+        permission: ['attendance.read', 'attendance.manage'],
+        roles: ['BRANCH_ADMIN'],
       },
       {
         label: 'Payroll Config',

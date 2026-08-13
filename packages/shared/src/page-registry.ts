@@ -135,6 +135,7 @@ export const PAGE_REGISTRY: ReadonlyArray<PageRegistryEntry> = [
   // ── HR ────────────────────────────────────────────────────────────
   { key: 'admin.hr.payroll', label: 'Payroll', parentKey: 'admin.hr', permissionCode: 'hr.read',
     defaultFilters: { datePreset: 'This Month' } },
+  { key: 'admin.hr.attendance', label: 'Attendance', parentKey: 'admin.hr', permissionCode: 'attendance.read' },
 
   // ── Analytics ─────────────────────────────────────────────────────
   { key: 'admin.analytics.audit', label: 'Audit Trail', parentKey: 'admin.analytics', permissionCode: 'audit.read',

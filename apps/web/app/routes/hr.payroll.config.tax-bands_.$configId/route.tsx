@@ -81,8 +81,10 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'saveTaxBandConfig') {
     const bandsJson = formData.get('bandsJson')?.toString()?.trim();
     const reliefsJson = formData.get('reliefsJson')?.toString()?.trim();
+    const statutoryDeductionsJson = formData.get('statutoryDeductionsJson')?.toString()?.trim();
     let bands: unknown[] = [];
     let reliefs: unknown[] = [];
+    let statutoryDeductions: unknown[] = [];
     try {
       if (bandsJson) {
         const parsed: unknown = JSON.parse(bandsJson);
@@ -92,9 +94,19 @@ export async function action({ request }: ActionFunctionArgs) {
         const parsed: unknown = JSON.parse(reliefsJson);
         if (Array.isArray(parsed)) reliefs = parsed;
       }
+      if (statutoryDeductionsJson) {
+        const parsed: unknown = JSON.parse(statutoryDeductionsJson);
+        if (Array.isArray(parsed)) statutoryDeductions = parsed;
+      }
     } catch {
-      return json({ error: 'Invalid bands or reliefs JSON' }, { status: 400 });
+      return json({ error: 'Invalid bands, reliefs, or statutory deductions JSON' }, { status: 400 });
     }
+
+    const lowIncomeExemptionRaw = formData.get('lowIncomeExemptionMonthly')?.toString()?.trim();
+    const lowIncomeExemptionMonthly =
+      lowIncomeExemptionRaw != null && lowIncomeExemptionRaw !== ''
+        ? Number(lowIncomeExemptionRaw)
+        : 66667;
 
     const configId = formData.get('configId')?.toString();
     const body: Record<string, unknown> = {
@@ -102,6 +114,8 @@ export async function action({ request }: ActionFunctionArgs) {
       taxFreeThreshold: Number(formData.get('taxFreeThreshold')?.toString() ?? '800000'),
       bands,
       reliefs,
+      statutoryDeductions,
+      lowIncomeExemptionMonthly,
       effectiveFrom: formData.get('effectiveFrom')?.toString() ?? new Date().toISOString().slice(0, 10),
     };
     if (configId) body.id = configId;

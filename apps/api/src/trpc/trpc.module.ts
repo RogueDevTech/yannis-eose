@@ -44,8 +44,10 @@ import { HrModule } from '../hr/hr.module';
 import { HrService } from '../hr/hr.service';
 import { PayrollBatchService } from '../hr/payroll-batch.service';
 import { PayrollConfigService } from '../hr/payroll-config.service';
+import { AttendanceService } from '../hr/attendance.service';
 import { PayrollMetricsService } from '../hr/payroll-metrics.service';
 import { setHrService, setPayrollBatchService, setPayrollConfigService, setPayrollMetricsService } from './routers/hr.router';
+import { setAttendanceService } from './routers/attendance.router';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PushSchedulerService } from '../notifications/push-scheduler.service';
@@ -154,6 +156,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly payrollBatchService: PayrollBatchService,
     private readonly payrollConfigService: PayrollConfigService,
     private readonly payrollMetricsService: PayrollMetricsService,
+    private readonly attendanceService: AttendanceService,
     private readonly notificationsService: NotificationsService,
     private readonly pushSchedulerService: PushSchedulerService,
     private readonly auditService: AuditService,
@@ -203,6 +206,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setHrService(this.hrService);
     setPayrollBatchService(this.payrollBatchService);
     setPayrollConfigService(this.payrollConfigService);
+    setAttendanceService(this.attendanceService);
     setPayrollMetricsService(this.payrollMetricsService);
     setNotificationsService(this.notificationsService);
     setAutomationService(this.automationService);

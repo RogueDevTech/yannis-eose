@@ -182,6 +182,8 @@ export interface UserDetail {
   flatMonthlyAmount?: string | number | null;
   /** Declared annual rent (₦) for PAYE rent relief. */
   annualRent?: string | number | null;
+  /** Tax identification number (TIN). */
+  tin?: string | null;
   reportsToUserId?: string | null;
   crmLinked?: boolean | null;
   primaryBranchId: string | null;
@@ -235,8 +237,12 @@ export interface StaffPayoutEstimate {
   totalOrders: number;
   returnedCount: number;
   deliveryRate: number;
+  /** Team delivery rate for Heads; null for non-Head staff. */
+  teamDeliveryRate?: number | null;
   baseSalary: number;
   performanceBonus: number;
+  /** Per-line breakdown of the performance bonus. */
+  bonusBreakdown?: Array<{ label: string; amount: number; productId?: string; productName?: string }>;
   allowancesTotal?: number;
   addOnsTotal?: number;
   penalties: number;
@@ -394,6 +400,7 @@ export interface UserDetailLoaderData {
   showOnboardingTab?: boolean;
   /** Viewer may open `/hr/users/:id/onboarding` (HR workflow). */
   viewerCanManageHrOnboarding?: boolean;
+  viewerCanManageAttendance?: boolean;
 
   // ── Page bundle data (replaces client-side resource route fetchers) ──
 

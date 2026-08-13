@@ -15,6 +15,7 @@ export * from './delivery-remittances';
 export * from './cart';
 export * from './finance';
 export * from './hr';
+export * from './attendance';
 export * from './notifications';
 export * from './rbac';
 export * from './permission-requests';

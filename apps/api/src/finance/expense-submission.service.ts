@@ -13,6 +13,7 @@ import {
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { assertGroupInScope } from '../common/db/assert-entity-in-scope';
 import { GeneralLedgerService, type PostVoucherLine } from './general-ledger.service';
 
 type Drizzle = PostgresJsDatabase<typeof schema>;
@@ -57,7 +58,7 @@ export class ExpenseSubmissionService {
 
   // ─── Approve ───────────────────────────────────────────────────────────────
 
-  async approveExpense(input: ApproveExpenseInput, actor: Actor) {
+  async approveExpense(input: ApproveExpenseInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [expense] = await tx
         .select()
@@ -68,6 +69,7 @@ export class ExpenseSubmissionService {
       if (!expense) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Expense submission not found.' });
       }
+      assertGroupInScope(expense.groupId, activeGroupId, { message: 'This expense is outside your active company.' });
       if (expense.status !== 'PENDING') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -151,7 +153,7 @@ export class ExpenseSubmissionService {
 
   // ─── Reject ────────────────────────────────────────────────────────────────
 
-  async rejectExpense(input: RejectExpenseInput, actor: Actor) {
+  async rejectExpense(input: RejectExpenseInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [expense] = await tx
         .select()
@@ -162,6 +164,7 @@ export class ExpenseSubmissionService {
       if (!expense) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Expense submission not found.' });
       }
+      assertGroupInScope(expense.groupId, activeGroupId, { message: 'This expense is outside your active company.' });
       if (expense.status !== 'PENDING') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -222,7 +225,7 @@ export class ExpenseSubmissionService {
 
   // ─── Get ───────────────────────────────────────────────────────────────────
 
-  async getExpense(input: GetExpenseInput) {
+  async getExpense(input: GetExpenseInput, activeGroupId?: string | null) {
     const [expense] = await this.db
       .select()
       .from(schema.expenseSubmissions)
@@ -231,6 +234,7 @@ export class ExpenseSubmissionService {
     if (!expense) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Expense submission not found.' });
     }
+    assertGroupInScope(expense.groupId, activeGroupId, { message: 'This expense is outside your active company.' });
     return expense;
   }
 

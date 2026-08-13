@@ -467,7 +467,12 @@ function FunnelDataTables({
             ) : (
               topForms.map((f) => (
                 <tr key={f.campaignId} className="border-t border-app-border">
-                  <td className={td}>{f.label}</td>
+                  <td className={td}>
+                    <span className="text-app-fg">{f.label}</span>
+                    {f.mediaBuyerName ? (
+                      <span className="ml-2 text-xs text-app-fg-muted">{f.mediaBuyerName}</span>
+                    ) : null}
+                  </td>
                   <td className={td}>{f.count.toLocaleString()}</td>
                   <td className={td}>
                     {topFormsTotal > 0 ? `${((f.count / topFormsTotal) * 100).toFixed(0)}%` : '--'}
@@ -672,12 +677,17 @@ export function FormsTable({
       key: 'form',
       header: 'Form',
       render: (r) => (
-        <Link
-          to={detailHref(r.campaignId, filters)}
-          className="font-medium text-brand-600 hover:underline dark:text-brand-400"
-        >
-          {r.label}
-        </Link>
+        <div className="min-w-0">
+          <Link
+            to={detailHref(r.campaignId, filters)}
+            className="font-medium text-brand-600 hover:underline dark:text-brand-400"
+          >
+            {r.label}
+          </Link>
+          {r.mediaBuyerName ? (
+            <div className="truncate text-xs text-app-fg-muted">{r.mediaBuyerName}</div>
+          ) : null}
+        </div>
       ),
     },
     {

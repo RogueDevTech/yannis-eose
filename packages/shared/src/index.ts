@@ -8,6 +8,7 @@ export * from './hr/commission-calc';
 export * from './hr/payroll-formula-engine';
 export * from './hr/payroll-proration';
 export * from './hr/paye-calc';
+export * from './hr/attendance-eligibility';
 export * from './hr/nigerian-banks';
 export * from './hr/nigerian-states';
 export * from './notifications/config';
