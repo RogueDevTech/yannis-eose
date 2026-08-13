@@ -4,6 +4,7 @@ import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { PageHeader } from '~/components/ui/page-header';
 import { Modal } from '~/components/ui/modal';
 import { SearchableSelect } from '~/components/ui/searchable-select';
+import { TextInput } from '~/components/ui/text-input';
 import { CONTROL_HEIGHT_CLASS } from '~/components/ui/_control-heights';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { RoleBadge } from '~/components/ui/role-badge';
@@ -19,21 +20,25 @@ import { useBranchesCatalog, useBranchGroupsCatalog } from '~/contexts/branches-
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { ROLE_OPTIONS, formatRole } from '~/features/users/types';
+import type { AttendancePolicyInput } from '@yannis/shared';
 import {
   type AttendanceGridData,
   type AttendanceGridRow,
   type AttendanceStatus,
   type CellStatus,
+  type WeekCell,
   STATUS_LETTER,
   STATUS_LABEL,
   STATUS_THEME,
   MARK_CYCLE,
   weeksOfMonth,
   WEEKDAY_HEADERS,
+  WEEKDAY_INDEX,
 } from './attendance-types';
 
 interface Props {
   grid: AttendanceGridData | null;
+  policy: AttendancePolicyInput;
   canManage: boolean;
   month: string; // YYYY-MM
   startDate: string; // YYYY-MM-DD (global date filter)
@@ -74,6 +79,20 @@ function defaultDayForMonth(month: string): number {
   return month === nowMonth ? now.getDate() : 1;
 }
 
+/**
+ * The daily view's selected day. Prefer TODAY: the daily view should land on
+ * today whenever today is inside the viewed month, even when the date filter
+ * spans the whole month (e.g. the "This month" preset sets startDate to the 1st).
+ * Only honour the filter's day when a SINGLE day was explicitly picked
+ * (start === end) within the viewed month. Otherwise fall back to today/1st.
+ */
+function dayFromStartDate(startDate: string, endDate: string, month: string): number {
+  const isSingleDay =
+    /^\d{4}-\d{2}-\d{2}$/.test(startDate) && startDate === endDate && startDate.slice(0, 7) === month;
+  if (isSingleDay) return Number(startDate.slice(8, 10));
+  return defaultDayForMonth(month);
+}
+
 /** Header label for the single daily column, e.g. "Mon 12". */
 function dailyLabel(month: string, day: number): string {
   const { y, m } = parseMonth(month);
@@ -86,6 +105,16 @@ function daysInMonthOf(month: string): number {
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
+/** Short marked-at time in Nigeria time, e.g. "9:14 AM". Empty when null. */
+function markedTime(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-US', {
+    hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Africa/Lagos',
+  });
+}
+
 /**
  * Fixed column widths for the branch-grouped table (table-fixed). Keeping widths
  * fixed means expanding/collapsing a branch never reflows the shared header.
@@ -93,23 +122,25 @@ function daysInMonthOf(month: string): number {
  */
 function colWidth(col: CompactTableColumn<AttendanceGridRow>): CSSProperties {
   if (col.key === 'select') return { width: '2.5rem' };
-  if (col.key === 'role') return { width: '9rem' };
+  // Layout: Staff (fixed) + Role hug the LEFT; the day column(s) + P/A/O/S
+  // summary hug the RIGHT. Role FLEXES (its badge stays left-aligned next to
+  // Staff and the empty space absorbs the middle gap), so the day column stays
+  // adjacent to the summary instead of being pushed apart.
+  if (col.key === 'staff') return { width: '16rem' };
+  if (col.key === 'role') return {}; // flexes → absorbs the middle gap
   if (col.key === 'view') return { width: '5rem' };
   if (col.key === 'summary') return { width: '7rem' };
-  // Daily view: fixed day column so Staff flexes and the day + summary hug the
-  // right edge (next to P/A/O/S).
-  if (col.key === 'today') return { width: '5rem' };
-  // Staff flexes (absorbs remaining width) so Role/day/summary align consistently.
-  if (col.key === 'staff') return {};
-  // Weekly day cells share the remaining space.
-  if (col.key.startsWith('d')) return {};
+  // Daily 'today' column: fixed so it sits right next to the summary.
+  if (col.key === 'today') return { width: '6rem' };
+  // Weekly day cells: fixed each so the week block hugs the summary.
+  if (col.key.startsWith('d')) return { width: '3rem' };
   // monthly count columns (p/a/o/s/pct)
   return { width: '5.5rem' };
 }
 
 /** "6 – 12" style label for a week's first/last real day. */
-function weekRangeLabel(month: string, weekDays: Array<number | null>): string {
-  const real = weekDays.filter((d): d is number => d != null);
+function weekRangeLabel(_month: string, weekDays: WeekCell[]): string {
+  const real = weekDays.filter((c) => c.inMonth).map((c) => c.day);
   if (real.length === 0) return '';
   const first = real[0];
   const last = real[real.length - 1];
@@ -129,7 +160,7 @@ function branchTotals(rows: AttendanceGridRow[]): { present: number; absent: num
   );
 }
 
-export function AttendancePage({ grid, canManage, month, startDate, endDate, search, branchId, role, statuses }: Props) {
+export function AttendancePage({ grid, policy, canManage, month, startDate, endDate, search, branchId, role, statuses }: Props) {
   const [, setSearchParams] = useSearchParams();
   const markFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const bulkFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -137,7 +168,10 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
   const [weekIndex, setWeekIndex] = useState(0);
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
   const [dayPickerOpen, setDayPickerOpen] = useState(false);
-  const [selectedDay, setSelectedDay] = useState<number>(() => defaultDayForMonth(month));
+  // The daily view's selected day is DERIVED from the global date filter
+  // (startDate) so the "Thu 13" picker and the DateFilterBar stay in sync. When
+  // startDate lands outside the viewed month we fall back to today/1.
+  const selectedDay = dayFromStartDate(startDate, endDate, month);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [editing, setEditing] = useState<{ row: AttendanceGridRow; date: string; current: CellStatus } | null>(null);
@@ -196,6 +230,24 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
     setParam('month', next);
   }
 
+  // Pick a day in the daily view → drive the GLOBAL date filter (single-day
+  // range) so the DateFilterBar and the "Thu 13" picker stay in sync.
+  const selectDay = useCallback(
+    (day: number) => {
+      const date = `${month}-${String(day).padStart(2, '0')}`;
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('startDate', date);
+          next.set('endDate', date);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [month, setSearchParams],
+  );
+
   // ── Filters ──────────────────────────────────────────────────
   const branchesCatalog = useBranchesCatalog();
   const branchGroupsCatalog = useBranchGroupsCatalog();
@@ -240,9 +292,9 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
 
   // Multi-select Status filter as a dropdown (keeps the multi-status capability
   // of the old toggle chips, just collapsed behind a trigger). Rendered in both
-  // the collapsible filters sheet and the desktop inline row — each instance owns
+  // the collapsible filters sheet and the desktop inline row: each instance owns
   // its own open state / outside-click ref so the two never fight over one popover.
-  function StatusFilterDropdown() {
+  function StatusFilterDropdown({ fullWidth = false }: { fullWidth?: boolean }) {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
     useEffect(() => {
@@ -268,6 +320,53 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
         : statusSet.size === 1 && firstStatus
           ? STATUS_LABEL[firstStatus]
           : `${statusSet.size} selected`;
+
+    const optionList = (
+      <>
+        {MARK_CYCLE.map((s) => {
+          const active = statusSet.has(s);
+          return (
+            <button
+              key={s}
+              type="button"
+              role="option"
+              aria-selected={active}
+              onClick={() => toggleStatusFilter(s)}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-app-fg transition hover:bg-app-muted"
+            >
+              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${active ? 'border-transparent bg-info-600 text-white' : 'border-app-border'}`}>
+                {active && (
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </span>
+              <span className={`h-2.5 w-2.5 rounded-full ${STATUS_THEME[s].dot}`} />
+              <span className="flex-1">{STATUS_LABEL[s]}</span>
+            </button>
+          );
+        })}
+        {statusSet.size > 0 && (
+          <button
+            type="button"
+            onClick={() => setParam('statuses', null)}
+            className="flex w-full items-center border-t border-app-border px-3 py-2 text-left text-xs text-app-fg-muted transition hover:bg-app-muted"
+          >
+            Clear
+          </button>
+        )}
+      </>
+    );
+
+    // In the filters sheet, render the options INLINE (no popover): a popover
+    // there gets clipped by the sheet's scroll container / hidden under it.
+    if (fullWidth) {
+      return (
+        <div className="w-full overflow-hidden rounded-lg border border-app-border">
+          {optionList}
+        </div>
+      );
+    }
 
     return (
       <div className="relative w-full sm:w-auto" ref={ref}>
@@ -295,44 +394,9 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
         {open && (
           <div
             role="listbox"
-            className="absolute left-0 z-30 mt-1 w-full min-w-[12rem] overflow-hidden rounded-lg border border-app-border bg-app-elevated shadow-lg"
+            className="absolute left-0 z-[100] mt-1 w-full min-w-[12rem] overflow-hidden rounded-lg border border-app-border bg-app-elevated shadow-lg"
           >
-            {MARK_CYCLE.map((s) => {
-              const active = statusSet.has(s);
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  role="option"
-                  aria-selected={active}
-                  onClick={() => toggleStatusFilter(s)}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-app-fg transition hover:bg-app-muted"
-                >
-                  <span
-                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                      active ? 'border-transparent bg-info-600 text-white' : 'border-app-border'
-                    }`}
-                  >
-                    {active && (
-                      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
-                  </span>
-                  <span className={`h-2.5 w-2.5 rounded-full ${STATUS_THEME[s].dot}`} />
-                  <span className="flex-1">{STATUS_LABEL[s]}</span>
-                </button>
-              );
-            })}
-            {statusSet.size > 0 && (
-              <button
-                type="button"
-                onClick={() => setParam('statuses', null)}
-                className="flex w-full items-center border-t border-app-border px-3 py-2 text-left text-xs text-app-fg-muted transition hover:bg-app-muted"
-              >
-                Clear
-              </button>
-            )}
+            {optionList}
           </div>
         )}
       </div>
@@ -346,6 +410,34 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
   }
   function dateFor(day: number): string {
     return `${month}-${String(day).padStart(2, '0')}`;
+  }
+
+  // ── Policy: work days + locking ──────────────────────────────
+  // Mirror the server's assertDateEditable so the UI disables cells that a save
+  // would reject. Non-work weekdays are always non-editable + greyed.
+  const nowLagos = useMemo(() => {
+    const now = new Date();
+    const d = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+    const t = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
+    return { today: d, hhmm: t };
+  }, []);
+  const workDaySet = useMemo(() => new Set(policy.workDays), [policy.workDays]);
+  function weekdayOf(date: string): number {
+    const parts = date.split('-');
+    const yy = Number(parts[0]);
+    const mm = Number(parts[1]);
+    const dd = Number(parts[2]);
+    return new Date(Date.UTC(yy, mm - 1, dd)).getUTCDay(); // 0=Sun..6=Sat
+  }
+  function isWorkDay(date: string): boolean {
+    return workDaySet.has(weekdayOf(date));
+  }
+  /** True when a save to `date` would be rejected by the policy (non-work / locked). */
+  function isLocked(date: string): boolean {
+    if (!isWorkDay(date)) return true;
+    if (policy.lockPreviousDays && date < nowLagos.today) return true;
+    if (policy.autoAbsentEnabled && date === nowLagos.today && nowLagos.hhmm >= policy.autoAbsentCutoff) return true;
+    return false;
   }
 
   const staff = grid?.staff ?? [];
@@ -379,14 +471,9 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
     });
   }, [staff]);
 
-  // First branch open by default; re-open the first whenever the group set changes.
-  const firstGroupKey = branchGroups[0]?.key;
+  // All branch accordions start COLLAPSED — the user expands the branch they
+  // want. (Previously the first group auto-expanded on load.)
   const [expandedBranches, setExpandedBranches] = useState<Set<string>>(new Set());
-  const [seededKey, setSeededKey] = useState<string | undefined>(undefined);
-  if (firstGroupKey && firstGroupKey !== seededKey) {
-    setSeededKey(firstGroupKey);
-    setExpandedBranches(new Set([firstGroupKey]));
-  }
   function toggleBranch(key: string) {
     setExpandedBranches((prev) => {
       const next = new Set(prev);
@@ -407,50 +494,64 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
   }
 
   const renderStaffCard = (row: AttendanceGridRow) => (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          {canManage && (
-            <input
-              type="checkbox"
-              checked={selected.has(row.staffId)}
-              onChange={() => toggleOne(row.staffId)}
-              aria-label={`Select ${row.name}`}
-              className="h-4 w-4"
-            />
-          )}
-          <Link to={`/hr/attendance/${row.staffId}`} className="font-medium text-app-fg underline-offset-2 hover:underline">
+    <div className="flex items-center gap-3">
+      {canManage && (
+        <input
+          type="checkbox"
+          checked={selected.has(row.staffId)}
+          onChange={() => toggleOne(row.staffId)}
+          aria-label={`Select ${row.name}`}
+          className="h-4 w-4 shrink-0"
+        />
+      )}
+
+      {/* Name + role: the primary content, hugs the left. */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <Link to={`/hr/attendance/${row.staffId}`} className="truncate font-medium text-app-fg">
             {row.name}
           </Link>
+          {row.baseAtRisk && <StatusBadge status="At risk" variant="danger" size="sm" pill label={`-${row.deductionPercent}%`} />}
         </div>
-        {row.baseAtRisk && <StatusBadge status="At risk" variant="danger" size="sm" pill label={`-${row.deductionPercent}%`} />}
+        <div className="mt-0.5 flex items-center gap-2">
+          <RoleBadge role={row.role} size="sm" />
+          <span className="flex gap-1.5 text-[0.7rem] tabular-nums text-app-fg-muted">
+            <span className="text-green-600 dark:text-green-400">{row.summary.present}P</span>
+            <span className="font-semibold text-red-600 dark:text-red-400">{row.summary.absent}A</span>
+            <span className="text-amber-600 dark:text-amber-400">{row.summary.offDuty}O</span>
+            <span className="text-blue-600 dark:text-blue-400">{row.summary.sick}S</span>
+          </span>
+        </div>
       </div>
-      <RoleBadge role={row.role} size="sm" />
+
+      {/* Day cell(s): hug the right. Daily = one cell; weekly = the work-day strip
+          (non-work days hidden entirely). */}
       {viewMode !== 'monthly' && (
-        <div className="flex flex-wrap gap-1">
-          {(viewMode === 'daily' ? [selectedDay] : weekDays).map((d, slot) =>
-            d == null ? null : (
+        <div className="flex shrink-0 gap-1">
+          {(viewMode === 'daily'
+            ? [{ day: selectedDay, inMonth: true }]
+            : weekDays.filter((_, slot) => workDaySet.has(WEEKDAY_INDEX[slot]!))
+          ).map((cell, slot) =>
+            !cell.inMonth ? (
+              <span key={slot} className="flex h-9 w-9 items-center justify-center rounded text-[0.65rem] text-app-fg-muted/40">
+                {cell.day}
+              </span>
+            ) : (
               <button
                 key={slot}
                 type="button"
                 disabled={!canManage}
-                onClick={() => setEditing({ row, date: dateFor(d), current: statusFor(row, d) })}
-                title={`${dateFor(d)}: ${STATUS_LABEL[statusFor(row, d)]}`}
-                className={`flex h-8 w-8 flex-col items-center justify-center rounded text-[0.65rem] ${STATUS_THEME[statusFor(row, d)].cell} ${canManage ? 'cursor-pointer' : 'cursor-default'}`}
+                onClick={() => setEditing({ row, date: dateFor(cell.day), current: statusFor(row, cell.day) })}
+                title={`${dateFor(cell.day)}: ${STATUS_LABEL[statusFor(row, cell.day)]}`}
+                className={`flex h-9 w-9 flex-col items-center justify-center rounded text-[0.65rem] ${STATUS_THEME[statusFor(row, cell.day)].cell} ${canManage ? 'cursor-pointer' : 'cursor-default'}`}
               >
-                <span>{d}</span>
-                <span className="font-medium">{STATUS_LETTER[statusFor(row, d)]}</span>
+                <span>{cell.day}</span>
+                <span className="font-medium">{STATUS_LETTER[statusFor(row, cell.day)]}</span>
               </button>
             ),
           )}
         </div>
       )}
-      <div className="flex gap-2 text-xs text-app-fg-muted">
-        <span className="text-green-600 dark:text-green-400">{row.summary.present}P</span>
-        <span className="font-semibold text-red-600 dark:text-red-400">{row.summary.absent}A</span>
-        <span className="text-amber-600 dark:text-amber-400">{row.summary.offDuty}O</span>
-        <span className="text-blue-600 dark:text-blue-400">{row.summary.sick}S</span>
-      </div>
     </div>
   );
 
@@ -500,20 +601,31 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
       },
     );
 
-    // A tappable day cell (shared by daily + weekly modes).
+    // A tappable day cell (shared by daily + weekly modes). Marked time is NOT
+    // shown on the grid cell (kept compact): it lives in the cell-detail modal
+    // and the report page. The tooltip still surfaces it on hover.
     const dayCell = (row: AttendanceGridRow, d: number) => {
       const status = statusFor(row, d);
       const date = dateFor(d);
       const isBlank = status === 'NONE';
+      const time = markedTime(row.exceptions[date]?.markedAt ?? null);
+      const nonWork = !isWorkDay(date);
+      const locked = isLocked(date);
+      const editable = canManage && !locked;
+      const lockReason = nonWork
+        ? 'Not a work day'
+        : locked
+          ? 'Locked (past cutoff / previous day)'
+          : '';
       return (
         <button
           type="button"
-          disabled={!canManage}
+          disabled={!editable}
           onClick={() => setEditing({ row, date, current: status })}
-          title={`${row.name} — ${date}: ${STATUS_LABEL[status]}`}
+          title={`${row.name}, ${date}: ${STATUS_LABEL[status]}${time ? ` (marked ${time})` : ''}${lockReason ? ` (${lockReason})` : ''}`}
           className={`inline-flex h-6 w-6 items-center justify-center rounded-md text-xs font-semibold ${STATUS_THEME[status].cell} ${
-            canManage ? 'cursor-pointer' : 'cursor-default'
-          } ${!isBlank && canManage ? 'hover:ring-2 hover:ring-brand-400' : ''}`}
+            editable ? 'cursor-pointer' : 'cursor-not-allowed'
+          } ${nonWork ? 'opacity-30' : locked ? 'opacity-60' : ''} ${!isBlank && editable ? 'hover:ring-2 hover:ring-brand-400' : ''}`}
         >
           {STATUS_LETTER[status]}
         </button>
@@ -528,35 +640,35 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
         render: (row) => dayCell(row, selectedDay),
       });
     } else if (viewMode === 'weekly') {
+      // Non-work days (per the policy) are HIDDEN entirely — only work-day columns
+      // render. Each surviving column keeps its own weekday label (Mon/Tue/…).
       cols.push(
-        ...weekDays.map((d, slot) => ({
-          key: `d${slot}`,
-          header: (
-            <div className="flex flex-col items-center leading-tight">
-              <span className="text-[0.6rem] font-normal text-app-fg-muted">{WEEKDAY_HEADERS[slot]}</span>
-              <span>{d ?? ''}</span>
-            </div>
-          ),
-          align: 'center' as const,
-          tight: true,
-          hideOnMobile: true,
-          render: (row: AttendanceGridRow) =>
-            d == null ? (
-              // Out-of-month day (belongs to the previous/next month's week). Not
-              // clickable — show a clearly disabled, hatched placeholder instead of
-              // a bare dot so the empty Mon–Fri of a partial week reads as N/A.
-              <span
-                className="mx-auto block h-5 w-5 rounded bg-app-hover/40 opacity-40 [background-image:repeating-linear-gradient(45deg,transparent,transparent_3px,rgb(var(--app-border))_3px,rgb(var(--app-border))_4px)]"
-                title="Not in this month"
-                aria-hidden
-              />
-            ) : (
-              dayCell(row, d)
+        ...weekDays
+          .map((cell, slot) => ({ cell, slot }))
+          .filter(({ slot }) => workDaySet.has(WEEKDAY_INDEX[slot]!))
+          .map(({ cell, slot }) => ({
+            key: `d${slot}`,
+            header: (
+              <div className="flex flex-col items-center leading-tight">
+                <span className="text-[0.6rem] font-normal text-app-fg-muted">{WEEKDAY_HEADERS[slot]}</span>
+                <span className={cell.inMonth ? '' : 'text-app-fg-muted/40'}>{cell.day}</span>
+              </div>
             ),
-        })),
+            align: 'center' as const,
+            tight: true,
+            hideOnMobile: true,
+            render: (row: AttendanceGridRow) =>
+              cell.inMonth ? (
+                dayCell(row, cell.day)
+              ) : (
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-md text-xs text-app-fg-muted/40" title="Not in this month">
+                  {cell.day}
+                </span>
+              ),
+          })),
       );
     } else {
-      // Monthly — per-status count columns (no per-day cells).
+      // Monthly: per-status count columns (no per-day cells).
       cols.push(
         { key: 'p', header: 'Present', align: 'center', render: (row) => <span className="tabular-nums text-green-600 dark:text-green-400">{row.summary.present}</span> },
         { key: 'a', header: 'Absent', align: 'center', render: (row) => <span className="font-semibold tabular-nums text-red-600 dark:text-red-400">{row.summary.absent}</span> },
@@ -587,7 +699,7 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
       });
     }
 
-    // View action — always the LAST column, as a text link.
+    // View action: always the LAST column, as a text link.
     cols.push({
       key: 'view',
       header: '',
@@ -610,23 +722,23 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
     <div className="space-y-4">
       <PageHeader
         title="Attendance"
-        mobileInlineActions
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <DateFilterBar startDate={startDate} endDate={endDate} chrome="pill" />
-            <TableActionButton
-              variant="neutral"
-              to={`/hr/attendance/report?date=${reportDate}`}
-            >
+            <Link to={`/hr/attendance/report?startDate=${reportDate}&endDate=${reportDate}`} className="btn-secondary btn-sm">
               Report
-            </TableActionButton>
-            {canManage && <TableActionButton variant="neutral" to="/hr/attendance/config">Configure</TableActionButton>}
+            </Link>
+            {canManage && (
+              <Link to="/hr/attendance/config" className="btn-primary btn-sm">
+                Configure
+              </Link>
+            )}
           </div>
         }
       >
         <div className="space-y-2">
           <ToolbarFiltersCollapsible
-            className="!border-0"
+            className="!border-0 md:!px-0"
             badgeCount={activeFilters}
             searchRow={searchRow}
             desktopInlineFilters={
@@ -687,7 +799,7 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
                 )}
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-app-fg-muted">Status</span>
-                  <StatusFilterDropdown />
+                  <StatusFilterDropdown fullWidth />
                 </div>
               </>
             }
@@ -879,26 +991,50 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
           <div className="space-y-3 md:hidden">
             {branchGroups.map((group) => {
               const open = expandedBranches.has(group.key);
+              const allInGroupSelected = group.rows.every((r) => selected.has(r.staffId));
               return (
                 <div key={group.key} className="overflow-hidden rounded-lg border border-app-border">
-                  <button
-                    type="button"
-                    onClick={() => toggleBranch(group.key)}
-                    className="flex w-full items-center gap-2 bg-app-hover/80 px-3 py-1.5 text-left dark:bg-app-hover/60"
-                    aria-expanded={open}
-                  >
-                    <svg
-                      className={`h-4 w-4 shrink-0 text-brand-600 transition-transform dark:text-brand-400 ${open ? 'rotate-90' : ''}`}
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
+                  <div className="flex items-center gap-2 bg-app-hover/80 px-3 py-2 dark:bg-app-hover/60">
+                    {canManage && (
+                      <input
+                        type="checkbox"
+                        checked={allInGroupSelected}
+                        onChange={(e) => selectBranch(group.rows, e.target.checked)}
+                        aria-label={`Select all in ${group.name}`}
+                        className="h-4 w-4 shrink-0"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => toggleBranch(group.key)}
+                      className="flex flex-1 items-center gap-2 text-left"
+                      aria-expanded={open}
                     >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                    <span className="text-sm font-semibold text-app-fg">{group.name}</span>
-                    <span className="rounded-full bg-app-elevated px-1.5 py-0.5 text-xs font-medium text-app-fg-muted">{group.rows.length}</span>
-                  </button>
+                      <svg
+                        className={`h-4 w-4 shrink-0 text-brand-600 transition-transform dark:text-brand-400 ${open ? 'rotate-90' : ''}`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                      <span className="text-sm font-semibold text-app-fg">{group.name}</span>
+                      <span className="rounded-full bg-app-elevated px-1.5 py-0.5 text-xs font-medium text-app-fg-muted">{group.rows.length}</span>
+                    </button>
+                    {/* Branch totals (compact) as the group's at-a-glance stat. */}
+                    {(() => {
+                      const t = branchTotals(group.rows);
+                      return (
+                        <span className="flex shrink-0 gap-1 text-[0.7rem] tabular-nums">
+                          <span className="text-green-600 dark:text-green-400">{t.present}</span>
+                          <span className="font-semibold text-red-600 dark:text-red-400">{t.absent}</span>
+                          <span className="text-amber-600 dark:text-amber-400">{t.offDuty}</span>
+                          <span className="text-blue-600 dark:text-blue-400">{t.sick}</span>
+                        </span>
+                      );
+                    })()}
+                  </div>
                   {open && (
                     <div className="divide-y divide-app-border/60">
                       {group.rows.map((row) => (
@@ -925,6 +1061,10 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
             <div>
               <h2 className="text-base font-semibold text-app-fg">{editing.row.name}</h2>
               <p className="text-sm text-app-fg-muted">{editing.date}</p>
+              {(() => {
+                const time = markedTime(editing.row.exceptions[editing.date]?.markedAt ?? null);
+                return time ? <p className="text-xs text-app-fg-muted">Marked at {time}</p> : null;
+              })()}
             </div>
             <StatusRadioGroup value={editing.current} onChange={(s) => setEditing((prev) => (prev ? { ...prev, current: s } : prev))} />
             <RemarkInput defaultValue={editing.row.exceptions[editing.date]?.remark ?? ''} />
@@ -995,7 +1135,7 @@ export function AttendancePage({ grid, canManage, month, startDate, endDate, sea
                 <button
                   key={d}
                   type="button"
-                  onClick={() => { setSelectedDay(d); setDayPickerOpen(false); }}
+                  onClick={() => { selectDay(d); setDayPickerOpen(false); }}
                   className={`flex h-9 items-center justify-center rounded-lg border text-sm transition ${
                     active ? 'border-brand-400 bg-brand-50 font-semibold text-app-fg dark:bg-brand-950/30' : 'border-app-border text-app-fg-muted hover:bg-app-muted'
                   }`}
@@ -1040,18 +1180,15 @@ function StatusRadioGroup({ value, onChange }: { value: CellStatus; onChange: (s
 
 function RemarkInput({ defaultValue }: { defaultValue: string }) {
   return (
-    <div>
-      <label className="mb-1 block text-sm font-medium text-app-fg" htmlFor="remark">Remark (optional)</label>
-      <input
-        id="remark"
-        name="remark"
-        type="text"
-        maxLength={500}
-        defaultValue={defaultValue}
-        placeholder="e.g. approved leave"
-        className="w-full rounded-md border border-app-border px-3 py-2 text-sm dark:bg-gray-900"
-      />
-    </div>
+    <TextInput
+      label="Remark (optional)"
+      id="remark"
+      name="remark"
+      type="text"
+      maxLength={500}
+      defaultValue={defaultValue}
+      placeholder="e.g. approved leave"
+    />
   );
 }
 

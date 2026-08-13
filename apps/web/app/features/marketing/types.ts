@@ -597,11 +597,13 @@ export interface FormAnalytics {
    *  how the trend chart formats each point's label (hour vs date). */
   trendUnit: 'hour' | 'day';
   timeSeries: Array<{ date: string; viewsRaw: number; viewsUnique: number }>;
-  topForms: Array<{ campaignId: string; label: string; count: number }>;
+  topForms: Array<{ campaignId: string; label: string; mediaBuyerName: string | null; count: number }>;
   /** Per-form rows for the clickable forms table. */
   forms: Array<{
     campaignId: string;
     label: string;
+    /** Owning media buyer's name — set for HoM/supervisor/admin views, null for an individual MB. */
+    mediaBuyerName: string | null;
     /** Product the form advertises: the product name for single-product forms,
      *  "Mixed" for multi-product forms, null when the form has no product. */
     productName: string | null;

@@ -5,6 +5,7 @@ import { PayrollMetricsService } from './payroll-metrics.service';
 import { PayrollComputeService } from './payroll-compute.service';
 import { PayrollConfigService } from './payroll-config.service';
 import { AttendanceService } from './attendance.service';
+import { AttendanceAutoAbsentService } from './attendance-auto-absent.service';
 import { EventsModule } from '../events/events.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { LedgerModule } from '../finance/ledger.module';
@@ -18,6 +19,7 @@ import { LedgerModule } from '../finance/ledger.module';
     PayrollComputeService,
     PayrollConfigService,
     AttendanceService,
+    AttendanceAutoAbsentService,
   ],
   exports: [HrService, PayrollBatchService, PayrollMetricsService, PayrollComputeService, PayrollConfigService, AttendanceService],
 })

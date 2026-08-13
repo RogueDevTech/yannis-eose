@@ -400,6 +400,7 @@ export interface UserDetailLoaderData {
   showOnboardingTab?: boolean;
   /** Viewer may open `/hr/users/:id/onboarding` (HR workflow). */
   viewerCanManageHrOnboarding?: boolean;
+  viewerCanManageAttendance?: boolean;
 
   // ── Page bundle data (replaces client-side resource route fetchers) ──
 

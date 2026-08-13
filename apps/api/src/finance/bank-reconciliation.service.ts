@@ -13,6 +13,7 @@ import {
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { assertGroupInScope } from '../common/db/assert-entity-in-scope';
 
 type Actor = { id: string };
 
@@ -160,17 +161,25 @@ export class BankReconciliationService {
     });
   }
 
-  async matchLine(input: MatchLineInput, actor: Actor) {
+  async matchLine(input: MatchLineInput, actor: Actor, activeGroupId?: string | null) {
     return withActor(this.db, actor, async (tx) => {
       const [line] = await tx
-        .select()
+        .select({
+          id: schema.bankReconLines.id,
+          groupId: schema.bankReconciliations.groupId,
+        })
         .from(schema.bankReconLines)
+        .innerJoin(
+          schema.bankReconciliations,
+          eq(schema.bankReconciliations.id, schema.bankReconLines.reconciliationId),
+        )
         .where(eq(schema.bankReconLines.id, input.lineId))
         .limit(1);
 
       if (!line) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation line not found.' });
       }
+      assertGroupInScope(line.groupId, activeGroupId, { message: 'This reconciliation is outside your active company.' });
 
       const [glEntry] = await tx
         .select({

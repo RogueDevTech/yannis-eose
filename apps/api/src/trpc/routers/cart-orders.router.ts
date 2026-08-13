@@ -59,7 +59,7 @@ export const cartOrdersRouter = router({
   getById: permissionProcedure('orders.read')
     .input(cartOrderDetailSchema)
     .query(async ({ input, ctx }) => {
-      const detail = await getCartOrdersService().getById(input.id);
+      const detail = await getCartOrdersService().getById(input.id, ctx.effectiveBranchIds);
       const viewerCanEditOrderLinePrices = await getOrdersService().canActorEditOrderLinePrices(ctx.user, {
         branchId: detail.servicingBranchId ?? detail.branchId ?? null,
         assignedCsId: detail.assignedCsId ?? null,
@@ -70,7 +70,7 @@ export const cartOrdersRouter = router({
   update: authedProcedure
     .input(updateCartOrderSchema)
     .mutation(async ({ input, ctx }) => {
-      return getCartOrdersService().update(input, ctx.user);
+      return getCartOrdersService().update(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   adjustItems: authedProcedure
@@ -85,19 +85,19 @@ export const cartOrdersRouter = router({
       totalAmount: z.coerce.number().min(0),
     }))
     .mutation(async ({ input, ctx }) => {
-      return getCartOrdersService().adjustItems(input.orderId, input.items, input.totalAmount, ctx.user);
+      return getCartOrdersService().adjustItems(input.orderId, input.items, input.totalAmount, ctx.user, ctx.effectiveBranchIds);
     }),
 
   assignToCS: permissionProcedure('orders.reassign')
     .input(assignCartOrderSchema)
     .mutation(async ({ input, ctx }) => {
-      return getCartOrdersService().assignToCS(input.orderId, input.closerId, ctx.user);
+      return getCartOrdersService().assignToCS(input.orderId, input.closerId, ctx.user, ctx.effectiveBranchIds);
     }),
 
   bulkAssign: permissionProcedure('orders.bulkAssign')
     .input(bulkAssignCartOrdersSchema)
     .mutation(async ({ input, ctx }) => {
-      return getCartOrdersService().bulkAssign(input.orderIds, input.closerIds, ctx.user);
+      return getCartOrdersService().bulkAssign(input.orderIds, input.closerIds, ctx.user, ctx.effectiveBranchIds);
     }),
 
   transition: permissionProcedure('orders.detail.manage')
@@ -109,12 +109,13 @@ export const cartOrdersRouter = router({
         ctx.user,
         input.note,
         input.metadata,
+        ctx.effectiveBranchIds,
       );
 
       // Auto-generate invoice on CONFIRMED — mirrors follow-up/main order behaviour
       if (input.newStatus === 'CONFIRMED') {
         try {
-          const co = await getCartOrdersService().getById(input.orderId);
+          const co = await getCartOrdersService().getById(input.orderId, ctx.effectiveBranchIds);
           const coItems = (co as { orderItems?: Array<{ quantity: number; unitPrice: string; productName?: string | null; productId: string }> }).orderItems ?? [];
           await getFinanceService().ensureInvoiceForOrder({
             order: {
@@ -137,7 +138,7 @@ export const cartOrdersRouter = router({
   ensureInvoice: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
-      const co = await getCartOrdersService().getById(input.orderId);
+      const co = await getCartOrdersService().getById(input.orderId, ctx.effectiveBranchIds);
       const coItems = (co as { orderItems?: Array<{ quantity: number; unitPrice: string; productName?: string | null; productId: string }> }).orderItems ?? [];
       await getFinanceService().ensureInvoiceForOrder({
         order: {
@@ -157,7 +158,7 @@ export const cartOrdersRouter = router({
   initiateCall: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
-      return getCartOrdersService().initiateCall(input.orderId, ctx.user);
+      return getCartOrdersService().initiateCall(input.orderId, ctx.user, ctx.effectiveBranchIds);
     }),
 
   pullFromCarts: permissionProcedure('orders.bulkAssign')

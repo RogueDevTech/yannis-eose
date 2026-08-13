@@ -9,27 +9,26 @@ import {
   getSessionCookie,
   requirePermissionOrRoles,
   safeStatus,
+  toLocalDateString,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { AttendancePage } from '~/features/hr/AttendancePage';
 import { PayrollConfigLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type { AttendanceGridData } from '~/features/hr/attendance-types';
+import { DEFAULT_ATTENDANCE_POLICY, type AttendancePolicyInput } from '@yannis/shared';
 
-export const meta: MetaFunction = () => [{ title: 'Attendance — Yannis EOSE' }];
+export const meta: MetaFunction = () => [{ title: 'Attendance: Yannis EOSE' }];
 
 const VIEWER_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HR_MANAGER'];
 
-/** Current month as YYYY-MM (server clock; UI can navigate months). */
-function currentMonth(): string {
-  return new Date().toISOString().slice(0, 7);
+/** Today in Africa/Lagos as YYYY-MM-DD. Attendance defaults to today. */
+function today(): string {
+  return toLocalDateString(new Date());
 }
 
-/** Last day-of-month for a YYYY-MM string. */
-function daysInMonth(month: string): number {
-  const parts = month.split('-');
-  const y = Number(parts[0]);
-  const m = Number(parts[1]);
-  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+/** Current month as YYYY-MM (Africa/Lagos; UI can navigate months). */
+function currentMonth(): string {
+  return today().slice(0, 7);
 }
 
 /** Global date filter → the single month the attendance grid shows (YYYY-MM). */
@@ -65,13 +64,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (role && role !== 'ALL') input.role = role;
     if (statuses.length) input.statuses = statuses;
     const inputEnc = encodeURIComponent(JSON.stringify(input));
-    const gridRes = await apiRequest<unknown>(`/trpc/attendance.grid?input=${inputEnc}`, {
-      method: 'GET',
-      cookie,
-    });
+    const [gridRes, policyRes] = await Promise.all([
+      apiRequest<unknown>(`/trpc/attendance.grid?input=${inputEnc}`, { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/attendance.getPolicy', { method: 'GET', cookie }),
+    ]);
     const grid = gridRes.ok
       ? ((gridRes.data as { result?: { data?: AttendanceGridData } })?.result?.data ?? null)
       : null;
+    const policy = policyRes.ok
+      ? ((policyRes.data as { result?: { data?: AttendancePolicyInput } })?.result?.data ?? DEFAULT_ATTENDANCE_POLICY)
+      : DEFAULT_ATTENDANCE_POLICY;
     const perms = user.permissions ?? [];
     const canManage =
       perms.includes('attendance.manage') ||
@@ -80,12 +82,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       user.role === 'HR_MANAGER';
     return {
       grid,
+      policy,
       canManage,
       month,
-      // Reflect the current range in the global DateFilterBar. When only a legacy
-      // `?month` (or nothing) is set, default the bar to that whole month.
-      startDate: url.searchParams.get('startDate') ?? `${month}-01`,
-      endDate: url.searchParams.get('endDate') ?? `${month}-${String(daysInMonth(month)).padStart(2, '0')}`,
+      // Attendance defaults to TODAY, not the whole month: the daily view derives
+      // its selected day from `startDate`, so a fresh visit lands on today. Any
+      // explicit range in the URL still wins.
+      startDate: url.searchParams.get('startDate') ?? today(),
+      endDate: url.searchParams.get('endDate') ?? today(),
       search: search ?? '',
       branchId: branchId ?? 'ALL',
       role: role ?? 'ALL',
@@ -153,6 +157,7 @@ export default function AttendanceRoute() {
       {(data) => (
         <AttendancePage
           grid={data.grid}
+          policy={data.policy}
           canManage={data.canManage}
           month={data.month}
           startDate={data.startDate}

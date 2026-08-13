@@ -898,6 +898,8 @@ export class UsersService {
           visibleOrderStatuses: input.visibleOrderStatuses ?? null,
           restrictProductAccess: input.restrictProductAccess ?? false,
           commissionPlanId,
+          // Branch Admins don't mark their own attendance — exclude by default.
+          attendanceExcluded: input.role === 'BRANCH_ADMIN',
         })
         .returning({
           id: schema.users.id,
@@ -2228,6 +2230,12 @@ export class UsersService {
     if (input.name !== undefined) updateFields['name'] = input.name;
     if (input.email !== undefined) updateFields['email'] = input.email.toLowerCase();
     if (input.role !== undefined) updateFields['role'] = input.role;
+    // Auto-exclude from attendance when a user BECOMES a Branch Admin (they mark
+    // their branch's staff, not themselves). Only on transition IN — leaving the
+    // role doesn't auto-re-include, so a manual include isn't clobbered.
+    if (input.role === 'BRANCH_ADMIN' && beforeRow.role !== 'BRANCH_ADMIN') {
+      updateFields['attendanceExcluded'] = true;
+    }
 
     // Permission templates + explicit scope flags
     if (input.roleTemplateId !== undefined) {

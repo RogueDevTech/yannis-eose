@@ -119,6 +119,12 @@ export const users = pgTable('users', {
    * resolveAttendanceEnabled() in attendance-eligibility.ts.
    */
   attendanceAffectsPay: boolean('attendance_affects_pay'),
+  /**
+   * When true, the staff member is EXCLUDED from attendance entirely: dropped
+   * from the grid, counts, report, and the auto-absent cron. Distinct from
+   * attendanceAffectsPay (which only governs pay eligibility for tracked staff).
+   */
+  attendanceExcluded: boolean('attendance_excluded').notNull().default(false),
   ...temporalColumns,
   ...timestampColumns,
 });

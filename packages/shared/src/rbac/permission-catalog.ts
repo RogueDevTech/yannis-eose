@@ -262,40 +262,23 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   // All mutations are still blocked at the tRPC middleware layer.
   SUPPORT: ALL_PERMISSION_CODES,
   ADMIN: ALL_PERMISSION_CODES,
+  // BRANCH_ADMIN is now a SLIM role focused on attendance (worked alongside HR)
+  // plus visibility of the users in their branch (CEO directive 2026-08-13). The
+  // previously-broad order / inventory / finance / marketing / logistics / branch-
+  // management access was intentionally removed — a branch admin's day-to-day job
+  // is attendance + branch roster, not org operations. Audit + data exports are
+  // retained so they can still pull records for their branch.
   BRANCH_ADMIN: [
-    'orders.read',
+    // Attendance: view the sheet AND mark/manage records with HR.
+    'attendance.read',
+    'attendance.manage',
+    // See the users in their branch (auto-scoped by effectiveBranchIds).
     'users.read',
-    'audit.read',
-    'products.read',
-    'categories.read',
-    'inventory.read',
-    'logistics.read',
-    'marketing.read',
-    'finance.read',
+    // hr.read lets the HR/Attendance nav + page loaders resolve; audit.read keeps
+    // accountability visibility for their branch.
     'hr.read',
-    'settings.write',
-    'branches.manage',
-    'branches.manage_users',
-    'branches.teams.cs',
-    'branches.teams.marketing',
-    'orders.line_price.edit',
-    'orders.detail.manage',
-    'orders.confirm.bypass_call_gate',
-    'orders.delivery.confirm',
-    'orders.assign',
-    // `orders.routing` is intentionally NOT granted to BRANCH_ADMIN. The CS
-    // routing page is global (writes fan out to every branch's settings) —
-    // a single Branch Admin shouldn't be able to flip the org-wide routing
-    // mode or reassign products globally. Admin-class + Head of CS only.
-    // Branch admins approve order-domain requests for orders in their branch
-    // (per-order context check still runs in the service).
-    'permission_requests.order_line_price.approve',
-    'permission_requests.order_deletion.approve',
-    // Branch admin is the source authority for WAREHOUSE locations in their branch
-    // (alongside Stock Manager) — see Transfer Approval Gate in CLAUDE.md.
-    'inventory.approveTransfer',
-    // Branch admin owns the branch end-to-end and can pull data downloads for
-    // any domain they read (orders + inventory + finance + audit + HR).
+    'audit.read',
+    // Data downloads retained across the domains they used to export.
     'orders.export',
     'inventory.export',
     'finance.export',
@@ -304,11 +287,6 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'marketing.export',
     'logistics.export',
     'data.export',
-    'data.import',
-    // Page-scoped slice of logistics.read so Branch Admin keeps Logistics
-    // companies visibility after the 2026-05 split. Branch Admin never had
-    // transfers.read, so partner transfers remains out of scope.
-    'logistics.providers.view',
   ],
   HEAD_OF_MARKETING: [
     'marketing.read',

@@ -17,6 +17,35 @@ export const attendanceConfigSchema = z.object({
 });
 export type AttendanceConfigInput = z.infer<typeof attendanceConfigSchema>;
 
+/**
+ * Global attendance POLICY (org-wide, stored in system_settings under
+ * ATTENDANCE_POLICY). Distinct from per-role deduction bands: this governs which
+ * days are work days and how strict marking is (locking + auto-absent cutoff).
+ *
+ * - workDays: ISO-ish weekday numbers 0..6 (0=Sunday … 6=Saturday) that count as
+ *   work days. Non-work days are excluded from the grid, counts, % and auto-absent.
+ * - lockPreviousDays: once a day is past, its cells become read-only.
+ * - autoAbsentEnabled + autoAbsentCutoff ("HH:mm", WAT): after the cutoff on a
+ *   work day, that day locks and every unmarked tracked staff is set ABSENT.
+ */
+export const attendancePolicySchema = z.object({
+  workDays: z.array(z.number().int().min(0).max(6)).max(7),
+  lockPreviousDays: z.boolean(),
+  autoAbsentEnabled: z.boolean(),
+  autoAbsentCutoff: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Cutoff must be HH:mm (24h)'),
+});
+export type AttendancePolicyInput = z.infer<typeof attendancePolicySchema>;
+
+/** Sensible defaults when no policy has been saved yet: Mon–Fri, no locking. */
+export const DEFAULT_ATTENDANCE_POLICY: AttendancePolicyInput = {
+  workDays: [1, 2, 3, 4, 5],
+  lockPreviousDays: false,
+  autoAbsentEnabled: false,
+  autoAbsentCutoff: '12:00',
+};
+
 /** Month key `YYYY-MM` for grid + summary reads. */
 const monthSchema = z
   .string()
@@ -92,3 +121,21 @@ export const setUserAttendanceOverrideSchema = z.object({
   attendanceAffectsPay: z.boolean().nullable(),
 });
 export type SetUserAttendanceOverrideInput = z.infer<typeof setUserAttendanceOverrideSchema>;
+
+/** Exclude/include a staff member from attendance tracking entirely. */
+export const setUserAttendanceExcludedSchema = z.object({
+  staffId: z.string().uuid(),
+  excluded: z.boolean(),
+});
+export type SetUserAttendanceExcludedInput = z.infer<typeof setUserAttendanceExcludedSchema>;
+
+/**
+ * Bulk-set attendance exclusion. `excludedIds` = the FULL set of staff that
+ * should be excluded among `scopeIds`; every id in scopeIds NOT in excludedIds
+ * is set to included. This lets one Save reconcile all checkbox changes.
+ */
+export const setUsersAttendanceExcludedBulkSchema = z.object({
+  scopeIds: z.array(z.string().uuid()).min(1).max(2000),
+  excludedIds: z.array(z.string().uuid()).max(2000),
+});
+export type SetUsersAttendanceExcludedBulkInput = z.infer<typeof setUsersAttendanceExcludedBulkSchema>;

@@ -25,7 +25,7 @@ export interface AttendanceGridRow {
   branchId: string | null;
   branchName: string | null;
   /** Only exception days are present; a missing day = PRESENT. Keyed YYYY-MM-DD. */
-  exceptions: Record<string, { status: AttendanceStatus; remark: string | null }>;
+  exceptions: Record<string, { status: AttendanceStatus; remark: string | null; markedAt: string | null }>;
   summary: AttendanceSummaryCounts;
   attendanceGated: boolean;
   baseAtRisk: boolean;
@@ -131,31 +131,57 @@ export const STATUS_THEME: Record<
 };
 
 /**
- * Weeks of a month, Monday-anchored. Each week is a 7-slot array (Mon→Sun);
- * slots outside the month are `null` so the grid renders full aligned rows.
+ * One cell in the weekly grid. `date` is the real YYYY-MM-DD; `day` its
+ * day-of-month; `inMonth` false for leading/trailing days that belong to the
+ * adjacent month (shown greyed, non-interactive) so every week is a full aligned
+ * Mon→Sun row that always displays a date.
  */
-export function weeksOfMonth(year: number, month1: number): Array<Array<number | null>> {
+export interface WeekCell {
+  date: string;
+  day: number;
+  inMonth: boolean;
+}
+
+/** Weeks of a month, Monday-anchored, padded with real adjacent-month dates. */
+export function weeksOfMonth(year: number, month1: number): WeekCell[][] {
   const daysInMonth = new Date(Date.UTC(year, month1, 0)).getUTCDate();
-  const weeks: Array<Array<number | null>> = [];
-  let current: Array<number | null> = [];
-
   // Monday-index (0=Mon … 6=Sun) of the 1st.
-  const firstDow = new Date(Date.UTC(year, month1 - 1, 1)).getUTCDay(); // 0=Sun
-  const leadingBlanks = (firstDow + 6) % 7; // convert so Monday=0
-  for (let i = 0; i < leadingBlanks; i++) current.push(null);
+  const firstDow = new Date(Date.UTC(year, month1 - 1, 1)).getUTCDay();
+  const leadingBlanks = (firstDow + 6) % 7;
 
-  for (let d = 1; d <= daysInMonth; d++) {
-    current.push(d);
+  const cellFor = (offset: number): WeekCell => {
+    // offset is days from the 1st of month1 (can be negative for prev-month).
+    const d = new Date(Date.UTC(year, month1 - 1, 1 + offset));
+    const date = d.toISOString().slice(0, 10);
+    return { date, day: d.getUTCDate(), inMonth: d.getUTCMonth() === month1 - 1 };
+  };
+
+  const weeks: WeekCell[][] = [];
+  let current: WeekCell[] = [];
+  // Start from the Monday that begins the first week (may be in the prev month).
+  for (let offset = -leadingBlanks; ; offset++) {
+    current.push(cellFor(offset));
     if (current.length === 7) {
       weeks.push(current);
       current = [];
     }
-  }
-  if (current.length > 0) {
-    while (current.length < 7) current.push(null);
-    weeks.push(current);
+    // Stop once we've placed the last day of the month AND completed its week.
+    if (offset >= daysInMonth - 1 && current.length === 0) break;
   }
   return weeks;
 }
 
 export const WEEKDAY_HEADERS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/**
+ * Maps a Monday-anchored column slot (0=Mon … 6=Sun) to the JS getUTCDay weekday
+ * number (0=Sun … 6=Sat), matching `AttendancePolicy.workDays`.
+ */
+export const WEEKDAY_INDEX = [1, 2, 3, 4, 5, 6, 0];
+
+/** Whether a YYYY-MM-DD date is a work day under the given workDays (0=Sun..6=Sat). */
+export function isWorkDayDate(date: string, workDays: number[]): boolean {
+  const parts = date.split('-');
+  const d = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+  return workDays.includes(d.getUTCDay());
+}

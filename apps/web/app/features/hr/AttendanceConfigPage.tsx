@@ -1,158 +1,286 @@
 import { useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
-import { TableActionButton } from '~/components/ui/table-action-button';
 import { Button } from '~/components/ui/button';
-import { StatusBadge } from '~/components/ui/status-badge';
+import { RoleBadge } from '~/components/ui/role-badge';
+import { SearchInput } from '~/components/ui/search-input';
 import { EmptyState } from '~/components/ui/empty-state';
 import { useFetcherToast } from '~/components/ui/toast';
-import type { AbsenceBand, PayRoleConfigRow } from './attendance-types';
+import { DEFAULT_ATTENDANCE_POLICY, type AttendancePolicyInput } from '@yannis/shared';
 
-interface Props {
-  payRoles: PayRoleConfigRow[];
+export interface ExcludableStaff {
+  id: string;
+  name: string;
+  role: string;
+  branchName: string | null;
+  excluded: boolean;
 }
 
-const DEFAULT_BANDS: AbsenceBand[] = [
-  { minAbsences: 0, deductionPercent: 0 },
-  { minAbsences: 4, deductionPercent: 50 },
-  { minAbsences: 7, deductionPercent: 100 },
+interface Props {
+  policy: AttendancePolicyInput;
+  staff: ExcludableStaff[];
+}
+
+/** Mon-first weekday labels; value = JS getDay() (0=Sun..6=Sat). */
+const WEEKDAYS: { value: number; label: string }[] = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
 ];
 
-export function AttendanceConfigPage({ payRoles }: Props) {
+export function AttendanceConfigPage({ policy, staff }: Props) {
   return (
     <div className="space-y-4">
       <PageHeader
         title="Attendance rules"
-        description="Set how absences reduce base salary, per pay role. Only absences count: off duty and sick leave never affect pay."
+        description="Set work days and strict-marking rules, and exclude staff from attendance."
         backTo="/hr/attendance"
       />
-      {payRoles.length === 0 ? (
-        <EmptyState title="No pay roles" description="Create pay roles in Payroll Config first." variant="card" />
-      ) : (
-        <div className="space-y-3">
-          {payRoles.map((role) => (
-            <RoleConfigCard key={role.id} role={role} />
-          ))}
-        </div>
-      )}
+
+      <PolicyCard policy={policy} />
+      <ExcludeStaffCard staff={staff} />
     </div>
   );
 }
 
-function RoleConfigCard({ role }: { role: PayRoleConfigRow }) {
+/** Exclude specific staff from attendance tracking (dropped from grid/reports). */
+function ExcludeStaffCard({ staff }: { staff: ExcludableStaff[] }) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
-  const [open, setOpen] = useState(false); // accordion collapsed by default
-  const [enabled, setEnabled] = useState<boolean>(role.attendanceConfig?.enabled ?? false);
-  const [bands, setBands] = useState<AbsenceBand[]>(
-    role.attendanceConfig?.bands?.length ? role.attendanceConfig.bands : DEFAULT_BANDS,
+  const [search, setSearch] = useState('');
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Staged local selection: the set of staffIds that should be EXCLUDED. Seeded
+  // from the server data; one Save reconciles all changes at once.
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(
+    () => new Set(staff.filter((s) => s.excluded).map((s) => s.id)),
   );
+  useFetcherToast(fetcher.data, { successMessage: 'Exclusions saved' });
 
-  useFetcherToast(fetcher.data, { successMessage: `${role.name} rules saved` });
+  const term = search.trim().toLowerCase();
+  const filtered = term
+    ? staff.filter((s) => s.name.toLowerCase().includes(term) || (s.branchName ?? '').toLowerCase().includes(term))
+    : staff;
+  const excludedCount = excludedIds.size;
 
-  const sortedBands = [...bands].sort((a, b) => a.minAbsences - b.minAbsences);
+  // Dirty when the staged set differs from what the server has.
+  const serverExcluded = new Set(staff.filter((s) => s.excluded).map((s) => s.id));
+  const dirty =
+    serverExcluded.size !== excludedIds.size || [...excludedIds].some((id) => !serverExcluded.has(id));
 
-  function updateBand(i: number, patch: Partial<AbsenceBand>) {
-    setBands((prev) => prev.map((b, idx) => (idx === i ? { ...b, ...patch } : b)));
+  function toggleExcluded(id: string) {
+    setExcludedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Group filtered staff by branch (like the attendance page's branch sections).
+  const groups = (() => {
+    const map = new Map<string, { name: string; rows: ExcludableStaff[] }>();
+    for (const s of filtered) {
+      const key = s.branchName ?? '__none';
+      const name = s.branchName ?? 'No branch';
+      if (!map.has(key)) map.set(key, { name, rows: [] });
+      map.get(key)!.rows.push(s);
+    }
+    return [...map.entries()]
+      .map(([key, g]) => ({ key, name: g.name, rows: g.rows }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  })();
+
+  function toggleGroup(key: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   return (
-    <div className="card overflow-hidden p-0">
-      {/* Accordion header — always visible, click to expand the rules body. */}
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition hover:bg-app-muted/40"
-      >
-        <div className="flex items-center gap-2">
-          <svg
-            className={`h-4 w-4 shrink-0 text-app-fg-muted transition-transform ${open ? 'rotate-90' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-          <h3 className="text-sm font-semibold text-app-fg">{role.name}</h3>
-          {enabled ? (
-            <StatusBadge status="On" variant="success" size="sm" pill label="Attendance affects pay" />
-          ) : (
-            <StatusBadge status="Off" variant="neutral" size="sm" pill label="Not affected" />
+    <div className="card space-y-3 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-app-fg">Excluded staff</h3>
+          <p className="text-xs text-app-fg-muted">
+            Excluded staff are not tracked: they never appear in the grid, counts, report, or auto-absent.
+            {excludedCount > 0 ? ` ${excludedCount} currently excluded.` : ''}
+          </p>
+        </div>
+        <SearchInput value={search} onChange={setSearch} placeholder="Search staff…" className="w-full sm:w-56" />
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyState title="No staff" description={term ? 'No staff match your search.' : 'No active staff.'} variant="card" />
+      ) : (
+        <div className="space-y-3">
+          {groups.map((g) => {
+            const open = !collapsed.has(g.key);
+            const groupExcluded = g.rows.filter((r) => excludedIds.has(r.id)).length;
+            return (
+              <div key={g.key} className="overflow-hidden rounded-lg border border-app-border">
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(g.key)}
+                  aria-expanded={open}
+                  className="flex w-full items-center gap-2 bg-app-muted/40 px-3 py-2 text-left"
+                >
+                  <svg className={`h-4 w-4 shrink-0 text-app-fg-muted transition-transform ${open ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                  <span className="text-sm font-semibold text-app-fg">{g.name}</span>
+                  <span className="text-xs text-app-fg-muted">({g.rows.length})</span>
+                  {groupExcluded > 0 && (
+                    <span className="ml-auto text-xs text-app-fg-muted">{groupExcluded} excluded</span>
+                  )}
+                </button>
+                {open && (
+                  <div className="divide-y divide-app-border/60">
+                    {g.rows.map((s) => {
+                      const checked = excludedIds.has(s.id);
+                      return (
+                        <label key={s.id} className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 hover:bg-app-muted/30">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleExcluded(s.id)}
+                              className="h-4 w-4 shrink-0"
+                            />
+                            <span className={`truncate text-sm font-medium ${checked ? 'text-app-fg-muted line-through' : 'text-app-fg'}`}>{s.name}</span>
+                            <RoleBadge role={s.role} size="sm" />
+                          </div>
+                          {checked && <span className="shrink-0 text-xs text-app-fg-muted">Excluded</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Single Save reconciles every staged change at once. */}
+      <fetcher.Form method="post" className="flex items-center justify-end gap-2 border-t border-app-border pt-3">
+        <input type="hidden" name="intent" value="setUsersExcludedBulk" />
+        <input type="hidden" name="scopeIds" value={staff.map((s) => s.id).join(',')} />
+        <input type="hidden" name="excludedIds" value={[...excludedIds].join(',')} />
+        {dirty && <span className="text-xs text-app-fg-muted">Unsaved changes</span>}
+        <Button variant="primary" type="submit" disabled={!dirty || fetcher.state !== 'idle'}>
+          {fetcher.state !== 'idle' ? 'Saving…' : 'Save exclusions'}
+        </Button>
+      </fetcher.Form>
+    </div>
+  );
+}
+
+/** Work days + strict rules (lock previous days, auto-absent cutoff). */
+function PolicyCard({ policy }: { policy: AttendancePolicyInput }) {
+  const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const init = policy ?? DEFAULT_ATTENDANCE_POLICY;
+  const [workDays, setWorkDays] = useState<number[]>(init.workDays);
+  const [lockPreviousDays, setLockPreviousDays] = useState<boolean>(init.lockPreviousDays);
+  const [autoAbsentEnabled, setAutoAbsentEnabled] = useState<boolean>(init.autoAbsentEnabled);
+  const [autoAbsentCutoff, setAutoAbsentCutoff] = useState<string>(init.autoAbsentCutoff);
+
+  useFetcherToast(fetcher.data, { successMessage: 'Attendance policy saved' });
+
+  function toggleDay(d: number) {
+    setWorkDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b)));
+  }
+
+  const payload: AttendancePolicyInput = { workDays, lockPreviousDays, autoAbsentEnabled, autoAbsentCutoff };
+
+  return (
+    <div className="card space-y-4 p-4">
+      <fetcher.Form method="post" className="space-y-4">
+        <input type="hidden" name="intent" value="saveAttendancePolicy" />
+        <input type="hidden" name="policyJson" value={JSON.stringify(payload)} />
+
+        {/* Work days */}
+        <div className="space-y-1.5">
+          <h3 className="text-sm font-semibold text-app-fg">Work days</h3>
+          <p className="text-xs text-app-fg-muted">Days that count as work days. Other days are excluded from attendance.</p>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {WEEKDAYS.map((d) => {
+              const active = workDays.includes(d.value);
+              return (
+                <button
+                  key={d.value}
+                  type="button"
+                  onClick={() => toggleDay(d.value)}
+                  aria-pressed={active}
+                  className={`h-9 w-12 rounded-lg border text-sm font-medium transition ${
+                    active
+                      ? 'border-brand-400 bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300'
+                      : 'border-app-border text-app-fg-muted hover:bg-app-muted'
+                  }`}
+                >
+                  {d.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Strict rules */}
+        <div className="space-y-3 border-t border-app-border pt-4">
+          <h3 className="text-sm font-semibold text-app-fg">Strict rules</h3>
+
+          <label className="flex cursor-pointer items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={lockPreviousDays}
+              onChange={(e) => setLockPreviousDays(e.target.checked)}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span>
+              <span className="font-medium text-app-fg">Lock previous days</span>
+              <span className="block text-xs text-app-fg-muted">Past days can no longer be edited once the day has ended.</span>
+            </span>
+          </label>
+
+          <label className="flex cursor-pointer items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={autoAbsentEnabled}
+              onChange={(e) => setAutoAbsentEnabled(e.target.checked)}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span>
+              <span className="font-medium text-app-fg">Auto-mark absent after cutoff</span>
+              <span className="block text-xs text-app-fg-muted">After the cutoff time, that day locks and anyone not marked is set Absent.</span>
+            </span>
+          </label>
+
+          {autoAbsentEnabled && (
+            <div className="flex items-center gap-2 pl-6">
+              <span className="text-sm text-app-fg-muted">Cutoff time</span>
+              <input
+                type="time"
+                value={autoAbsentCutoff}
+                onChange={(e) => setAutoAbsentCutoff(e.target.value)}
+                className="h-9 rounded-lg border border-app-border bg-app-elevated px-2 text-sm text-app-fg"
+              />
+            </div>
           )}
         </div>
-      </button>
-
-      {open && (
-      <fetcher.Form method="post" className="space-y-3 border-t border-app-border px-4 py-3">
-        <input type="hidden" name="intent" value="savePayRoleAttendanceConfig" />
-        <input type="hidden" name="payRoleId" value={role.id} />
-        <input type="hidden" name="enabled" value={String(enabled)} />
-        <input type="hidden" name="bandsJson" value={JSON.stringify(sortedBands)} />
-
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="h-4 w-4" />
-            Attendance affects pay
-          </label>
-        </div>
-
-        {enabled && (
-          <div className="space-y-2">
-            <div className="grid grid-cols-[1fr_1fr_auto] gap-2 text-xs font-medium text-app-fg-muted">
-              <span>Absences (at least)</span>
-              <span>Deduct % of base</span>
-              <span />
-            </div>
-            {bands.map((band, i) => (
-              <div key={i} className="grid grid-cols-[1fr_1fr_auto] items-center gap-2">
-                <input
-                  type="number"
-                  min={0}
-                  max={31}
-                  value={band.minAbsences}
-                  onChange={(e) => updateBand(i, { minAbsences: Number(e.target.value) })}
-                  className="rounded-md border border-app-border px-2 py-1.5 text-sm dark:bg-gray-900"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={band.deductionPercent}
-                  onChange={(e) => updateBand(i, { deductionPercent: Number(e.target.value) })}
-                  className="rounded-md border border-app-border px-2 py-1.5 text-sm dark:bg-gray-900"
-                />
-                <TableActionButton
-                  variant="danger"
-                  type="button"
-                  onClick={() => setBands((prev) => prev.filter((_, idx) => idx !== i))}
-                >
-                  Remove
-                </TableActionButton>
-              </div>
-            ))}
-            <TableActionButton
-              variant="neutral"
-              type="button"
-              onClick={() => setBands((prev) => [...prev, { minAbsences: 0, deductionPercent: 0 }])}
-            >
-              + Add band
-            </TableActionButton>
-            <p className="text-xs text-app-fg-muted">
-              Example: 0 to 3 absences deduct 0%, 4 to 6 deduct 50%, 7 or more deduct 100%. PAYE follows the reduced base.
-            </p>
-          </div>
-        )}
 
         {fetcher.data?.error && <p className="text-sm text-red-600">{fetcher.data.error}</p>}
 
-        <div className="flex justify-end">
-          <Button variant="primary" type="submit" disabled={fetcher.state !== 'idle'}>
-            {fetcher.state !== 'idle' ? 'Saving…' : 'Save'}
+        <div className="flex justify-end border-t border-app-border pt-3">
+          <Button variant="primary" type="submit" disabled={fetcher.state !== 'idle' || workDays.length === 0}>
+            {fetcher.state !== 'idle' ? 'Saving…' : 'Save policy'}
           </Button>
         </div>
       </fetcher.Form>
-      )}
     </div>
   );
 }

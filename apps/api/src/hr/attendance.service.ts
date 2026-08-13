@@ -15,6 +15,9 @@ import {
   type AttendanceSummaryInput,
   type SavePayRoleAttendanceConfigInput,
   type SetUserAttendanceOverrideInput,
+  attendancePolicySchema,
+  type AttendancePolicyInput,
+  DEFAULT_ATTENDANCE_POLICY,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
@@ -23,6 +26,12 @@ import { nigeriaToday } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 type Db = PostgresJsDatabase<typeof schema>;
+
+/** system_settings key holding the global attendance policy (per company group). */
+const ATTENDANCE_POLICY_KEY = 'ATTENDANCE_POLICY';
+
+/** Nil UUID actor for system-initiated writes (auto-absent cron). */
+const SYSTEM_ACTOR_ID = '00000000-0000-0000-0000-000000000000';
 
 /**
  * Whether the actor may edit attendance. Permission-code first (never a raw role
@@ -74,6 +83,42 @@ function assertMarkableDate(
   }
 }
 
+/** Current Africa/Lagos date (YYYY-MM-DD) and HH:mm, for policy lock checks. */
+function lagosNow(): { date: string; hhmm: string } {
+  const now = new Date();
+  const date = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(now);
+  const hhmm = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Lagos', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(now);
+  return { date, hhmm };
+}
+
+/**
+ * Enforce the strict-marking policy on an edit to `date`:
+ *  - lockPreviousDays: any day before today is read-only.
+ *  - autoAbsentEnabled: today becomes read-only once past the cutoff (the day is
+ *    considered "closed"); future days are already rejected by assertMarkableDate.
+ * Admins are NOT exempt here — locking is a deliberate integrity rule; loosen
+ * later if a supervisor override is required.
+ */
+function assertDateEditable(date: string, policy: AttendancePolicyInput): void {
+  const { date: today, hhmm } = lagosNow();
+  if (policy.lockPreviousDays && date < today) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'This day is locked: previous days can no longer be edited.',
+    });
+  }
+  if (policy.autoAbsentEnabled && date === today && hhmm >= policy.autoAbsentCutoff) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `Today is locked after the ${policy.autoAbsentCutoff} cutoff.`,
+    });
+  }
+}
+
 
 @Injectable()
 export class AttendanceService {
@@ -89,6 +134,45 @@ export class AttendanceService {
   }
 
   /**
+   * Company-isolation guard for per-staff operations that take a `staffId`
+   * directly (summary/mark/markBulk/markRange). `effectiveBranchIds` is the
+   * concrete branch set the caller's active company allows; `null` = org-wide
+   * (admin / no company selected) and bypasses the check. When scoped, every
+   * target staff's `primaryBranchId` MUST be inside that set, else it's a
+   * cross-company access attempt (Pillar 2 / data isolation). Staff with no
+   * branch are only reachable org-wide.
+   *
+   * Returns the set of allowed staffIds (so bulk callers can drop strays), and
+   * throws for single-staff callers when the one id is out of scope.
+   */
+  private async assertStaffInScope(
+    staffIds: string[],
+    effectiveBranchIds: string[] | null | undefined,
+    opts: { throwOnStray?: boolean } = {},
+  ): Promise<Set<string>> {
+    const ids = [...new Set(staffIds.filter(Boolean))];
+    if (ids.length === 0) return new Set();
+    // Org-wide (null/undefined) → no company filter.
+    if (!effectiveBranchIds) return new Set(ids);
+    const allowedBranches = new Set(effectiveBranchIds.filter(Boolean));
+    const rows = await this.db
+      .select({ id: schema.users.id, branchId: schema.users.primaryBranchId })
+      .from(schema.users)
+      .where(inArray(schema.users.id, ids));
+    const inScope = new Set<string>();
+    for (const r of rows) {
+      if (r.branchId && allowedBranches.has(r.branchId)) inScope.add(r.id);
+    }
+    if (opts.throwOnStray && inScope.size !== ids.length) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'This staff member is not in your company.',
+      });
+    }
+    return inScope;
+  }
+
+  /**
    * Master grid for a month: one row per payroll-eligible staff member, with the
    * exception days they've been marked (missing day = Present). Scoped to the
    * actor's effective branches.
@@ -98,13 +182,22 @@ export class AttendanceService {
     const { start, end, days } = monthBounds(input.month);
 
     // Enumerate the SAME population payroll pays: ACTIVE staff with a comp basis,
-    // scoped to the actor's effective branches (or the requested branch).
-    const branchScope = input.branchId
-      ? [input.branchId]
-      : (effectiveBranchIds ?? []).filter(Boolean);
+    // scoped to the actor's effective branches. A requested `input.branchId` is a
+    // NARROWING filter only — it must stay within effectiveBranchIds so a
+    // branch-scoped actor (e.g. Branch Admin) can't request another branch's data.
+    const allowed = (effectiveBranchIds ?? []).filter(Boolean);
+    let branchScope: string[];
+    if (input.branchId) {
+      // Honour the requested branch only if the actor is org-wide (no scope) or
+      // it's within their allowed set; otherwise fall back to their allowed set.
+      branchScope = allowed.length === 0 || allowed.includes(input.branchId) ? [input.branchId] : allowed;
+    } else {
+      branchScope = allowed;
+    }
 
     const staffConds = [
       eq(schema.users.status, 'ACTIVE'),
+      eq(schema.users.attendanceExcluded, false), // excluded staff are not tracked
       sql`(${schema.users.payRoleId} IS NOT NULL OR ${schema.users.flatMonthlyAmount} IS NOT NULL)`,
     ];
     if (branchScope.length) {
@@ -146,6 +239,7 @@ export class AttendanceService {
         attendanceDate: schema.attendanceRecords.attendanceDate,
         status: schema.attendanceRecords.status,
         remark: schema.attendanceRecords.remark,
+        markedAt: schema.attendanceRecords.markedAt,
       })
       .from(schema.attendanceRecords)
       .where(
@@ -156,11 +250,18 @@ export class AttendanceService {
         ),
       );
 
-    const byStaff = new Map<string, Map<string, { status: string; remark: string | null }>>();
+    const byStaff = new Map<
+      string,
+      Map<string, { status: string; remark: string | null; markedAt: string | null }>
+    >();
     for (const r of records) {
       const day = String(r.attendanceDate).slice(0, 10);
       if (!byStaff.has(r.staffId)) byStaff.set(r.staffId, new Map());
-      byStaff.get(r.staffId)!.set(day, { status: r.status, remark: r.remark });
+      byStaff.get(r.staffId)!.set(day, {
+        status: r.status,
+        remark: r.remark,
+        markedAt: r.markedAt ? new Date(r.markedAt).toISOString() : null,
+      });
     }
 
     // Role attendance configs, for the at-risk flag.
@@ -221,8 +322,10 @@ export class AttendanceService {
   }
 
   /** Upsert one staff/day cell. HR only. Actor-stamped + audited via history trigger. */
-  async mark(input: MarkAttendanceInput, actor: SessionUser) {
+  async mark(input: MarkAttendanceInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     this.assertCanManage(actor);
+    // Company isolation: only mark staff in the caller's active company.
+    await this.assertStaffInScope([input.staffId], effectiveBranchIds, { throwOnStray: true });
 
     // Stamp branch/group from the staff member so the grid + summaries scope correctly.
     const [staff] = await this.db
@@ -237,6 +340,7 @@ export class AttendanceService {
       .limit(1);
     if (!staff) throw new TRPCError({ code: 'NOT_FOUND', message: 'Staff not found.' });
     assertMarkableDate(input.attendanceDate, staff.dateOfJoining, staff.exitDate);
+    assertDateEditable(input.attendanceDate, await this.getPolicy(actor));
 
     let branchId: string | null = staff.primaryBranchId ?? null;
     let groupId: string | null = null;
@@ -277,14 +381,19 @@ export class AttendanceService {
   }
 
   /** Bulk-mark one day for many staff (HR). One tx; each row upserted + audited. */
-  async markBulk(input: MarkAttendanceBulkInput, actor: SessionUser) {
+  async markBulk(input: MarkAttendanceBulkInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     this.assertCanManage(actor);
-    const ids = [...new Set(input.staffIds)];
+    // Company isolation: drop any staff outside the caller's active company
+    // rather than failing the whole batch. Org-wide callers keep every id.
+    const inScope = await this.assertStaffInScope(input.staffIds, effectiveBranchIds);
+    const ids = [...new Set(input.staffIds)].filter((id) => inScope.has(id));
 
     // A future date is invalid for everyone — reject up front.
     if (input.attendanceDate > nigeriaToday()) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot mark attendance for a future date.' });
     }
+    // Strict-marking policy (lock previous days / today-after-cutoff).
+    assertDateEditable(input.attendanceDate, await this.getPolicy(actor));
 
     // Resolve branch + group + employment window for every staff member in one query.
     const staffRows = await this.db
@@ -343,8 +452,10 @@ export class AttendanceService {
    * Powers "mark whole month". Clamps the range to [joining, min(exit, today)]
    * and, when `onlyBlank`, skips days that already have a record.
    */
-  async markRange(input: MarkAttendanceRangeInput, actor: SessionUser) {
+  async markRange(input: MarkAttendanceRangeInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     this.assertCanManage(actor);
+    // Company isolation: only mark staff in the caller's active company.
+    await this.assertStaffInScope([input.staffId], effectiveBranchIds, { throwOnStray: true });
 
     const [staff] = await this.db
       .select({
@@ -363,8 +474,19 @@ export class AttendanceService {
     const lowerBound = staff.dateOfJoining ? staff.dateOfJoining.slice(0, 10) : input.startDate;
     const upperCandidates = [input.endDate, today];
     if (staff.exitDate) upperCandidates.push(staff.exitDate.slice(0, 10));
-    const start = input.startDate > lowerBound ? input.startDate : lowerBound;
-    const end = upperCandidates.reduce((a, b) => (b < a ? b : a));
+    let start = input.startDate > lowerBound ? input.startDate : lowerBound;
+    let end = upperCandidates.reduce((a, b) => (b < a ? b : a));
+
+    // Strict-marking policy: clamp the editable window rather than rejecting.
+    const policy = await this.getPolicy(actor);
+    const { hhmm } = lagosNow();
+    if (policy.lockPreviousDays && start < today) start = today; // past days locked
+    if (policy.autoAbsentEnabled && hhmm >= policy.autoAbsentCutoff && end >= today) {
+      // Today is closed after cutoff — trim to yesterday.
+      const y = new Date(`${today}T00:00:00Z`);
+      y.setUTCDate(y.getUTCDate() - 1);
+      end = y.toISOString().slice(0, 10);
+    }
     if (start > end) return { success: true, count: 0 };
 
     let branchId: string | null = staff.primaryBranchId ?? null;
@@ -437,11 +559,16 @@ export class AttendanceService {
   }
 
   /** Monthly summary for one staff member (self-view or HR). */
-  async summary(input: AttendanceSummaryInput, actor: SessionUser) {
+  async summary(input: AttendanceSummaryInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     const staffId = input.staffId ?? actor.id;
     // Staff may only view their own; HR/admins may view anyone.
     if (staffId !== actor.id && !canReadAllAttendance(actor)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only view your own attendance.' });
+    }
+    // Company isolation: viewing another staff member requires them to be in the
+    // caller's active company (self-view is always allowed).
+    if (staffId !== actor.id) {
+      await this.assertStaffInScope([staffId], effectiveBranchIds, { throwOnStray: true });
     }
     const { start, end, days } = monthBounds(input.month);
 
@@ -556,9 +683,92 @@ export class AttendanceService {
     });
   }
 
-  /** Set a user's per-user attendance override (null = inherit role). HR only. Audited. */
-  async setUserOverride(input: SetUserAttendanceOverrideInput, actor: SessionUser) {
+  /**
+   * List ACTIVE staff (in the actor's effective branches) with their attendance
+   * exclusion flag, for the config page's exclude picker.
+   */
+  async listExcludableStaff(actor: SessionUser, effectiveBranchIds?: string[] | null) {
     this.assertCanManage(actor);
+    const conds = [eq(schema.users.status, 'ACTIVE')];
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      conds.push(inArray(schema.users.primaryBranchId, effectiveBranchIds));
+    }
+    const rows = await this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        role: schema.users.role,
+        branchName: schema.branches.name,
+        excluded: schema.users.attendanceExcluded,
+      })
+      .from(schema.users)
+      .leftJoin(schema.branches, eq(schema.branches.id, schema.users.primaryBranchId))
+      .where(and(...conds))
+      .orderBy(asc(schema.users.name));
+    return rows.map((r) => ({ ...r, excluded: !!r.excluded }));
+  }
+
+  /** Set a staff member's attendance-excluded flag. HR only. Audited. */
+  async setUserExcluded(
+    input: { staffId: string; excluded: boolean },
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    this.assertCanManage(actor);
+    await this.assertStaffInScope([input.staffId], effectiveBranchIds, { throwOnStray: true });
+    return withActor(this.db, actor, async (tx) => {
+      const res = await tx
+        .update(schema.users)
+        .set({ attendanceExcluded: input.excluded, updatedAt: sql`now()` })
+        .where(eq(schema.users.id, input.staffId))
+        .returning({ id: schema.users.id });
+      if (res.length === 0) throw new TRPCError({ code: 'NOT_FOUND', message: 'Staff not found.' });
+      return { success: true };
+    });
+  }
+
+  /**
+   * Bulk-reconcile attendance exclusion. Within the in-scope subset of scopeIds,
+   * every id in excludedIds is set excluded=true and the rest excluded=false —
+   * so one Save applies all the config page's checkbox changes. HR only. Audited.
+   */
+  async setUsersExcludedBulk(
+    input: { scopeIds: string[]; excludedIds: string[] },
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    this.assertCanManage(actor);
+    const inScope = await this.assertStaffInScope(input.scopeIds, effectiveBranchIds);
+    const scoped = [...inScope];
+    if (scoped.length === 0) return { success: true, excluded: 0 };
+    const excludeSet = new Set(input.excludedIds.filter((id) => inScope.has(id)));
+    const toExclude = scoped.filter((id) => excludeSet.has(id));
+    const toInclude = scoped.filter((id) => !excludeSet.has(id));
+    await withActor(this.db, actor, async (tx) => {
+      if (toExclude.length > 0) {
+        await tx
+          .update(schema.users)
+          .set({ attendanceExcluded: true, updatedAt: sql`now()` })
+          .where(and(inArray(schema.users.id, toExclude), eq(schema.users.attendanceExcluded, false)));
+      }
+      if (toInclude.length > 0) {
+        await tx
+          .update(schema.users)
+          .set({ attendanceExcluded: false, updatedAt: sql`now()` })
+          .where(and(inArray(schema.users.id, toInclude), eq(schema.users.attendanceExcluded, true)));
+      }
+    });
+    return { success: true, excluded: toExclude.length };
+  }
+
+  /** Set a user's per-user attendance override (null = inherit role). HR only. Audited. */
+  async setUserOverride(
+    input: SetUserAttendanceOverrideInput,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    this.assertCanManage(actor);
+    await this.assertStaffInScope([input.staffId], effectiveBranchIds, { throwOnStray: true });
     return withActor(this.db, actor, async (tx) => {
       const res = await tx
         .update(schema.users)
@@ -569,6 +779,122 @@ export class AttendanceService {
       return { success: true };
     });
   }
+
+  // ── Global attendance policy (work days + strict rules) ────────────────────
+  // Stored in system_settings under ATTENDANCE_POLICY, per company group. Read
+  // directly here (rather than via SettingsService) to avoid a cross-module dep.
+
+  /** Read the effective attendance policy for the actor's company (or defaults). */
+  async getPolicy(actor: SessionUser): Promise<AttendancePolicyInput> {
+    const groupId = actor.activeGroupId ?? null;
+    const conds = [eq(schema.systemSettings.key, ATTENDANCE_POLICY_KEY)];
+    // Group-scoped row wins; fall back to the ungrouped (global) row.
+    const rows = await this.db
+      .select({ value: schema.systemSettings.value, groupId: schema.systemSettings.groupId })
+      .from(schema.systemSettings)
+      .where(and(...conds));
+    const forGroup = groupId ? rows.find((r) => r.groupId === groupId) : undefined;
+    const global = rows.find((r) => r.groupId === null);
+    const raw = (forGroup ?? global)?.value;
+    if (!raw) return { ...DEFAULT_ATTENDANCE_POLICY };
+    const parsed = attendancePolicySchema.safeParse(raw);
+    return parsed.success ? parsed.data : { ...DEFAULT_ATTENDANCE_POLICY };
+  }
+
+  /** All distinct company-group policies (group row wins; plus the global row). */
+  async getAllPolicies(): Promise<Array<{ groupId: string | null; policy: AttendancePolicyInput }>> {
+    const rows = await this.db
+      .select({ value: schema.systemSettings.value, groupId: schema.systemSettings.groupId })
+      .from(schema.systemSettings)
+      .where(eq(schema.systemSettings.key, ATTENDANCE_POLICY_KEY));
+    return rows.map((r) => {
+      const parsed = attendancePolicySchema.safeParse(r.value);
+      return { groupId: r.groupId, policy: parsed.success ? parsed.data : { ...DEFAULT_ATTENDANCE_POLICY } };
+    });
+  }
+
+  /**
+   * Auto-mark ABSENT: for `date` (YYYY-MM-DD, WAT), every ACTIVE tracked staff
+   * member (optionally scoped to a company group) who has NO attendance record
+   * that day gets an ABSENT record stamped by the system actor. Idempotent — an
+   * existing record (any status) is never overwritten. Returns the count marked.
+   *
+   * Callers gate on: it's a work day AND now is past the cutoff. This method does
+   * the write only; the schedule/policy check lives in the cron service.
+   */
+  async autoMarkAbsentForDate(date: string, groupId: string | null): Promise<{ marked: number }> {
+    // Tracked population = same as the grid: ACTIVE + has a comp basis, within
+    // their employment window, and (when scoped) in the given company group.
+    const staffConds = [
+      eq(schema.users.status, 'ACTIVE'),
+      eq(schema.users.attendanceExcluded, false), // excluded staff are not auto-marked
+      sql`(${schema.users.payRoleId} IS NOT NULL OR ${schema.users.flatMonthlyAmount} IS NOT NULL)`,
+      sql`(${schema.users.dateOfJoining} IS NULL OR ${schema.users.dateOfJoining}::date <= ${date}::date)`,
+      sql`(${schema.users.exitDate} IS NULL OR ${schema.users.exitDate}::date >= ${date}::date)`,
+      // No existing record for this staff/day.
+      sql`NOT EXISTS (SELECT 1 FROM ${schema.attendanceRecords} ar WHERE ar.staff_id = ${schema.users.id} AND ar.attendance_date = ${date}::date)`,
+    ];
+    if (groupId) {
+      staffConds.push(
+        sql`${schema.users.primaryBranchId} IN (SELECT id FROM ${schema.branches} WHERE ${schema.branches.groupId} = ${groupId})`,
+      );
+    }
+    const staff = await this.db
+      .select({ id: schema.users.id, branchId: schema.users.primaryBranchId, branchGroupId: schema.branches.groupId })
+      .from(schema.users)
+      .leftJoin(schema.branches, eq(schema.branches.id, schema.users.primaryBranchId))
+      .where(and(...staffConds));
+    if (staff.length === 0) return { marked: 0 };
+
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      for (const s of staff) {
+        await tx
+          .insert(schema.attendanceRecords)
+          .values({
+            id: uuidv7(),
+            staffId: s.id,
+            attendanceDate: date,
+            status: 'ABSENT',
+            remark: 'Auto-marked (no attendance by cutoff)',
+            branchId: s.branchId ?? null,
+            groupId: s.branchGroupId ?? null,
+            markedBy: SYSTEM_ACTOR_ID,
+          })
+          // Race guard: if a real mark landed between the SELECT and here, keep it.
+          .onConflictDoNothing({
+            target: [schema.attendanceRecords.staffId, schema.attendanceRecords.attendanceDate],
+          });
+      }
+    });
+    return { marked: staff.length };
+  }
+
+  /** Save the attendance policy for the actor's company. HR only. Audited. */
+  async savePolicy(input: AttendancePolicyInput, actor: SessionUser): Promise<{ success: true }> {
+    this.assertCanManage(actor);
+    const groupId = actor.activeGroupId ?? null;
+    const value = attendancePolicySchema.parse(input) as unknown as Record<string, unknown>;
+    return withActor(this.db, actor, async (tx) => {
+      const conds = [eq(schema.systemSettings.key, ATTENDANCE_POLICY_KEY)];
+      if (groupId) conds.push(eq(schema.systemSettings.groupId, groupId));
+      else conds.push(sql`${schema.systemSettings.groupId} IS NULL`);
+      const existing = await tx.select({ id: schema.systemSettings.id }).from(schema.systemSettings).where(and(...conds));
+      if (existing.length > 0) {
+        await tx
+          .update(schema.systemSettings)
+          .set({ value, updatedAt: sql`now()` })
+          .where(eq(schema.systemSettings.id, existing[0]!.id));
+      } else {
+        await tx.insert(schema.systemSettings).values({
+          id: uuidv7(),
+          key: ATTENDANCE_POLICY_KEY,
+          value,
+          groupId,
+        });
+      }
+      return { success: true as const };
+    });
+  }
 }
 
 interface GridRow {
@@ -577,7 +903,7 @@ interface GridRow {
   role: string;
   branchId: string | null;
   branchName: string | null;
-  exceptions: Record<string, { status: string; remark: string | null }>;
+  exceptions: Record<string, { status: string; remark: string | null; markedAt: string | null }>;
   summary: { present: number; absent: number; offDuty: number; sick: number; attendancePct: number };
   attendanceGated: boolean;
   baseAtRisk: boolean;

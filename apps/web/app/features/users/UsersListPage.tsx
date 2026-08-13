@@ -85,6 +85,13 @@ interface UsersListPageProps {
    * `hr.export` — this is just the UI gate. Default false.
    */
   canExport?: boolean;
+  /**
+   * Whether to show user-management controls (Add User / Import). View-only
+   * roles like BRANCH_ADMIN reach this page via `users.read` to see their
+   * branch roster and must NOT see create/import (the routes 403 anyway).
+   * Default true (management pages pass the real flag).
+   */
+  canManageUsers?: boolean;
 }
 
 /** Type guard — distinguishes a pre-resolved payload (clientLoader cache hit)
@@ -105,6 +112,7 @@ export function UsersListPage({
   usersBasePath = '/hr/users',
   variant = 'default',
   canExport = false,
+  canManageUsers = true,
 }: UsersListPageProps) {
   // Bridge the deferred roster to local state. Page chrome below renders
   // immediately with `null` data + skeleton rows; once the promise resolves
@@ -568,7 +576,7 @@ export function UsersListPage({
                       Export staff accounts
                     </Button>
                   ) : null
-                ) : (
+                ) : canManageUsers ? (
                   <>
                     <BranchScopedLink
                       to={`${usersBasePath}/new`}
@@ -587,7 +595,7 @@ export function UsersListPage({
                       Import users
                     </Link>
                   </>
-                )}
+                ) : null}
               </>
             )}
           />

@@ -15,12 +15,26 @@ import { StaffAttendanceDetailPage } from '~/features/hr/StaffAttendanceDetailPa
 import { PayrollConfigLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type { AttendanceSummaryData } from '~/features/hr/attendance-types';
 
-export const meta: MetaFunction = () => [{ title: 'Staff attendance — Yannis EOSE' }];
+export const meta: MetaFunction = () => [{ title: 'Staff attendance: Yannis EOSE' }];
 
 const MANAGE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HR_MANAGER'];
 
 function currentMonth(): string {
   return new Date().toISOString().slice(0, 7);
+}
+
+function daysInMonth(month: string): number {
+  const parts = month.split('-');
+  return new Date(Date.UTC(Number(parts[0]), Number(parts[1]), 0)).getUTCDate();
+}
+
+/** Month (YYYY-MM) the page shows, derived from the global DateFilterBar's startDate. */
+function monthFromDateFilter(url: URL): string {
+  const startDate = url.searchParams.get('startDate') ?? '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return startDate.slice(0, 7);
+  const legacy = url.searchParams.get('month') ?? '';
+  if (/^\d{4}-\d{2}$/.test(legacy)) return legacy;
+  return currentMonth();
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -31,7 +45,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const staffId = params.staffId!;
 
   const url = new URL(request.url);
-  const month = url.searchParams.get('month') ?? currentMonth();
+  const month = monthFromDateFilter(url);
 
   const pageData = (async () => {
     const inputEnc = encodeURIComponent(JSON.stringify({ month, staffId }));
@@ -48,7 +62,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       user.role === 'SUPER_ADMIN' ||
       user.role === 'ADMIN' ||
       user.role === 'HR_MANAGER';
-    return { summary, canManage, month };
+    return {
+      summary,
+      canManage,
+      month,
+      startDate: url.searchParams.get('startDate') ?? `${month}-01`,
+      endDate: url.searchParams.get('endDate') ?? `${month}-${String(daysInMonth(month)).padStart(2, '0')}`,
+    };
   })();
 
   return defer({ pageData });
@@ -110,7 +130,7 @@ export default function StaffAttendanceDetailRoute() {
   return (
     <CachedAwait resolve={pageData} fallback={<PayrollConfigLoadingShell />} loaderShell={{}} deferredKey="pageData">
       {(data) => (
-        <StaffAttendanceDetailPage summary={data.summary} canManage={data.canManage} month={data.month} />
+        <StaffAttendanceDetailPage summary={data.summary} canManage={data.canManage} month={data.month} startDate={data.startDate} endDate={data.endDate} />
       )}
     </CachedAwait>
   );
