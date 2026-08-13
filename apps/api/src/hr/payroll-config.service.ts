@@ -7,6 +7,7 @@ import {
   db as schema,
   computePaye,
   computePayrollFormula,
+  validatePayrollFormula,
   defaultPayeBandConfig,
   type CreateContractorInput,
   type CreatePayRoleInput,
@@ -312,6 +313,15 @@ export class PayrollConfigService {
     groupId?: string | null,
   ) {
     const companyId = requireCompanyId(groupId);
+    // Validate the formula's logic before saving (requirement #11) — bad
+    // thresholds, conflicting tiers, per-order rates ≤ 0, etc.
+    const validation = validatePayrollFormula(input.formula);
+    if (validation.errors.length > 0) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Formula has errors:\n- ${validation.errors.join('\n- ')}`,
+      });
+    }
     return withActor(this.db, actor, async (tx) => {
       const payRoleRows = await tx
         .select()
