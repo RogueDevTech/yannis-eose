@@ -2,6 +2,12 @@
  * Format and parse amount/price strings with thousand separators.
  * Used by AmountInput for display and form submission.
  */
+import { formatMoney as sharedFormatMoney, NGN, type CurrencyInfo } from '@yannis/shared';
+
+// Re-export currency-aware primitives so multi-currency screens can format any
+// currency. `formatNaira` stays the NGN-pinned convenience wrapper.
+export { NGN };
+export type { CurrencyInfo };
 
 /**
  * Strips any non-numeric characters except decimal point and optional minus.
@@ -58,7 +64,7 @@ export function formatAmountDisplay(raw: string): string {
   return withSign;
 }
 
-const NAIRA = '\u20A6';
+// NAIRA symbol now lives in the shared currency module (NGN.symbol).
 
 /**
  * Format a number as Naira with correct sign placement.
@@ -68,14 +74,17 @@ export function formatNaira(
   amount: number,
   options?: { minimumFractionDigits?: number; maximumFractionDigits?: number }
 ): string {
-  const frac = options?.maximumFractionDigits ?? options?.minimumFractionDigits ?? 0;
-  const opts: Intl.NumberFormatOptions = {
-    minimumFractionDigits: options?.minimumFractionDigits ?? frac,
-    maximumFractionDigits: options?.maximumFractionDigits ?? frac,
-  };
-  const absNum = Math.abs(amount);
-  // en-US avoids narrow no-break space (U+202F) and other locale-specific separators
-  // that appear as odd characters next to amounts in some environments.
-  const formatted = absNum.toLocaleString('en-US', opts);
-  return amount < 0 ? `-${NAIRA}${formatted}` : `${NAIRA}${formatted}`;
+  return sharedFormatMoney(amount, NGN, options);
+}
+
+/**
+ * Format an amount in a given currency (multi-currency aware). Falls back to
+ * NGN when `currency` is omitted, so it is a safe drop-in anywhere.
+ */
+export function formatMoney(
+  amount: number,
+  currency?: Pick<CurrencyInfo, 'symbol' | 'precision'> | null,
+  options?: { minimumFractionDigits?: number; maximumFractionDigits?: number }
+): string {
+  return sharedFormatMoney(amount, currency, options);
 }

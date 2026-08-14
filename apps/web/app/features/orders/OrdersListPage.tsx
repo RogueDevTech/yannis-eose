@@ -23,6 +23,8 @@ import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-colla
 import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
+import { CurrencyFilterSelect } from '~/components/ui/currency-filter-select';
+import { MoneyAmount } from '~/components/ui/money-amount';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Pagination } from '~/components/ui/pagination';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -1368,7 +1370,10 @@ function OrdersListPageImpl({
         headerClassName: 'text-right',
         render: (order) => (
           <span className="font-medium">
-            <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
+            <MoneyAmount
+              amount={order.totalAmount ? Number(order.totalAmount) : null}
+              currencyCode={(order as { currencyCode?: string }).currencyCode}
+            />
           </span>
         ),
       },
@@ -1724,6 +1729,10 @@ function OrdersListPageImpl({
                       wrapperClassName="w-full"
                       className={mobileSelectTransparent} inlineChevron
                     />
+                  </div>
+                  {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
+                  <div className={mobileFilterBoxClass}>
+                    <CurrencyFilterSelect className={mobileSelectTransparent} />
                   </div>
                   {showCSCloserColumn && ((csClosersForFilter?.length ?? 0) > 0 || deferredLoading) ? (
                     <div className={mobileFilterBoxClass}>

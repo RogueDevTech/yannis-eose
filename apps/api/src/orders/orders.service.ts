@@ -2335,6 +2335,9 @@ export class OrdersService {
           paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
           items: deepStrip0(orderInput.items),
           totalAmount: orderInput.totalAmount != null ? sql`${orderInput.totalAmount}::numeric` : null,
+          // Frozen currency. STAMP-never-reject: absent/blank → NGN (single-currency
+          // behaviour unchanged). Never validated here — the edge form is frozen.
+          currencyCode: orderInput.currencyCode ? orderInput.currencyCode.toUpperCase() : 'NGN',
           status: 'UNPROCESSED',
           orderSource: orderSource === 'edge-form' ? 'edge-form' : orderSource === 'offline' ? 'offline' : null,
           customFields: orderInput.customFields ? deepStrip0(orderInput.customFields) : null,
@@ -2701,6 +2704,7 @@ export class OrdersService {
           paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
           items: input.items,
           totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
+          currencyCode: input.currencyCode ? input.currencyCode.toUpperCase() : 'NGN',
           status: 'CS_ASSIGNED',
           orderSource: 'offline',
           offlineOrderCategory: input.offlineOrderCategory ?? null,
@@ -3084,6 +3088,7 @@ export class OrdersService {
           paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
           items: input.items,
           totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
+          currencyCode: input.currencyCode ? input.currencyCode.toUpperCase() : 'NGN',
           status: 'CS_ASSIGNED',
           orderSource: 'delivered_follow_up',
           isDeliveredFollowUp: true,
@@ -4704,6 +4709,10 @@ export class OrdersService {
         ? [...new Set([...input.statuses, 'CANCELLED' as typeof input.statuses[number]])]
         : input.statuses;
       conditions.push(inArray(schema.orders.status, expanded));
+    }
+    // Multi-currency filter — a specific currency, or omitted = all currencies.
+    if (input.currencyCode) {
+      conditions.push(eq(schema.orders.currencyCode, input.currencyCode));
     }
     // Mirrors `appendOrdersAggregateScopeConditions` / `narrowOrdersAggregateFiltersForViewer`:
     // supervisor OR-scope replaces single-ID filters — AND-ing `assignedCsId` would hide
@@ -7318,6 +7327,8 @@ export class OrdersService {
      * DELIVERED/REMITTED counts. This gives a "marketing + graduated" total.
      */
     onlyGraduateNonMarketing?: boolean,
+    /** Multi-currency filter — mirror the list's currency filter so strip == list. */
+    currencyCode?: string,
   ) {
     // Match orders.list: soft-deleted rows (deletedAt IS NOT NULL) must only
     // count under DELETED/CANCELLED, never inflate other status buckets.
@@ -7325,6 +7336,11 @@ export class OrdersService {
     const conditions: Parameters<typeof and>[0][] = [
       sql`(${schema.orders.deletedAt} IS NULL OR ${schema.orders.status} IN ('DELETED', 'CANCELLED'))`,
     ];
+
+    // Multi-currency: mirror orders.list's currency filter so the strip == list.
+    if (currencyCode) {
+      conditions.push(eq(schema.orders.currencyCode, currencyCode));
+    }
 
     if (onlyGraduateNonMarketing) {
       // Marketing orders (edge-form or legacy NULL, NOT follow-ups): full funnel.

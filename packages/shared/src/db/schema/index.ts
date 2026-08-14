@@ -21,6 +21,7 @@ export * from './rbac';
 export * from './permission-requests';
 export * from './system';
 export * from './branch-groups';
+export * from './currencies';
 export * from './branches';
 export * from './branch-teams';
 export * from './cs-order-routing';

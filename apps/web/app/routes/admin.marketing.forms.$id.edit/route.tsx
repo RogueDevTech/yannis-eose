@@ -234,6 +234,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const accentColor = formData.get('formAccentColor')?.toString()?.trim();
   const successCallbackUrl = formData.get('successCallbackUrl')?.toString()?.trim() || undefined;
   const showProductImages = formData.get('showProductImages')?.toString() !== 'false';
+  const allowMultiCurrency = formData.get('allowMultiCurrency')?.toString() === 'true';
+  const pinnedCurrencyRaw = formData.get('pinnedCurrency')?.toString()?.trim().toUpperCase();
+  const pinnedCurrency = pinnedCurrencyRaw && pinnedCurrencyRaw.length > 0 && pinnedCurrencyRaw.length <= 5 ? pinnedCurrencyRaw : undefined;
   const offerGroupIdRaw = formData.get('offerGroupId')?.toString();
   const offerGroupId = offerGroupIdRaw && offerGroupIdRaw.trim().length > 0 ? offerGroupIdRaw.trim() : null;
 
@@ -286,6 +289,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
     ...(accentColor ? { accentColor } : {}),
     successCallbackUrl: successCallbackUrl ?? undefined,
     showProductImages,
+    allowMultiCurrency,
+    // Pinned currency only meaningful when the switcher is OFF; clear it otherwise.
+    ...(allowMultiCurrency ? { pinnedCurrency: undefined } : { pinnedCurrency }),
     standardFields: ensureFixedStandardFields(parsedStandard.fields),
     fieldOrder: normalizeBuilderFieldOrder(
       parsedFieldOrder.fieldOrder,

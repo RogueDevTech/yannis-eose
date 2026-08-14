@@ -16,6 +16,7 @@ import { OfferImagesEditor } from '~/features/products/OfferImagesEditor';
 import type { MinimalOfferTemplateForPreview } from './offer-template-preview';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import { useCurrenciesCatalog } from '~/contexts/currencies-catalog-context';
 
 export interface OfferTiersPanelProps {
   /** Catalog SKU — tiers attach here but are managed from this form, not the product page. */
@@ -94,6 +95,12 @@ export function OfferTiersPanel({
   const [name, setName] = useState('');
   const [qty, setQty] = useState('1');
   const [price, setPrice] = useState('');
+  // Per-currency (non-base) prices, keyed by currency code. Dormant unless a 2nd
+  // active currency exists.
+  const allCurrencies = useCurrenciesCatalog();
+  const extraCurrencies = allCurrencies.filter((c) => c.active && !c.isDefault);
+  const showCurrencyPrices = extraCurrencies.length > 0;
+  const [currencyPrices, setCurrencyPrices] = useState<Record<string, string>>({});
   const [statusDraft, setStatusDraft] = useState<'ACTIVE' | 'INACTIVE' | 'ARCHIVED'>('ACTIVE');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [viewingTier, setViewingTier] = useState<MinimalOfferTemplateForPreview | null>(null);
@@ -115,6 +122,7 @@ export function OfferTiersPanel({
       setName('');
       setQty('1');
       setPrice('');
+      setCurrencyPrices({});
       setImageUrls([]);
       setStatusDraft('ACTIVE');
       bumpTemplates();
@@ -126,6 +134,7 @@ export function OfferTiersPanel({
     setName('');
     setQty('1');
     setPrice('');
+    setCurrencyPrices({});
     setImageUrls([]);
     setStatusDraft('ACTIVE');
     setShowModal(true);
@@ -143,6 +152,9 @@ export function OfferTiersPanel({
     setName(t.name);
     setQty(String(t.quantity ?? 1));
     setPrice(String(t.price ?? ''));
+    // Pre-fill non-base currency prices (server returns pricesByCurrency map).
+    const pbc = t.pricesByCurrency ?? {};
+    setCurrencyPrices(Object.fromEntries(Object.entries(pbc).map(([k, v]) => [k, String(v)])));
     setImageUrls(t.imageUrls ?? []);
     const st = t.status?.toUpperCase();
     setStatusDraft(
@@ -179,6 +191,16 @@ export function OfferTiersPanel({
     fd.set('templateName', trimmed);
     fd.set('templateQty', String(q));
     fd.set('templatePrice', priceTrim);
+    // Serialize non-base currency prices (only positive values; blanks dropped).
+    if (showCurrencyPrices) {
+      const cp: Record<string, number> = {};
+      for (const c of extraCurrencies) {
+        const raw = (currencyPrices[c.code] ?? '').trim();
+        const n = Number(raw.replace(/,/g, ''));
+        if (raw && Number.isFinite(n) && n > 0) cp[c.code] = n;
+      }
+      fd.set('templatePrices', JSON.stringify(cp));
+    }
     fd.set('templateImageUrls', JSON.stringify(imageUrls));
     if (editingId) fd.set('templateStatus', statusDraft);
     fetcher.submit(fd, { method: 'post' });
@@ -365,6 +387,26 @@ export function OfferTiersPanel({
               <AmountInput id="tier-price-modal" required placeholder="0.00" value={price} onChange={setPrice} />
             </FormField>
           </div>
+
+          {showCurrencyPrices && (
+            <div className="rounded-lg border border-app-border bg-app-elevated p-3">
+              <p className="mb-2 text-xs font-medium text-app-fg-muted">
+                Other currency prices (leave blank to hide this tier in that currency)
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                {extraCurrencies.map((c) => (
+                  <FormField key={c.code} label={`Price (${c.symbol} ${c.code})`} htmlFor={`tier-price-${c.code}`}>
+                    <AmountInput
+                      id={`tier-price-${c.code}`}
+                      placeholder="0.00"
+                      value={currencyPrices[c.code] ?? ''}
+                      onChange={(v) => setCurrencyPrices((prev) => ({ ...prev, [c.code]: v }))}
+                    />
+                  </FormField>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div>
             <p className="text-xs font-medium text-app-fg-muted mb-1">Tier images (optional)</p>

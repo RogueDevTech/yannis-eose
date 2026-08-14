@@ -6307,6 +6307,89 @@ export class MarketingService {
     }
   }
 
+  /**
+   * Replace the non-default currency prices for an offer template. The base
+   * (NGN) price lives on offer_templates.price and is NOT stored here. Codes
+   * with price <= 0 are dropped (that currency becomes "not priced" → hidden).
+   */
+  private async replaceOfferTemplatePrices(
+    tx: MarketingFundingTx,
+    offerTemplateId: string,
+    prices: Record<string, number> | undefined,
+  ): Promise<void> {
+    if (prices === undefined) return; // caller isn't touching currency prices
+    await tx.delete(schema.offerTemplatePrices).where(eq(schema.offerTemplatePrices.offerTemplateId, offerTemplateId));
+    const rows = Object.entries(prices)
+      .filter(([, v]) => Number.isFinite(v) && v > 0)
+      .map(([code, v]) => ({
+        id: uuidv7(),
+        offerTemplateId,
+        currencyCode: code.toUpperCase(),
+        price: sql`${v}::numeric`,
+      }));
+    if (rows.length) await tx.insert(schema.offerTemplatePrices).values(rows);
+  }
+
+  /** Resolve the branch group (company) for a branch id (NULL → NULL/global). */
+  private async resolveGroupIdForBranch(branchId: string | null): Promise<string | null> {
+    if (!branchId) return null;
+    const [row] = await this.db
+      .select({ groupId: schema.branches.groupId })
+      .from(schema.branches)
+      .where(eq(schema.branches.id, branchId))
+      .limit(1);
+    return row?.groupId ?? null;
+  }
+
+  /** currencies.group_id = X (or IS NULL) predicate. */
+  private currencyGroupEq(groupId: string | null) {
+    return groupId == null ? sql`${schema.currencies.groupId} IS NULL` : eq(schema.currencies.groupId, groupId);
+  }
+
+  /**
+   * Batch-load non-default currency prices for a set of offer template ids,
+   * as a Map<templateId, { CODE: priceString }>. Only currencies with a stored
+   * (priced) row appear — that IS the "hidden until priced" data for the form.
+   */
+  async loadOfferTemplatePriceMap(templateIds: string[]): Promise<Map<string, Record<string, string>>> {
+    const out = new Map<string, Record<string, string>>();
+    if (templateIds.length === 0) return out;
+    const rows = await this.db
+      .select({
+        templateId: schema.offerTemplatePrices.offerTemplateId,
+        code: schema.offerTemplatePrices.currencyCode,
+        price: schema.offerTemplatePrices.price,
+      })
+      .from(schema.offerTemplatePrices)
+      .where(inArray(schema.offerTemplatePrices.offerTemplateId, templateIds));
+    for (const r of rows) {
+      const m = out.get(r.templateId) ?? {};
+      m[r.code] = String(r.price);
+      out.set(r.templateId, m);
+    }
+    return out;
+  }
+
+  /** Same as {@link loadOfferTemplatePriceMap} for offer group item ids. */
+  async loadOfferGroupItemPriceMap(itemIds: string[]): Promise<Map<string, Record<string, string>>> {
+    const out = new Map<string, Record<string, string>>();
+    if (itemIds.length === 0) return out;
+    const rows = await this.db
+      .select({
+        itemId: schema.offerGroupItemPrices.offerGroupItemId,
+        code: schema.offerGroupItemPrices.currencyCode,
+        price: schema.offerGroupItemPrices.price,
+      })
+      .from(schema.offerGroupItemPrices)
+      .where(inArray(schema.offerGroupItemPrices.offerGroupItemId, itemIds));
+    for (const r of rows) {
+      const m = out.get(r.itemId) ?? {};
+      m[r.code] = String(r.price);
+      out.set(r.itemId, m);
+    }
+    return out;
+  }
+
   async createOfferTemplate(input: CreateOfferTemplateInput, createdBy: string) {
     return withActor(this.db, { id: createdBy }, async (tx) => {
       // Verify product exists
@@ -6341,6 +6424,7 @@ export class MarketingService {
           message: 'Failed to create offer template',
         });
       }
+      await this.replaceOfferTemplatePrices(tx, template.id, input.prices);
       await this.syncProductBaseSalePriceFromTemplates(tx, input.productId);
       return template;
     });
@@ -6374,6 +6458,7 @@ export class MarketingService {
 
       const row = updated[0];
       if (row) {
+        await this.replaceOfferTemplatePrices(tx, row.id, input.prices);
         await this.syncProductBaseSalePriceFromTemplates(tx, row.productId);
       }
       return row;
@@ -6519,8 +6604,16 @@ export class MarketingService {
       whereClause ? countBase.where(whereClause) : countBase,
     ]);
 
+    // Attach non-default currency prices for the admin editor (so Stock Manager
+    // sees existing GHS etc. when editing). Base/NGN price stays on `.price`.
+    const priceMap = await this.loadOfferTemplatePriceMap(templates.map((t) => t.id));
+    const templatesWithPrices = templates.map((t) => ({
+      ...t,
+      pricesByCurrency: priceMap.get(t.id) ?? {},
+    }));
+
     return {
-      templates,
+      templates: templatesWithPrices,
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
     };
   }
@@ -6650,8 +6743,33 @@ export class MarketingService {
 
       const items = await tx.insert(schema.offerGroupItems).values(itemValues).returning();
 
+      // Per-currency prices, zipped by index (itemValues preserves input order).
+      await this.insertOfferGroupItemPrices(tx, items, input.items);
+
       return { group, items };
     });
+  }
+
+  /**
+   * Insert non-default currency prices for freshly-created offer group items.
+   * `createdItems` and `inputItems` are index-aligned (same order). Base (NGN)
+   * price stays on offer_group_items.price. Prices <= 0 are dropped.
+   */
+  private async insertOfferGroupItemPrices(
+    tx: MarketingFundingTx,
+    createdItems: Array<{ id: string }>,
+    inputItems: Array<{ prices?: Record<string, number> }>,
+  ): Promise<void> {
+    const rows: Array<{ id: string; offerGroupItemId: string; currencyCode: string; price: SQL }> = [];
+    createdItems.forEach((item, idx) => {
+      const prices = inputItems[idx]?.prices;
+      if (!prices) return;
+      for (const [code, v] of Object.entries(prices)) {
+        if (!Number.isFinite(v) || v <= 0) continue;
+        rows.push({ id: uuidv7(), offerGroupItemId: item.id, currencyCode: code.toUpperCase(), price: sql`${v}::numeric` });
+      }
+    });
+    if (rows.length) await tx.insert(schema.offerGroupItemPrices).values(rows);
   }
 
   async updateOfferGroup(input: UpdateOfferGroupInput, actorId: string) {
@@ -6711,7 +6829,9 @@ export class MarketingService {
           sortOrder: it.sortOrder ?? idx,
           status: 'ACTIVE' as const,
         }));
-        await tx.insert(schema.offerGroupItems).values(itemValues);
+        // Old offer_group_item_prices cascade-deleted with the items above.
+        const insertedItems = await tx.insert(schema.offerGroupItems).values(itemValues).returning();
+        await this.insertOfferGroupItemPrices(tx, insertedItems, input.items);
       }
 
       const items = await tx
@@ -6756,7 +6876,11 @@ export class MarketingService {
       )
       .orderBy(schema.offerGroupItems.sortOrder);
 
-    return { group, items };
+    // Attach non-default currency prices so the editor pre-fills them.
+    const priceMap = await this.loadOfferGroupItemPriceMap(items.map((it) => it.id));
+    const itemsWithPrices = items.map((it) => ({ ...it, pricesByCurrency: priceMap.get(it.id) ?? {} }));
+
+    return { group, items: itemsWithPrices };
   }
 
   async listOfferGroups(input: ListOfferGroupsInput, groupId?: string | null) {
@@ -7110,7 +7234,7 @@ export class MarketingService {
       name: string;
       price: string;
       galleryImageUrls?: string[];
-      offers: Array<{ label: string; qty: number; price: string; imageUrls?: string[] }>;
+      offers: Array<{ label: string; qty: number; price: string; imageUrls?: string[]; pricesByCurrency?: Record<string, string> }>;
     };
     const products: PublicProduct[] = [];
 
@@ -7131,6 +7255,7 @@ export class MarketingService {
     if (campaign.offerGroupId) {
       const itemRows = await this.db
         .select({
+          id: schema.offerGroupItems.id,
           productId: schema.offerGroupItems.productId,
           label: schema.offerGroupItems.label,
           quantity: schema.offerGroupItems.quantity,
@@ -7180,10 +7305,12 @@ export class MarketingService {
 
         const galleryImageUrls = parseGallery(p.galleryImageUrls);
         const itemsForProduct = itemRows.filter((r) => r.productId === productId);
+        const itemPriceMap = await this.loadOfferGroupItemPriceMap(itemsForProduct.map((r) => r.id));
         const offerList = itemsForProduct.map((it) => ({
           label: it.label,
           qty: it.quantity ?? 1,
           price: String(it.price),
+          pricesByCurrency: itemPriceMap.get(it.id),
           imageUrls:
             typeof it.imageUrl === 'string' && it.imageUrl.length > 0
               ? [it.imageUrl]
@@ -7237,6 +7364,7 @@ export class MarketingService {
 
           const templateRows = await this.db
             .select({
+              id: schema.offerTemplates.id,
               name: schema.offerTemplates.name,
               price: schema.offerTemplates.price,
               quantity: schema.offerTemplates.quantity,
@@ -7245,10 +7373,15 @@ export class MarketingService {
             .from(schema.offerTemplates)
             .where(and(...templateConditions));
 
+          // Batch-load non-default currency prices for these tiers (additive —
+          // the base price stays on `price`; multi-currency forms read this map).
+          const tplPriceMap = await this.loadOfferTemplatePriceMap(templateRows.map((t) => t.id));
+
           offerList = templateRows.map((t) => ({
             label: t.name,
             qty: t.quantity ?? 1,
             price: String(t.price),
+            pricesByCurrency: tplPriceMap.get(t.id),
             imageUrls:
               parseGallery(t.imageUrls).length > 0
                 ? parseGallery(t.imageUrls)
@@ -7294,12 +7427,39 @@ export class MarketingService {
       }
     }
 
+    // Multi-currency: only expose the currency list when the company has 2+ active
+    // currencies AND at least one offer is priced beyond base. Otherwise omit it
+    // entirely so the form is byte-identical to the single-currency world.
+    const anyOfferPriced = products.some((p) =>
+      p.offers.some((o) => o.pricesByCurrency && Object.keys(o.pricesByCurrency).length > 0),
+    );
+    let formCurrencies: Array<{ code: string; symbol: string; precision: number; isDefault: boolean }> | undefined;
+    if (anyOfferPriced) {
+      const groupId = await this.resolveGroupIdForBranch(campaign.branchId ?? null);
+      const active = await this.db
+        .select({
+          code: schema.currencies.code,
+          symbol: schema.currencies.symbol,
+          precision: schema.currencies.precision,
+          isDefault: schema.currencies.isDefault,
+        })
+        .from(schema.currencies)
+        .where(and(this.currencyGroupEq(groupId), eq(schema.currencies.active, true)));
+      if (active.length > 1) {
+        // base first, then the rest by code
+        formCurrencies = active
+          .slice()
+          .sort((a, b) => (a.isDefault ? -1 : b.isDefault ? 1 : a.code.localeCompare(b.code)));
+      }
+    }
+
     return {
       id: campaign.id,
       name: campaign.name,
       mediaBuyerId: campaign.mediaBuyerId,
       deploymentType: campaign.deploymentType,
       products,
+      ...(formCurrencies ? { currencies: formCurrencies } : {}),
       formConfig: campaign.formConfig as {
         heading?: string;
         subtitle?: string;

@@ -44,6 +44,25 @@ export const offerGroupItems = pgTable(
   }),
 );
 
+// Table: offer_group_item_prices — per-currency price for an offer group item.
+// Holds ONLY non-default currencies; the base (NGN) price stays on
+// offer_group_items.price. Absent/<=0 = "not priced" → hidden on forms.
+export const offerGroupItemPrices = pgTable(
+  'offer_group_item_prices',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    offerGroupItemId: uuid('offer_group_item_id')
+      .notNull()
+      .references(() => offerGroupItems.id, { onDelete: 'cascade' }),
+    currencyCode: text('currency_code').notNull(),
+    price: numeric('price', { precision: 12, scale: 2 }).notNull(),
+    ...timestampColumns,
+  },
+  (table) => ({
+    uniq: index('offer_group_item_prices_item_idx').on(table.offerGroupItemId),
+  }),
+);
+
 // Table 7: offer_templates — pre-configured sale offers
 export const offerTemplates = pgTable('offer_templates', {
   id: uuidv7Pk(),
@@ -64,6 +83,25 @@ export const offerTemplates = pgTable('offer_templates', {
   ...temporalColumns,
   ...timestampColumns,
 });
+
+// Table: offer_template_prices — per-currency price for an offer template tier.
+// Holds ONLY non-default currencies; the base (NGN) price stays on
+// offer_templates.price. Absent/<=0 = "not priced" → hidden on forms.
+export const offerTemplatePrices = pgTable(
+  'offer_template_prices',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    offerTemplateId: uuid('offer_template_id')
+      .notNull()
+      .references(() => offerTemplates.id, { onDelete: 'cascade' }),
+    currencyCode: text('currency_code').notNull(),
+    price: numeric('price', { precision: 12, scale: 2 }).notNull(),
+    ...timestampColumns,
+  },
+  (table) => ({
+    tplIdx: index('offer_template_prices_tpl_idx').on(table.offerTemplateId),
+  }),
+);
 
 // Table 8: campaigns — media buyer campaigns
 export const campaigns = pgTable('campaigns', {

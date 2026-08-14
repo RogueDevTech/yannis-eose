@@ -406,10 +406,23 @@ const offerTemplateImagesSchema = z
   .optional()
   .transform((v) => (Array.isArray(v) ? v : []));
 
+/**
+ * Per-currency price overrides, keyed by currency code (e.g. { GHS: 1500 }).
+ * The base (default/NGN) price stays on the `price` field — this map holds ONLY
+ * non-default currencies. A code absent here = "not priced" → hidden on forms.
+ * A value of 0 clears/omits that currency.
+ */
+export const currencyPricesSchema = z
+  .record(z.string().trim().toUpperCase(), z.coerce.number().min(0).multipleOf(0.01))
+  .optional();
+export type CurrencyPrices = Record<string, number>;
+
 export const createOfferTemplateSchema = z.object({
   productId: z.string().uuid(),
   name: z.string().min(1, 'Template name is required').max(200),
   price: z.coerce.number().min(0).multipleOf(0.01),
+  /** Non-default currency prices (base/NGN stays on `price`). */
+  prices: currencyPricesSchema,
   quantity: z.number().int().min(1).optional().default(1),
   imageUrls: offerTemplateImagesSchema,
   variants: z.record(z.unknown()).optional(),
@@ -420,6 +433,8 @@ export const updateOfferTemplateSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(200).optional(),
   price: z.coerce.number().min(0).multipleOf(0.01).optional(),
+  /** Non-default currency prices — full replace when present. */
+  prices: currencyPricesSchema,
   quantity: z.number().int().min(1).optional(),
   imageUrls: offerTemplateImagesSchema.optional(),
   variants: z.record(z.unknown()).optional(),
@@ -453,6 +468,8 @@ const offerGroupItemSchema = z.object({
   label: z.string().trim().min(1, 'Label is required').max(200),
   quantity: z.number().int().min(1).default(1),
   price: z.coerce.number().min(0).multipleOf(0.01),
+  /** Non-default currency prices for this line (base/NGN stays on `price`). */
+  prices: currencyPricesSchema,
   /** Optional image URL selected from the product's gallery. */
   imageUrl: z.union([z.literal(''), z.string().url()]).optional().transform((v) => (v ? v : undefined)),
   sortOrder: z.number().int().min(0).optional(),
@@ -676,6 +693,16 @@ export const formConfigSchema = z.object({
   maxQuantity: z.number().int().min(1).max(100).optional(),
   /** Limit which `offer_templates` tiers appear on the Edge form (same product as campaign). Empty = all ACTIVE. */
   selectedOfferTemplateIds: z.array(z.string().uuid()).max(50).optional(),
+  /**
+   * Multi-currency: when true, the public form shows a currency switcher and the
+   * customer picks the currency (only currencies that are PRICED for the shown
+   * offers appear). When false/absent, the form uses a single currency
+   * (`pinnedCurrency`, default the company base). Dormant unless the company has
+   * a 2nd active currency.
+   */
+  allowMultiCurrency: z.boolean().optional(),
+  /** The single currency this form takes when `allowMultiCurrency` is false. Defaults to base. */
+  pinnedCurrency: z.string().trim().toUpperCase().max(5).optional(),
 });
 export type FormConfig = z.infer<typeof formConfigSchema>;
 

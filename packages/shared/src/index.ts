@@ -11,6 +11,8 @@ export * from './hr/paye-calc';
 export * from './hr/attendance-eligibility';
 export * from './hr/nigerian-banks';
 export * from './hr/nigerian-states';
+export * from './currency/currency';
+export * from './currency/african-countries';
 export * from './notifications/config';
 export * from './rbac/permission-codes';
 export * from './rbac/permission-catalog';

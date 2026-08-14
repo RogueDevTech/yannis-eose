@@ -96,6 +96,8 @@ interface SubmissionPayload {
     offerLabel?: string;
   }>;
   totalAmount?: string;
+  /** Currency the order was placed in (frozen). Additive; API defaults to NGN. */
+  currencyCode?: string;
   cartId?: string;
   /** Form-builder responses, keyed by `customField.id`. */
   customFields?: Record<string, CustomFieldValue>;
@@ -125,6 +127,8 @@ interface OrderCreatePayload {
     offerLabel?: string;
   }>;
   totalAmount?: string;
+  /** Currency the order was placed in (frozen). Additive; API defaults to NGN if absent. */
+  currencyCode?: string;
   /** Identifies Edge Form as source for audit trail */
   source?: 'edge-form';
   /** Cart ID from prior cart save — marks cart as CONVERTED when order created */
@@ -187,6 +191,21 @@ interface ProductOffer {
   qty: number;
   price: string;
   imageUrls?: string[];
+  /**
+   * Multi-currency: price of this offer in non-default currencies (code → price
+   * string). Absent/empty = base-only. A currency present here is "priced"; one
+   * absent is hidden from the switcher for this offer. Additive — the base
+   * `price` above is unchanged and always present.
+   */
+  pricesByCurrency?: Record<string, string>;
+}
+
+/** A currency available on the public form (base + any the offers are priced in). */
+interface FormCurrency {
+  code: string;
+  symbol: string;
+  precision: number;
+  isDefault: boolean;
 }
 
 interface CampaignConfig {
@@ -203,6 +222,12 @@ interface CampaignConfig {
     offers: ProductOffer[];
     variants?: unknown;
   }>;
+  /**
+   * Active currencies for the company (base first). Present only when the API
+   * has 2+ active currencies AND at least one offer is priced beyond base.
+   * Absent/length<=1 → single-currency form, byte-identical to today.
+   */
+  currencies?: FormCurrency[];
   formConfig?: {
     heading?: string;
     subtitle?: string;
@@ -230,6 +255,10 @@ interface CampaignConfig {
     requirePreferredDeliveryDate?: boolean;
     requireCustomerEmail?: boolean;
     requirePaymentMethod?: boolean;
+    /** When true, show a currency switcher; customer picks (priced currencies only). */
+    allowMultiCurrency?: boolean;
+    /** Single currency this form uses when allowMultiCurrency is false. Defaults to base. */
+    pinnedCurrency?: string;
     standardFields?: Array<{
       key:
         | 'deliveryAddress'
@@ -459,6 +488,9 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
       customerEmail: customerEmail || undefined,
       items: normalisedItems as SubmissionPayload['items'],
       totalAmount: typeof b['totalAmount'] === 'string' ? b['totalAmount'] : typeof b['totalAmount'] === 'number' ? String(b['totalAmount']) : undefined,
+      // Additive, never-reject: pass through the currency code if present (max 5 chars,
+      // uppercased); the API defaults to NGN when absent.
+      currencyCode: typeof b['currencyCode'] === 'string' && b['currencyCode'].length <= 5 ? b['currencyCode'].toUpperCase() : undefined,
       cartId: typeof b['cartId'] === 'string' ? b['cartId'] : undefined,
       customFields,
       sessionId: typeof b['sessionId'] === 'string' ? b['sessionId'] : undefined,
@@ -1214,6 +1246,42 @@ function getFormScript(
       var products = ${safeJsonForScript(products)};
       var card = form ? form.closest('.yannis-form-card') : null;
       var singleProductId = form ? form.dataset.singleProduct : null;
+
+      // ── Multi-currency (additive; no-op when single-currency) ──────────────
+      var currencyList = [];
+      try { currencyList = JSON.parse((form && form.dataset.currencyMeta) || '[]') || []; } catch (e) { currencyList = []; }
+      var currentCurrency = (form && form.dataset.initialCurrency) || 'NGN';
+      var baseCurrency = null;
+      for (var _ci = 0; _ci < currencyList.length; _ci++) { if (currencyList[_ci].isDefault) { baseCurrency = currencyList[_ci]; break; } }
+      if (!baseCurrency && currencyList.length) baseCurrency = currencyList[0];
+      function currencyInfo(code) {
+        for (var i = 0; i < currencyList.length; i++) { if (currencyList[i].code === code) return currencyList[i]; }
+        return baseCurrency || { code: code, symbol: '', precision: 2, isDefault: true };
+      }
+      // Price of an offer in the current currency (base price when base/absent).
+      function offerPrice(offer) {
+        if (!offer) return '0';
+        if (baseCurrency && currentCurrency === baseCurrency.code) return offer.price;
+        if (offer.pricesByCurrency && offer.pricesByCurrency[currentCurrency] != null) return offer.pricesByCurrency[currentCurrency];
+        return offer.price; // fall back to base price — never breaks submission
+      }
+      function formatMoneyClient(amount, code) {
+        var info = currencyInfo(code);
+        var num = parseFloat(amount);
+        if (isNaN(num)) return String(amount);
+        return (info.symbol || '') + num.toLocaleString('en-US');
+      }
+      // Re-render every visible offer price + total to the current currency.
+      function rerenderCurrencyPrices() {
+        var radios = document.querySelectorAll('.offer-radio');
+        for (var i = 0; i < radios.length; i++) {
+          var r = radios[i];
+          var od = null; try { od = JSON.parse(r.dataset.offer); } catch (e) { od = null; }
+          if (!od) continue;
+          var span = r.closest('.offer-option') ? r.closest('.offer-option').querySelector('.offer-price') : null;
+          if (span) span.textContent = formatMoneyClient(offerPrice(od), currentCurrency);
+        }
+      }
       var successPanel = null;
 
       // Funnel navigation for success / payment redirects. In iframe mode the
@@ -1354,6 +1422,19 @@ function getFormScript(
           maybeSaveCart();
         });
       });
+
+      // Currency switcher — re-price the visible offers on change. Additive: only
+      // present when the API supplied 2+ currencies and the MB enabled it.
+      var currencySwitcherEl = document.getElementById('currencySwitcher');
+      if (currencySwitcherEl) {
+        currentCurrency = currencySwitcherEl.value || currentCurrency;
+        currencySwitcherEl.addEventListener('change', function() {
+          currentCurrency = currencySwitcherEl.value || currentCurrency;
+          rerenderCurrencyPrices();
+        });
+      }
+      // Initial paint in the starting currency (no-op for base/single-currency).
+      if (currencyList.length > 1) rerenderCurrencyPrices();
 
       // Online/Offline detection
       var isOnline = navigator.onLine;
@@ -1951,9 +2032,13 @@ function getFormScript(
           preferredDeliveryDate: fd.get('preferredDeliveryDate') || undefined,
           paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
           customerEmail: customerEmail ? customerEmail : undefined,
-          items: [{ productId: selectedProduct, quantity: selectedOffer.qty, unitPrice: selectedOffer.price, offerLabel: selectedOffer.label }],
+          // Currency-aware price (base price for base/single-currency → identical to
+          // before). currencyCode is stamped additively; the API defaults it to NGN
+          // if absent and NEVER rejects on it (edge-freeze rule).
+          items: [{ productId: selectedProduct, quantity: selectedOffer.qty, unitPrice: offerPrice(selectedOffer), offerLabel: selectedOffer.label }],
           cartId: savedCartId || undefined,
-          totalAmount: selectedOffer.price.toString(),
+          totalAmount: offerPrice(selectedOffer).toString(),
+          currencyCode: currentCurrency || undefined,
           customFields: Object.keys(customFields).length > 0 ? customFields : undefined,
           // Form Analytics attribution — optional. If unset, the API strips it; order is unaffected.
           sessionId: window.__yannisSessionId || undefined
@@ -2159,6 +2244,20 @@ function getFormInnerHTML(config: CampaignConfig): string {
   const showPaymentMethod = showField('paymentMethod');
   const showStandaloneEmail = showField('customerEmail');
   const showProductImages = fc.showProductImages !== false;
+
+  // Multi-currency: switcher only appears when the API supplied 2+ currencies AND
+  // the MB toggled it on. Otherwise everything below is single-currency (base),
+  // byte-identical to today. `baseCurrency` is the default; `pinnedCurrency`
+  // selects a single non-base currency when the switcher is off.
+  const currencyList = Array.isArray(config.currencies) ? config.currencies : [];
+  const baseCurrency = currencyList.find((c) => c.isDefault) ?? currencyList[0];
+  const showCurrencySwitcher = currencyList.length > 1 && fc.allowMultiCurrency === true;
+  const pinnedCurrency =
+    !showCurrencySwitcher && fc.pinnedCurrency
+      ? currencyList.find((c) => c.code === fc.pinnedCurrency)?.code
+      : undefined;
+  // The currency the form STARTS in (and, when the switcher is off, stays in).
+  const initialCurrency = pinnedCurrency ?? baseCurrency?.code ?? 'NGN';
   const standardFieldEntries = (
     [
       'gender',
@@ -2201,15 +2300,24 @@ function getFormInnerHTML(config: CampaignConfig): string {
       const thumbHtml = showProductImages && firstImg
         ? `<img src="${escapeHtml(firstImg)}" alt="" class="offer-thumb" width="48" height="48" loading="lazy">`
         : '';
+      // Additive: `pricesByCurrency` rides along in data-offer so the client can
+      // pick the price for the chosen currency. Absent for single-currency offers.
+      const offerPayload: { label: string; qty: number; price: string; pricesByCurrency?: Record<string, string> } = {
+        label: o.label,
+        qty: o.qty,
+        price: o.price,
+      };
+      const pbc = (o as ProductOffer).pricesByCurrency;
+      if (pbc && Object.keys(pbc).length > 0) offerPayload.pricesByCurrency = pbc;
       return `<label class="offer-option">
         <input type="radio" name="${radioName}" class="offer-radio"
-          data-offer='${JSON.stringify({ label: o.label, qty: o.qty, price: o.price }).replace(/'/g, '&#39;')}'>
+          data-offer='${JSON.stringify(offerPayload).replace(/'/g, '&#39;')}'>
         ${thumbHtml}
         <span class="offer-body">
           <span class="offer-label">${escapeHtml(o.label)}</span>
           <span class="offer-details">
             <span class="offer-qty">${o.qty} unit${o.qty > 1 ? 's' : ''}</span>
-            <span class="offer-price">${formatPrice(o.price)}</span>
+            <span class="offer-price" data-base-price="${escapeHtml(o.price)}">${formatPrice(o.price)}</span>
           </span>
         </span>
       </label>`;
@@ -2221,7 +2329,23 @@ function getFormInnerHTML(config: CampaignConfig): string {
 
   // The whole "Select Offer" block. Placed by its `offer` field-order token so
   // the form builder can position it anywhere (defaults to the bottom).
-  const offerSelectionHtml = `<label>Select Offer</label>
+  // Currency switcher — rendered only when enabled; otherwise empty string (no
+  // DOM change vs today). Options list every supplied currency by "SYMBOL CODE".
+  const currencySwitcherHtml = showCurrencySwitcher
+    ? `<div class="currency-switcher" style="margin-bottom:12px">
+        <label for="currencySwitcher">Currency</label>
+        <select id="currencySwitcher" name="currencySwitcher">
+          ${currencyList
+            .map(
+              (c) =>
+                `<option value="${escapeHtml(c.code)}"${c.code === initialCurrency ? ' selected' : ''}>${escapeHtml(c.symbol)} ${escapeHtml(c.code)}</option>`,
+            )
+            .join('')}
+        </select>
+      </div>`
+    : '';
+
+  const offerSelectionHtml = `${currencySwitcherHtml}<label>Select Offer</label>
       ${offerGroupsHtml}`;
 
   // If single product, auto-set selectedProduct via hidden data attribute
@@ -2262,7 +2386,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
     <h2>${escapeHtml(heading)}</h2>
     ${subtitleBlock}
     <div id="yannisMsg" class="msg hidden"></div>
-    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${showPaymentMethod ? 'true' : 'false'}" data-show-customer-email="${showStandaloneEmail ? 'true' : 'false'}" data-require-customer-email="${requiredField('customerEmail') ? 'true' : 'false'}" data-success-callback="${escapeHtml(fc.successCallbackUrl ?? '')}"${singleProductAttr}>
+    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${showPaymentMethod ? 'true' : 'false'}" data-show-customer-email="${showStandaloneEmail ? 'true' : 'false'}" data-require-customer-email="${requiredField('customerEmail') ? 'true' : 'false'}" data-success-callback="${escapeHtml(fc.successCallbackUrl ?? '')}" data-initial-currency="${escapeHtml(initialCurrency)}" data-currency-meta="${escapeHtml(JSON.stringify(currencyList))}"${singleProductAttr}>
       <!-- Honeypot: bots auto-fill every input they see; humans never touch this. Field is
            visually hidden + tabindex=-1 + autocomplete=off + aria-hidden so real users and
            screen readers skip it entirely. If submitted with a value, the worker silently
@@ -3158,6 +3282,7 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     customerEmail: data.customerEmail,
     items: data.items,
     totalAmount: data.totalAmount,
+    currencyCode: data.currencyCode,
     source: 'edge-form',
     cartId: data.cartId,
     customFields: data.customFields,
