@@ -124,9 +124,6 @@ const navStructure: NavGroupDef[] = [
     group: null,
     items: [
       { label: 'Dashboard', href: '/admin', icon: SidebarIcons.dashboard },
-      // Branch Admin marks their branch's staff on the attendance page, not
-      // their own attendance — hide the self-service "My Attendance" from them.
-      { label: 'My Attendance', href: '/attendance/me', icon: SidebarIcons.hr, excludeRoles: ['BRANCH_ADMIN'] },
     ],
   },
   {
