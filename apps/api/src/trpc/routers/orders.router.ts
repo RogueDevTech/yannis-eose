@@ -1145,6 +1145,8 @@ export const ordersRouter = router({
           onlyOffline: z.boolean().optional(),
           /** When set, scope to orders assigned to members of this team. */
           teamId: z.string().uuid().optional(),
+          /** Multi-currency filter — mirror orders.list so strip == list. */
+          currencyCode: z.string().trim().toUpperCase().max(5).optional(),
         })
         .optional(),
     )
@@ -1221,6 +1223,7 @@ export const ordersRouter = router({
           undefined,
           teamMemberIds,
           input?.onlyGraduateNonMarketing,
+          input?.currencyCode,
         );
       }
 
@@ -1238,6 +1241,7 @@ export const ordersRouter = router({
           teamId: input?.teamId,
           onlyGraduateNonMarketing: input?.onlyGraduateNonMarketing,
           onlyOffline: input?.onlyOffline,
+          currencyCode: input?.currencyCode,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -1260,6 +1264,7 @@ export const ordersRouter = router({
           undefined,
           teamMemberIds,
           input?.onlyGraduateNonMarketing,
+          input?.currencyCode,
         ),
       );
     }),

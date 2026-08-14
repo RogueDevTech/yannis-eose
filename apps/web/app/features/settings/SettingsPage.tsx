@@ -1428,6 +1428,28 @@ export function SettingsPage({
               </div>
               )}
 
+              {/* Country & Currency — multi-currency config. Admin-level only. */}
+              {isAdminLevel(user) && (
+              <div className="card lg:col-span-2">
+                <Link
+                  to="/admin/settings/currencies"
+                  className="flex items-center gap-3"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0 0c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3M3.6 9h16.8M3.6 15h16.8" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-app-fg">Country &amp; currency</h3>
+                    <p className="text-sm text-app-fg-muted">
+                      Add currencies and set FX rates for multi-currency operations.
+                    </p>
+                  </div>
+                </Link>
+              </div>
+              )}
+
               <div className="card lg:col-span-2 pt-4 border-t border-app-border">
                 <Button
                   type="button"

@@ -73,6 +73,12 @@ export const createOrderSchema = z.object({
   preferredDeliveryDate: z.string().max(100).optional(),
   items: z.array(orderItemSchema).min(1, 'At least one item is required'),
   totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
+  /**
+   * Currency the order was placed in (frozen). OPTIONAL + never-reject: absent →
+   * defaults to 'NGN' server-side (single-currency behaviour unchanged). Sent by
+   * the multi-currency edge form. Must never gate/reject an intake (edge freeze).
+   */
+  currencyCode: z.string().trim().toUpperCase().max(5).optional(),
   /** Payment method: PAY_ON_DELIVERY (default) or PAY_ONLINE (requires customerEmail for Paystack) */
   paymentMethod: z.enum(['PAY_ON_DELIVERY', 'PAY_ONLINE']).optional(),
   /** Required when paymentMethod is PAY_ONLINE (for Paystack receipt and initialize) */
@@ -120,6 +126,8 @@ export const createOfflineOrderSchema = z.object({
   preferredDeliveryDate: z.string().max(100).optional(),
   items: z.array(orderItemSchema).min(1, 'At least one item is required'),
   totalAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
+  /** Currency for the offline order (frozen). Absent → 'NGN'. */
+  currencyCode: z.string().trim().toUpperCase().max(5).optional(),
   paymentMethod: z.enum(['PAY_ON_DELIVERY', 'PAY_ONLINE']).optional(),
   customerEmail: z.string().email().max(255).optional(),
   /** Category for offline orders: 'website_order' or 'referrals'. */
@@ -420,6 +428,8 @@ export const listOrdersSchema = z
   .object({
     status: orderStatusSchema.optional(),
     statuses: z.array(orderStatusSchema).min(1).optional(),
+    /** Multi-currency filter: a specific currency code, or omitted = all currencies. */
+    currencyCode: z.string().trim().toUpperCase().max(5).optional(),
     assignedCsId: z.string().uuid().optional(),
     mediaBuyerId: z.union([z.string().uuid(), z.literal('__system__')]).optional(),
     /**

@@ -1819,6 +1819,7 @@ export class LogisticsService implements OnModuleInit {
           branchId: schema.orders.servicingBranchId,
           totalAmount: schema.orders.totalAmount,
           deliveryFee: schema.orders.deliveryFee,
+          currencyCode: schema.orders.currencyCode,
         })
         .from(schema.orders)
         .where(inArray(schema.orders.id, input.orderIds));
@@ -1827,6 +1828,18 @@ export class LogisticsService implements OnModuleInit {
       for (const id of input.orderIds) {
         if (!foundIds.has(id)) {
           throw new TRPCError({ code: 'NOT_FOUND', message: `Order ${id} not found` });
+        }
+      }
+
+      // Single-currency batch: every order must share one currency. A batch never
+      // mixes currencies (GH₵ cash must never be summed as ₦). Default NGN.
+      const batchCurrency = (orderRows[0]?.currencyCode ?? 'NGN').toUpperCase();
+      for (const row of orderRows) {
+        if ((row.currencyCode ?? 'NGN').toUpperCase() !== batchCurrency) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `A remittance batch must be a single currency. Order ${row.id} is ${row.currencyCode}, expected ${batchCurrency}.`,
+          });
         }
       }
 
@@ -1976,6 +1989,7 @@ export class LogisticsService implements OnModuleInit {
           sentBy: actor.id,
           receiptUrls: input.receiptUrls,
           status: markReceivedNow ? 'RECEIVED' : 'SENT',
+          currencyCode: batchCurrency,
           notes: input.notes ?? null,
           ...(commitmentFee > 0 ? { commitmentFee: sql`${commitmentFee.toFixed(2)}::numeric` } : {}),
           ...(posFee > 0 ? { posFee: sql`${posFee.toFixed(2)}::numeric` } : {}),

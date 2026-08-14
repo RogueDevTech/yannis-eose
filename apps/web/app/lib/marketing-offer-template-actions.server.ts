@@ -85,6 +85,24 @@ export async function respondToOfferTemplateIntent(opts: {
     return json({ error: 'Tier label is required' }, { status: 400 });
   }
 
+  // Optional non-default currency prices (map of code → number). Absent when the
+  // system is single-currency (feature dormant).
+  let prices: Record<string, number> | undefined;
+  const pricesRaw = formData.get('templatePrices')?.toString();
+  if (pricesRaw) {
+    try {
+      const parsed = JSON.parse(pricesRaw) as Record<string, unknown>;
+      const cleaned: Record<string, number> = {};
+      for (const [code, v] of Object.entries(parsed)) {
+        const n = typeof v === 'number' ? v : Number(v);
+        if (Number.isFinite(n) && n > 0) cleaned[code.toUpperCase()] = n;
+      }
+      prices = cleaned;
+    } catch {
+      return json({ error: 'Invalid currency prices JSON' }, { status: 400 });
+    }
+  }
+
   if (intent === 'createOfferTemplate') {
     const res = await apiRequest<unknown>('/trpc/marketing.createOfferTemplate', {
       method: 'POST',
@@ -93,6 +111,7 @@ export async function respondToOfferTemplateIntent(opts: {
         productId,
         name,
         price: priceNum,
+        ...(prices ? { prices } : {}),
         quantity: qty,
         imageUrls: templateImageUrls,
       },
@@ -123,6 +142,7 @@ export async function respondToOfferTemplateIntent(opts: {
     quantity: qty,
     imageUrls: templateImageUrls,
   };
+  if (prices) body.prices = prices;
   if (status) body.status = status;
 
   const res = await apiRequest<unknown>('/trpc/marketing.updateOfferTemplate', {

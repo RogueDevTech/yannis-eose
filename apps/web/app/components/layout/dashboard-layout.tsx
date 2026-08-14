@@ -25,6 +25,8 @@ import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 import { BranchScopeGuardProvider } from '~/contexts/branch-scope-action-guard';
 import { BranchesCatalogProvider, BranchGroupsCatalogProvider } from '~/contexts/branches-catalog-context';
+import { CurrenciesCatalogProvider } from '~/contexts/currencies-catalog-context';
+import { NGN } from '@yannis/shared';
 import { OnboardingNudge } from './onboarding-nudge';
 import { canAccessGlobalAuditLog, isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
@@ -82,6 +84,8 @@ interface DashboardLayoutProps {
   branchesHydrationReady?: boolean;
   /** When set with `isBlocked: true`, shows a non-dismissable modal forcing the MB to fill ad spend. */
   adSpendBacklog?: { missingDates: string[]; isBlocked: boolean } | null;
+  /** Active currency catalog for the company. Undefined until streamed; provider falls back to NGN. */
+  currencies?: Array<{ code: string; symbol: string; countryName: string; precision: number; isDefault: boolean; active: boolean; fxRateToBase: number | null }>;
 }
 
 interface NavItemDef {
@@ -998,6 +1002,7 @@ function DashboardLayoutInner({
   branchGroups,
   branchesHydrationReady = true,
   adSpendBacklog,
+  currencies,
 }: DashboardLayoutProps) {
   const { onboardingGate } = useLoginModalGate();
   const [collapsed, setCollapsed] = useState(false);
@@ -1626,6 +1631,7 @@ function DashboardLayoutInner({
           >
             <BranchesCatalogProvider value={catalogBranches}>
             <BranchGroupsCatalogProvider value={branchGroups ?? []}>
+            <CurrenciesCatalogProvider value={currencies && currencies.length > 0 ? currencies : [NGN]}>
               {/* Cross-route nav swap — when the user clicks a sidebar link, render the
                   destination route's own loading shell (matched by pathname against the
                   registry in `~/lib/route-shells.tsx`) so Skeleton #1 == Skeleton #2 and
@@ -1644,6 +1650,7 @@ function DashboardLayoutInner({
                     },
                   ) ?? <Outlet />)
                 : <Outlet />}
+            </CurrenciesCatalogProvider>
             </BranchGroupsCatalogProvider>
             </BranchesCatalogProvider>
           </div>

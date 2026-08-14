@@ -20,6 +20,8 @@ export const deliveryRemittances = pgTable('delivery_remittances', {
   /** One or more payment receipt URLs (3PL uploads). */
   receiptUrls: jsonb('receipt_urls').$type<string[]>().notNull(),
   status: remittanceStatusEnum('status').default('SENT').notNull(),
+  /** Single-currency batch: all included orders share this currency. Default NGN. */
+  currencyCode: text('currency_code').notNull().default('NGN'),
   sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
   receivedAt: timestamp('received_at', { withTimezone: true }),
   receivedBy: uuid('received_by').references(() => users.id),
