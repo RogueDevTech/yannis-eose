@@ -28,6 +28,8 @@ export const orders = pgTable('orders', {
   customerAddress: text('customer_address'),
   deliveryAddress: text('delivery_address'),
   totalAmount: numeric('total_amount', { precision: 12, scale: 2 }),
+  /** Currency this order was placed in, FROZEN at creation. Amounts above are in this currency. Default NGN. */
+  currencyCode: text('currency_code').notNull().default('NGN'),
   landedCost: numeric('landed_cost', { precision: 12, scale: 2 }),
   deliveryFee: numeric('delivery_fee', { precision: 12, scale: 2 }),
   deliveryNotes: text('delivery_notes'),

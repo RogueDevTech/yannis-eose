@@ -60,6 +60,10 @@ export interface CampaignFormConfig {
   showCustomerEmail?: boolean | string;
   showPaymentMethod?: boolean | string;
   showProductImages?: boolean | string;
+  /** Multi-currency: customer picks the currency on the public form (priced only). */
+  allowMultiCurrency?: boolean;
+  /** Single currency this form uses when allowMultiCurrency is false. */
+  pinnedCurrency?: string;
   requireDeliveryAddress?: boolean | string;
   requireDeliveryNotes?: boolean | string;
   requireDeliveryState?: boolean | string;

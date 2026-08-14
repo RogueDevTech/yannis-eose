@@ -28,6 +28,7 @@ import { userFilterPreferencesRouter } from './user-filter-preferences.router';
 import { aiAssistantRouter } from './ai-assistant.router';
 import { automationRouter } from './automation.router';
 import { attendanceRouter } from './attendance.router';
+import { currenciesRouter } from './currencies.router';
 
 /**
  * Root tRPC router — merges all module routers.
@@ -63,6 +64,7 @@ export const appRouter = router({
   aiAssistant: aiAssistantRouter,
   automation: automationRouter,
   attendance: attendanceRouter,
+  currencies: currenciesRouter,
 });
 
 export type AppRouter = typeof appRouter;

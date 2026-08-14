@@ -6,6 +6,7 @@ import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
@@ -144,6 +145,11 @@ export function MarketingFormEditPage({
   const cfg = campaign.formConfig;
   const legacyMultiProduct = (campaign.productIds?.length ?? 0) > 1;
 
+  // Multi-currency config (dormant unless the company has 2+ active currencies).
+  const currenciesForForm = useCurrenciesCatalog();
+  const hasMultipleCurrencies = useHasMultipleCurrencies();
+  const baseCurrency = currenciesForForm.find((c) => c.isDefault && c.active) ?? currenciesForForm[0];
+
   const [selectedOfferTemplateIds, setSelectedOfferTemplateIds] = useState<string[]>(() =>
     Array.isArray(cfg?.selectedOfferTemplateIds) ? cfg.selectedOfferTemplateIds : [],
   );
@@ -158,6 +164,8 @@ export function MarketingFormEditPage({
   const [formButtonText, setFormButtonText] = useState(() => cfg?.buttonText ?? '');
   const [successCallbackUrl, setSuccessCallbackUrl] = useState(() => cfg?.successCallbackUrl ?? '');
   const [showProductImages, setShowProductImages] = useState(() => cfg?.showProductImages !== false);
+  const [allowMultiCurrency, setAllowMultiCurrency] = useState(() => (cfg as { allowMultiCurrency?: boolean } | null)?.allowMultiCurrency === true);
+  const [pinnedCurrency, setPinnedCurrency] = useState(() => (cfg as { pinnedCurrency?: string } | null)?.pinnedCurrency ?? '');
   const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>(() => ensureFixedStandardFields(normalizeStandardFields(campaign.formConfig)));
   const [fieldOrder, setFieldOrder] = useState<CampaignFieldOrderToken[]>(() =>
     normalizeBuilderFieldOrder(cfg?.fieldOrder, normalizeStandardFields(campaign.formConfig), sortAndReindexCustomFields((cfg?.customFields ?? []) as CustomFormField[])),
@@ -175,6 +183,8 @@ export function MarketingFormEditPage({
     setFormButtonText(c?.buttonText ?? '');
     setSuccessCallbackUrl(c?.successCallbackUrl ?? '');
     setShowProductImages(c?.showProductImages !== false);
+    setAllowMultiCurrency((c as { allowMultiCurrency?: boolean } | null)?.allowMultiCurrency === true);
+    setPinnedCurrency((c as { pinnedCurrency?: string } | null)?.pinnedCurrency ?? '');
     setStandardFields(normalizeStandardFields(c));
     setFieldOrder(
       normalizeBuilderFieldOrder(
@@ -385,6 +395,8 @@ export function MarketingFormEditPage({
             <input type="hidden" name="additionalFieldSelectOptions" value={additionalFieldSelectOptionsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
             <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
+            <input type="hidden" name="allowMultiCurrency" value={allowMultiCurrency ? 'true' : 'false'} readOnly />
+            <input type="hidden" name="pinnedCurrency" value={allowMultiCurrency ? '' : pinnedCurrency} readOnly />
             <input type="hidden" name="selectedOfferTemplateIds" value={selectedOfferTemplateIdsJson} readOnly />
             <input type="hidden" name="offerGroupId" value={selectedOfferGroupId} readOnly />
 
@@ -463,6 +475,27 @@ export function MarketingFormEditPage({
                     <Checkbox checked={showProductImages} onChange={(e) => setShowProductImages(e.target.checked)} />
                     Show product images on the form
                   </label>
+                  {hasMultipleCurrencies && (
+                    <div className="sm:col-span-2 space-y-2 rounded-lg border border-app-border bg-app-elevated p-3">
+                      <label className="inline-flex items-center gap-2 text-sm text-app-fg-muted cursor-pointer">
+                        <Checkbox checked={allowMultiCurrency} onChange={(e) => setAllowMultiCurrency(e.target.checked)} />
+                        Let customers choose their currency
+                      </label>
+                      {!allowMultiCurrency && (
+                        <FormSelect
+                          label="Form currency"
+                          value={pinnedCurrency}
+                          onChange={(e) => setPinnedCurrency(e.target.value)}
+                          options={[
+                            { value: '', label: `${baseCurrency?.symbol ?? '₦'} ${baseCurrency?.code ?? 'NGN'} (default)` },
+                            ...currenciesForForm
+                              .filter((c) => !c.isDefault)
+                              .map((c) => ({ value: c.code, label: `${c.symbol} ${c.code}` })),
+                          ]}
+                        />
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

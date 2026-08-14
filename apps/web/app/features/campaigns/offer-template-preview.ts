@@ -8,6 +8,8 @@ export interface MinimalOfferTemplateForPreview {
   status: string;
   /** Public image URLs for this tier (same as Edge `offer-thumb`). */
   imageUrls?: string[];
+  /** Non-default currency prices (code → price string). Empty/absent = base-only. */
+  pricesByCurrency?: Record<string, string>;
 }
 
 /**

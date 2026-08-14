@@ -513,6 +513,22 @@ export type {
   ResetAccountMappingInput,
 } from './general-ledger';
 
+// Currencies / country config validators (Multi-currency Phase 1)
+export {
+  createCurrencySchema,
+  updateCurrencySchema,
+  setFxRateSchema,
+  setDefaultCurrencySchema,
+  listCurrenciesSchema,
+} from './currencies';
+export type {
+  CreateCurrencyInput,
+  UpdateCurrencyInput,
+  SetFxRateInput,
+  SetDefaultCurrencyInput,
+  ListCurrenciesInput,
+} from './currencies';
+
 // Asset register validators (Phase 4A)
 export {
   createAssetSchema,

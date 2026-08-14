@@ -1,16 +1,9 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Form, Link, useActionData, useLoaderData, useNavigation } from '@remix-run/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useActionData, useLoaderData, useNavigation } from '@remix-run/react';
+import { useEffect, useState } from 'react';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { PageHeader } from '~/components/ui/page-header';
-import { Button } from '~/components/ui/button';
-import { PageNotification } from '~/components/ui/page-notification';
-import { SearchableSelect } from '~/components/ui/searchable-select';
-import { TextInput } from '~/components/ui/text-input';
-import { NumberInput } from '~/components/ui/number-input';
-import { AmountInput } from '~/components/ui/amount-input';
-import { InlineNotification } from '~/components/ui/inline-notification';
+import { OfferForm } from '~/features/campaigns/OfferForm';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import type { Product } from '~/features/campaigns/types';
@@ -79,7 +72,17 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!name) return json({ error: 'Offer name is required' }, { status: 400 });
   if (!productId) return json({ error: 'Product is required' }, { status: 400 });
 
-  let items: Array<{ label: string; quantity: number; price: number; imageUrl?: string | null }> = [];
+  const cleanPrices = (raw: unknown): Record<string, number> | undefined => {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const out: Record<string, number> = {};
+    for (const [code, v] of Object.entries(raw as Record<string, unknown>)) {
+      const n = Number(String(v ?? '').replace(/,/g, '').trim());
+      if (Number.isFinite(n) && n > 0) out[code.toUpperCase()] = n;
+    }
+    return Object.keys(out).length ? out : undefined;
+  };
+
+  let items: Array<{ label: string; quantity: number; price: number; imageUrl?: string | null; prices?: Record<string, number> }> = [];
   try {
     const raw = JSON.parse(formData.get('itemsJson')?.toString() ?? '[]');
     if (!Array.isArray(raw)) throw new Error('bad');
@@ -93,6 +96,7 @@ export async function action({ request }: ActionFunctionArgs) {
             : parseInt(String(r.quantity ?? '1'), 10) || 1,
         price: Number(String(r.price ?? '0').replace(/,/g, '').trim()) || 0,
         imageUrl: r.imageUrl != null ? String(r.imageUrl) : undefined,
+        prices: cleanPrices(r.prices),
       }))
       .filter((it) => it.label.length > 0);
   } catch {
@@ -110,6 +114,7 @@ export async function action({ request }: ActionFunctionArgs) {
         label: it.label,
         quantity: it.quantity,
         price: it.price,
+        ...(it.prices ? { prices: it.prices } : {}),
         imageUrl: it.imageUrl ?? undefined,
         sortOrder: idx,
       })),
@@ -173,198 +178,15 @@ export default function CreateOfferRoute() {
     };
   }, [productsPromise]);
 
-  const productOptions = useMemo(
-    () =>
-      (products ?? []).map((p) => ({
-        value: p.id,
-        label: `${p.name} (₦${Number(p.baseSalePrice).toLocaleString()})`,
-      })),
-    [products],
-  );
-
-  const [productId, setProductId] = useState('');
-  type DraftLine = { label: string; quantity: number; price: string; imageUrl?: string };
-  const [lines, setLines] = useState<DraftLine[]>([{ label: '', quantity: 1, price: '' }]);
-
-  const selectedProduct = useMemo(() => (products ?? []).find((p) => p.id === productId) ?? null, [products, productId]);
-  const gallery = useMemo(
-    () => (selectedProduct?.galleryImageUrls ?? []).filter((u) => typeof u === 'string' && u.length > 0),
-    [selectedProduct?.galleryImageUrls],
-  );
-  const basePrice = useMemo(() => {
-    const raw = selectedProduct?.baseSalePrice;
-    const n = typeof raw === 'number' ? raw : Number(String(raw ?? '').replace(/,/g, '').trim());
-    return Number.isFinite(n) ? n : NaN;
-  }, [selectedProduct?.baseSalePrice]);
-
-  const formatMoney = (n: number) =>
-    Number.isFinite(n)
-      ? n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })
-      : '';
-
-  const itemsJson = useMemo(() => JSON.stringify(lines), [lines]);
-
   return (
-    <div className="space-y-4">
-      <PageHeader
-        title="Create offer"
-        description={
-          <>
-            Create a reusable offer package (cards) tied to one product.{' '}
-            <Link to={returnTo} className="text-brand-600 dark:text-brand-400 hover:underline">
-              Back
-            </Link>
-          </>
-        }
-      />
-
-      {actionData?.error ? (
-        <PageNotification
-          variant="error"
-          message={actionData.error}
-          durationMs={8000}
-          onDismiss={() => {}}
-        />
-      ) : null}
-
-      {productsLoadError ? (
-        <PageNotification
-          variant="error"
-          message={productsLoadError}
-          durationMs={8000}
-          onDismiss={() => {}}
-        />
-      ) : null}
-
-      <Form method="post" className="card p-5 space-y-4">
-        <input type="hidden" name="intent" value="createOffer" />
-        <input type="hidden" name="productId" value={productId} readOnly />
-        <input type="hidden" name="itemsJson" value={itemsJson} readOnly />
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <TextInput name="name" label="Offer name" required placeholder="ARJUNA-OFFER" />
-          <SearchableSelect
-            id="offer-product"
-            label="Product"
-            value={productId}
-            onChange={(v) => {
-              setProductId(v);
-              // Reset line images when product changes.
-              setLines((prev) => prev.map((l) => ({ ...l, imageUrl: undefined })));
-            }}
-            options={productOptions}
-            placeholder={products === null ? 'Loading products…' : 'Select product…'}
-            searchPlaceholder="Search products…"
-            disabled={products === null}
-          />
-        </div>
-
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-app-fg">Offer items</h3>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setLines((p) => p.concat([{ label: '', quantity: 1, price: '' }]))}
-            >
-              + Add line
-            </Button>
-          </div>
-
-          <div className="space-y-3">
-            {lines.map((it, idx) => (
-              <div key={idx} className="rounded-xl border border-app-border bg-app-surface p-4 space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <TextInput
-                    label="Label"
-                    value={it.label}
-                    onChange={(e) =>
-                      setLines((p) => p.map((x, i) => (i === idx ? { ...x, label: e.target.value } : x)))
-                    }
-                    placeholder="Buy 1 get 1 free"
-                  />
-                  <NumberInput
-                    label="Qty"
-                    min={1}
-                    fallbackValue={1}
-                    value={it.quantity}
-                    onValueChange={(n) =>
-                      setLines((p) => p.map((x, i) => (i === idx ? { ...x, quantity: n } : x)))
-                    }
-                  />
-                  <div>
-                    <label className="block text-xs font-medium text-app-fg-muted mb-1">Price (₦)</label>
-                    <AmountInput
-                      prefix="₦"
-                      value={it.price}
-                      onChange={(raw) =>
-                        setLines((p) => p.map((x, i) => (i === idx ? { ...x, price: raw } : x)))
-                      }
-                      placeholder={Number.isFinite(basePrice) ? formatMoney(basePrice * (it.quantity ?? 1)) : '0'}
-                    />
-                    {Number.isFinite(basePrice) ? (
-                      <p className="text-xs text-app-fg-muted mt-1">Default: ₦{formatMoney(basePrice)} × {it.quantity}</p>
-                    ) : null}
-                  </div>
-                </div>
-
-                {!productId ? null : gallery.length > 0 ? (
-                  <div>
-                    <p className="text-xs font-medium text-app-fg-muted mb-2">Pick image for this line</p>
-                    <div className="flex flex-wrap gap-2">
-                      {gallery.map((url) => {
-                        const selected = it.imageUrl === url;
-                        return (
-                          <button
-                            key={url}
-                            type="button"
-                            onClick={() =>
-                              setLines((p) => p.map((x, i) => (i === idx ? { ...x, imageUrl: url } : x)))
-                            }
-                            className={[
-                              'w-16 h-16 rounded-lg border overflow-hidden bg-app-hover shrink-0',
-                              selected
-                                ? 'border-brand-500 ring-2 ring-brand-500/30'
-                                : 'border-app-border hover:border-app-border/80',
-                            ].join(' ')}
-                          >
-                            <img src={url} alt="" className="w-full h-full object-cover" />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  <InlineNotification variant="info" message="This product has no gallery images yet." />
-                )}
-
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    disabled={lines.length <= 1}
-                    onClick={() => setLines((p) => p.filter((_, i) => i !== idx))}
-                  >
-                    Remove line
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-2 pt-2">
-          <Link to={returnTo} className="btn-secondary btn-sm">
-            Cancel
-          </Link>
-          <Button type="submit" variant="primary" size="sm" loading={busy} loadingText="Saving…">
-            Save offer
-          </Button>
-        </div>
-      </Form>
-    </div>
+    <OfferForm
+      mode="create"
+      products={products}
+      productsLoadError={productsLoadError}
+      returnTo={returnTo}
+      busy={busy}
+      error={actionData?.error}
+    />
   );
 }
 

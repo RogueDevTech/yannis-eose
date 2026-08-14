@@ -172,6 +172,8 @@ export const payrollBatches = pgTable('payroll_batches', {
   /** NULL for null-scope batches (scope_type CONTRACTORS/ALL); see table doc. */
   department: payrollDepartmentEnum('department'),
   status: payrollBatchStatusEnum('status').default('DRAFT').notNull(),
+  /** Single-currency batch: all payouts share this currency. Default NGN (dormant). */
+  currencyCode: text('currency_code').notNull().default('NGN'),
 
   scopeType: payrollBatchScopeTypeEnum('scope_type').default('DEPARTMENT'),
   scopeBranchIds: uuid('scope_branch_ids').array(),

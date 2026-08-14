@@ -10,11 +10,13 @@ import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
+import { formatMoney } from '~/lib/format-amount';
 
 export interface ProductOption {
   id: string;
   name: string;
-  offers?: Array<{ label: string; price: string; qty: number }>;
+  offers?: Array<{ label: string; price: string; qty: number; pricesByCurrency?: Record<string, string> }>;
 }
 
 /** Cart data to pre-fill when recovering from an abandoned cart. */
@@ -86,9 +88,25 @@ export function CreateOfflineOrderModal({
   const [productId, setProductId] = useState('');
   const [selectedOfferLabel, setSelectedOfferLabel] = useState('');
 
+  // Multi-currency: base + any active currencies (dormant when single-currency).
+  const allCurrencies = useCurrenciesCatalog();
+  const baseCur = allCurrencies.find((c) => c.isDefault && c.active) ?? allCurrencies[0];
+  const showCurrency = useHasMultipleCurrencies();
+  const [currencyCode, setCurrencyCode] = useState<string>(() => baseCur?.code ?? 'NGN');
+
   const selectedProduct = products.find((p) => p.id === productId);
   const offers = selectedProduct?.offers ?? [];
   const selectedOffer = offers.find((o) => o.label === selectedOfferLabel);
+
+  const currentCurrencyInfo = allCurrencies.find((c) => c.code === currencyCode) ?? baseCur;
+  const isBaseCurrency = !baseCur || currencyCode === baseCur.code;
+  /** Price of the selected offer in the chosen currency (base price for the base currency). */
+  const offerPriceInCurrency = (o: { price: string; pricesByCurrency?: Record<string, string> }): number =>
+    isBaseCurrency ? Number(o.price) : Number(o.pricesByCurrency?.[currencyCode] ?? o.price);
+  /** Only currencies that actually price the selected offer appear (hidden-until-priced). */
+  const availableCurrencies = allCurrencies.filter(
+    (c) => c.active && (c.code === baseCur?.code || (selectedOffer?.pricesByCurrency?.[c.code] != null)),
+  );
 
   useFetcherToast(fetcher.data, { successMessage: 'Offline order created', skipErrorToast: open });
 
@@ -158,7 +176,7 @@ export function CreateOfflineOrderModal({
     setSelectedOfferLabel(firstOffer?.label ?? '');
   }
 
-  const totalAmount = selectedOffer ? Number(selectedOffer.price) : 0;
+  const totalAmount = selectedOffer ? offerPriceInCurrency(selectedOffer) : 0;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -167,7 +185,7 @@ export function CreateOfflineOrderModal({
     const validItems = [{
       productId,
       quantity: selectedOffer.qty,
-      unitPrice: Number(selectedOffer.price),
+      unitPrice: offerPriceInCurrency(selectedOffer),
       offerLabel: selectedOffer.label,
     }];
 
@@ -178,6 +196,7 @@ export function CreateOfflineOrderModal({
     formData.set('paymentMethod', paymentMethod);
     formData.set('items', JSON.stringify(validItems));
     formData.set('totalAmount', String(totalAmount.toFixed(2)));
+    if (showCurrency && currencyCode) formData.set('currencyCode', currencyCode);
     if (cartPrefill?.cartId) formData.set('cartId', cartPrefill.cartId);
     if (customerAddress.trim()) formData.set('customerAddress', customerAddress.trim());
     if (deliveryAddress.trim()) formData.set('deliveryAddress', deliveryAddress.trim());
@@ -357,6 +376,17 @@ export function CreateOfflineOrderModal({
               />
 
               {/* Offer cards — shown after product is selected */}
+              {showCurrency && productId && offers.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-app-fg-muted mb-2">Currency</label>
+                  <FormSelect
+                    value={currencyCode}
+                    onChange={(e) => setCurrencyCode(e.target.value)}
+                    options={availableCurrencies.map((c) => ({ value: c.code, label: `${c.symbol} ${c.code}` }))}
+                  />
+                </div>
+              )}
+
               {productId && offers.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-app-fg-muted mb-2">
@@ -380,7 +410,11 @@ export function CreateOfflineOrderModal({
                           <div className="flex items-center justify-between gap-2 mt-1">
                             <span className="text-xs text-app-fg-muted">Qty: {offer.qty}</span>
                             <span className="text-sm font-bold text-app-fg tabular-nums">
-                              <NairaPrice amount={Number(offer.price)} />
+                              {isBaseCurrency ? (
+                                <NairaPrice amount={Number(offer.price)} />
+                              ) : (
+                                formatMoney(offerPriceInCurrency(offer), currentCurrencyInfo)
+                              )}
                             </span>
                           </div>
                         </button>
@@ -398,7 +432,7 @@ export function CreateOfflineOrderModal({
                     <span className="text-app-fg-muted"> · {selectedOffer.label} · Qty {selectedOffer.qty}</span>
                   </div>
                   <span className="text-sm font-bold text-app-fg tabular-nums">
-                    <NairaPrice amount={totalAmount} />
+                    {isBaseCurrency ? <NairaPrice amount={totalAmount} /> : formatMoney(totalAmount, currentCurrencyInfo)}
                   </span>
                 </div>
               )}

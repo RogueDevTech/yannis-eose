@@ -1,7 +1,7 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import * as React from 'react';
-import { Await, Link, useFetcher, useLoaderData } from '@remix-run/react';
+import { Await, Link, useFetcher, useLoaderData, useNavigate } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader, invalidateCachedLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, parsePerPage, requirePermission, safeStatus } from '~/lib/api.server';
@@ -20,7 +20,6 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Button } from '~/components/ui/button';
 import { ActionDropdown } from '~/components/ui/action-dropdown';
 import { MarketingOffersTab } from '~/features/campaigns/MarketingOffersTab';
-import { OfferGroupCreateModal } from '~/features/campaigns/OfferGroupCreateModal';
 import { ProductsListPage } from '~/features/products/ProductsListPage';
 import { ProductsHubLoadingShell } from '~/features/products/ProductsDeferredLoadingShells';
 import type { Product } from '~/features/products/types';
@@ -415,8 +414,8 @@ function ProductsRouteInner(
     offerGroupsCount: number;
   },
 ) {
+  const navigate = useNavigate();
   const [uiTab, setUiTab] = React.useState<'product' | 'offers'>(data.initialTab);
-  const [showCreateOffer, setShowCreateOffer] = React.useState(false);
   // Owned here (not in <ProductsListPage>) so the Status filter can also render
   // inside the page-header kebab (mobile actions group).
   const [productStatusFilter, setProductStatusFilter] = React.useState('ACTIVE');
@@ -459,13 +458,6 @@ function ProductsRouteInner(
     if (uiTab !== 'offers') return;
     startOffersSummaryFetch();
   }, [uiTab, startOffersSummaryFetch]);
-
-  // Ensure the Create Offer modal can load products even if the user
-  // opens it from the Product tab before ever switching to Offers.
-  React.useEffect(() => {
-    if (!showCreateOffer) return;
-    startOffersSummaryFetch();
-  }, [showCreateOffer, startOffersSummaryFetch]);
 
   // Background-prefetch the offers summary so the kebab's offer-product filter
   // has options even while the user is still on the Product tab. This is a
@@ -574,8 +566,7 @@ function ProductsRouteInner(
                     className="w-full justify-center"
                     onClick={() => {
                       closeSheet();
-                      startOffersSummaryFetch();
-                      setShowCreateOffer(true);
+                      navigate('/admin/marketing/offers/new?returnTo=' + encodeURIComponent('/admin/products?tab=offers'));
                     }}
                   >
                     Create offer
@@ -649,19 +640,6 @@ function ProductsRouteInner(
 
       {data.canManageOffers ? (
         <div className="space-y-4">
-          <OfferGroupCreateModal
-            open={showCreateOffer}
-            onClose={() => setShowCreateOffer(false)}
-            products={offersLoaded ? offersCache.offersProducts : []}
-            productsLoading={!offersLoaded && offersFetcher.state !== 'idle'}
-            actionUrl="/admin/products?index"
-            onCreated={() => {
-              setOffersLoaded(false);
-              offersFetchStartedRef.current = false;
-              offersFetcher.load('/api/products-offers-summary');
-            }}
-          />
-
           {uiTab === 'offers' ? (
             <MarketingOffersTab
               products={offersCache.offersProducts}

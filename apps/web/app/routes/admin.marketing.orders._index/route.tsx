@@ -126,12 +126,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const orderSourceParam = url.searchParams.get('orderSource') as 'offline' | 'edge-form' | null;
   const orderSource = orderSourceParam === 'offline' || orderSourceParam === 'edge-form' ? orderSourceParam : undefined;
 
+  // Multi-currency filter (dormant unless the company added a 2nd currency).
+  const currencyCode = url.searchParams.get('currency')?.toUpperCase() || undefined;
+
   const listInput = {
     page,
     limit: ORDERS_PER_PAGE,
     ...(expandedStatuses
       ? { statuses: expandedStatuses }
       : { status: status || undefined }),
+    ...(currencyCode ? { currencyCode } : {}),
     search: search || undefined,
     sortBy,
     sortOrder,

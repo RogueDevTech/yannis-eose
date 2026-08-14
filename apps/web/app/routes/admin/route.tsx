@@ -101,6 +101,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .catch(() => [] as BranchGroupEntry[])
     : Promise.resolve([] as BranchGroupEntry[]);
 
+  // Fetch the ACTIVE currency catalog for the company (non-blocking). Drives the
+  // app-wide `useHasMultipleCurrencies()` gate. Falls back to [] → NGN in the
+  // provider, so the single-currency world is unaffected.
+  type CurrencyRow = {
+    code: string; symbol: string; countryName: string; precision: number;
+    isDefault: boolean; active: boolean; fxRateToBase: string | null;
+  };
+  type CurrencyEntry = {
+    code: string; symbol: string; countryName: string; precision: number;
+    isDefault: boolean; active: boolean; fxRateToBase: number | null;
+  };
+  const currenciesPromise: Promise<CurrencyEntry[]> = apiRequest<unknown>('/trpc/currencies.listActive', { method: 'GET', cookie })
+    .then((res) => {
+      if (!res.ok) return [] as CurrencyEntry[];
+      const rows = (res.data as { result?: { data?: CurrencyRow[] } })?.result?.data ?? [];
+      return rows.map((r) => ({
+        code: r.code, symbol: r.symbol, countryName: r.countryName, precision: r.precision,
+        isDefault: r.isDefault, active: r.active,
+        fxRateToBase: r.fxRateToBase == null ? null : Number(r.fxRateToBase),
+      }));
+    })
+    .catch(() => [] as CurrencyEntry[]);
+
   // Ad spend backlog check — only for Media Buyers (deferred, non-blocking)
   type AdSpendBacklogData = { missingDates: string[]; isBlocked: boolean };
   const adSpendBacklogPromise: Promise<AdSpendBacklogData> = user?.role === 'MEDIA_BUYER'
@@ -114,7 +137,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : Promise.resolve({ missingDates: [], isBlocked: false });
 
   // Stream branches like notifications — avoids blocking the document on branches.list
-  return defer({ user, notifications: notificationsPromise, branches: branchesPromise, branchGroups: branchGroupsPromise, adSpendBacklog: adSpendBacklogPromise });
+  return defer({ user, notifications: notificationsPromise, branches: branchesPromise, branchGroups: branchGroupsPromise, currencies: currenciesPromise, adSpendBacklog: adSpendBacklogPromise });
 }
 
 /**
@@ -144,6 +167,10 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
 }) => {
   // Force revalidation when session identity changed (mirror start/stop redirects add _reload).
   if (nextUrl.searchParams.has('_reload')) return true;
+  // Currency config mutations change the app-wide currency catalog carried by this
+  // shell loader — revalidate so a newly added/edited currency appears immediately
+  // in every dropdown/filter without a manual reload.
+  if (formAction?.includes('/admin/settings/currencies')) return true;
   if (formAction && formMethod && formMethod !== 'GET') {
     return defaultShouldRevalidate;
   }
@@ -227,7 +254,7 @@ export async function action({ request }: ActionFunctionArgs) {
  * Single mount + state bridge keeps the Outlet alive across resolution.
  */
 export default function AdminLayout() {
-  const { user, notifications, branches, branchGroups, adSpendBacklog } = useLoaderData<typeof loader>();
+  const { user, notifications, branches, branchGroups, currencies, adSpendBacklog } = useLoaderData<typeof loader>();
   // Marketing supervisors are locked to their primary branch to prevent
   // scope confusion — they must not switch branches.
   const isSupervisorLockedToBranch =
@@ -239,9 +266,15 @@ export default function AdminLayout() {
   >(null);
   const [resolvedGroups, setResolvedGroups] = useState<Array<{ id: string; name: string }> | null>(null);
   const [resolvedAdSpendBacklog, setResolvedAdSpendBacklog] = useState<{ missingDates: string[]; isBlocked: boolean } | null>(null);
+  const [resolvedCurrencies, setResolvedCurrencies] = useState<
+    Array<{ code: string; symbol: string; countryName: string; precision: number; isDefault: boolean; active: boolean; fxRateToBase: number | null }> | null
+  >(null);
 
   useEffect(() => {
     let cancelled = false;
+    Promise.resolve(currencies)
+      .then((list) => { if (!cancelled && Array.isArray(list)) setResolvedCurrencies(list); })
+      .catch(() => {});
     // An empty result is almost always a transient `branches.list` failure
     // (a request aborted by rapid branch switching) — every user has at least
     // one branch. Keep the last-known-good non-empty list rather than blinking
@@ -264,7 +297,7 @@ export default function AdminLayout() {
     return () => {
       cancelled = true;
     };
-  }, [branches, branchGroups, adSpendBacklog]);
+  }, [branches, branchGroups, currencies, adSpendBacklog]);
 
   return (
     <DashboardLayout
@@ -279,6 +312,7 @@ export default function AdminLayout() {
       notificationsPromise={notifications}
       notificationsActionUrl="/admin"
       adSpendBacklog={resolvedAdSpendBacklog}
+      currencies={resolvedCurrencies ?? undefined}
     />
   );
 }
