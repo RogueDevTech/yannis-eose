@@ -3,7 +3,7 @@ import { Link, useFetcher, useNavigate, useRevalidator, useSearchParams } from '
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
-import { EDGE_FORM_ACTOR_ID, RETRACK_CATEGORY_OPTIONS, isPriceAffectingRetrackCategory, retrackCategoryLabel, RETRACK_CATEGORY_META } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, RETRACK_CATEGORY_OPTIONS, isPriceAffectingRetrackCategory, retrackCategoryLabel, RETRACK_CATEGORY_META, formatMoney, symbolForCurrencyCode } from '@yannis/shared';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
 import { Spinner } from '~/components/ui/spinner';
@@ -16,9 +16,10 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useAgentStateBroadcast } from '~/hooks/useSocket';
-import { formatNaira } from '~/lib/format-amount';
+import { useCurrencySymbol } from '~/contexts/currencies-catalog-context';
 import { formatOrderTimestamp } from '~/lib/format-date';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { MoneyAmount } from '~/components/ui/money-amount';
 
 const OrderTimeline = lazy(() =>
   import('~/components/ui/order-timeline').then((m) => ({ default: m.OrderTimeline })),
@@ -296,6 +297,15 @@ interface DetailFieldConfig {
 
 const DETAIL_DATE_CLASS = 'text-app-fg-muted tabular-nums';
 const DETAIL_CURRENCY_CLASS = 'font-semibold text-success-600 dark:text-success-400 tabular-nums';
+
+/**
+ * Format an order-money value in the order's frozen currency. Catalog-free
+ * (module-level context has no React hooks) — resolves the symbol from the
+ * shared static map, so NGN stays ₦ and e.g. GHS renders GH₵.
+ */
+function formatOrderMoney(amount: number, currencyCode: string | null | undefined): string {
+  return formatMoney(amount, { symbol: symbolForCurrencyCode(currencyCode), precision: 2 });
+}
 const DETAIL_PERSON_CLASS = 'font-medium text-brand-600 dark:text-brand-400';
 const DETAIL_ID_CLASS = 'font-mono text-xs text-app-fg-muted break-all';
 
@@ -440,20 +450,20 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   {
     label: 'Total amount',
     getValue: (o) => o.totalAmount,
-    format: (v) => (v != null && v !== '' ? formatNaira(Number(v)) : ''),
+    format: (v, o) => (v != null && v !== '' ? formatOrderMoney(Number(v), o.currencyCode) : ''),
     ddClassName: DETAIL_CURRENCY_CLASS,
     rowAccent: 'border-l-4 border-l-success-200 dark:border-l-success-900/40',
   },
   {
     label: 'Landed cost',
     getValue: (o) => o.landedCost,
-    format: (v) => (v != null && v !== '' ? formatNaira(Number(v)) : ''),
+    format: (v, o) => (v != null && v !== '' ? formatOrderMoney(Number(v), o.currencyCode) : ''),
     ddClassName: DETAIL_CURRENCY_CLASS,
   },
   {
     label: 'Delivery fee',
     getValue: (o) => o.deliveryFee,
-    format: (v) => (v != null && v !== '' ? formatNaira(Number(v)) : ''),
+    format: (v, o) => (v != null && v !== '' ? formatOrderMoney(Number(v), o.currencyCode) : ''),
     ddClassName: DETAIL_CURRENCY_CLASS,
   },
   {
@@ -1001,6 +1011,9 @@ export function OrderDetailPage({
 
     return patched;
   })();
+
+  // Symbol for this order's frozen currency — drives money-input addons (₦, GH₵…).
+  const orderCurrencySymbol = useCurrencySymbol(order.currencyCode);
 
   const [searchParams] = useSearchParams();
   const ordersListHref = useMemo(() => {
@@ -1775,7 +1788,7 @@ export function OrderDetailPage({
         <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
-        <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-app-fg font-medium truncate min-w-0" />
+        <OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} textClassName="text-app-fg font-medium truncate min-w-0" />
       </div>
 
       {/* Header */}
@@ -2017,7 +2030,7 @@ export function OrderDetailPage({
                         <span className="text-app-fg-muted"> · Qty {item.quantity}</span>
                       </div>
                       <span className="text-sm font-bold text-app-fg tabular-nums shrink-0 ml-2">
-                        <NairaPrice amount={Number(item.unitPrice)} />
+                        <NairaPrice amount={Number(item.unitPrice)} currencyCode={order.currencyCode} />
                       </span>
                     </div>
                   ))}
@@ -2039,13 +2052,13 @@ export function OrderDetailPage({
                             <span className="text-app-fg-muted"> · Qty {item.quantity}</span>
                           </div>
                           <span className="text-sm font-bold text-brand-500 tabular-nums shrink-0 ml-2">
-                            <NairaPrice amount={item.unitPrice} />
+                            <NairaPrice amount={item.unitPrice} currencyCode={order.currencyCode} />
                           </span>
                         </div>
                       );
                     })}
                     <p className="text-xs text-app-fg-muted">
-                      New total: <span className="font-semibold text-app-fg">&#8358;{order.pendingLinePriceChangeProposal.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      New total: <span className="font-semibold text-app-fg"><NairaPrice amount={order.pendingLinePriceChangeProposal.totalAmount} decimals={2} currencyCode={order.currencyCode} /></span>
                     </p>
                   </div>
                 )}
@@ -2141,7 +2154,7 @@ export function OrderDetailPage({
               <p className={`mt-0.5 ${c.body}`}>
                 {catMeta?.description ?? 'This order was retracked by Finance.'} It cannot be delivered until a closer or Head of CS resolves the retrack.
                 {order.valueHoldHint != null && order.valueHoldHint !== '' ? (
-                  <> Finance indicated the correct value is <strong>₦{Number(order.valueHoldHint).toLocaleString()}</strong>.</>
+                  <> Finance indicated the correct value is <strong><NairaPrice amount={Number(order.valueHoldHint)} currencyCode={order.currencyCode} /></strong>.</>
                 ) : null}
               </p>
               <div className="mt-2">
@@ -2311,7 +2324,7 @@ export function OrderDetailPage({
                 {order.totalAmount && (
                   <div className="flex items-baseline gap-1.5">
                     <span className="text-xs text-app-fg-muted">Total:</span>
-                    <NairaPrice amount={Number(order.totalAmount)} className="text-sm font-bold text-app-fg" />
+                    <MoneyAmount amount={Number(order.totalAmount)} currencyCode={order.currencyCode} className="text-sm font-bold text-app-fg" />
                   </div>
                 )}
               </div>
@@ -2329,7 +2342,7 @@ export function OrderDetailPage({
                         )}
                       </div>
                     </div>
-                    <NairaPrice amount={Number(item.unitPrice)} className="text-sm font-semibold text-app-fg shrink-0" />
+                    <MoneyAmount amount={Number(item.unitPrice)} currencyCode={order.currencyCode} className="text-sm font-semibold text-app-fg shrink-0" />
                     <Link
                       to={`/admin/products/${item.productId}`}
                       className="shrink-0 text-xs font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
@@ -2381,6 +2394,7 @@ export function OrderDetailPage({
                                 <p className="text-2xs font-semibold uppercase tracking-wide text-app-fg-muted">Total</p>
                                 <NairaPrice
                                   amount={Number(resolved.totalAmount)}
+                                  currencyCode={order.currencyCode}
                                   className="text-2xl font-bold text-app-fg tabular-nums"
                                 />
                               </div>
@@ -2509,6 +2523,7 @@ export function OrderDetailPage({
                             <p className="text-2xs font-semibold uppercase tracking-wide text-app-fg-muted">Total</p>
                             <NairaPrice
                               amount={Number(i.totalAmount)}
+                              currencyCode={order.currencyCode}
                               className="text-2xl font-bold text-app-fg tabular-nums"
                             />
                           </div>
@@ -3875,7 +3890,7 @@ export function OrderDetailPage({
               placeholder="e.g. 2,500"
               value={deliverCost}
               onChange={setDeliverCost}
-              prefix="₦"
+              prefix={orderCurrencySymbol}
               className="input w-full"
             />
           </div>
@@ -4586,7 +4601,7 @@ export function OrderDetailPage({
                                 <div className="flex items-center justify-between gap-2 mt-1">
                                   <span className="text-xs text-app-fg-muted">Qty: {offer.quantity}</span>
                                   <span className="text-sm font-bold text-app-fg tabular-nums">
-                                    <NairaPrice amount={offer.unitPrice} />
+                                    <NairaPrice amount={offer.unitPrice} currencyCode={order.currencyCode} />
                                   </span>
                                 </div>
                               </button>
@@ -4634,7 +4649,7 @@ export function OrderDetailPage({
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-app-fg-muted mb-1">Price (&#8358;)</label>
+                          <label className="block text-xs text-app-fg-muted mb-1">Price ({orderCurrencySymbol})</label>
                           <NumberInput
                             coerce="decimal"
                             min={0}
@@ -4664,7 +4679,7 @@ export function OrderDetailPage({
                         )}
                       </div>
                       <span className="text-sm font-bold text-app-fg tabular-nums shrink-0 ml-2">
-                        <NairaPrice amount={item.unitPrice} />
+                        <NairaPrice amount={item.unitPrice} currencyCode={order.currencyCode} />
                       </span>
                     </div>
                   </div>
@@ -4693,8 +4708,7 @@ export function OrderDetailPage({
             )}
             <div className="p-6 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] border-t border-app-border">
               <p className="text-sm font-semibold text-app-fg mb-4">
-                Total: &#8358;
-                {editedItems.reduce((sum, i) => sum + i.unitPrice, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                Total: <NairaPrice amount={editedItems.reduce((sum, i) => sum + i.unitPrice, 0)} decimals={2} currencyCode={order.currencyCode} />
               </p>
               <div className="flex flex-wrap gap-2 justify-end">
                 <Button

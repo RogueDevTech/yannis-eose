@@ -24,7 +24,7 @@ import {
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema, canonicalPermissionCode } from '@yannis/shared';
+import { db as schema, canonicalPermissionCode, regionsForCountry } from '@yannis/shared';
 import { uuidv7 } from 'uuidv7';
 import type {
   CreateFundingInput,
@@ -5198,6 +5198,7 @@ export class MarketingService {
         deliveredThisMonth: 0,
         deliveredRevenue: 0,
         deliveredRevenueBreakdown: { funnel: 0, cart: 0 },
+        deliveredRevenueByCurrency: {},
         confirmedOrders: 0,
         confirmationRate: 0,
         cpa: 0,
@@ -5485,6 +5486,8 @@ export class MarketingService {
       cartDeliveredRows,
       deliveredThisMonthRows,
       cartDeliveredThisMonthRows,
+      funnelRevenueByCurrencyRows,
+      cartRevenueByCurrencyRows,
     ] = await Promise.all([
       this.db
         .select({ total: sum(schema.adSpendLogs.spendAmount) })
@@ -5508,6 +5511,42 @@ export class MarketingService {
       cartQuery,
       this.db.select({ count: count() }).from(schema.orders).where(deliveredThisMonthWhere),
       cartDeliveredThisMonthQuery,
+      // Delivered revenue grouped by frozen currency (funnel side). Same scope
+      // as the funnel deliveredRevenue SUM above — reuses `deliveredWhere` so it
+      // can never drift. Powers the currency-lens (per-currency / merged views).
+      this.db
+        .select({
+          currencyCode: schema.orders.currencyCode,
+          total: sql<number>`coalesce(sum(${schema.orders.totalAmount}), 0)`.mapWith(Number),
+        })
+        .from(schema.orders)
+        .where(deliveredWhere)
+        .groupBy(schema.orders.currencyCode),
+      // Cart side, grouped by currency. Mirrors the cart delivered scope.
+      !isServicingScope
+        ? (() => {
+            const cartConds: SQL[] = [
+              isNull(schema.cartOrders.deletedAt),
+              inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
+            ];
+            const bCond = branchScopeCondition(schema.cartOrders.branchId, branchId, effectiveBranchIds);
+            if (bCond) cartConds.push(bCond);
+            if (mediaBuyerId && mediaBuyerId !== '__system__') cartConds.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
+            if (supervisorScope?.mediaBuyerIds && supervisorScope.mediaBuyerIds.length > 0) {
+              cartConds.push(inArray(schema.cartOrders.mediaBuyerId, supervisorScope.mediaBuyerIds));
+            }
+            if (periodStart) cartConds.push(gte(schema.cartOrders.createdAt, periodStart));
+            if (periodEnd) cartConds.push(lte(schema.cartOrders.createdAt, periodEnd));
+            return this.db
+              .select({
+                currencyCode: schema.cartOrders.currencyCode,
+                total: sql<number>`coalesce(sum(${schema.cartOrders.totalAmount}), 0)`.mapWith(Number),
+              })
+              .from(schema.cartOrders)
+              .where(and(...cartConds))
+              .groupBy(schema.cartOrders.currencyCode);
+          })()
+        : Promise.resolve([] as { currencyCode: string | null; total: number }[]),
     ]);
 
     const approvedSpend = Number(totalSpendRows[0]?.total ?? 0);
@@ -5520,6 +5559,13 @@ export class MarketingService {
     const totalOrders = (totalOrdersRows[0]?.count ?? 0) + cartDelivered;
     const deliveredOrders = (deliveredOrdersRows[0]?.count ?? 0) + cartDelivered;
     const deliveredRevenue = funnelRevenue + cartRevenue;
+    // Per-currency delivered revenue (funnel + cart), keyed by ISO code. Powers
+    // the currency lens. Sums to `deliveredRevenue` across all currencies.
+    const deliveredRevenueByCurrency: Record<string, number> = {};
+    for (const r of [...funnelRevenueByCurrencyRows, ...cartRevenueByCurrencyRows]) {
+      const code = (r.currencyCode ?? 'NGN').toUpperCase();
+      deliveredRevenueByCurrency[code] = (deliveredRevenueByCurrency[code] ?? 0) + Number(r.total ?? 0);
+    }
     const confirmedOrders = (confirmedOrdersRows[0]?.count ?? 0) + cartDelivered;
     const confirmationRate = totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0;
     // Carry-over-inclusive delivered count (by delivered_at). Additive/display-only.
@@ -5542,6 +5588,9 @@ export class MarketingService {
         funnel: funnelRevenue,
         cart: cartRevenue,
       },
+      /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }). Sums
+       *  to `deliveredRevenue`. Drives the currency lens on aggregate surfaces. */
+      deliveredRevenueByCurrency,
       confirmedOrders,
       confirmationRate,
       // CPA uses approved spend only — pending spend is unverified and would
@@ -5587,6 +5636,9 @@ export class MarketingService {
     deliveredRevenue: number;
     confirmedOrders: number;
     deliveredThisMonth?: number;
+    /** Delivered revenue split by frozen ISO currency code. Sums to
+     *  `deliveredRevenue`. Empty on single-currency companies. */
+    deliveredRevenueByCurrency?: Record<string, number>;
   }) {
     const { totalSpend, totalOrders, deliveredOrders, deliveredRevenue, confirmedOrders } = raw;
     return {
@@ -5597,6 +5649,9 @@ export class MarketingService {
       // Pass-through display value — NEVER used in any rate below.
       deliveredThisMonth: raw.deliveredThisMonth ?? 0,
       deliveredRevenue,
+      // Per-currency delivered revenue (funnel + cart), keyed by ISO code.
+      // Powers the marketing currency lens. Sums to `deliveredRevenue`.
+      deliveredRevenueByCurrency: raw.deliveredRevenueByCurrency ?? {},
       confirmedOrders,
       confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0,
       cpa: totalOrders > 0 ? totalSpend / totalOrders : 0,
@@ -5753,7 +5808,21 @@ export class MarketingService {
     if (periodEnd) cartInDelivered.push(lte(schema.cartOrders.deliveredAt, periodEnd));
     const cartDeliveredFilter = cartInDelivered.length > 0 ? (and(...cartInDelivered) ?? sql`true`) : sql`true`;
 
-    const [spendRows, orderRows, cartRows] = await Promise.all([
+    // Shared WHERE for the funnel orders queries — reused by the scalar
+    // deliveredRevenue query AND the per-currency breakdown so they can never
+    // drift. Include ALL media buyers (active + inactive/probation) so the
+    // overview total matches the Marketing Orders page.
+    const funnelOrdersWhere = and(
+      isNotNull(schema.orders.mediaBuyerId),
+      sql`${schema.orders.status} != 'DELETED'`,
+      // Exclude graduated follow-up and cart-graduated orders.
+      // Cart-graduated are added separately (only DELIVERED/REMITTED count).
+      eq(schema.orders.isFollowUp, false),
+      sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} IN ('edge-form', 'import'))`,
+      branchScopeCondition(schema.orders.branchId, branchId, effectiveBranchIds) ?? undefined,
+    );
+
+    const [spendRows, orderRows, cartRows, orderCurrencyRows, cartCurrencyRows] = await Promise.all([
       this.db
         .select({
           mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
@@ -5777,20 +5846,7 @@ export class MarketingService {
             ),
         })
         .from(schema.orders)
-        .where(
-          and(
-            // Include ALL media buyers (active + inactive/probation) so the
-            // overview total matches the Marketing Orders page. Per-row
-            // leaderboard data is still scoped to eligible (active) buyers.
-            isNotNull(schema.orders.mediaBuyerId),
-            sql`${schema.orders.status} != 'DELETED'`,
-            // Exclude graduated follow-up and cart-graduated orders.
-            // Cart-graduated are added separately (only DELIVERED/REMITTED count).
-            eq(schema.orders.isFollowUp, false),
-            sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} IN ('edge-form', 'import'))`,
-            branchScopeCondition(schema.orders.branchId, branchId, effectiveBranchIds) ?? undefined,
-          ),
-        )
+        .where(funnelOrdersWhere)
         .groupBy(schema.orders.mediaBuyerId),
       // Per-MB cart graduated delivered — attributed to original MB.
       // deliveredCount/Revenue = cohort (by created_at); deliveredThisMonth =
@@ -5805,6 +5861,30 @@ export class MarketingService {
         .from(schema.cartOrders)
         .where(and(...cartConditions))
         .groupBy(schema.cartOrders.mediaBuyerId),
+      // Per-(MB × currency) funnel delivered revenue. Same WHERE as the funnel
+      // scalar query, same `deliveredFilter` on the SUM — so the per-currency
+      // map sums exactly to the funnel `deliveredRevenue` scalar above.
+      this.db
+        .select({
+          mediaBuyerId: schema.orders.mediaBuyerId,
+          currencyCode: schema.orders.currencyCode,
+          total: sql<number>`coalesce(sum(${schema.orders.totalAmount}) FILTER (WHERE ${deliveredFilter}), 0)`.mapWith(Number),
+        })
+        .from(schema.orders)
+        .where(funnelOrdersWhere)
+        .groupBy(schema.orders.mediaBuyerId, schema.orders.currencyCode),
+      // Per-(MB × currency) cart graduated delivered revenue. Same conditions +
+      // same `cartCreatedFilter` (cohort by created_at) as the cart scalar
+      // deliveredRevenue above — sums exactly to the cart `deliveredRevenue`.
+      this.db
+        .select({
+          mediaBuyerId: schema.cartOrders.mediaBuyerId,
+          currencyCode: schema.cartOrders.currencyCode,
+          total: sql<number>`coalesce(sum(${schema.cartOrders.totalAmount}) FILTER (WHERE ${cartCreatedFilter}), 0)`.mapWith(Number),
+        })
+        .from(schema.cartOrders)
+        .where(and(...cartConditions))
+        .groupBy(schema.cartOrders.mediaBuyerId, schema.cartOrders.currencyCode),
     ]);
 
     const spendByBuyer = new Map<string, number>(
@@ -5822,6 +5902,17 @@ export class MarketingService {
         .filter((row): row is typeof row & { mediaBuyerId: string } => row.mediaBuyerId != null)
         .map((row) => [row.mediaBuyerId, row]),
     );
+    // Per-buyer delivered revenue split by frozen ISO currency (funnel + cart).
+    // Merges both grouped queries; each keyed { code -> total }. Sums per buyer
+    // exactly to that buyer's `deliveredRevenue` scalar (same filters/scope).
+    const revenueByCurrencyByBuyer = new Map<string, Record<string, number>>();
+    for (const row of [...orderCurrencyRows, ...cartCurrencyRows]) {
+      if (row.mediaBuyerId == null) continue;
+      const code = (row.currencyCode ?? 'NGN').toUpperCase();
+      const bucket = revenueByCurrencyByBuyer.get(row.mediaBuyerId) ?? {};
+      bucket[code] = (bucket[code] ?? 0) + Number(row.total ?? 0);
+      revenueByCurrencyByBuyer.set(row.mediaBuyerId, bucket);
+    }
 
     const result = new Map<string, ReturnType<MarketingService['deriveBuyerMetrics']>>();
     // When restrictToBuyerIds is true (supervisor view), only include the
@@ -5842,6 +5933,7 @@ export class MarketingService {
           totalOrders: Number(orderRow?.totalOrders ?? 0) + cartDelivered,
           deliveredOrders: Number(orderRow?.deliveredOrders ?? 0) + cartDelivered,
           deliveredRevenue: Number(orderRow?.deliveredRevenue ?? 0) + cartRevenue,
+          deliveredRevenueByCurrency: revenueByCurrencyByBuyer.get(buyerId) ?? {},
           confirmedOrders: Number(orderRow?.confirmedOrders ?? 0) + cartDelivered,
           // Carry-over-inclusive delivered (by delivered_at), orders + cart.
           deliveredThisMonth:
@@ -6140,6 +6232,7 @@ export class MarketingService {
         originalCampaignName: originalCampaignAlias.name,
         originalOrderStatus: sql<string | null>`COALESCE(${schema.crossFunnelAttempts.originalOrderStatus}, ${schema.orders.status}::text)`,
         originalOrderAmount: schema.orders.totalAmount,
+        originalOrderCurrency: schema.orders.currencyCode,
         originalOrderNumber: sql<number | null>`COALESCE(${schema.crossFunnelAttempts.originalOrderNumber}, ${schema.orders.orderNumber})`,
         originalOrderCreatedAt: schema.orders.createdAt,
         originalOrderPhone: schema.orders.customerPhone,
@@ -6929,8 +7022,12 @@ export class MarketingService {
             )
             .orderBy(schema.offerGroupItems.offerGroupId, schema.offerGroupItems.sortOrder);
 
-    const itemsByGroup = new Map<string, typeof items>();
-    for (const it of items) {
+    // Attach non-default currency prices so the offers list/detail can show them.
+    const priceMap = await this.loadOfferGroupItemPriceMap(items.map((it) => it.id));
+    const itemsWithPrices = items.map((it) => ({ ...it, pricesByCurrency: priceMap.get(it.id) ?? {} }));
+
+    const itemsByGroup = new Map<string, typeof itemsWithPrices>();
+    for (const it of itemsWithPrices) {
       const arr = itemsByGroup.get(it.offerGroupId) ?? [];
       arr.push(it);
       itemsByGroup.set(it.offerGroupId, arr);
@@ -7009,6 +7106,51 @@ export class MarketingService {
   // ============================================
 
   /** Ordered distinct product ids from active offer lines (first appearance by sort_order). */
+  /**
+   * The default branch to stamp on a form created without a specific branch
+   * (e.g. SuperAdmin with a company selected but no branch). Prefers a branch in
+   * the caller's effectiveBranchIds; else the oldest ACTIVE branch of the active
+   * company; else null (truly no company/branch context → stays branchless).
+   */
+  private async resolveDefaultBranchId(
+    tx: PostgresJsDatabase<typeof schema>,
+    activeGroupId: string | null,
+    effectiveBranchIds: string[] | null,
+  ): Promise<string | null> {
+    // If the caller has a concrete effective-branch set, pick the first ACTIVE
+    // one (oldest) — it belongs to the active company by construction.
+    if (effectiveBranchIds && effectiveBranchIds.length > 0) {
+      const [b] = await tx
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(
+          and(
+            inArray(schema.branches.id, effectiveBranchIds),
+            eq(schema.branches.status, 'ACTIVE'),
+          ),
+        )
+        .orderBy(asc(schema.branches.createdAt))
+        .limit(1);
+      if (b) return b.id;
+    }
+    // Else fall back to the oldest ACTIVE branch of the active company.
+    if (activeGroupId) {
+      const [b] = await tx
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(
+          and(
+            eq(schema.branches.groupId, activeGroupId),
+            eq(schema.branches.status, 'ACTIVE'),
+          ),
+        )
+        .orderBy(asc(schema.branches.createdAt))
+        .limit(1);
+      if (b) return b.id;
+    }
+    return null;
+  }
+
   private async deriveProductIdsFromOfferGroup(
     tx: PostgresJsDatabase<typeof schema>,
     offerGroupId: string,
@@ -7043,8 +7185,25 @@ export class MarketingService {
     return ordered;
   }
 
-  async createCampaign(input: CreateCampaignInput, mediaBuyerId: string, branchId?: string | null) {
+  async createCampaign(
+    input: CreateCampaignInput,
+    mediaBuyerId: string,
+    branchId?: string | null,
+    opts?: { activeGroupId?: string | null; effectiveBranchIds?: string[] | null },
+  ) {
     return withActor(this.db, { id: mediaBuyerId }, async (tx) => {
+      // Never leave a form branchless. When no specific branch is selected (e.g.
+      // a SuperAdmin creating with a company selected but no branch), stamp the
+      // company's default branch so the form is properly scoped and visible to
+      // everyone in the company — not just its creator via the callerId fallback.
+      let resolvedBranchId = branchId ?? null;
+      if (!resolvedBranchId) {
+        resolvedBranchId = await this.resolveDefaultBranchId(
+          tx,
+          opts?.activeGroupId ?? null,
+          opts?.effectiveBranchIds ?? null,
+        );
+      }
       // Form names are unique org-wide, case-insensitive. Pre-check so callers
       // get a friendly CONFLICT instead of a Postgres unique-violation surfacing
       // as an INTERNAL_SERVER_ERROR.
@@ -7094,7 +7253,7 @@ export class MarketingService {
           deploymentType: input.deploymentType,
           formConfig: input.formConfig ?? null,
           status: 'ACTIVE',
-          branchId: branchId ?? null,
+          branchId: resolvedBranchId,
         })
         .returning();
 
@@ -7433,7 +7592,12 @@ export class MarketingService {
     const anyOfferPriced = products.some((p) =>
       p.offers.some((o) => o.pricesByCurrency && Object.keys(o.pricesByCurrency).length > 0),
     );
-    let formCurrencies: Array<{ code: string; symbol: string; precision: number; isDefault: boolean }> | undefined;
+    let formCurrencies:
+      | Array<{ code: string; symbol: string; precision: number; isDefault: boolean; countryName: string }>
+      | undefined;
+    // Regions per configured country — lets the public form swap the "Delivery
+    // State" list when the customer picks a country (country-selection mode).
+    let regionsByCountry: Record<string, string[]> | undefined;
     if (anyOfferPriced) {
       const groupId = await this.resolveGroupIdForBranch(campaign.branchId ?? null);
       const active = await this.db
@@ -7442,6 +7606,7 @@ export class MarketingService {
           symbol: schema.currencies.symbol,
           precision: schema.currencies.precision,
           isDefault: schema.currencies.isDefault,
+          countryName: schema.currencies.countryName,
         })
         .from(schema.currencies)
         .where(and(this.currencyGroupEq(groupId), eq(schema.currencies.active, true)));
@@ -7450,6 +7615,15 @@ export class MarketingService {
         formCurrencies = active
           .slice()
           .sort((a, b) => (a.isDefault ? -1 : b.isDefault ? 1 : a.code.localeCompare(b.code)));
+        // Region lists for each configured country (deduped).
+        const regions: Record<string, string[]> = {};
+        for (const c of active) {
+          if (c.countryName && !regions[c.countryName]) {
+            const r = regionsForCountry(c.countryName);
+            if (r.length > 0) regions[c.countryName] = [...r];
+          }
+        }
+        if (Object.keys(regions).length > 0) regionsByCountry = regions;
       }
     }
 
@@ -7460,6 +7634,7 @@ export class MarketingService {
       deploymentType: campaign.deploymentType,
       products,
       ...(formCurrencies ? { currencies: formCurrencies } : {}),
+      ...(regionsByCountry ? { regionsByCountry } : {}),
       formConfig: campaign.formConfig as {
         heading?: string;
         subtitle?: string;
@@ -7986,11 +8161,19 @@ export class MarketingService {
       conditions.push(or(...branchOr)!);
     } else if (eIds && eIds.length > 0) {
       // No specific branch selected but company-group isolation is active.
-      // Restrict to campaigns belonging to the group's branches.
+      // Restrict to campaigns belonging to the group's branches — PLUS the
+      // caller's own forms regardless of branch. A form created by a SuperAdmin
+      // (or anyone) while a company is selected but no specific branch is picked
+      // saves with branch_id=NULL, so it would otherwise vanish from both "All"
+      // and "My forms". Mirrors the callerId fallback in the branch path above.
       const bCond = eIds.length === 1
         ? eq(schema.campaigns.branchId, eIds[0]!)
         : inArray(schema.campaigns.branchId, eIds);
-      conditions.push(bCond);
+      if (opts?.callerId) {
+        conditions.push(or(bCond, eq(schema.campaigns.mediaBuyerId, opts.callerId))!);
+      } else {
+        conditions.push(bCond);
+      }
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

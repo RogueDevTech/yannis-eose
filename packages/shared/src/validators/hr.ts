@@ -211,6 +211,118 @@ export const deleteAdjustmentSchema = z.object({
 export type DeleteAdjustmentInput = z.infer<typeof deleteAdjustmentSchema>;
 
 // ============================================
+// Staff Refund Validators (post-tax, doc §2)
+// ============================================
+
+/**
+ * Record a refund owed to a staff member. Refunds are POST-TAX cash added to net
+ * pay (never taxed), recorded by HR and approved on creation. `amount` is always
+ * positive — a refund only ever adds to pay.
+ */
+export const createRefundSchema = z.object({
+  staffId: z.string().uuid(),
+  amount: z.coerce.number().multipleOf(0.01).positive('Refund amount must be greater than zero'),
+  reason: z.string().min(3).max(200),
+  notes: z.string().max(1000).optional(),
+  docUrl: z.string().url().optional(),
+  // Date the refund was incurred/approved.
+  refundDate: z.string().date(),
+  // Target payroll month (YYYY-MM-01) whose batch this refund settles in.
+  periodMonth: z.string().regex(/^\d{4}-\d{2}-01$/, 'Select the target payroll month'),
+});
+export type CreateRefundInput = z.infer<typeof createRefundSchema>;
+
+/** Edit a refund. Blocked server-side once swept into a PENDING_FINANCE/PAID batch. */
+export const updateRefundSchema = z.object({
+  refundId: z.string().uuid(),
+  amount: z.coerce.number().multipleOf(0.01).positive('Refund amount must be greater than zero'),
+  reason: z.string().min(3).max(200),
+  notes: z.string().max(1000).optional(),
+  docUrl: z.string().url().optional(),
+  refundDate: z.string().date(),
+  periodMonth: z.string().regex(/^\d{4}-\d{2}-01$/, 'periodMonth must be YYYY-MM-01').optional(),
+});
+export type UpdateRefundInput = z.infer<typeof updateRefundSchema>;
+
+/** Void (soft-cancel) a refund without a hard delete, preserving the audit trail. */
+export const voidRefundSchema = z.object({
+  refundId: z.string().uuid(),
+});
+export type VoidRefundInput = z.infer<typeof voidRefundSchema>;
+
+// ============================================
+// Per-staff Allowance Validators (taxable, doc §3)
+// ============================================
+
+/**
+ * Record a per-staff ad-hoc allowance. Allowances are TAXABLE earnings added to
+ * gross before PAYE, on top of role allowances. `recurring` allowances prorate by
+ * active days; one-time allowances are paid in full. Amount is always positive.
+ */
+export const createStaffAllowanceSchema = z.object({
+  staffId: z.string().uuid(),
+  amount: z.coerce.number().multipleOf(0.01).positive('Allowance amount must be greater than zero'),
+  name: z.string().min(2).max(100),
+  notes: z.string().max(1000).optional(),
+  recurring: z.coerce.boolean().default(false),
+  periodMonth: z.string().regex(/^\d{4}-\d{2}-01$/, 'Select the target payroll month'),
+});
+export type CreateStaffAllowanceInput = z.infer<typeof createStaffAllowanceSchema>;
+
+/** Edit an allowance. Blocked server-side once swept into a PENDING_FINANCE/PAID batch. */
+export const updateStaffAllowanceSchema = z.object({
+  allowanceId: z.string().uuid(),
+  amount: z.coerce.number().multipleOf(0.01).positive('Allowance amount must be greater than zero'),
+  name: z.string().min(2).max(100),
+  notes: z.string().max(1000).optional(),
+  recurring: z.coerce.boolean().default(false),
+  periodMonth: z.string().regex(/^\d{4}-\d{2}-01$/, 'periodMonth must be YYYY-MM-01').optional(),
+});
+export type UpdateStaffAllowanceInput = z.infer<typeof updateStaffAllowanceSchema>;
+
+/** Void (soft-cancel) a per-staff allowance, preserving the audit trail. */
+export const voidStaffAllowanceSchema = z.object({
+  allowanceId: z.string().uuid(),
+});
+export type VoidStaffAllowanceInput = z.infer<typeof voidStaffAllowanceSchema>;
+
+// ============================================
+// Staff Tax Document Validators (doc §5)
+// ============================================
+
+export const taxDocumentTypeSchema = z.enum([
+  'TIN_CERTIFICATE',
+  'TAX_CARD',
+  'PAYE_RECEIPT',
+  'TAX_CLEARANCE',
+  'OTHER',
+]);
+export type TaxDocumentType = z.infer<typeof taxDocumentTypeSchema>;
+
+/** Record a tax document for a staff member. The file is already uploaded to GCS. */
+export const createTaxDocumentSchema = z.object({
+  staffId: z.string().uuid(),
+  docType: taxDocumentTypeSchema,
+  title: z.string().min(2).max(150),
+  docUrl: z.string().url(),
+  notes: z.string().max(1000).optional(),
+  expiresOn: z.string().date().optional(),
+});
+export type CreateTaxDocumentInput = z.infer<typeof createTaxDocumentSchema>;
+
+/** Delete a tax document (hard delete — the audit trail lives in the history twin). */
+export const deleteTaxDocumentSchema = z.object({
+  documentId: z.string().uuid(),
+});
+export type DeleteTaxDocumentInput = z.infer<typeof deleteTaxDocumentSchema>;
+
+/** List tax documents for one staff member. */
+export const listTaxDocumentsSchema = z.object({
+  staffId: z.string().uuid(),
+});
+export type ListTaxDocumentsInput = z.infer<typeof listTaxDocumentsSchema>;
+
+// ============================================
 // Settlement Window Config Validators
 // ============================================
 

@@ -48,6 +48,7 @@ export interface CrossFunnelAttemptRow {
   originalCampaignName: string | null;
   originalOrderStatus: string | null;
   originalOrderAmount: string | null;
+  originalOrderCurrency?: string | null;
   originalOrderNumber: number | null;
   originalOrderCreatedAt: string | null;
   originalOrderPhone: string | null;
@@ -236,7 +237,7 @@ export function MarketingCrossFunnelPage({
       render: (row) => (
         <span className="font-medium">
           {row.originalOrderAmount ? (
-            <NairaPrice amount={Number(row.originalOrderAmount)} />
+            <NairaPrice amount={Number(row.originalOrderAmount)} currencyCode={row.originalOrderCurrency} />
           ) : (
             <span className="text-app-fg-muted">—</span>
           )}
@@ -795,8 +796,8 @@ function DuplicateCompareOverlay({
             <CompareRow label="Product" left={row.productName ?? '—'} right={row.productName ?? '—'} />
             <CompareRow
               label="Total"
-              left={row.originalOrderAmount ? <NairaPrice amount={Number(row.originalOrderAmount)} /> : '—'}
-              right={row.originalOrderAmount ? <NairaPrice amount={Number(row.originalOrderAmount)} /> : '—'}
+              left={row.originalOrderAmount ? <NairaPrice amount={Number(row.originalOrderAmount)} currencyCode={row.originalOrderCurrency} /> : '—'}
+              right={row.originalOrderAmount ? <NairaPrice amount={Number(row.originalOrderAmount)} currencyCode={row.originalOrderCurrency} /> : '—'}
             />
             <CompareRow
               label="Date"

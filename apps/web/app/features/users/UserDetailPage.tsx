@@ -1110,6 +1110,29 @@ export function UserDetailPage({
             onClick={() => setOpenModal('branches')}
           />
         )}
+        {showPayrollTab && (() => {
+          // "In payroll?" indicator (doc §1): ACTIVE + has a comp basis + not
+          // awaiting payroll approval. Mirrors the payroll batch inclusion filter.
+          const hasCompBasis = user.payRoleId != null || user.flatMonthlyAmount != null;
+          const payrollStatus = user.onboardingPayrollStatus ?? 'NOT_APPLICABLE';
+          const inPayroll =
+            user.status === 'ACTIVE' && hasCompBasis && payrollStatus !== 'PENDING_APPROVAL';
+          const label = inPayroll
+            ? 'In payroll'
+            : payrollStatus === 'PENDING_APPROVAL'
+              ? 'Pending payroll approval'
+              : 'Not in payroll';
+          return (
+            <div className="flex items-center gap-2 px-1">
+              <span className="text-xs text-app-fg-muted">Payroll status</span>
+              <StatusBadge
+                status={inPayroll ? 'active' : payrollStatus === 'PENDING_APPROVAL' ? 'pending' : 'inactive'}
+                label={label}
+                size="sm"
+              />
+            </div>
+          );
+        })()}
         {isSelfView && showPayrollTab && (
           <SectionCard
             label="Payroll details"

@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { resolveAssetMaxBytes } from '@yannis/shared';
 import { uploadAsset, type AssetFolder } from '~/lib/object-storage';
 
 export type FileUploadUploadState = 'idle' | 'uploading' | 'done' | 'error';
@@ -7,8 +8,9 @@ interface FileUploadProps {
   folder: AssetFolder;
   onUpload: (url: string) => void;
   accept?: string;
-  /** Hard cap on file size. Platform default is 2 MB (CEO directive) — do
-   *  not override upward unless you have a specific business reason. */
+  /** Hard cap on file size in MB. Defaults to the folder's platform cap
+   *  (`resolveAssetMaxBytes`): 2 MB for images, 10 MB for onboarding docs.
+   *  Pass explicitly only to tighten it further for a specific field. */
   maxSizeMB?: number;
   label?: string;
   /**
@@ -33,7 +35,7 @@ export function FileUpload({
   folder,
   onUpload,
   accept = 'image/*',
-  maxSizeMB = 2,
+  maxSizeMB,
   label,
   name,
   required,
@@ -41,6 +43,10 @@ export function FileUpload({
   size = 'md',
   variant = 'default',
 }: FileUploadProps) {
+  // Cap defaults to the folder's platform limit (2 MB images / 10 MB onboarding
+  // docs) so the picker copy, the client check, and the server check all agree.
+  // An explicit `maxSizeMB` only tightens it further.
+  const effectiveMaxSizeMB = maxSizeMB ?? resolveAssetMaxBytes(folder) / (1024 * 1024);
   const [state, setState] = useState<UploadState>('idle');
   const [progress, setProgress] = useState(0);
   const [uploadedUrl, setUploadedUrl] = useState('');
@@ -86,8 +92,8 @@ export function FileUpload({
     async (file: File) => {
       setError('');
 
-      if (file.size > maxSizeMB * 1024 * 1024) {
-        setError(`File too large. Maximum size is ${maxSizeMB}MB.`);
+      if (file.size > effectiveMaxSizeMB * 1024 * 1024) {
+        setError(`File too large. Maximum size is ${effectiveMaxSizeMB}MB.`);
         return;
       }
 
@@ -113,7 +119,7 @@ export function FileUpload({
         setError(err instanceof Error ? err.message : 'Upload failed. Please try again.');
       }
     },
-    [folder, maxSizeMB, onUpload],
+    [folder, effectiveMaxSizeMB, onUpload],
   );
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -186,7 +192,7 @@ export function FileUpload({
                 />
               </svg>
               <span className="text-sm text-app-fg-muted truncate">
-                Choose file <span className="text-mini">· max {maxSizeMB}MB</span>
+                Choose file <span className="text-mini">· max {effectiveMaxSizeMB}MB</span>
               </span>
             </>
           ) : (
@@ -208,7 +214,7 @@ export function FileUpload({
                 Click or drag file to upload
               </p>
               <p className={`${size === 'sm' ? 'text-micro mt-0.5' : 'text-xs mt-1'} text-app-fg-muted`}>
-                Max {maxSizeMB}MB
+                Max {effectiveMaxSizeMB}MB
               </p>
             </>
           )}

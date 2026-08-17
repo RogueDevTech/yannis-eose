@@ -23,6 +23,7 @@ import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-colla
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
+import { useCurrencyFilterOptions } from '~/contexts/currencies-catalog-context';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -87,6 +88,7 @@ const MARKETING_ORDERS_STATUS_OPTIONS_BASE = MARKETING_ORDERS_STATUSES.map((stat
 const FROM_CART_STATUS_VALUE = '__from_cart__';
 const OFFLINE_STATUS_VALUE = '__offline__';
 const TEST_ORDERS_STATUS_VALUE = '__test_orders__';
+const CARRY_OVER_STATUS_VALUE = '__carry_over__';
 
 /** Marketing performance metrics — same shape as `marketing.metrics` / dashboard. */
 export interface MarketingMetrics {
@@ -243,12 +245,15 @@ export function MarketingOrdersPage({
   // and only commit (one navigation) when the user presses Apply in the sheet /
   // desktop Filters modal. Status stays immediate (below): its dropdown maps to
   // several params and its values are also driven by stat-strip tile clicks.
-  const df = useDraftFilters(['mediaBuyerId', 'productId', 'campaignId', 'sortBy', 'sortOrder'], {
+  const df = useDraftFilters(['mediaBuyerId', 'productId', 'campaignId', 'currency', 'sortBy', 'sortOrder'], {
     beforeApply: primeSamePathRefetch,
   });
   const draftMediaBuyerId = df.get('mediaBuyerId') || 'ALL';
   const draftProductId = df.get('productId') || 'ALL';
   const draftCampaignId = df.get('campaignId') || 'ALL';
+  // Multi-currency filter — dormant (null) until the company adds a 2nd currency.
+  const currencyFilterOptions = useCurrencyFilterOptions();
+  const draftCurrency = df.get('currency') || 'ALL';
   const draftSortValue = `${df.get('sortBy') || 'createdAt'}:${df.get('sortOrder') || 'desc'}`;
   const setDraftSort = useCallback(
     (v: string) => {
@@ -264,14 +269,17 @@ export function MarketingOrdersPage({
   const fromCartUrlActive = searchParams.get('fromCart') === '1';
   const testOrdersUrlActive = searchParams.get('testOrders') === '1';
   const offlineUrlActive = searchParams.get('orderSource') === 'offline';
+  const carryOverUrlActive = searchParams.get('carryOver') === '1';
   const [selectedStatus, setSelectedStatus] = useState(
     offlineUrlActive
       ? OFFLINE_STATUS_VALUE
-      : enableTestOrdersOption && testOrdersUrlActive
-        ? TEST_ORDERS_STATUS_VALUE
-        : enableFromCartStatusOption && fromCartUrlActive
-          ? FROM_CART_STATUS_VALUE
-          : statusFilter || 'ALL',
+      : carryOverUrlActive
+        ? CARRY_OVER_STATUS_VALUE
+        : enableTestOrdersOption && testOrdersUrlActive
+          ? TEST_ORDERS_STATUS_VALUE
+          : enableFromCartStatusOption && fromCartUrlActive
+            ? FROM_CART_STATUS_VALUE
+            : statusFilter || 'ALL',
   );
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [myTeamTab, setMyTeamTab] = useState<'personal' | 'team'>(
@@ -291,14 +299,16 @@ export function MarketingOrdersPage({
     setSelectedStatus(
       offlineUrlActive
         ? OFFLINE_STATUS_VALUE
-        : enableTestOrdersOption && testOrdersUrlActive
-          ? TEST_ORDERS_STATUS_VALUE
-          : enableFromCartStatusOption && fromCartUrlActive
-            ? FROM_CART_STATUS_VALUE
-            : statusFilter || 'ALL',
+        : carryOverUrlActive
+          ? CARRY_OVER_STATUS_VALUE
+          : enableTestOrdersOption && testOrdersUrlActive
+            ? TEST_ORDERS_STATUS_VALUE
+            : enableFromCartStatusOption && fromCartUrlActive
+              ? FROM_CART_STATUS_VALUE
+              : statusFilter || 'ALL',
     );
     setMyTeamTab(activeMediaBuyerFilter === viewerUserId ? 'personal' : 'team');
-  }, [statusFilter, enableFromCartStatusOption, fromCartUrlActive, enableTestOrdersOption, testOrdersUrlActive, offlineUrlActive, activeMediaBuyerFilter, viewerUserId]);
+  }, [statusFilter, enableFromCartStatusOption, fromCartUrlActive, enableTestOrdersOption, testOrdersUrlActive, offlineUrlActive, carryOverUrlActive, activeMediaBuyerFilter, viewerUserId]);
 
   // Quick-detail modal for an abandoned cart row — fetched on demand from the
   // marketing cart-detail resource route (scoped server-side to the viewer).
@@ -322,21 +332,33 @@ export function MarketingOrdersPage({
         next.delete('status');
         next.delete('testOrders');
         next.delete('orderSource');
+        next.delete('carryOver');
         next.set('fromCart', '1');
       } else if (status === TEST_ORDERS_STATUS_VALUE) {
         next.delete('status');
         next.delete('fromCart');
         next.delete('orderSource');
+        next.delete('carryOver');
         next.set('testOrders', '1');
       } else if (status === OFFLINE_STATUS_VALUE) {
         next.delete('status');
         next.delete('fromCart');
         next.delete('testOrders');
+        next.delete('carryOver');
         next.set('orderSource', 'offline');
+      } else if (status === CARRY_OVER_STATUS_VALUE) {
+        // Carry-over is not a real status — it swaps the list to delivered-this-
+        // period-but-generated-earlier orders (created_at filter replaced server-side).
+        next.delete('status');
+        next.delete('fromCart');
+        next.delete('testOrders');
+        next.delete('orderSource');
+        next.set('carryOver', '1');
       } else {
         next.delete('fromCart');
         next.delete('testOrders');
         next.delete('orderSource');
+        next.delete('carryOver');
         if (status === 'ALL' || !status) next.delete('status');
         else next.set('status', status);
       }
@@ -380,6 +402,7 @@ export function MarketingOrdersPage({
     if ((searchParams.get('productId') || '').length > 0) n += 1;
     if ((searchParams.get('campaignId') || '').length > 0) n += 1;
     if ((searchParams.get('orderSource') || '').length > 0) n += 1;
+    if ((searchParams.get('currency') || '').length > 0) n += 1;
     return n;
   }, [selectedStatus, showMediaBuyerColumn, searchParams]);
 
@@ -395,9 +418,9 @@ export function MarketingOrdersPage({
           : (order) =>
               order.status === 'CART' || order.status === 'ABANDONED' || order.status === 'RECOVERED' ? (
                 // Cart / abandoned rows have no order detail page — copyable id only.
-                <OrderIdBadge id={order.id} orderNumber={order.orderNumber} />
+                <OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} />
               ) : (
-                <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={orderDetailHref('/admin/orders', order.id, 'marketing')} />
+                <OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} linkTo={orderDetailHref('/admin/orders', order.id, 'marketing')} />
               ),
       },
       {
@@ -442,11 +465,15 @@ export function MarketingOrdersPage({
           ? () => <TableCellTextPulse className="w-[10rem] max-w-[min(16rem,100%)]" />
           : (order) => {
               const name = order.primaryProductName?.trim();
+              const qty = order.primaryQuantity ?? 0;
+              // Show the offer/pack size next to the product, e.g. "BCG-35 · qty 3".
+              const packLabel = qty >= 1 ? ` · qty ${qty}` : '';
               const extra =
                 (order.itemCount ?? 0) > 1 ? ` · +${(order.itemCount ?? 0) - 1} more` : '';
               return name ? (
                 <span className="text-sm text-app-fg truncate">
                   {name}
+                  {packLabel ? <span className="text-app-fg-muted">{packLabel}</span> : null}
                   {extra ? <span className="text-app-fg-muted">{extra}</span> : null}
                 </span>
               ) : (
@@ -466,7 +493,7 @@ export function MarketingOrdersPage({
             )
           : (order) => (
               <span className="font-medium">
-                <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
+                <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} currencyCode={order.currencyCode} />
               </span>
             ),
       },
@@ -574,7 +601,7 @@ export function MarketingOrdersPage({
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Possible dup</span>
               )}
             </span>
-            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
+            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} textClassName="text-sm font-medium text-app-fg" />
           </div>
           <div className="flex items-center justify-between gap-2">
             {order.status === 'CART' ? (
@@ -674,6 +701,19 @@ export function MarketingOrdersPage({
               <>
                 {/* Status stays immediate (not draft): it maps to several params
                     and is also driven by stat-strip tile clicks. */}
+                {currencyFilterOptions ? (
+                  <FilterField onClear={draftCurrency !== 'ALL' ? () => df.set('currency', null) : undefined}>
+                    <FormSelect
+                      value={draftCurrency}
+                      onChange={(e) => df.set('currency', e.target.value !== 'ALL' ? e.target.value : null)}
+                      options={currencyFilterOptions}
+                      controlSize="sm"
+                      className="!bg-transparent !border-transparent !text-center" inlineChevron
+                      openAs="modal"
+                      wrapperClassName="w-full"
+                    />
+                  </FilterField>
+                ) : null}
                 <FilterField>
                   <FormSelect
                     value={selectedStatus}
@@ -980,13 +1020,16 @@ export function MarketingOrdersPage({
                         : {}),
                     },
                     {
-                      // Carry-over only: orders delivered this period but
-                      // generated in a prior month. Display-only (no onClick) —
-                      // NOT a status filter and excluded from the DR calc above.
+                      // Carry-over: orders delivered this period but generated in
+                      // a prior month. Clickable — swaps the list to those orders
+                      // (a created_at-based subset, not a status). Still excluded
+                      // from the DR calc above.
                       label: carryOverTileLabel(dateFilters.startDate, dateFilters.endDate),
                       value: activeSecondary.deliveredThisMonth ?? 0,
                       valueClassName: 'text-success-600 dark:text-success-400',
-                      title: 'Carry-over delivered: orders delivered this period but generated in a prior month. Does not affect Delivery Rate.',
+                      title: 'Carry-over delivered: orders delivered this period but generated in a prior month. Click to view them. Does not affect Delivery Rate.',
+                      active: selectedStatus === CARRY_OVER_STATUS_VALUE,
+                      onClick: () => handleStatusChange(CARRY_OVER_STATUS_VALUE),
                     },
                     {
                       label: 'Deleted',
@@ -1018,6 +1061,18 @@ export function MarketingOrdersPage({
                   }
                   desktopInlineFilters={
                     <>
+                      {/* Currency — widest scoping axis, dormant until a 2nd currency exists. */}
+                      {currencyFilterOptions ? (
+                        <InlineFilter
+                          type="select"
+                          value={draftCurrency}
+                          defaultValue="ALL"
+                          onChange={(v) => df.set('currency', v && v !== 'ALL' ? v : null)}
+                          onClear={() => df.set('currency', null)}
+                          options={currencyFilterOptions}
+                          width="w-auto min-w-[9rem]"
+                        />
+                      ) : null}
                       {/* Status stays immediate (multi-param + tile-driven). */}
                       <InlineFilter
                         type="select"
@@ -1262,7 +1317,7 @@ export function MarketingOrdersPage({
               {/* Header: customer + order ID */}
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-app-fg truncate min-w-0" title={o.customerName ?? undefined}>{clipName(o.customerName)}</p>
-                <OrderIdBadge id={o.id} orderNumber={o.orderNumber} textClassName="text-sm font-medium text-app-fg" />
+                <OrderIdBadge id={o.id} orderNumber={o.orderNumber} currencyCode={o.currencyCode} textClassName="text-sm font-medium text-app-fg" />
               </div>
 
               {/* Details */}
@@ -1275,13 +1330,14 @@ export function MarketingOrdersPage({
                   <span className="text-app-fg-muted">Product</span>
                   <span className="text-app-fg text-right truncate max-w-[60%]">
                     {o.primaryProductName?.trim() || '—'}
+                    {(o.primaryQuantity ?? 0) >= 1 ? <span className="text-app-fg-muted"> · qty {o.primaryQuantity}</span> : null}
                     {(o.itemCount ?? 0) > 1 ? <span className="text-app-fg-muted"> +{(o.itemCount ?? 0) - 1}</span> : null}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-app-fg-muted">Amount</span>
                   <span className="font-medium">
-                    <NairaPrice amount={o.totalAmount ? Number(o.totalAmount) : null} />
+                    <NairaPrice amount={o.totalAmount ? Number(o.totalAmount) : null} currencyCode={o.currencyCode} />
                   </span>
                 </div>
                 {o.campaignName?.trim() && (

@@ -79,6 +79,9 @@ export function OfferForm({
     return [...map.values()];
   }, [currencies, lines]);
 
+  // As long as other currencies are configured, always show their price columns.
+  const visibleExtraCurrencies = extraCurrencies;
+
   const productOptions = useMemo(
     () => (products ?? []).map((p) => ({ value: p.id, label: `${p.name} (₦${Number(p.baseSalePrice).toLocaleString()})` })),
     [products],
@@ -148,7 +151,7 @@ export function OfferForm({
 
         {/* Offer lines — compact table */}
         <div className="card overflow-hidden p-0">
-          <div className="flex items-center justify-between gap-2 border-b border-app-border px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-app-border px-4 py-3">
             <h3 className="text-sm font-semibold text-app-fg">Offer lines</h3>
             <Button type="button" variant="secondary" size="sm" onClick={() => setLines((p) => p.concat([{ ...EMPTY_LINE }]))}>
               + Add line
@@ -167,7 +170,7 @@ export function OfferForm({
                     <th className="px-3 py-2 font-medium">Label</th>
                     <th className="w-20 px-3 py-2 font-medium">Qty</th>
                     <th className="w-40 px-3 py-2 font-medium">Price (₦)</th>
-                    {extraCurrencies.map((c) => (
+                    {visibleExtraCurrencies.map((c) => (
                       <th key={c.code} className="w-40 px-3 py-2 font-medium">
                         Price ({c.symbol} {c.code})
                       </th>
@@ -220,7 +223,7 @@ export function OfferForm({
                           placeholder={Number.isFinite(basePrice) ? fmt(basePrice * (it.quantity ?? 1)) : '0'}
                         />
                       </td>
-                      {extraCurrencies.map((c) => (
+                      {visibleExtraCurrencies.map((c) => (
                         <td key={c.code} className="px-3 py-2">
                           <AmountInput
                             prefix={c.symbol}

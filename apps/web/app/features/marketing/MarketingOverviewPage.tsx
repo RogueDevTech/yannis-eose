@@ -14,6 +14,10 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { LiveActivityCard, LiveActivityDetailModal } from '~/components/ui/live-activity-card';
 import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
+import { CurrencyLens, useCurrencyLensMode } from '~/components/ui/currency-lens';
+import { LensedMoney } from '~/components/ui/lensed-money';
+import { useCurrenciesCatalog } from '~/contexts/currencies-catalog-context';
+import { toBaseAmount } from '@yannis/shared';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
 import { STATUS_COLORS, formatStatus } from '~/features/shared/order-status';
@@ -339,6 +343,35 @@ export function MarketingOverviewPage({
   const avgCpa = leaderboard.length > 0
     ? leaderboard.reduce((sum, b) => sum + b.cpa, 0) / leaderboard.length
     : 0;
+
+  // ── Currency lens ──────────────────────────────────────────────────────────
+  // Ad spend is NGN-only (spec), so ROAS = revenue ÷ ₦ spend must use a
+  // BASE-EQUIVALENT revenue numerator. We recompute the numerator per lens mode
+  // (base → ₦ slice; single → that currency in ₦; merged → all currencies in ₦),
+  // converting via each currency's FX rate. Currencies with no rate are dropped
+  // from ROAS only (their raw amount still shows in the Del. Revenue tile via
+  // <LensedMoney>). CPA is count-based, so it needs no FX and is unchanged.
+  const lensMode = useCurrencyLensMode();
+  const currenciesCatalog = useCurrenciesCatalog();
+  const revenueByCcy = metrics.deliveredRevenueByCurrency ?? { NGN: metrics.deliveredRevenue };
+  const baseCode = (currenciesCatalog.find((c) => c.isDefault)?.code ?? 'NGN').toUpperCase();
+  const roasRevenueBase = (() => {
+    const inBase = (code: string, amount: number): number => {
+      if (!amount) return 0;
+      // Only a KNOWN catalog currency converts; currencyByCode() returns a
+      // synthetic base-like row for unknown codes that would wrongly count 1:1.
+      const info = currenciesCatalog.find((c) => c.code.toUpperCase() === code.toUpperCase());
+      const v = info ? toBaseAmount(amount, info) : null;
+      return v ?? 0; // unset FX or unknown code → excluded from ROAS (still shown in the revenue tile)
+    };
+    if (lensMode.kind === 'single') return inBase(lensMode.code, revenueByCcy[lensMode.code] ?? 0);
+    if (lensMode.kind === 'merged') {
+      return Object.entries(revenueByCcy).reduce((sum, [code, amt]) => sum + inBase(code, amt), 0);
+    }
+    return revenueByCcy[baseCode] ?? 0; // base mode
+  })();
+  const lensRoas = metrics.approvedSpend > 0 ? roasRevenueBase / metrics.approvedSpend : 0;
+
   const statItems: OverviewStatStripItem[] = [
     {
       label: 'Ad Spend',
@@ -407,12 +440,16 @@ export function MarketingOverviewPage({
     },
     {
       label: 'True ROAS',
-      value: `${metrics.trueRoas.toFixed(2)}x`,
+      value: `${lensRoas.toFixed(2)}x`,
       valueClassName: 'text-app-fg',
+      title:
+        lensMode.kind === 'base'
+          ? undefined
+          : 'ROAS uses base-currency-equivalent revenue (via FX) ÷ ad spend (₦).',
     },
     {
       label: 'Del. Revenue',
-      value: formatNaira(Math.round(metrics.deliveredRevenue)),
+      value: <LensedMoney amounts={revenueByCcy} />,
       valueClassName: 'text-app-fg',
     },
     {
@@ -457,6 +494,8 @@ export function MarketingOverviewPage({
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
+                {/* Currency lens — self-hides unless the company has 2+ currencies. */}
+                <CurrencyLens />
                 <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters?.startDate ?? ''}

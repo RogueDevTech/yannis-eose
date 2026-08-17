@@ -1,9 +1,11 @@
 import { TextInput } from '~/components/ui/text-input';
+import { LabelInfo } from '~/components/ui/label-info';
 
 interface AccentColorInputProps {
   value: string;
   onChange: (next: string) => void;
-  hint?: string;
+  /** Optional info tooltip shown next to the label. */
+  labelInfo?: string;
 }
 
 function normalizeHexColor(raw: string): string | null {
@@ -14,16 +16,15 @@ function normalizeHexColor(raw: string): string | null {
   return withHash;
 }
 
-export function AccentColorInput({
-  value,
-  onChange,
-  hint = 'Preview updates as you edit.',
-}: AccentColorInputProps) {
+export function AccentColorInput({ value, onChange, labelInfo }: AccentColorInputProps) {
   return (
-    <div className="sm:col-span-1 space-y-1">
-      <label className="text-xs font-medium text-app-fg-muted">Accent color</label>
-      <div className="flex items-center gap-3">
-        <label className="relative inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-app-border bg-app-canvas shadow-sm">
+    <div className="space-y-1">
+      <label className="inline-flex items-center gap-1 text-xs font-medium text-app-fg-muted">
+        Accent color
+        {labelInfo && <LabelInfo text={labelInfo} />}
+      </label>
+      <div className="flex items-center gap-2">
+        <label className="relative inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-app-border bg-app-canvas shadow-sm md:h-9 md:w-9">
           <input
             type="color"
             aria-label="Accent color"
@@ -39,7 +40,6 @@ export function AccentColorInput({
         </label>
 
         <TextInput
-          label=""
           aria-label="Accent hex value"
           value={value}
           onChange={(e) => {
@@ -51,7 +51,6 @@ export function AccentColorInput({
           wrapperClassName="flex-1"
         />
       </div>
-      <p className="text-xs text-app-fg-muted">{hint}</p>
     </div>
   );
 }

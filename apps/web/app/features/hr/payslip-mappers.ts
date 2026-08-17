@@ -10,6 +10,7 @@ export type PayslipApiRow = {
     performanceBonus: string | number;
     allowancesTotal: string | number;
     addOnsTotal: string | number;
+    refundTotal?: string | number | null;
     deductionsTotal: string | number;
     grossPay: string | number;
     payeTax: string | number;
@@ -105,6 +106,7 @@ export function toPayslipPdfInput(row: PayslipApiRow): PayslipPdfInput {
     performanceBonus: Number(row.payout.performanceBonus),
     allowancesTotal: Number(row.payout.allowancesTotal),
     addOnsTotal: Number(row.payout.addOnsTotal),
+    refundTotal: Number(row.payout.refundTotal ?? 0),
     deductionsTotal: Number(row.payout.deductionsTotal),
     grossPay: Number(row.payout.grossPay),
     payeTax: Number(row.payout.payeTax),

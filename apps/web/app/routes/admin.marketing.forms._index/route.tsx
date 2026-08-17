@@ -74,6 +74,10 @@ function parseOfferGroups(payload: unknown): OfferGroupRow[] {
             imageUrl: rr.imageUrl != null ? String(rr.imageUrl) : null,
             sortOrder: typeof rr.sortOrder === 'number' ? rr.sortOrder : parseInt(String(rr.sortOrder ?? '0'), 10) || 0,
             status: rr.status != null ? String(rr.status) : 'ACTIVE',
+            pricesByCurrency:
+              rr.pricesByCurrency && typeof rr.pricesByCurrency === 'object'
+                ? Object.fromEntries(Object.entries(rr.pricesByCurrency as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+                : {},
           }))
           .filter((it) => it.id && it.productId && it.label)
       : [];
@@ -135,14 +139,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   const pageData = (async () => {
-  // Forms list + the product catalog that powers the "Filter by product" picker.
-  const [formsRes, productsRes] = await Promise.all([
+  // Forms list + the product catalog that powers the "Filter by product" picker
+  // + offer groups (with per-currency prices) so cards can badge multi-currency forms.
+  const [formsRes, productsRes, offerGroupsRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${listInputStr}`, {
       method: 'GET',
       cookie,
     }),
     apiRequest<unknown>(
       `/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
+      { method: 'GET', cookie },
+    ),
+    apiRequest<unknown>(
+      `/trpc/marketing.listOfferGroups?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 250 }))}`,
       { method: 'GET', cookie },
     ),
   ]);
@@ -166,7 +175,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     productsLoadError: productsRes.ok ? null : 'Could not load products for the filter.',
     allOfferTemplates: [] as OfferTemplateListRow[],
     offersListLoadError: null,
-    offerGroups: [] as OfferGroupRow[],
+    offerGroups: offerGroupsRes.ok ? parseOfferGroups(offerGroupsRes.data) : ([] as OfferGroupRow[]),
     offerGroupsLoadError: null,
   } satisfies Pick<
     FormsStreamData,

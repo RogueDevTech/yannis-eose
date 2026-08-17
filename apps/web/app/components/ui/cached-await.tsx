@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useLocation, useRevalidator } from '@remix-run/react';
+import { useLocation, useNavigation, useRevalidator } from '@remix-run/react';
 import {
   getCachedLoaderEntry,
   setCachedLoaderEntry,
@@ -87,6 +87,7 @@ export function CachedAwait<T>({
 }) {
   const location = useLocation();
   const revalidator = useRevalidator();
+  const navigation = useNavigation();
   const cacheKey = location.pathname + location.search;
   const cachedRef = useRef(getCachedLoaderEntry(cacheKey));
   const [resolved, setResolved] = useState<T | null>(
@@ -195,9 +196,21 @@ export function CachedAwait<T>({
   }
 
   if (resolved !== null) {
-    // When showing cached data while revalidating, apply a subtle opacity
-    // transition so users know numbers are refreshing.
-    const isRefreshing = dimOnRefresh && revalidator.state === 'loading' && cachedRef.current !== null;
+    // When showing cached data while refreshing, apply a subtle opacity
+    // transition so users know numbers are updating. Two triggers:
+    //  1. an explicit revalidation (useRevalidator), and
+    //  2. a SAME-PATH navigation load — i.e. a filter/param change like the
+    //     currency switch, where the URL changes but the pathname stays put.
+    //     Without (2), changing a query param re-fetched silently and the
+    //     numbers appeared frozen until the new data landed.
+    const samePathNavLoading =
+      navigation.state === 'loading' &&
+      !!navigation.location &&
+      navigation.location.pathname === location.pathname;
+    const isRefreshing =
+      dimOnRefresh &&
+      cachedRef.current !== null &&
+      (revalidator.state === 'loading' || samePathNavLoading);
     return (
       <div className={isRefreshing ? 'opacity-60 transition-opacity duration-300' : 'transition-opacity duration-300'}>
         {children(resolved)}

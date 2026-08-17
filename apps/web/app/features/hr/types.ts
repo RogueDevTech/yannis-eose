@@ -36,6 +36,40 @@ export interface Adjustment {
   batchStatus?: string | null;
 }
 
+/** A post-tax staff refund (doc §2). Added to net pay, never taxed. */
+export interface Refund {
+  id: string;
+  staffId: string;
+  amount: string;
+  reason: string;
+  notes: string | null;
+  docUrl: string | null;
+  refundDate: string;
+  status: 'APPROVED' | 'VOIDED';
+  approvedBy: string;
+  createdAt: string;
+  periodMonth?: string | null;
+  // Batch status of the linked payout (null when floating). Editable/voidable while
+  // floating or in DRAFT/PENDING_HR; PENDING_FINANCE/PAID lock it.
+  batchStatus?: string | null;
+}
+
+/** A per-staff taxable allowance (doc §3). Added to gross before PAYE. */
+export interface StaffAllowance {
+  id: string;
+  staffId: string;
+  amount: string;
+  name: string;
+  notes: string | null;
+  recurring: boolean;
+  status: 'APPROVED' | 'VOIDED';
+  approvedBy: string;
+  payoutId: string | null;
+  createdAt: string;
+  periodMonth?: string | null;
+  batchStatus?: string | null;
+}
+
 export interface HRUser {
   id: string;
   name: string;

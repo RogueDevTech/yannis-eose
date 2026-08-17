@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
+import { useBaseCurrency, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { Modal } from '~/components/ui/modal';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { CurrencyFilterSelect } from '~/components/ui/currency-filter-select';
 import { formatNaira } from '~/lib/format-amount';
 import { RemittanceInfoIcon as InfoIcon, FormulaBreakdownModal } from './remittance-info-modals';
 import type {
@@ -48,6 +50,25 @@ export function FinanceCashRemittanceSection({
   const [dateScopeModalOpen, setDateScopeModalOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
+  // Cash remittance is single-currency. When the company has 2+ currencies and
+  // no currency is chosen yet, default the URL to the base currency so the
+  // figures are never a mixed-currency ₦+GH₵ sum. Single-currency companies are
+  // untouched (the filter self-hides and the param stays off).
+  const hasMultipleCurrencies = useHasMultipleCurrencies();
+  const baseCurrency = useBaseCurrency();
+  useEffect(() => {
+    if (hasMultipleCurrencies && !searchParams.get('currency')) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('currency', baseCurrency.code);
+          return next;
+        },
+        { replace: true, preventScrollReset: true },
+      );
+    }
+  }, [hasMultipleCurrencies, baseCurrency.code, searchParams, setSearchParams]);
+
   // Label the "this period" figures with the actual month when the selected
   // range is a single calendar month (e.g. "July 2026"); fall back to "This
   // period" for custom multi-month ranges or when no dates are set.
@@ -55,6 +76,10 @@ export function FinanceCashRemittanceSection({
     searchParams.get('startDate'),
     searchParams.get('endDate'),
   );
+
+  // The currency all Cash-remittance figures are scoped to (URL param or base),
+  // so tiles show the right symbol (e.g. GH₵) instead of always ₦.
+  const activeCurrencyCode = searchParams.get('currency') || baseCurrency.code;
 
   // Use gross delivered amount to match the Cash Remittances page
   const totalDelivered = pulse.deliveredAmount ?? pulse.deliveredNetAmount ?? (pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount);
@@ -67,16 +92,21 @@ export function FinanceCashRemittanceSection({
         title="Cash remittance"
         description="Delivered orders and remittance status."
         actions={
-          <button
-            type="button"
-            onClick={() => setDateScopeModalOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-app-border bg-app-elevated px-2.5 py-1.5 text-xs font-medium text-app-fg-muted hover:text-app-fg hover:border-brand-400 transition-colors"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-            </svg>
-            {dateScope === 'createdAt' ? 'By order date' : 'By delivery date'}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Currency filter — self-hides for single-currency companies. Placed
+                beside the date-scope pill; Cash remittance is single-currency. */}
+            <CurrencyFilterSelect className="!h-auto !rounded-md !px-2.5 !py-1.5 !text-xs !font-medium !text-app-fg-muted !bg-app-elevated" />
+            <button
+              type="button"
+              onClick={() => setDateScopeModalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-app-border bg-app-elevated px-2.5 py-1.5 text-xs font-medium text-app-fg-muted hover:text-app-fg hover:border-brand-400 transition-colors"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+              </svg>
+              {dateScope === 'createdAt' ? 'By order date' : 'By delivery date'}
+            </button>
+          </div>
         }
       />
       <CardBody className="-mt-2 space-y-4">
@@ -88,7 +118,7 @@ export function FinanceCashRemittanceSection({
               <InfoIcon onClick={() => setInfoModal('delivered')} />
             </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-app-fg">
-              {formatNaira(Math.round(totalDelivered))}
+              <NairaPrice amount={Math.round(totalDelivered)} currencyCode={activeCurrencyCode} />
             </p>
             <p className="text-xs text-app-fg-muted mt-0.5">
               {totalDeliveredOrders} order(s)
@@ -100,7 +130,7 @@ export function FinanceCashRemittanceSection({
               <InfoIcon onClick={() => setInfoModal('remitted')} />
             </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-success-600 dark:text-success-400">
-              {formatNaira(Math.round(pulse.receivedAmount))}
+              <NairaPrice amount={Math.round(pulse.receivedAmount)} currencyCode={activeCurrencyCode} />
             </p>
             <p className="text-xs text-app-fg-muted mt-0.5">
               {pulse.receivedCount} order(s) received
@@ -115,7 +145,7 @@ export function FinanceCashRemittanceSection({
               <InfoIcon onClick={() => setInfoModal('awaitingPeriod')} />
             </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-warning-600 dark:text-warning-400">
-              {formatNaira(Math.round(pulse.awaitingPeriodCash))}
+              <NairaPrice amount={Math.round(pulse.awaitingPeriodCash)} currencyCode={activeCurrencyCode} />
             </p>
             <p className="text-xs text-app-fg-muted mt-0.5">
               {pulse.awaitingPeriodOrderCount} order(s) due{periodLabel === 'This period' ? ' this period' : ` in ${periodLabel}`}
@@ -130,7 +160,7 @@ export function FinanceCashRemittanceSection({
               <InfoIcon onClick={() => setInfoModal('awaiting')} />
             </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-warning-600 dark:text-warning-400">
-              {formatNaira(Math.round(pulse.awaitingCash))}
+              <NairaPrice amount={Math.round(pulse.awaitingCash)} currencyCode={activeCurrencyCode} />
             </p>
             <p className="text-xs text-app-fg-muted mt-0.5">
               {pulse.awaitingOrderCount} order(s) not on a remittance
@@ -145,7 +175,7 @@ export function FinanceCashRemittanceSection({
               <InfoIcon onClick={() => setInfoModal('pending')} />
             </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-warning-600 dark:text-warning-400">
-              <NairaPrice amount={pulse.pendingRemittanceAmount} />
+              <NairaPrice amount={pulse.pendingRemittanceAmount} currencyCode={activeCurrencyCode} />
             </p>
             <p className="text-xs text-app-fg-muted mt-0.5">{pulse.pendingRemittanceBatchCount} order(s) sent</p>
           </Link>
@@ -158,7 +188,7 @@ export function FinanceCashRemittanceSection({
               <InfoIcon onClick={() => setInfoModal('disputed')} />
             </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-danger-600 dark:text-danger-400">
-              {formatNaira(Math.round(pulse.disputedRemittanceAmount))}
+              <NairaPrice amount={Math.round(pulse.disputedRemittanceAmount)} currencyCode={activeCurrencyCode} />
             </p>
             <p className="text-xs text-app-fg-muted mt-0.5">{pulse.disputedRemittanceBatchCount} order(s) disputed</p>
           </Link>
@@ -173,32 +203,32 @@ export function FinanceCashRemittanceSection({
                 <InfoIcon onClick={() => setInfoModal('gross')} />
               </p>
               <p className="mt-1 text-base font-semibold tabular-nums text-app-fg">
-                {formatNaira(Math.round(pulse.grossOrderValue))}
+                <NairaPrice amount={Math.round(pulse.grossOrderValue)} currencyCode={activeCurrencyCode} />
               </p>
               <p className="text-xs text-app-fg-muted mt-0.5">before deductions</p>
             </div>
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
               <p className="text-xs font-medium text-app-fg-muted">Delivery Fees ({pulse.deliveryFeeCount})</p>
               <p className="mt-1 text-base font-semibold tabular-nums text-red-500">
-                {formatNaira(Math.round(pulse.totalDeliveryFees))}
+                <NairaPrice amount={Math.round(pulse.totalDeliveryFees)} currencyCode={activeCurrencyCode} />
               </p>
             </div>
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
               <p className="text-xs font-medium text-app-fg-muted">Commitment Fees ({pulse.commitmentFeeCount})</p>
               <p className="mt-1 text-base font-semibold tabular-nums text-red-500">
-                {formatNaira(Math.round(pulse.totalCommitmentFees))}
+                <NairaPrice amount={Math.round(pulse.totalCommitmentFees)} currencyCode={activeCurrencyCode} />
               </p>
             </div>
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
               <p className="text-xs font-medium text-app-fg-muted">POS Fees ({pulse.posFeeCount})</p>
               <p className="mt-1 text-base font-semibold tabular-nums text-red-500">
-                {formatNaira(Math.round(pulse.totalPosFees))}
+                <NairaPrice amount={Math.round(pulse.totalPosFees)} currencyCode={activeCurrencyCode} />
               </p>
             </div>
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
               <p className="text-xs font-medium text-app-fg-muted">Failed Delivery ({pulse.failedDeliveryCount})</p>
               <p className="mt-1 text-base font-semibold tabular-nums text-red-500">
-                {formatNaira(Math.round(pulse.totalFailedDeliveryCosts))}
+                <NairaPrice amount={Math.round(pulse.totalFailedDeliveryCosts)} currencyCode={activeCurrencyCode} />
               </p>
             </div>
             <div className="rounded-lg border border-app-border bg-app-hover/60 p-3">
@@ -207,7 +237,7 @@ export function FinanceCashRemittanceSection({
                 <InfoIcon onClick={() => setInfoModal('net')} />
               </p>
               <p className="mt-1 text-base font-semibold tabular-nums text-success-600 dark:text-success-400">
-                {formatNaira(Math.round(netRemittable))}
+                <NairaPrice amount={Math.round(netRemittable)} currencyCode={activeCurrencyCode} />
               </p>
               <p className="text-xs text-app-fg-muted mt-0.5">after all deductions</p>
             </div>

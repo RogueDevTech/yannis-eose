@@ -12,6 +12,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { useCurrencySymbol } from '~/contexts/currencies-catalog-context';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { EmptyState } from '~/components/ui/empty-state';
 import { TextInput } from '~/components/ui/text-input';
@@ -235,7 +236,9 @@ function CubeIcon() {
 
 type LogisticsOrderLineItem = OrderDetail['orderItems'][number];
 
-const LOGISTICS_ORDER_LINE_COLUMNS: CompactTableColumn<LogisticsOrderLineItem>[] = [
+// Factory so the price columns can render in the order's currency (the render
+// callback only receives the line item, which has no currency of its own).
+const logisticsOrderLineColumns = (currencyCode?: string): CompactTableColumn<LogisticsOrderLineItem>[] => [
   {
     key: 'product',
     header: 'Product',
@@ -266,7 +269,7 @@ const LOGISTICS_ORDER_LINE_COLUMNS: CompactTableColumn<LogisticsOrderLineItem>[]
     align: 'right',
     render: (item) => (
       <span className="text-sm tabular-nums text-app-fg-muted">
-        <NairaPrice amount={Number(item.unitPrice)} />
+        <NairaPrice amount={Number(item.unitPrice)} currencyCode={currencyCode} />
       </span>
     ),
   },
@@ -276,7 +279,7 @@ const LOGISTICS_ORDER_LINE_COLUMNS: CompactTableColumn<LogisticsOrderLineItem>[]
     align: 'right',
     render: (item) => (
       <span className="text-sm font-semibold tabular-nums text-app-fg">
-        <NairaPrice amount={Number(item.unitPrice)} />
+        <NairaPrice amount={Number(item.unitPrice)} currencyCode={currencyCode} />
       </span>
     ),
   },
@@ -543,6 +546,8 @@ export function LogisticsOrderDetailPage({
   const fetcher = useFetcher();
   const { toast } = useToast();
   useFetcherToast(fetcher.data, { successMessage: 'Order updated' });
+  // Symbol for this order's frozen currency — drives money-input addons (₦, GH₵…).
+  const orderCurrencySymbol = useCurrencySymbol(order.currencyCode);
 
   const handleCopyOrderSummary = useCallback(async () => {
     try {
@@ -634,7 +639,7 @@ export function LogisticsOrderDetailPage({
         mobileInlineActions
         description={
           <span className="inline-flex items-center gap-1.5">
-            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-app-fg-muted" />
+            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} textClassName="text-app-fg-muted" />
             <span>· Created {formatDate(order.createdAt)}</span>
           </span>
         }
@@ -646,7 +651,7 @@ export function LogisticsOrderDetailPage({
             <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
             </svg>
-            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-app-fg font-medium truncate min-w-0" />
+            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} textClassName="text-app-fg font-medium truncate min-w-0" />
           </div>
         }
         actions={
@@ -684,7 +689,7 @@ export function LogisticsOrderDetailPage({
         items={[
           {
             label: 'Amount',
-            value: <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} zeroAsDash />,
+            value: <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} currencyCode={order.currencyCode} zeroAsDash />,
             valueClassName: 'text-app-fg tabular-nums',
           },
           {
@@ -698,7 +703,7 @@ export function LogisticsOrderDetailPage({
           },
           {
             label: 'Delivery Fee',
-            value: <NairaPrice amount={order.deliveryFee ? Number(order.deliveryFee) : null} zeroAsDash />,
+            value: <NairaPrice amount={order.deliveryFee ? Number(order.deliveryFee) : null} currencyCode={order.currencyCode} zeroAsDash />,
             valueClassName: 'text-app-fg tabular-nums',
           },
           {
@@ -940,7 +945,7 @@ export function LogisticsOrderDetailPage({
           {order.orderItems && order.orderItems.length > 0 ? (
             <CompactTable<LogisticsOrderLineItem>
               withCard={false}
-              columns={LOGISTICS_ORDER_LINE_COLUMNS}
+              columns={logisticsOrderLineColumns(order.currencyCode)}
               rows={order.orderItems}
               rowKey={(item) => item.id}
               rowClassName={(_item, idx) => (idx % 2 === 0 ? 'bg-app-hover/50' : '')}
@@ -953,7 +958,7 @@ export function LogisticsOrderDetailPage({
                         {totalQty} unit{totalQty !== 1 ? 's' : ''}
                       </span>
                       <span className="text-base font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
-                        <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} zeroAsDash />
+                        <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} currencyCode={order.currencyCode} zeroAsDash />
                       </span>
                     </div>
                   </div>
@@ -961,7 +966,7 @@ export function LogisticsOrderDetailPage({
                     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-app-border pt-2 text-xs text-app-fg-muted">
                       <span>Delivery Fee</span>
                       <span className="text-sm tabular-nums">
-                        <NairaPrice amount={Number(order.deliveryFee)} />
+                        <NairaPrice amount={Number(order.deliveryFee)} currencyCode={order.currencyCode} />
                       </span>
                     </div>
                   ) : null}
@@ -1162,7 +1167,7 @@ export function LogisticsOrderDetailPage({
                         onChange={(e) => setDeliveryCost(e.target.value)}
                         placeholder="0"
                         disabled={isSubmitting}
-                        leftAddon="₦"
+                        leftAddon={orderCurrencySymbol}
                       />
                       <TextInput
                         label="Discount at Delivery"
@@ -1174,7 +1179,7 @@ export function LogisticsOrderDetailPage({
                         onChange={(e) => setDeliveryDiscount(e.target.value)}
                         placeholder="0"
                         disabled={isSubmitting}
-                        leftAddon="₦"
+                        leftAddon={orderCurrencySymbol}
                       />
                       <div>
                         <label className="block text-xs font-medium text-app-fg-muted mb-1">Proof Screenshot</label>
@@ -1235,7 +1240,7 @@ export function LogisticsOrderDetailPage({
                         onChange={(e) => setPartialDeliveryCost(e.target.value)}
                         placeholder="0"
                         disabled={isSubmitting}
-                        leftAddon="₦"
+                        leftAddon={orderCurrencySymbol}
                       />
                       <TextInput
                         label="Discount"
@@ -1247,7 +1252,7 @@ export function LogisticsOrderDetailPage({
                         onChange={(e) => setPartialDeliveryDiscount(e.target.value)}
                         placeholder="0"
                         disabled={isSubmitting}
-                        leftAddon="₦"
+                        leftAddon={orderCurrencySymbol}
                       />
                       <div>
                         <label className="block text-xs font-medium text-app-fg-muted mb-1">Proof</label>

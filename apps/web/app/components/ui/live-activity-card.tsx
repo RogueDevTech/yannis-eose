@@ -99,7 +99,7 @@ export function LiveActivityCard({
           <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
             {item.customerName}
           </p>
-          <NairaPrice amount={item.totalAmount} className="text-mini font-bold text-app-fg shrink-0 tabular-nums" />
+          <NairaPrice amount={item.totalAmount} currencyCode={item.currencyCode} className="text-mini font-bold text-app-fg shrink-0 tabular-nums" />
         </div>
 
         {/* Row 2: product pill + status pill */}
@@ -194,7 +194,7 @@ export function LiveActivityDetailModal({ item, onClose }: { item: LiveActivityI
               } />
               <DetailRow
                 label="Amount"
-                value={<NairaPrice amount={item.totalAmount} className="text-sm font-semibold text-app-fg" />}
+                value={<NairaPrice amount={item.totalAmount} currencyCode={item.currencyCode} className="text-sm font-semibold text-app-fg" />}
                 icon={
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

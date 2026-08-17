@@ -511,6 +511,48 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return redirect('/hr/users');
   }
 
+  // ── Staff tax documents (doc §5) ───────────────────────────
+
+  if (intent === 'createTaxDocument') {
+    const expiresOn = formData.get('expiresOn')?.toString()?.trim();
+    const notes = formData.get('notes')?.toString()?.trim();
+    const res = await apiRequest<unknown>('/trpc/hr.createTaxDocument', {
+      method: 'POST',
+      cookie,
+      body: {
+        // staffId comes from the panel (hidden field) — always this profile's user.
+        staffId: formData.get('staffId')?.toString() ?? userId,
+        docType: formData.get('docType')?.toString() ?? '',
+        title: formData.get('title')?.toString() ?? '',
+        docUrl: formData.get('docUrl')?.toString() ?? '',
+        ...(notes ? { notes } : {}),
+        ...(expiresOn ? { expiresOn } : {}),
+      },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to save tax document') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'deleteTaxDocument') {
+    const res = await apiRequest<unknown>('/trpc/hr.deleteTaxDocument', {
+      method: 'POST',
+      cookie,
+      body: { documentId: formData.get('documentId')?.toString() ?? '' },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to delete tax document') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
   if (intent === 'reactivate') {
     const currentUser = await getCurrentUser(request);
     const targetRes = await apiRequest<unknown>(

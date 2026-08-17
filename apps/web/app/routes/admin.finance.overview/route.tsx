@@ -95,6 +95,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const branchId = url.searchParams.get('branchId') || undefined;
   const mediaBuyerId = url.searchParams.get('mediaBuyerId') || undefined;
   const dateScope = (url.searchParams.get('dateScope') as 'createdAt' | 'deliveredAt' | null) || undefined;
+  // Currency filter (dormant unless a 2nd currency exists). Driven by the Cash
+  // remittance section's <CurrencyFilterSelect> via the `currency` param. The
+  // remittance summary is single-currency, so all overview money scopes to one
+  // currency. When absent, the section defaults the URL to the base currency.
+  const currencyCode = url.searchParams.get('currency')?.toUpperCase() || undefined;
 
   const financeShell = {
     filters: {
@@ -121,6 +126,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ...(branchId && { branchId }),
         ...(mediaBuyerId && { mediaBuyerId }),
         ...(dateScope && { dateScope }),
+        ...(currencyCode && { currencyCode }),
       }),
     );
 

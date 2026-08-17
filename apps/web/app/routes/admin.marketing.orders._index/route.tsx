@@ -57,6 +57,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // carts; the backend `cart.listAbandoned` auto-scopes them).
   const fromCart = url.searchParams.get('fromCart') === '1';
   const testOrders = url.searchParams.get('testOrders') === '1' && isAdminLevel(user);
+  // Carry-over pseudo-filter — `?carryOver=1` shows the orders behind the
+  // "Carry-over Delivered" tile (delivered this period, generated in a prior month).
+  const carryOver = url.searchParams.get('carryOver') === '1';
 
   // Date filter — default to today when no params
   const periodAllTime = url.searchParams.get('period') === 'all_time';
@@ -146,6 +149,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(apiStartDate && { startDate: apiStartDate }),
     ...(apiEndDate && { endDate: apiEndDate }),
     ...(testOrders && { testOrders: true }),
+    ...(carryOver && { carryOver: true }),
     // Marketing only shows edge-form orders — offline orders affect Sales only.
     // When an explicit orderSource filter is active (rare), honour it; otherwise
     // default to edge-form so offline orders never appear on this page.
@@ -175,11 +179,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     startDate?: string;
     endDate?: string;
     includeMarketingExportPicklists: boolean;
+    currencyCode?: string;
   } = { includeMarketingExportPicklists: loadMarketingExportPicklists };
   if (teamBundleMedioBuyerId) bundleInput.mediaBuyerId = teamBundleMedioBuyerId;
   if (status) bundleInput.status = status;
   if (apiStartDate) bundleInput.startDate = apiStartDate;
   if (apiEndDate) bundleInput.endDate = apiEndDate;
+  // Currency filter mirrors the list so the stat strip matches the table.
+  if (currencyCode) bundleInput.currencyCode = currencyCode;
   const bundleInputStr = encodeURIComponent(JSON.stringify(bundleInput));
 
   // Supervisors + HoM get both team stats AND personal stats pre-fetched so
@@ -192,6 +199,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ...(status ? { status } : {}),
         ...(apiStartDate ? { startDate: apiStartDate } : {}),
         ...(apiEndDate ? { endDate: apiEndDate } : {}),
+        ...(currencyCode ? { currencyCode } : {}),
       }
     : null;
   const personalBundleInputStr = personalBundleInput

@@ -14,6 +14,15 @@ import type {
   ApproveAdjustmentInput,
   UpdateAdjustmentInput,
   DeleteAdjustmentInput,
+  CreateRefundInput,
+  UpdateRefundInput,
+  VoidRefundInput,
+  CreateStaffAllowanceInput,
+  UpdateStaffAllowanceInput,
+  VoidStaffAllowanceInput,
+  CreateTaxDocumentInput,
+  DeleteTaxDocumentInput,
+  ListTaxDocumentsInput,
   SetSettlementConfigInput,
   PayrollMetrics,
 } from '@yannis/shared';
@@ -1151,6 +1160,516 @@ export class HrService {
     }
 
     return { deleted: true };
+  }
+
+  // ============================================
+  // Staff Refunds (post-tax, doc §2)
+  // ============================================
+
+  /**
+   * Record a refund owed to a staff member. Refunds are POST-TAX cash added to
+   * net pay (never taxed) and are APPROVED on creation (HR-recorded). If the
+   * target month already has an OPEN batch line for this staff, fold it in now;
+   * otherwise it floats until the next generate/recalculate sweeps it.
+   */
+  async createRefund(input: CreateRefundInput, actorId: string, effectiveBranchIds?: string[] | null) {
+    await this.assertStaffInScope(input.staffId, effectiveBranchIds);
+    const refund = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.payrollRefunds)
+        .values({
+          staffId: input.staffId,
+          amount: sql`${input.amount}::numeric`,
+          reason: input.reason,
+          notes: input.notes ?? null,
+          docUrl: input.docUrl ?? null,
+          refundDate: input.refundDate,
+          periodMonth: input.periodMonth,
+          status: 'APPROVED',
+          approvedBy: actorId,
+        })
+        .returning();
+      const inserted = rows[0];
+      if (!inserted) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create refund' });
+      }
+      return inserted;
+    });
+
+    // Best-effort: fold into an already-open (DRAFT / PENDING_HR) batch for the
+    // target month. Non-fatal — on any miss the refund stays floating and the
+    // next generate/recalculate sweeps it.
+    try {
+      await this.payrollBatch.absorbPendingStaffRefund(refund.id, actorId);
+    } catch (err) {
+      this.logger.warn(
+        `absorbPendingStaffRefund failed for ${refund.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // Notify staff — a refund is money coming to them.
+    const [staffBranch] = await this.db
+      .select({ branchId: schema.userBranches.branchId })
+      .from(schema.userBranches)
+      .where(and(eq(schema.userBranches.userId, input.staffId), eq(schema.userBranches.isPrimary, true)))
+      .limit(1);
+    this.notifications.enqueueCreate({
+      userId: input.staffId,
+      type: 'hr:refund_created',
+      title: 'Refund added',
+      body: 'A refund has been added to your earnings. It will be paid on top of your next payout.',
+      data: { refundId: refund.id, amount: input.amount, branchId: staffBranch?.branchId ?? null },
+    });
+
+    return refund;
+  }
+
+  /**
+   * Refunds locked once their batch reaches Finance review / PAID — same policy
+   * as earnings adjustments. Loads the refund and throws if missing or locked.
+   */
+  private async loadCorrectableRefund(refundId: string, effectiveBranchIds?: string[] | null) {
+    const rows = await this.db
+      .select()
+      .from(schema.payrollRefunds)
+      .where(eq(schema.payrollRefunds.id, refundId))
+      .limit(1);
+    const refund = rows[0];
+    if (!refund) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Refund not found' });
+    }
+    // Company isolation: the refund's staff must be in the caller's company.
+    await this.assertStaffInScope(refund.staffId, effectiveBranchIds);
+    if (refund.payoutId) {
+      const [payout] = await this.db
+        .select({ batchStatus: schema.payrollBatches.status })
+        .from(schema.payoutRecords)
+        .leftJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
+        .where(eq(schema.payoutRecords.id, refund.payoutId))
+        .limit(1);
+      const batchStatus = payout?.batchStatus ?? null;
+      if (batchStatus === null) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message:
+            'This refund is attached to a payroll batch that no longer exists. It can no longer be edited or voided here.',
+        });
+      }
+      if ((HrService.ADJUSTMENT_LOCKED_STATUSES as readonly string[]).includes(batchStatus)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message:
+            'This refund is already in a payroll batch under Finance review or paid, so it can no longer be edited or voided.',
+        });
+      }
+    }
+    return refund;
+  }
+
+  async updateRefund(input: UpdateRefundInput, actorId: string, effectiveBranchIds?: string[] | null) {
+    const existing = await this.loadCorrectableRefund(input.refundId, effectiveBranchIds);
+
+    const updated = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .update(schema.payrollRefunds)
+        .set({
+          amount: sql`${input.amount}::numeric`,
+          reason: input.reason,
+          notes: input.notes ?? null,
+          docUrl: input.docUrl ?? null,
+          refundDate: input.refundDate,
+          ...(input.periodMonth ? { periodMonth: input.periodMonth } : {}),
+        })
+        .where(eq(schema.payrollRefunds.id, input.refundId))
+        .returning();
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Refund not found' });
+      }
+      return rows[0];
+    });
+
+    if (existing.payoutId) {
+      try {
+        await this.payrollBatch.recomputeForRefund(existing.payoutId, actorId);
+      } catch (err) {
+        this.logger.warn(
+          `recomputeForRefund failed for ${input.refundId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return updated;
+  }
+
+  /** Void a refund (soft cancel) and detach it from any open batch, then re-roll that payout. */
+  async voidRefund(input: VoidRefundInput, actorId: string, effectiveBranchIds?: string[] | null) {
+    const existing = await this.loadCorrectableRefund(input.refundId, effectiveBranchIds);
+
+    await withActor(this.db, { id: actorId }, async (tx) => {
+      await tx
+        .update(schema.payrollRefunds)
+        .set({ status: 'VOIDED', payoutId: null })
+        .where(eq(schema.payrollRefunds.id, input.refundId));
+    });
+
+    if (existing.payoutId) {
+      try {
+        await this.payrollBatch.recomputeForRefund(existing.payoutId, actorId);
+      } catch (err) {
+        this.logger.warn(
+          `recomputeForRefund failed after voiding ${input.refundId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return { voided: true };
+  }
+
+  /** List refunds, optionally for one staff member, company-scoped via effectiveBranchIds. */
+  async listRefunds(
+    staffId?: string,
+    effectiveBranchIds?: string[] | null,
+    opts?: { search?: string; page?: number; pageSize?: number },
+  ) {
+    const pageSize = Math.min(Math.max(opts?.pageSize ?? 100, 1), 200);
+    const page = Math.max(opts?.page ?? 1, 1);
+    const offset = (page - 1) * pageSize;
+    const search = opts?.search?.trim();
+
+    const conditions: Parameters<typeof and>[0][] = [];
+    if (staffId) {
+      conditions.push(eq(schema.payrollRefunds.staffId, staffId));
+    }
+    if (effectiveBranchIds?.length) {
+      conditions.push(
+        exists(
+          this.db
+            .select({ one: sql`1` })
+            .from(schema.userBranches)
+            .where(
+              and(
+                sql`${schema.userBranches.userId} = ${schema.payrollRefunds.staffId}`,
+                inArray(schema.userBranches.branchId, effectiveBranchIds),
+              ),
+            ),
+        ),
+      );
+    }
+    if (search) {
+      const like = `%${search}%`;
+      conditions.push(
+        or(
+          exists(
+            this.db
+              .select({ one: sql`1` })
+              .from(schema.users)
+              .where(
+                and(
+                  sql`${schema.users.id} = ${schema.payrollRefunds.staffId}`,
+                  ilike(schema.users.name, like),
+                ),
+              ),
+          ),
+          ilike(schema.payrollRefunds.reason, like),
+        )!,
+      );
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [rows, totalRows] = await Promise.all([
+      this.db
+        .select({
+          refund: schema.payrollRefunds,
+          batchStatus: schema.payrollBatches.status,
+        })
+        .from(schema.payrollRefunds)
+        .leftJoin(schema.payoutRecords, eq(schema.payoutRecords.id, schema.payrollRefunds.payoutId))
+        .leftJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
+        .where(whereClause)
+        .orderBy(desc(schema.payrollRefunds.createdAt))
+        .limit(pageSize)
+        .offset(offset),
+      this.db.select({ total: count() }).from(schema.payrollRefunds).where(whereClause),
+    ]);
+
+    const items = rows.map((r) => ({ ...r.refund, batchStatus: r.batchStatus ?? null }));
+    return { items, total: Number(totalRows[0]?.total ?? 0), page, pageSize };
+  }
+
+  // ============================================
+  // Per-staff Allowances (taxable, doc §3)
+  // ============================================
+
+  /**
+   * Record a per-staff ad-hoc TAXABLE allowance. Approved on creation. It floats
+   * until the target month's batch is generated/recalculated, at which point it is
+   * folded into gross BEFORE PAYE (so it is taxed) by the compute engine. We do NOT
+   * live-absorb into an open batch (unlike refunds) because a taxable amount can't
+   * be added without recomputing PAYE — that only happens on a full batch recompute.
+   */
+  async createStaffAllowance(
+    input: CreateStaffAllowanceInput,
+    actorId: string,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    await this.assertStaffInScope(input.staffId, effectiveBranchIds);
+    const allowance = await withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.payrollStaffAllowances)
+        .values({
+          staffId: input.staffId,
+          amount: sql`${input.amount}::numeric`,
+          name: input.name,
+          notes: input.notes ?? null,
+          recurring: input.recurring,
+          periodMonth: input.periodMonth,
+          status: 'APPROVED',
+          approvedBy: actorId,
+        })
+        .returning();
+      const inserted = rows[0];
+      if (!inserted) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create allowance' });
+      }
+      return inserted;
+    });
+
+    const [staffBranch] = await this.db
+      .select({ branchId: schema.userBranches.branchId })
+      .from(schema.userBranches)
+      .where(and(eq(schema.userBranches.userId, input.staffId), eq(schema.userBranches.isPrimary, true)))
+      .limit(1);
+    this.notifications.enqueueCreate({
+      userId: input.staffId,
+      type: 'hr:allowance_created',
+      title: 'Allowance added',
+      body: 'A taxable allowance has been added to your earnings for an upcoming payout.',
+      data: { allowanceId: allowance.id, amount: input.amount, branchId: staffBranch?.branchId ?? null },
+    });
+
+    return allowance;
+  }
+
+  /**
+   * Load an allowance and throw if it can't be corrected. A taxable allowance is
+   * locked the moment it is swept into a payout (payoutId set) — editing it in
+   * place would leave that payout's PAYE stale. HR must recalculate the batch to
+   * change it. Floating (unlinked) allowances edit freely.
+   */
+  private async loadCorrectableStaffAllowance(allowanceId: string, effectiveBranchIds?: string[] | null) {
+    const rows = await this.db
+      .select()
+      .from(schema.payrollStaffAllowances)
+      .where(eq(schema.payrollStaffAllowances.id, allowanceId))
+      .limit(1);
+    const allowance = rows[0];
+    if (!allowance) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Allowance not found' });
+    }
+    // Company isolation: the allowance's staff must be in the caller's company.
+    await this.assertStaffInScope(allowance.staffId, effectiveBranchIds);
+    if (allowance.payoutId) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message:
+          'This allowance is already in a generated payroll batch. Recalculate that batch to change it, or remove it from the batch first.',
+      });
+    }
+    return allowance;
+  }
+
+  async updateStaffAllowance(
+    input: UpdateStaffAllowanceInput,
+    actorId: string,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    await this.loadCorrectableStaffAllowance(input.allowanceId, effectiveBranchIds);
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .update(schema.payrollStaffAllowances)
+        .set({
+          amount: sql`${input.amount}::numeric`,
+          name: input.name,
+          notes: input.notes ?? null,
+          recurring: input.recurring,
+          ...(input.periodMonth ? { periodMonth: input.periodMonth } : {}),
+        })
+        .where(eq(schema.payrollStaffAllowances.id, input.allowanceId))
+        .returning();
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Allowance not found' });
+      }
+      return rows[0];
+    });
+  }
+
+  /** Void (soft-cancel) a floating allowance. Swept allowances are locked (recalc to remove). */
+  async voidStaffAllowance(
+    input: VoidStaffAllowanceInput,
+    actorId: string,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    await this.loadCorrectableStaffAllowance(input.allowanceId, effectiveBranchIds);
+    await withActor(this.db, { id: actorId }, async (tx) => {
+      await tx
+        .update(schema.payrollStaffAllowances)
+        .set({ status: 'VOIDED' })
+        .where(eq(schema.payrollStaffAllowances.id, input.allowanceId));
+    });
+    return { voided: true };
+  }
+
+  /** List per-staff allowances, optionally for one staff member, company-scoped. */
+  async listStaffAllowances(
+    staffId?: string,
+    effectiveBranchIds?: string[] | null,
+    opts?: { search?: string; page?: number; pageSize?: number },
+  ) {
+    const pageSize = Math.min(Math.max(opts?.pageSize ?? 100, 1), 200);
+    const page = Math.max(opts?.page ?? 1, 1);
+    const offset = (page - 1) * pageSize;
+    const search = opts?.search?.trim();
+
+    const conditions: Parameters<typeof and>[0][] = [];
+    if (staffId) {
+      conditions.push(eq(schema.payrollStaffAllowances.staffId, staffId));
+    }
+    if (effectiveBranchIds?.length) {
+      conditions.push(
+        exists(
+          this.db
+            .select({ one: sql`1` })
+            .from(schema.userBranches)
+            .where(
+              and(
+                sql`${schema.userBranches.userId} = ${schema.payrollStaffAllowances.staffId}`,
+                inArray(schema.userBranches.branchId, effectiveBranchIds),
+              ),
+            ),
+        ),
+      );
+    }
+    if (search) {
+      const like = `%${search}%`;
+      conditions.push(
+        or(
+          exists(
+            this.db
+              .select({ one: sql`1` })
+              .from(schema.users)
+              .where(
+                and(
+                  sql`${schema.users.id} = ${schema.payrollStaffAllowances.staffId}`,
+                  ilike(schema.users.name, like),
+                ),
+              ),
+          ),
+          ilike(schema.payrollStaffAllowances.name, like),
+        )!,
+      );
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [rows, totalRows] = await Promise.all([
+      this.db
+        .select({
+          allowance: schema.payrollStaffAllowances,
+          batchStatus: schema.payrollBatches.status,
+        })
+        .from(schema.payrollStaffAllowances)
+        .leftJoin(schema.payoutRecords, eq(schema.payoutRecords.id, schema.payrollStaffAllowances.payoutId))
+        .leftJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
+        .where(whereClause)
+        .orderBy(desc(schema.payrollStaffAllowances.createdAt))
+        .limit(pageSize)
+        .offset(offset),
+      this.db.select({ total: count() }).from(schema.payrollStaffAllowances).where(whereClause),
+    ]);
+
+    const items = rows.map((r) => ({ ...r.allowance, batchStatus: r.batchStatus ?? null }));
+    return { items, total: Number(totalRows[0]?.total ?? 0), page, pageSize };
+  }
+
+  // ============================================
+  // Staff Tax Documents (doc §5)
+  // ============================================
+
+  /** Assert the staff member is within the caller's company scope before mutating. */
+  private async assertStaffInScope(staffId: string, effectiveBranchIds?: string[] | null): Promise<void> {
+    // No company selected → cross-company reach (SuperAdmin/global HR). Allow.
+    if (!effectiveBranchIds?.length) return;
+    const [inScope] = await this.db
+      .select({ one: sql`1` })
+      .from(schema.userBranches)
+      .where(
+        and(
+          eq(schema.userBranches.userId, staffId),
+          inArray(schema.userBranches.branchId, effectiveBranchIds),
+        ),
+      )
+      .limit(1);
+    if (!inScope) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Staff member is outside your company scope.' });
+    }
+  }
+
+  async createTaxDocument(
+    input: CreateTaxDocumentInput,
+    actorId: string,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    await this.assertStaffInScope(input.staffId, effectiveBranchIds);
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.staffTaxDocuments)
+        .values({
+          staffId: input.staffId,
+          docType: input.docType,
+          title: input.title,
+          docUrl: input.docUrl,
+          notes: input.notes ?? null,
+          expiresOn: input.expiresOn ?? null,
+          uploadedBy: actorId,
+        })
+        .returning();
+      const inserted = rows[0];
+      if (!inserted) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to save tax document' });
+      }
+      return inserted;
+    });
+  }
+
+  async deleteTaxDocument(
+    input: DeleteTaxDocumentInput,
+    actorId: string,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    const [doc] = await this.db
+      .select({ staffId: schema.staffTaxDocuments.staffId })
+      .from(schema.staffTaxDocuments)
+      .where(eq(schema.staffTaxDocuments.id, input.documentId))
+      .limit(1);
+    if (!doc) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Tax document not found' });
+    }
+    await this.assertStaffInScope(doc.staffId, effectiveBranchIds);
+    await withActor(this.db, { id: actorId }, async (tx) => {
+      await tx.delete(schema.staffTaxDocuments).where(eq(schema.staffTaxDocuments.id, input.documentId));
+    });
+    return { deleted: true };
+  }
+
+  async listTaxDocuments(
+    input: ListTaxDocumentsInput,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    await this.assertStaffInScope(input.staffId, effectiveBranchIds);
+    return this.db
+      .select()
+      .from(schema.staffTaxDocuments)
+      .where(eq(schema.staffTaxDocuments.staffId, input.staffId))
+      .orderBy(desc(schema.staffTaxDocuments.createdAt));
   }
 
   async listAdjustments(

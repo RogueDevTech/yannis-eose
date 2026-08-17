@@ -33,5 +33,10 @@ export function MoneyAmount({ amount, currencyCode, className, maximumFractionDi
   if (num == null || Number.isNaN(num)) {
     return <span className={className}>—</span>;
   }
-  return <span className={className}>{formatMoney(num, info, { maximumFractionDigits })}</span>;
+  // Tint the amount in the currency's accent colour (base stays neutral above).
+  return (
+    <span className={className} style={info.color ? { color: info.color } : undefined}>
+      {formatMoney(num, info, { maximumFractionDigits })}
+    </span>
+  );
 }

@@ -23,7 +23,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone, retrackCategoryLabel } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
@@ -57,14 +57,10 @@ import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
  */
 export function expandCustomerPhoneSearchDigitRuns(digitRun: string): string[] {
   if (digitRun.length < 7 || digitRun.length > 24) return [];
-  const runs = new Set<string>([digitRun]);
-  if (digitRun.startsWith('234') && digitRun.length >= 12 && digitRun.length <= 13) {
-    const rest = digitRun.slice(3);
-    if (rest.length === 10) runs.add(`0${rest}`);
-  }
-  if (digitRun.startsWith('0') && digitRun.length === 11) {
-    runs.add(`234${digitRun.slice(1)}`);
-  }
+  // Country-aware local ⇄ international expansion (Nigeria, Ghana, …).
+  const runs = new Set<string>(phoneSearchVariants(digitRun));
+  // Nigerian bare-national convenience: a 10-digit [789]… (no leading 0, no
+  // dial code) is a Nigerian number typed without its 0 — expand both ways.
   if (digitRun.length === 10 && /^[789]\d{9}$/.test(digitRun)) {
     runs.add(`0${digitRun}`);
     runs.add(`234${digitRun}`);
@@ -735,10 +731,11 @@ export class OrdersService {
     let orderStatus: string = '';
     let orderNumber: number | null = null;
     let orderAssignedCsId: string | null = null;
+    let orderCurrencyCode: string = 'NGN';
 
     if (orderType === 'followUp') {
       const [fu] = await this.db
-        .select({ id: schema.followUpOrders.id, status: schema.followUpOrders.status, branchId: schema.followUpOrders.branchId, servicingBranchId: schema.followUpOrders.servicingBranchId, assignedCsId: schema.followUpOrders.assignedCsId, orderNumber: schema.followUpOrders.orderNumber })
+        .select({ id: schema.followUpOrders.id, status: schema.followUpOrders.status, branchId: schema.followUpOrders.branchId, servicingBranchId: schema.followUpOrders.servicingBranchId, assignedCsId: schema.followUpOrders.assignedCsId, orderNumber: schema.followUpOrders.orderNumber, currencyCode: schema.followUpOrders.currencyCode })
         .from(schema.followUpOrders)
         .where(eq(schema.followUpOrders.id, input.orderId))
         .limit(1);
@@ -747,9 +744,10 @@ export class OrdersService {
       orderStatus = fu.status;
       orderNumber = fu.orderNumber;
       orderAssignedCsId = fu.assignedCsId ?? null;
+      orderCurrencyCode = fu.currencyCode ?? 'NGN';
     } else if (orderType === 'cart') {
       const [co] = await this.db
-        .select({ id: schema.cartOrders.id, status: schema.cartOrders.status, branchId: schema.cartOrders.branchId, servicingBranchId: schema.cartOrders.servicingBranchId, assignedCsId: schema.cartOrders.assignedCsId, orderNumber: schema.cartOrders.orderNumber })
+        .select({ id: schema.cartOrders.id, status: schema.cartOrders.status, branchId: schema.cartOrders.branchId, servicingBranchId: schema.cartOrders.servicingBranchId, assignedCsId: schema.cartOrders.assignedCsId, orderNumber: schema.cartOrders.orderNumber, currencyCode: schema.cartOrders.currencyCode })
         .from(schema.cartOrders)
         .where(eq(schema.cartOrders.id, input.orderId))
         .limit(1);
@@ -758,6 +756,7 @@ export class OrdersService {
       orderStatus = co.status;
       orderNumber = co.orderNumber;
       orderAssignedCsId = co.assignedCsId ?? null;
+      orderCurrencyCode = co.currencyCode ?? 'NGN';
     } else {
       const existingRows = await this.db
         .select()
@@ -770,6 +769,7 @@ export class OrdersService {
       orderStatus = order.status;
       orderNumber = order.orderNumber ?? null;
       orderAssignedCsId = order.assignedCsId ?? null;
+      orderCurrencyCode = order.currencyCode ?? 'NGN';
     }
 
     const blockedStatuses = ['DELIVERED', 'REMITTED'];
@@ -844,6 +844,7 @@ export class OrdersService {
       ...(orderType ? { orderType } : {}),
       items: input.items,
       totalAmount: input.totalAmount,
+      currencyCode: orderCurrencyCode,
     };
 
     const [req] = await withActor(this.db, actor, async (tx) =>
@@ -959,7 +960,7 @@ export class OrdersService {
       });
     }
 
-    const payload = { orderId: input.orderId, orderNo: order.orderNumber ?? null };
+    const payload = { orderId: input.orderId, orderNo: order.orderNumber ?? null, currencyCode: order.currencyCode ?? 'NGN' };
 
     const [req] = await withActor(this.db, actor, async (tx) =>
       tx
@@ -1643,9 +1644,27 @@ export class OrdersService {
 
     const priceNearlyEq = (a: number, b: number) => Math.abs(a - b) < 0.02;
 
+    // Multi-currency: the public form submits the price IN the customer's chosen
+    // currency (e.g. GHS), so the tamper gate must compare against that tier's
+    // per-currency price, not the base (NGN) price. Base-currency submissions
+    // (the single-currency world) keep matching the base `price` exactly — the
+    // per-currency branch below only engages when a non-base code is submitted.
+    const submittedCode = (orderInput.currencyCode ?? '').toUpperCase();
+    const [baseCur] = submittedCode
+      ? await this.db
+          .select({ code: schema.currencies.code })
+          .from(schema.currencies)
+          .where(and(eq(schema.currencies.isDefault, true), eq(schema.currencies.active, true)))
+          .limit(1)
+      : [];
+    const baseCode = (baseCur?.code ?? 'NGN').toUpperCase();
+    // Non-base only when a code was submitted AND it differs from base.
+    const nonBaseCode = submittedCode && submittedCode !== baseCode ? submittedCode : null;
+
     if (camp?.offerGroupId) {
       const rows = await this.db
         .select({
+          id: schema.offerGroupItems.id,
           productId: schema.offerGroupItems.productId,
           label: schema.offerGroupItems.label,
           price: schema.offerGroupItems.price,
@@ -1666,12 +1685,23 @@ export class OrdersService {
         });
       }
 
+      // For a non-base currency, load each item's per-currency price so the
+      // match uses the GHS (etc.) price the form actually rendered + submitted.
+      const perCurrency = nonBaseCode
+        ? await this.loadOfferGroupItemPricesForCode(rows.map((r) => r.id), nonBaseCode)
+        : new Map<string, number>();
+      // Effective allowlist price for a tier in the submitted currency: the
+      // per-currency price when set, else the base price (form falls back to
+      // base when a tier has no per-currency price — mirror that here).
+      const tierPrice = (r: (typeof rows)[number]): number =>
+        nonBaseCode && perCurrency.has(r.id) ? perCurrency.get(r.id)! : Number(r.price);
+
       for (const item of orderInput.items) {
         const tierCandidates = rows.filter(
           (r) =>
             r.productId === item.productId &&
             (r.quantity ?? 1) === item.quantity &&
-            priceNearlyEq(Number(r.price), Number(item.unitPrice)),
+            priceNearlyEq(tierPrice(r), Number(item.unitPrice)),
         );
 
         let ok = false;
@@ -1709,6 +1739,7 @@ export class OrdersService {
 
     const allowList = await this.db
       .select({
+        id: schema.offerTemplates.id,
         name: schema.offerTemplates.name,
         price: schema.offerTemplates.price,
         quantity: schema.offerTemplates.quantity,
@@ -1716,7 +1747,10 @@ export class OrdersService {
       .from(schema.offerTemplates)
       .where(and(...tmplConds));
 
-    let synthetic: typeof allowList = [];
+    // id is null for synthetic tiers (embedded product offers), which have no
+    // per-currency price table — they always match on base price (the form has
+    // no per-currency price for them either).
+    let synthetic: Array<{ id: string | null; name: string; price: string; quantity: number }> = [];
 
     if (allowList.length === 0) {
       const [p] = await this.db
@@ -1736,16 +1770,29 @@ export class OrdersService {
       const embedded = p.offers as Array<{ label?: string; qty?: number; price?: string | number }> | null;
       if (Array.isArray(embedded) && embedded.length > 0) {
         synthetic = embedded.map((o) => ({
+          id: null,
           name: typeof o.label === 'string' ? o.label : 'Offer',
           price: String(o.price ?? p.baseSalePrice),
           quantity: typeof o.qty === 'number' && o.qty >= 1 ? o.qty : 1,
         }));
       } else {
-        synthetic = [{ name: 'Standard', price: String(p.baseSalePrice), quantity: 1 }];
+        synthetic = [{ id: null, name: 'Standard', price: String(p.baseSalePrice), quantity: 1 }];
       }
     }
 
-    const tiers = synthetic.length ? synthetic : allowList;
+    const tiers: Array<{ id: string | null; name: string; price: string; quantity: number }> =
+      synthetic.length ? synthetic : allowList;
+
+    // Per-currency template prices for a non-base submission (synthetic tiers
+    // have no id → always base price).
+    const perCurrencyTpl = nonBaseCode
+      ? await this.loadOfferTemplatePricesForCode(
+          tiers.map((t) => t.id).filter((id): id is string => id != null),
+          nonBaseCode,
+        )
+      : new Map<string, number>();
+    const tplPrice = (t: (typeof tiers)[number]): number =>
+      nonBaseCode && t.id && perCurrencyTpl.has(t.id) ? perCurrencyTpl.get(t.id)! : Number(t.price);
 
     for (const item of orderInput.items) {
       if (item.productId !== campaignProductId) {
@@ -1761,7 +1808,7 @@ export class OrdersService {
 
       const candidates = tiers.filter(
         (t) =>
-          (t.quantity ?? 1) === templateQty && priceNearlyEq(Number(t.price), unitNum),
+          (t.quantity ?? 1) === templateQty && priceNearlyEq(tplPrice(t), unitNum),
       );
 
       let ok = false;
@@ -1778,6 +1825,77 @@ export class OrdersService {
         });
       }
     }
+  }
+
+  /**
+   * Per-currency prices for offer group items in ONE currency code. Used by the
+   * edge-form tamper gate to match a non-base submission against the price the
+   * public form actually rendered. Missing item → falls back to base (caller).
+   */
+  private async loadOfferGroupItemPricesForCode(
+    itemIds: string[],
+    code: string,
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (itemIds.length === 0) return out;
+    const rows = await this.db
+      .select({
+        itemId: schema.offerGroupItemPrices.offerGroupItemId,
+        price: schema.offerGroupItemPrices.price,
+      })
+      .from(schema.offerGroupItemPrices)
+      .where(
+        and(
+          inArray(schema.offerGroupItemPrices.offerGroupItemId, itemIds),
+          eq(schema.offerGroupItemPrices.currencyCode, code),
+        ),
+      );
+    for (const r of rows) out.set(r.itemId, Number(r.price));
+    return out;
+  }
+
+  /** Same as {@link loadOfferGroupItemPricesForCode} for offer template tiers. */
+  private async loadOfferTemplatePricesForCode(
+    templateIds: string[],
+    code: string,
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (templateIds.length === 0) return out;
+    const rows = await this.db
+      .select({
+        templateId: schema.offerTemplatePrices.offerTemplateId,
+        price: schema.offerTemplatePrices.price,
+      })
+      .from(schema.offerTemplatePrices)
+      .where(
+        and(
+          inArray(schema.offerTemplatePrices.offerTemplateId, templateIds),
+          eq(schema.offerTemplatePrices.currencyCode, code),
+        ),
+      );
+    for (const r of rows) out.set(r.templateId, Number(r.price));
+    return out;
+  }
+
+  /**
+   * True when the order's currency differs from the company's base (default)
+   * currency — i.e. a foreign-currency order. Used to strip base-currency-only
+   * embedded offers from pickers that can't price them in the order's currency.
+   */
+  async isOrderNonBaseCurrency(orderId: string): Promise<boolean> {
+    const [order] = await this.db
+      .select({ currencyCode: schema.orders.currencyCode })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    const orderCode = (order?.currencyCode ?? 'NGN').toUpperCase();
+    const [baseCur] = await this.db
+      .select({ code: schema.currencies.code })
+      .from(schema.currencies)
+      .where(and(eq(schema.currencies.isDefault, true), eq(schema.currencies.active, true)))
+      .limit(1);
+    const baseCode = (baseCur?.code ?? 'NGN').toUpperCase();
+    return orderCode !== baseCode;
   }
 
   /**
@@ -1808,6 +1926,20 @@ export class OrdersService {
     const orderProductIds = [...new Set(itemRows.map((r) => r.productId))];
     if (orderProductIds.length === 0) return [];
 
+    // Per-currency offer pricing: for a non-base-currency order (e.g. GHS), each
+    // preset offer must show ITS OWN price in that currency (from the sibling
+    // offer_template_prices / offer_group_item_prices tables), not the base (NGN)
+    // price relabelled with the foreign symbol. Mirrors the edge-form tamper gate.
+    const orderCode = (order.currencyCode ?? 'NGN').toUpperCase();
+    const [baseCur] = await this.db
+      .select({ code: schema.currencies.code })
+      .from(schema.currencies)
+      .where(and(eq(schema.currencies.isDefault, true), eq(schema.currencies.active, true)))
+      .limit(1);
+    const baseCode = (baseCur?.code ?? 'NGN').toUpperCase();
+    // Non-base only when the order's currency differs from the base currency.
+    const nonBaseCode = orderCode !== baseCode ? orderCode : null;
+
     type Tier = { label: string; quantity: number; unitPrice: number };
     const tiersByProduct = new Map<string, Tier[]>();
 
@@ -1825,6 +1957,7 @@ export class OrdersService {
       if (camp?.offerGroupId) {
         const rows = await this.db
           .select({
+            id: schema.offerGroupItems.id,
             productId: schema.offerGroupItems.productId,
             label: schema.offerGroupItems.label,
             price: schema.offerGroupItems.price,
@@ -1837,9 +1970,15 @@ export class OrdersService {
               eq(schema.offerGroupItems.status, 'ACTIVE'),
             ),
           );
+        // Per-currency prices keyed by offer-group-item id; base fallback when a
+        // tier has no price in the order's currency (mirrors the form).
+        const perCurrency = nonBaseCode
+          ? await this.loadOfferGroupItemPricesForCode(rows.map((r) => r.id), nonBaseCode)
+          : new Map<string, number>();
         for (const r of rows) {
           const list = tiersByProduct.get(r.productId) ?? [];
-          list.push({ label: r.label, quantity: r.quantity ?? 1, unitPrice: Number(r.price) });
+          const unitPrice = nonBaseCode && perCurrency.has(r.id) ? perCurrency.get(r.id)! : Number(r.price);
+          list.push({ label: r.label, quantity: r.quantity ?? 1, unitPrice });
           tiersByProduct.set(r.productId, list);
         }
       } else {
@@ -1857,6 +1996,7 @@ export class OrdersService {
           }
           const templates = await this.db
             .select({
+              id: schema.offerTemplates.id,
               name: schema.offerTemplates.name,
               price: schema.offerTemplates.price,
               quantity: schema.offerTemplates.quantity,
@@ -1864,13 +2004,20 @@ export class OrdersService {
             .from(schema.offerTemplates)
             .where(and(...tmplConds));
 
+          const perCurrency = nonBaseCode
+            ? await this.loadOfferTemplatePricesForCode(templates.map((t) => t.id), nonBaseCode)
+            : new Map<string, number>();
           let tiers: Tier[] = templates.map((t) => ({
             label: t.name,
             quantity: t.quantity ?? 1,
-            unitPrice: Number(t.price),
+            unitPrice: nonBaseCode && perCurrency.has(t.id) ? perCurrency.get(t.id)! : Number(t.price),
           }));
 
-          if (tiers.length === 0) {
+          // Embedded product offers + baseSalePrice are BASE-currency (NGN) only —
+          // they have no per-currency sibling. For a foreign-currency order we skip
+          // them (leaving no presets → the modal offers Custom entry) rather than
+          // show an NGN price mislabelled with the foreign symbol.
+          if (tiers.length === 0 && !nonBaseCode) {
             const [p] = await this.db
               .select({
                 baseSalePrice: schema.products.baseSalePrice,
@@ -1908,6 +2055,7 @@ export class OrdersService {
       // Try offer templates first
       const templates = await this.db
         .select({
+          id: schema.offerTemplates.id,
           productId: schema.offerTemplates.productId,
           name: schema.offerTemplates.name,
           price: schema.offerTemplates.price,
@@ -1920,14 +2068,22 @@ export class OrdersService {
             eq(schema.offerTemplates.status, 'ACTIVE'),
           ),
         );
+      const perCurrency = nonBaseCode
+        ? await this.loadOfferTemplatePricesForCode(templates.map((t) => t.id), nonBaseCode)
+        : new Map<string, number>();
       for (const t of templates) {
         const list = tiersByProduct.get(t.productId) ?? [];
-        list.push({ label: t.name, quantity: t.quantity ?? 1, unitPrice: Number(t.price) });
+        const unitPrice = nonBaseCode && perCurrency.has(t.id) ? perCurrency.get(t.id)! : Number(t.price);
+        list.push({ label: t.name, quantity: t.quantity ?? 1, unitPrice });
         tiersByProduct.set(t.productId, list);
       }
 
-      // For any still missing, fall back to embedded product offers
-      const stillMissing = missingProductIds.filter((id) => !tiersByProduct.has(id));
+      // For any still missing, fall back to embedded product offers. These are
+      // BASE-currency (NGN) only (no per-currency sibling), so skip them for a
+      // foreign-currency order — the modal falls back to Custom entry.
+      const stillMissing = nonBaseCode
+        ? []
+        : missingProductIds.filter((id) => !tiersByProduct.has(id));
       if (stillMissing.length > 0) {
         const products = await this.db
           .select({
@@ -3466,11 +3622,8 @@ export class OrdersService {
    * so the same physical phone always matches regardless of how the customer typed it.
    */
   private hashPhone(phone: string): string {
-    let digits = phone.replace(/\D/g, '');
-    // Nigerian local: 0XXXXXXXXXX (11 digits) → 234XXXXXXXXXX
-    if (digits.length === 11 && digits.startsWith('0')) {
-      digits = '234' + digits.slice(1);
-    }
+    // Country-aware canonicalization (shared so edge/API/seed hashes match).
+    const digits = normalizePhoneForHash(phone);
     return createHash('sha256').update(`yannis:phone:${digits}`).digest('hex');
   }
 
@@ -4520,6 +4673,7 @@ export class OrdersService {
       deliveryState: detail.deliveryState ?? null,
       orderItems: detail.orderItems,
       totalAmount: detail.totalAmount ?? null,
+      currencyCode: detail.currencyCode ?? 'NGN',
       createdAt: detail.createdAt ? String(detail.createdAt) : null,
       preferredDeliveryDate: detail.preferredDeliveryDate ?? null,
       logisticsLocationName: detail.logisticsLocationName ?? null,
@@ -4569,6 +4723,7 @@ export class OrdersService {
       deliveryState: fu.deliveryState ?? null,
       orderItems: items.map((it) => ({ id: it.productId, productId: it.productId, quantity: it.quantity, unitPrice: it.unitPrice, productName: it.productName, offerLabel: it.offerLabel })),
       totalAmount: fu.totalAmount ?? null,
+      currencyCode: fu.currencyCode ?? 'NGN',
       createdAt: fu.createdAt ? String(fu.createdAt) : null,
       preferredDeliveryDate: fu.preferredDeliveryDate ?? null,
       logisticsLocationName: null,
@@ -4618,6 +4773,7 @@ export class OrdersService {
       deliveryState: co.deliveryState ?? null,
       orderItems: items.map((it) => ({ id: it.productId, productId: it.productId, quantity: it.quantity, unitPrice: it.unitPrice, productName: it.productName, offerLabel: it.offerLabel })),
       totalAmount: co.totalAmount ?? null,
+      currencyCode: co.currencyCode ?? 'NGN',
       createdAt: co.createdAt ? String(co.createdAt) : null,
       preferredDeliveryDate: co.preferredDeliveryDate ?? null,
       logisticsLocationName: null,
@@ -4848,11 +5004,36 @@ export class OrdersService {
         }
       }
     }
-    if (input.startDate) {
-      conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
-    }
-    if (input.endDate) {
-      conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
+    // Carry-over view: the orders behind the "Carry-over Delivered" tile —
+    // DELIVERED/REMITTED in the range's final month (by delivered_at) but
+    // GENERATED before that month began (created_at < carryOverStart). This
+    // REPLACES the normal created_at range filter so the set the list returns
+    // matches exactly what the tile counts (getCarryOverDeliveredCount). Needs a
+    // date bound to anchor the final month; without one it is a no-op.
+    const carryOverAnchor = input.carryOver ? input.endDate ?? input.startDate : undefined;
+    if (carryOverAnchor) {
+      const carryOverStart = nigeriaCarryOverMonthStart(nigeriaDayEnd(carryOverAnchor));
+      // Match getCarryOverDeliveredCount / the tile exactly: only DELIVERED or
+      // REMITTED orders count as "delivered this period". Without this, an order
+      // with a delivered_at that later moved to RETURNED would leak in and the
+      // list would over-count the tile.
+      conditions.push(inArray(schema.orders.status, ['DELIVERED', 'REMITTED']));
+      // The marketing carry-over count excludes cart-graduated ('online') and
+      // follow-up copies; mirror that here so the list total equals the tile.
+      conditions.push(eq(schema.orders.isFollowUp, false));
+      conditions.push(
+        sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} NOT IN ('online', 'delivered_follow_up', 'graduated_follow_up'))`,
+      );
+      conditions.push(gte(schema.orders.deliveredAt, carryOverStart));
+      conditions.push(lt(schema.orders.createdAt, carryOverStart));
+      conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(carryOverAnchor)));
+    } else {
+      if (input.startDate) {
+        conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
+      }
+      if (input.endDate) {
+        conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
+      }
     }
     {
       const scope = listOpts?.branchScope ?? 'servicing';
@@ -4933,6 +5114,9 @@ export class OrdersService {
       customerPhoneHash: schema.orders.customerPhoneHash,
       customerPhone: schema.orders.customerPhone,
       totalAmount: schema.orders.totalAmount,
+      // Frozen currency the amount is denominated in (multi-currency). List rows
+      // render via <MoneyAmount currencyCode=…> so non-NGN orders show GH₵ etc.
+      currencyCode: schema.orders.currencyCode,
       createdAt: schema.orders.createdAt,
       updatedAt: schema.orders.updatedAt,
       preferredDeliveryDate: schema.orders.preferredDeliveryDate,
@@ -5109,6 +5293,9 @@ export class OrdersService {
           assignedCsName: order.assignedCsId ? userNamesById.get(order.assignedCsId) ?? null : null,
           primaryProductId: primary?.productId ?? null,
           primaryProductName: primary?.productName ?? null,
+          // Quantity of the primary (first) line item — the offer/pack size,
+          // e.g. 3 for a "3 pack". Surfaced so order lists can show "BCG-35 · 3 pack".
+          primaryQuantity: primary?.items[0]?.qty ?? null,
           itemCount: primary?.itemCount ?? 0,
           productLines: primary?.items.map((i) => `${i.name ?? 'Unknown'} x${i.qty}`).join('; ') ?? '',
           campaignName: order.campaignId ? campaignNames.get(order.campaignId) ?? null : null,
@@ -6678,6 +6865,7 @@ export class OrdersService {
       body: this.formatAssignedOrderBody({
         customerName: updated.customerName,
         totalAmount: updated.totalAmount,
+        currencyCode: updated.currencyCode ?? 'NGN',
       }),
       data: {
         orderId,
@@ -7163,10 +7351,14 @@ export class OrdersService {
     /** When true, exclude cart-graduated orders (order_source='online').
      *  Used when cart-graduated orders are counted in a separate query. */
     excludeCartGraduated?: boolean;
+    /** Multi-currency filter — restrict to one currency so the strip matches a
+     *  currency-filtered list. Undefined = all currencies (single-currency world). */
+    currencyCode?: string;
   }): Promise<Record<string, number>> {
     const conditions: Parameters<typeof and>[0][] = [
       sql`(${schema.orders.deletedAt} IS NULL OR ${schema.orders.status} IN ('DELETED', 'CANCELLED'))`,
     ];
+    if (opts.currencyCode) conditions.push(eq(schema.orders.currencyCode, opts.currencyCode));
     // Follow-up exclusion: matches orders.list's excludeGraduated=true behavior
     // so strip counts align with the table rows.
     if (opts.excludeFollowUps) {
@@ -7238,11 +7430,14 @@ export class OrdersService {
     orderSource?: string; teamMemberIds?: string[];
     excludeFollowUps?: boolean;
     excludeCartGraduated?: boolean;
+    /** Multi-currency filter — restrict to one currency. Undefined = all. */
+    currencyCode?: string;
   }): Promise<number> {
     const conditions: Parameters<typeof and>[0][] = [
       sql`(${schema.orders.deletedAt} IS NULL OR ${schema.orders.status} IN ('DELETED', 'CANCELLED'))`,
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
     ];
+    if (opts.currencyCode) conditions.push(eq(schema.orders.currencyCode, opts.currencyCode));
     if (opts.excludeFollowUps) {
       conditions.push(eq(schema.orders.isFollowUp, false));
       conditions.push(sql`(${schema.orders.orderSource} IS DISTINCT FROM 'delivered_follow_up' AND ${schema.orders.orderSource} IS DISTINCT FROM 'graduated_follow_up')`);
@@ -7439,10 +7634,13 @@ export class OrdersService {
     supervisorScope?: OrdersAggregateSupervisorScope,
     branchScope: 'servicing' | 'marketing' = 'servicing',
     effectiveBranchIds?: string[] | null,
+    /** Multi-currency filter — restrict to one currency. Undefined = all. */
+    currencyCode?: string,
   ): Promise<{ offlineCount: number; offlineDeliveredCount: number; duplicateCount: number; deliveredFollowUpCount: number }> {
     const conditions: Parameters<typeof and>[0][] = [
       eq(schema.orders.isFollowUp, false),
     ];
+    if (currencyCode) conditions.push(eq(schema.orders.currencyCode, currencyCode));
     appendOrdersAggregateScopeConditions(conditions, { mediaBuyerId, assignedCsId, supervisorScope });
     const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
@@ -7459,6 +7657,7 @@ export class OrdersService {
       eq(schema.orders.orderSource, 'offline'),
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
     ];
+    if (currencyCode) deliveredFollowUpOfflineConditions.push(eq(schema.orders.currencyCode, currencyCode));
     appendOrdersAggregateScopeConditions(deliveredFollowUpOfflineConditions, { mediaBuyerId, assignedCsId, supervisorScope });
     if (bCond) deliveredFollowUpOfflineConditions.push(bCond);
     if (startDate) deliveredFollowUpOfflineConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
@@ -7740,6 +7939,7 @@ export class OrdersService {
         createdAt: schema.orders.createdAt,
         updatedAt: schema.orders.updatedAt,
         totalAmount: schema.orders.totalAmount,
+        currencyCode: schema.orders.currencyCode,
       })
       .from(schema.orders)
       .where(and(...conditions))
@@ -7777,6 +7977,7 @@ export class OrdersService {
       createdAt: o.createdAt,
       updatedAt: o.updatedAt,
       totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
+      currencyCode: o.currencyCode ?? 'NGN',
       items: (itemsByOrder.get(o.id) ?? []).map((row) => ({
         productName: row.productName ?? null,
         quantity: row.quantity,
@@ -8812,6 +9013,7 @@ export class OrdersService {
         branchId: schema.orders.branchId,
         customerName: schema.orders.customerName,
         totalAmount: schema.orders.totalAmount,
+        currencyCode: schema.orders.currencyCode,
       })
       .from(schema.orders)
       .where(eq(schema.orders.id, orderId))
@@ -8903,6 +9105,7 @@ export class OrdersService {
       body: this.formatAssignedOrderBody({
         customerName: orderRow?.customerName ?? null,
         totalAmount: orderRow?.totalAmount ?? null,
+        currencyCode: orderRow?.currencyCode ?? 'NGN',
       }),
       data: {
         orderId,
@@ -9079,6 +9282,7 @@ export class OrdersService {
         createdAt: schema.orders.createdAt,
         status: schema.orders.status,
         totalAmount: schema.orders.totalAmount,
+        currencyCode: schema.orders.currencyCode,
       })
       .from(schema.orders)
       .where(
@@ -10979,6 +11183,7 @@ export class OrdersService {
   private formatAssignedOrderBody(input: {
     customerName: string | null;
     totalAmount: string | number | null;
+    currencyCode?: string | null;
     branchName?: string | null;
   }): string {
     const parts: string[] = [];
@@ -10989,7 +11194,7 @@ export class OrdersService {
         ? Number(input.totalAmount)
         : input.totalAmount;
     if (typeof amt === 'number' && Number.isFinite(amt) && amt > 0) {
-      parts.push(`₦${Math.round(amt).toLocaleString('en-NG')}`);
+      parts.push(`${symbolForCurrencyCode(input.currencyCode)}${Math.round(amt).toLocaleString('en-US')}`);
     }
     if (input.branchName?.trim()) parts.push(input.branchName.trim());
     if (parts.length === 0) {
@@ -12006,6 +12211,7 @@ export class OrdersService {
         orderNumber: schema.orders.orderNumber,
         customerName: schema.orders.customerName,
         totalAmount: schema.orders.totalAmount,
+        currencyCode: schema.orders.currencyCode,
         orderCreatedAt: schema.orders.createdAt,
         followUpSourceOrderId: schema.orders.followUpSourceOrderId,
       })

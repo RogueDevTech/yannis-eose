@@ -5,6 +5,8 @@ const METRIC_LABELS: Record<string, string> = {
   INDIVIDUAL_DR: 'individual delivery rate (DR %)',
   TEAM_DR: 'team delivery rate (DR %)',
   CPA: 'CPA (cost per acquisition)',
+  DELIVERED_COUNT: 'delivered orders',
+  QUALIFYING_REVENUE: 'qualifying revenue (delivered + remitted)',
   TARGET_MET: 'delivery target',
   NONE: 'no metric (flat)',
 };
@@ -19,7 +21,8 @@ const OPERATOR_LABELS: Record<string, string> = {
 
 function formatThreshold(metric: string, threshold: number): string {
   if (metric === 'TARGET_MET') return threshold >= 1 ? 'met' : 'not met';
-  if (metric === 'CPA') return formatNaira(threshold);
+  if (metric === 'CPA' || metric === 'QUALIFYING_REVENUE') return formatNaira(threshold);
+  if (metric === 'DELIVERED_COUNT') return `${threshold}`;
   if (metric === 'NONE') return '';
   return `${threshold}%`;
 }

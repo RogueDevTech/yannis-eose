@@ -4,7 +4,8 @@ import {
   type InvoicePdfData,
   type InvoicePdfRowSource,
 } from '~/lib/invoice-pdf';
-import { formatNaira } from '~/lib/format-amount';
+import { formatMoney, currencyByCode } from '@yannis/shared';
+import { useCurrenciesCatalog } from '~/contexts/currencies-catalog-context';
 
 /*
  * NOTE: this component intentionally uses absolute `text-[Npx]` sizes and a
@@ -22,6 +23,12 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
     0,
   );
   const taxAmount = taxRate > 0 ? subtotal * taxRate : 0;
+  // Resolve the invoice's frozen currency from the live catalog so the symbol
+  // (₦, GH₵, …) matches the order. Absent/NGN keeps the exact legacy output.
+  const currencies = useCurrenciesCatalog();
+  const currency = currencyByCode(currencies, invoice.currencyCode);
+  const money = (amount: number) =>
+    formatMoney(amount, currency, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const dateStr = (iso: string) =>
     new Date(iso).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
 
@@ -122,16 +129,10 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
                     <td className="px-1.5 py-1.5 pr-2 align-top">{li.description}</td>
                     <td className="py-1.5 text-right tabular-nums align-top">{li.quantity}</td>
                     <td className="py-1.5 text-right tabular-nums align-top">
-                      {formatNaira(Number(li.unitPrice), {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {money(Number(li.unitPrice))}
                     </td>
                     <td className="py-1.5 text-right tabular-nums align-top">
-                      {formatNaira(lineTotal, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {money(lineTotal)}
                     </td>
                   </tr>
                 );
@@ -148,24 +149,21 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
           <div className="flex w-[200px] max-w-full justify-between gap-4">
             <span className="text-black">Subtotal:</span>
             <span className="tabular-nums text-right text-black">
-              {formatNaira(subtotal, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {money(subtotal)}
             </span>
           </div>
           {taxRate > 0 ? (
             <div className="flex w-[200px] max-w-full justify-between gap-4">
               <span className="text-black">Tax ({(taxRate * 100).toFixed(1)}%):</span>
               <span className="tabular-nums text-right text-black">
-                {formatNaira(taxAmount, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {money(taxAmount)}
               </span>
             </div>
           ) : null}
           <div className="flex w-[200px] max-w-full justify-between gap-4 text-mini font-bold">
             <span className="text-black">TOTAL:</span>
             <span className="tabular-nums text-right text-black">
-              {formatNaira(Number(invoice.totalAmount), {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
+              {money(Number(invoice.totalAmount))}
             </span>
           </div>
         </div>

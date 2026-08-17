@@ -46,6 +46,7 @@ const STATUS_VARIANT_MAP: Record<string, BadgeVariant> = {
   disabled: 'neutral',
   pending: 'warning',
   approved: 'success',
+  voided: 'neutral',
   rejected: 'danger',
   cancelled: 'danger',
   completed: 'success',

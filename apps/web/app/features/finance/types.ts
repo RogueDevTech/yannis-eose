@@ -10,6 +10,8 @@ export interface Invoice {
   status: string;
   dueDate: string | null;
   createdAt: string;
+  /** Frozen currency of the underlying order. Absent/NGN → base currency. */
+  currencyCode?: string | null;
 }
 
 export interface ProductProfitBreakdownRow {

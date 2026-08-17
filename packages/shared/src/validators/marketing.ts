@@ -703,6 +703,19 @@ export const formConfigSchema = z.object({
   allowMultiCurrency: z.boolean().optional(),
   /** The single currency this form takes when `allowMultiCurrency` is false. Defaults to base. */
   pinnedCurrency: z.string().trim().toUpperCase().max(5).optional(),
+  /**
+   * The country this form delivers to. Drives the "Delivery State" region list
+   * (Ghana regions for a Ghana form, etc.). Defaults from the form's currency;
+   * the Media Buyer can override it in the editor. When `allowCountrySelection`
+   * is on, this is the DEFAULT/starting country the customer can change.
+   */
+  deliveryCountry: z.string().trim().max(100).optional(),
+  /**
+   * When true, the customer picks their country on the form; the region list +
+   * currency follow their choice. When false (default), the form is locked to
+   * `deliveryCountry`.
+   */
+  allowCountrySelection: z.boolean().optional(),
 });
 export type FormConfig = z.infer<typeof formConfigSchema>;
 

@@ -2,6 +2,7 @@ import jsPDF from 'jspdf';
 import type { Invoice } from '~/features/finance/types';
 import type { OrderInvoice } from '~/features/orders/types';
 import { formatNaira as formatNairaAmount } from './format-amount';
+import { symbolForCurrencyCode } from '@yannis/shared';
 
 /** jsPDF built-ins (Helvetica) omit U+20A6 (₦); register Noto Sans so currency renders correctly. */
 const INVOICE_PDF_FONT_FAMILY = 'NotoSans';
@@ -87,6 +88,8 @@ export interface InvoicePdfData {
   status: string;
   dueDate: string | null;
   createdAt: string;
+  /** Frozen currency of the order/invoice. NGN/absent → ₦ (unchanged); else that currency's symbol. */
+  currencyCode?: string | null;
   /** When true, render a rubber-stamp "MARKED AS PAID" at bottom-right (HTML + PDF). */
   markedPaid?: boolean;
 }
@@ -255,6 +258,7 @@ export function toInvoicePdfData(row: InvoicePdfRowSource): InvoicePdfData {
     status: row.status,
     dueDate: row.dueDate,
     createdAt: row.createdAt,
+    currencyCode: row.currencyCode ?? null,
     // `markedPaid` is on `OrderInvoice` (server-derived from
     // `delivery_remittances.status === 'RECEIVED'`), absent on `Invoice`.
     // Pass through when present; otherwise downstream renderers leave the stamp off.
@@ -266,7 +270,8 @@ async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
   const doc = new jsPDF();
   const fontsOk = await ensureInvoicePdfEmbeddedFonts(doc);
   const ff = fontsOk ? INVOICE_PDF_FONT_FAMILY : 'helvetica';
-  const naira = (amount: number) => formatNairaPdf(amount, fontsOk);
+  // Money formatter honours the invoice's frozen currency (NGN → ₦ as before).
+  const money = (amount: number) => formatMoneyPdf(amount, invoice.currencyCode, fontsOk);
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 20;
@@ -383,8 +388,8 @@ async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
 
     doc.text(item.description, colX.desc + 3, y);
     doc.text(String(item.quantity), colX.qty, y, { align: 'right' });
-    doc.text(naira(Number(item.unitPrice)), colX.unitPrice, y, { align: 'right' });
-    doc.text(naira(lineTotal), colX.total, y, { align: 'right' });
+    doc.text(money(Number(item.unitPrice)), colX.unitPrice, y, { align: 'right' });
+    doc.text(money(lineTotal), colX.total, y, { align: 'right' });
     y += 6;
 
     // Add page break if needed
@@ -404,7 +409,7 @@ async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
   doc.setFontSize(9);
   doc.setFont(ff, 'normal');
   doc.text('Subtotal:', pageWidth - margin - 55, y);
-  doc.text(naira(subtotal), pageWidth - margin, y, { align: 'right' });
+  doc.text(money(subtotal), pageWidth - margin, y, { align: 'right' });
   y += 6;
 
   // Tax
@@ -412,7 +417,7 @@ async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
   if (taxRate > 0) {
     const taxAmount = subtotal * taxRate;
     doc.text(`Tax (${(taxRate * 100).toFixed(1)}%):`, pageWidth - margin - 55, y);
-    doc.text(naira(taxAmount), pageWidth - margin, y, { align: 'right' });
+    doc.text(money(taxAmount), pageWidth - margin, y, { align: 'right' });
     y += 6;
   }
 
@@ -420,7 +425,7 @@ async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
   doc.setFont(ff, 'bold');
   doc.setFontSize(11);
   doc.text('TOTAL:', pageWidth - margin - 55, y);
-  doc.text(naira(Number(invoice.totalAmount)), pageWidth - margin, y, { align: 'right' });
+  doc.text(money(Number(invoice.totalAmount)), pageWidth - margin, y, { align: 'right' });
   y += 14;
 
   // ── Footer ────────────────────────────────
@@ -537,8 +542,27 @@ export async function generateInvoicePdf(invoice: InvoicePdfRowSource): Promise<
 
 const NAIRA_CHAR = '\u20A6';
 
-function formatNairaPdf(amount: number, useUnicodeNaira: boolean): string {
-  const s = formatNairaAmount(amount, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (useUnicodeNaira) return s;
-  return s.replaceAll(NAIRA_CHAR, 'NGN ');
+/**
+ * Format money for the PDF, honouring the invoice's frozen currency.
+ *
+ * NGN keeps its exact legacy output. For other currencies we prefix the amount
+ * with the currency's symbol (from the catalog-free lookup, e.g. GHS \u2192 GH\u20B5).
+ * When the embedded Unicode font failed to load, jsPDF's Helvetica can't draw
+ * \u20A6 / GH\u20B5 etc., so we fall back to the ISO code (`NGN `, `GHS `) \u2014 same defence
+ * the old naira-only path used.
+ */
+function formatMoneyPdf(amount: number, currencyCode: string | null | undefined, fontsOk: boolean): string {
+  const code = (currencyCode || 'NGN').toUpperCase();
+  // Numeric part: reuse the shared naira formatter for grouping, then swap the symbol.
+  const withNaira = formatNairaAmount(amount, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const sign = withNaira.startsWith('-') ? '-' : '';
+  const numeric = withNaira.replace('-', '').replaceAll(NAIRA_CHAR, '');
+
+  if (code === 'NGN') {
+    return fontsOk ? withNaira : `${sign}NGN ${numeric}`;
+  }
+  const symbol = symbolForCurrencyCode(code);
+  // If fonts loaded, symbols (GH\u20B5 etc.) render fine; otherwise fall back to the code.
+  const prefix = fontsOk ? symbol : `${code} `;
+  return `${sign}${prefix}${numeric}`;
 }

@@ -4,6 +4,7 @@
  */
 
 import { formatOrderNumber } from './format-order-number';
+import { symbolForCurrencyCode } from '../currency/african-countries';
 
 const NOTES_MAX = 300;
 const CUSTOM_VALUE_MAX = 500;
@@ -35,6 +36,8 @@ export type OrderClipboardSummaryInput = {
   deliveryState?: string | null;
   orderItems?: OrderClipboardSummaryOrderItem[];
   totalAmount?: string | null;
+  /** Frozen order currency (default NGN). Drives the money symbol in the summary. */
+  currencyCode?: string | null;
   createdAt?: string | null;
   preferredDeliveryDate?: string | null;
   logisticsLocationName?: string | null;
@@ -46,8 +49,8 @@ export type OrderClipboardSummaryInput = {
   customFields?: Record<string, unknown> | null;
 };
 
-function formatNaira(amount: number): string {
-  return `₦${amount.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`;
+function formatMoney(amount: number, code?: string | null): string {
+  return `${symbolForCurrencyCode(code)}${amount.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 }
 
 function truncate(s: string, max: number): string {
@@ -99,7 +102,7 @@ export function buildOrderClipboardSummaryText(order: OrderClipboardSummaryInput
   }
 
   const t = Number(order.totalAmount);
-  lines.push(`TOTAL AMOUNT:  ${Number.isFinite(t) && t > 0 ? formatNaira(t) : 'N/A'}`);
+  lines.push(`TOTAL AMOUNT:  ${Number.isFinite(t) && t > 0 ? formatMoney(t, order.currencyCode) : 'N/A'}`);
   lines.push('');
 
   lines.push(`Closer:        ${order.assignedCsName || 'Unassigned'}`);

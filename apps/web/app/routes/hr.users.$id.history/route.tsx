@@ -119,6 +119,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const { profileUser, cookie } = gate;
   const opt = { method: 'GET' as const, cookie };
 
+  // Tax-document management is gated on hr.write (same as the tRPC mutations).
+  // SUPER_ADMIN / HR_MANAGER always qualify.
+  const canManageTaxDocs =
+    currentUser.role === 'SUPER_ADMIN' ||
+    currentUser.role === 'HR_MANAGER' ||
+    (currentUser.permissions ?? []).includes('hr.write');
+
   const pageData = (async () => {
     const payoutInput: Record<string, unknown> = { staffId: userId, page: 1, limit: 200 };
     if (!periodAllTime) {
@@ -184,6 +191,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       payouts,
       adjustments,
       filters: { startDate, endDate, periodAllTime },
+      canManageTaxDocs,
     };
   })();
 
@@ -209,6 +217,7 @@ export default function UserHistoryRoute() {
           payouts={data.payouts}
           adjustments={data.adjustments}
           filters={data.filters}
+          canManageTaxDocs={data.canManageTaxDocs}
         />
       )}
     </CachedAwait>

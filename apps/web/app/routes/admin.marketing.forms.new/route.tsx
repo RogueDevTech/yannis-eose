@@ -115,6 +115,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const accentColor = formData.get('formAccentColor')?.toString();
   const successCallbackUrl = formData.get('successCallbackUrl')?.toString()?.trim() || undefined;
   const showProductImages = formData.get('showProductImages')?.toString() !== 'false';
+  const allowMultiCurrency = formData.get('allowMultiCurrency')?.toString() === 'true';
+  const pinnedCurrencyRaw = formData.get('pinnedCurrency')?.toString()?.trim().toUpperCase();
+  const pinnedCurrency = pinnedCurrencyRaw && pinnedCurrencyRaw.length > 0 && pinnedCurrencyRaw.length <= 5 ? pinnedCurrencyRaw : undefined;
+  const deliveryCountryRaw = formData.get('deliveryCountry')?.toString()?.trim();
+  const deliveryCountry = deliveryCountryRaw && deliveryCountryRaw.length > 0 && deliveryCountryRaw !== 'Nigeria' ? deliveryCountryRaw : undefined;
+  const allowCountrySelection = formData.get('allowCountrySelection')?.toString() === 'true';
   const parsedStandard = parseStandardFieldsPayload(formData.get('standardFields')?.toString());
   if (!parsedStandard.ok) {
     return json({ error: parsedStandard.error }, { status: 400 });
@@ -152,6 +158,10 @@ export async function action({ request }: ActionFunctionArgs) {
     accentColor ||
     successCallbackUrl ||
     showProductImages === false ||
+    allowMultiCurrency ||
+    pinnedCurrency ||
+    deliveryCountry ||
+    allowCountrySelection ||
     hasStandardFields ||
     hasCustomFields ||
     hasNonDefaultFieldOrder
@@ -162,6 +172,11 @@ export async function action({ request }: ActionFunctionArgs) {
           ...(accentColor ? { accentColor } : {}),
           ...(successCallbackUrl ? { successCallbackUrl } : {}),
           ...(showProductImages === false ? { showProductImages: false } : {}),
+          ...(allowMultiCurrency ? { allowMultiCurrency: true } : {}),
+          // pinnedCurrency = default/starting currency (whether the picker is on or off).
+          ...(pinnedCurrency ? { pinnedCurrency } : {}),
+          ...(deliveryCountry ? { deliveryCountry } : {}),
+          ...(allowCountrySelection ? { allowCountrySelection: true } : {}),
           standardFields,
           fieldOrder,
           ...legacyStandardFlags,

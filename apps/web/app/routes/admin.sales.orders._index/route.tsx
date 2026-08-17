@@ -195,6 +195,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const frozenParam = url.searchParams.get('frozen') || undefined;
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
+  // Multi-currency filter (dormant unless the company added a 2nd currency).
+  const currencyCode = url.searchParams.get('currency')?.toUpperCase() || undefined;
 
   // Six-bucket collapse: "Confirmed" pill rolls up the post-confirmation in-flight
   // pipeline (AGENT_ASSIGNED / DISPATCHED / IN_TRANSIT) so the list must match.
@@ -221,6 +223,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(testOrders && { testOrders: true }),
     ...(orderSource && { orderSource }),
     ...(teamIdParam && { teamId: teamIdParam }),
+    ...(currencyCode && { currencyCode }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
     ...(!hasScheduleListFilter && apiEndDate && { endDate: apiEndDate }),
   };
@@ -350,7 +353,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       assignedCsId: null,
       primaryProductId: c.productId ?? null,
       primaryProductName: c.productName ?? null,
-      itemCount: c.quantity ?? 0,
+      primaryQuantity: c.quantity ?? null,
+      itemCount: 1,
       campaignId: c.campaignId ?? null,
       campaignName: c.campaignName ?? null,
       mediaBuyerId: c.mediaBuyerId ?? null,
@@ -386,6 +390,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         canCreateOffline,
         orderSource: 'edge-form-and-import',
         ...(teamIdParam && { teamId: teamIdParam }),
+        ...(currencyCode && { currencyCode }),
       }),
     );
     const bundleRes = await apiRequest<unknown>(

@@ -66,6 +66,7 @@ function OrderColumn({
             <OrderIdBadge
               id={order.id}
               orderNumber={order.orderNumber}
+              currencyCode={order.currencyCode}
               length={8}
               ellipsis="…"
               linkTo={`/admin/orders/${order.id}`}
@@ -103,7 +104,7 @@ function OrderColumn({
             </dt>
             <dd className="mt-0.5 text-sm font-semibold text-app-fg tabular-nums">
               {order.totalAmount ? (
-                <NairaPrice amount={Number(order.totalAmount)} />
+                <NairaPrice amount={Number(order.totalAmount)} currencyCode={order.currencyCode} />
               ) : (
                 <span className="text-app-fg-muted">—</span>
               )}

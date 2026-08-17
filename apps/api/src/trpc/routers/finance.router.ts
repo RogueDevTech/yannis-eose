@@ -284,6 +284,9 @@ export const financeRouter = router({
         branchId: z.string().uuid().optional(),
         mediaBuyerId: z.string().uuid().optional(),
         dateScope: z.enum(['createdAt', 'deliveredAt']).optional(),
+        /** Currency lens: when set, scope all overview money to this currency.
+         *  Absent = all currencies (base + any others). */
+        currencyCode: z.string().trim().toUpperCase().max(5).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -293,6 +296,7 @@ export const financeRouter = router({
         endDate: input.endDate,
         ...(input.branchId && { branchId: input.branchId }),
         ...(input.mediaBuyerId && { mediaBuyerId: input.mediaBuyerId }),
+        ...(input.currencyCode && { currencyCode: input.currencyCode }),
         includeProductBreakdown: true,
       };
 
@@ -316,6 +320,7 @@ export const financeRouter = router({
                 dateScope: input.dateScope ?? 'createdAt',
                 ...(input.startDate && { startDate: input.startDate }),
                 ...(input.endDate && { endDate: input.endDate }),
+                ...(input.currencyCode && { currencyCode: input.currencyCode }),
               },
               ctx.user,
               ctx.activeGroupId,

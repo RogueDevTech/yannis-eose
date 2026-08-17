@@ -54,6 +54,7 @@ export interface DeliveryRemittanceEligibleOrder {
   orderNumber: number | null;
   customerName: string;
   totalAmount: string | null;
+  currencyCode?: string;
   deliveryFee: string | null;
   deliveredAt: string | null;
   logisticsLocationId?: string | null;
@@ -351,7 +352,7 @@ export function RemitPage({
                     </span>
                     {order.totalAmount != null && (
                       <span className="text-xs font-medium text-app-fg-muted shrink-0">
-                        <NairaPrice amount={Number(order.totalAmount)} />
+                        <NairaPrice amount={Number(order.totalAmount)} currencyCode={order.currencyCode} />
                       </span>
                     )}
                   </label>

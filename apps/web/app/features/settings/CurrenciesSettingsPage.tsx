@@ -15,6 +15,21 @@ interface Props {
   currencies: CurrencyRow[];
 }
 
+/**
+ * Preset accent colours for a currency. Chosen to be distinct and readable on
+ * both light and dark backgrounds (they tint an order number / amount inline).
+ */
+const CURRENCY_COLOR_PRESETS: { value: string; label: string }[] = [
+  { value: '#22c55e', label: 'Green' },
+  { value: '#3b82f6', label: 'Blue' },
+  { value: '#a855f7', label: 'Purple' },
+  { value: '#ec4899', label: 'Pink' },
+  { value: '#f97316', label: 'Orange' },
+  { value: '#eab308', label: 'Amber' },
+  { value: '#14b8a6', label: 'Teal' },
+  { value: '#ef4444', label: 'Red' },
+];
+
 /** Format the stored numeric FX string for display. */
 function fxLabel(row: CurrencyRow, base: CurrencyRow | undefined): string {
   if (row.isDefault) return 'Base';
@@ -60,13 +75,23 @@ export function CurrenciesSettingsPage({ currencies }: Props) {
           {
             key: 'currency',
             header: 'Currency',
-            render: (c) => (
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-app-fg">{c.symbol}</span>
-                <span className="font-medium text-app-fg">{c.code}</span>
-                {c.isDefault && <StatusBadge status="Default" variant="info" />}
-              </div>
-            ),
+            render: (c) => {
+              const accent = !c.isDefault ? c.color : null;
+              return (
+                <div className="flex items-center gap-2">
+                  {accent && (
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: accent }}
+                      aria-hidden
+                    />
+                  )}
+                  <span className={accent ? 'font-semibold' : 'font-semibold text-app-fg'} style={accent ? { color: accent } : undefined}>{c.symbol}</span>
+                  <span className={accent ? 'font-medium' : 'font-medium text-app-fg'} style={accent ? { color: accent } : undefined}>{c.code}</span>
+                  {c.isDefault && <StatusBadge status="Default" variant="info" />}
+                </div>
+              );
+            },
           },
           {
             key: 'country',
@@ -209,6 +234,8 @@ function CurrencyForm({
   const [code, setCode] = useState(editing?.code ?? '');
   const [symbol, setSymbol] = useState(editing?.symbol ?? '');
   const [fxRate, setFxRate] = useState(editing?.fxRateToBase ?? '');
+  // Accent colour — tints this currency's order#/amount so its rows stand out.
+  const [color, setColor] = useState<string>(editing?.color ?? '');
 
   // When country changes, cascade code + symbol (add mode only — identity fixed on edit).
   const onCountryChange = (value: string) => {
@@ -229,7 +256,10 @@ function CurrencyForm({
   const precision = editing?.precision ?? selected?.precision ?? AFRICAN_CURRENCY_CODES.find((c) => c.code === code)?.precision ?? 2;
   // On add, block a code the company already has. On edit the code is its own — ignore.
   const codeExists = !isEdit && code !== '' && existing.has(code.toUpperCase());
-  const canSubmit = country !== '' && code !== '' && symbol !== '' && !codeExists && fetcher.state === 'idle';
+  // FX rate is REQUIRED when adding a currency (needed for merged/FX aggregates).
+  // On edit the FX rate is managed via the dedicated "FX rate" row, not here.
+  const canSubmit =
+    country !== '' && code !== '' && symbol !== '' && !codeExists && (isEdit || fxValid) && fetcher.state === 'idle';
 
   return (
     <fetcher.Form method="post" className="space-y-4 p-5">
@@ -295,11 +325,12 @@ function CurrencyForm({
         </label>
       </div>
 
-      {/* 3. FX rate (optional; can also be set later per row) */}
+      {/* 3. FX rate — REQUIRED on add (needed for merged/FX aggregates). On edit
+          it is managed via the row's "FX rate" action, so it stays optional here. */}
       <label className="block text-sm">
         <span className="mb-1 block font-medium text-app-fg">
           FX to base: value of 1 {code || 'unit'} in {baseSymbol}{' '}
-          <span className="font-normal text-app-muted-fg">(optional)</span>
+          <span className="font-normal text-app-muted-fg">{isEdit ? '(optional)' : '(required)'}</span>
         </span>
         <TextInput
           name="fxRate"
@@ -314,12 +345,55 @@ function CurrencyForm({
         />
         <span className="mt-1 block text-xs text-app-muted-fg">
           {!code
-            ? 'Pick a currency first. You can also set this later.'
+            ? 'Pick a currency first.'
             : fxValid
               ? `1 ${code} = ${baseSymbol}${fxNum.toLocaleString('en-US', { maximumFractionDigits: 4 })}`
-              : `1 ${code} = ${baseSymbol}?`}
+              : isEdit
+                ? `1 ${code} = ${baseSymbol}?`
+                : 'Required: enter how many base units 1 unit of this currency is worth.'}
         </span>
       </label>
+
+      {/* 4. Accent colour (optional) — tints this currency's order#/amount. */}
+      <input type="hidden" name="color" value={color} />
+      <div className="block text-sm">
+        <span className="mb-1 block font-medium text-app-fg">
+          Accent colour <span className="font-normal text-app-muted-fg">(optional)</span>
+        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          {CURRENCY_COLOR_PRESETS.map((preset) => {
+            const active = color.toLowerCase() === preset.value.toLowerCase();
+            return (
+              <button
+                key={preset.value}
+                type="button"
+                onClick={() => setColor(active ? '' : preset.value)}
+                aria-label={preset.label}
+                aria-pressed={active}
+                title={preset.label}
+                className={`h-7 w-7 rounded-full border-2 transition-transform ${
+                  active ? 'border-app-fg scale-110' : 'border-transparent hover:scale-105'
+                }`}
+                style={{ backgroundColor: preset.value }}
+              />
+            );
+          })}
+          {color && (
+            <button
+              type="button"
+              onClick={() => setColor('')}
+              className="ml-1 text-xs text-app-muted-fg underline hover:text-app-fg"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <span className="mt-1 block text-xs text-app-muted-fg">
+          {color
+            ? 'This currency’s order number and amount are tinted this colour.'
+            : 'No colour: order number and amount render in the default text colour.'}
+        </span>
+      </div>
 
       {codeExists && (
         <p className="text-xs text-red-500">{code} is already configured for this company.</p>

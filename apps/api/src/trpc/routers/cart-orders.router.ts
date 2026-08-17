@@ -42,7 +42,7 @@ export const cartOrdersRouter = router({
     }),
 
   getStatusCounts: permissionProcedure('orders.read')
-    .input(listCartOrdersSchema.pick({ assignedCsId: true, branchId: true, startDate: true, endDate: true }))
+    .input(listCartOrdersSchema.pick({ assignedCsId: true, branchId: true, startDate: true, endDate: true, currencyCode: true }))
     .query(async ({ input, ctx }) => {
       const viewerCloserId = ctx.user.role === 'CS_CLOSER' ? ctx.user.id : null;
       return getCartOrdersService().getStatusCounts(
@@ -53,6 +53,9 @@ export const cartOrdersRouter = router({
         ctx.effectiveBranchIds,
         undefined, // mediaBuyerId
         viewerCloserId,
+        'servicing', // branchScope
+        undefined, // mediaBuyerIds
+        input.currencyCode, // currencyCode — strip mirrors the list's currency filter
       );
     }),
 

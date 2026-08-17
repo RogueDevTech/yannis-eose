@@ -22,6 +22,8 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { CompareButton } from '~/features/compare/CompareButton';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { InlineFilter } from '~/components/ui/inline-filter';
+import { CurrencyFilterSelect } from '~/components/ui/currency-filter-select';
+import { useBaseCurrency, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -77,6 +79,7 @@ export interface DeliveryRemittanceDetail extends DeliveryRemittanceListItem {
     orderNumber: number | null;
     customerName: string;
     totalAmount: string | null;
+    currencyCode?: string;
     deliveryFee: string | null;
     deliveredAt: string | null;
     status: string;
@@ -158,6 +161,7 @@ export interface RemittanceOrderRow {
   customerName: string;
   orderNumber: string | null;
   totalAmount: string;
+  currencyCode?: string;
   deliveryFee: string | null;
   deliveredAt: string | null;
   status: string;
@@ -228,7 +232,24 @@ export function DeliveryRemittancesPage({
   remittanceOrders = [],
   remittanceOrdersPagination,
 }: DeliveryRemittancesPageProps) {
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const hasMultipleCurrencies = useHasMultipleCurrencies();
+  const baseCurrency = useBaseCurrency();
+  // The currency all stat totals + summary amounts are scoped to (the URL param,
+  // or the base currency). Passed to <NairaPrice> so the strip shows the right
+  // symbol (e.g. GH₵) instead of always ₦ when a foreign currency is selected.
+  const activeCurrencyCode = searchParams.get('currency') || baseCurrency.code;
+  // Never show a mixed-currency view: when the company has 2+ currencies and no
+  // currency is chosen, default the URL to the base currency so every total and
+  // list on this financial page is single-currency from first paint. Single-
+  // currency companies are untouched (the filter self-hides, the param stays off).
+  useEffect(() => {
+    if (hasMultipleCurrencies && !searchParams.get('currency')) {
+      const next = new URLSearchParams(searchParams);
+      next.set('currency', baseCurrency.code);
+      setSearchParams(next, { replace: true, preventScrollReset: true });
+    }
+  }, [hasMultipleCurrencies, baseCurrency.code, searchParams, setSearchParams]);
   const location = useLocation();
   const navigation = useNavigation();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
@@ -565,6 +586,16 @@ export function DeliveryRemittancesPage({
   const eligibleMultiLocation =
     new Set(remittanceSelectedOrders.map((o) => o.logisticsLocationId ?? '')).size > 1;
 
+  // A remittance batch is single-currency (spec): block selecting orders of
+  // different currencies together, mirroring the single-location rule. The
+  // selection total would otherwise sum ₦ + GH₵ into one meaningless number.
+  const eligibleMultiCurrency =
+    new Set(remittanceSelectedOrders.map((o) => (o.currencyCode ?? 'NGN').toUpperCase())).size > 1;
+
+  // The batch's currency = the shared currency of the selected orders.
+  const eligibleSelectedCurrency =
+    remittanceSelectedOrders[0]?.currencyCode ?? activeCurrencyCode;
+
   const eligibleSelectedTotal = useMemo(
     () => remittanceSelectedOrders.reduce((acc, o) => acc + eligibleLineAmount(o), 0),
     [remittanceSelectedOrders],
@@ -625,7 +656,7 @@ export function DeliveryRemittancesPage({
         render: (o) => {
           // Order total (authoritative) — matches the selection total + stat tile.
           return o.totalAmount != null && o.totalAmount !== ''
-            ? <NairaPrice amount={eligibleLineAmount(o)} /> : '—';
+            ? <NairaPrice amount={eligibleLineAmount(o)} currencyCode={o.currencyCode} /> : '—';
         },
       },
       {
@@ -726,13 +757,14 @@ export function DeliveryRemittancesPage({
     if (
       eligibleSelectedIds.size === 0 ||
       eligibleMultiLocation ||
+      eligibleMultiCurrency ||
       !remittanceSelectionComplete
     ) {
       return;
     }
     const ids = [...eligibleSelectedIds].join(',');
     navigateTo(`/admin/finance/delivery-remittances/create?orders=${ids}`);
-  }, [eligibleSelectedIds, eligibleMultiLocation, remittanceSelectionComplete, navigateTo]);
+  }, [eligibleSelectedIds, eligibleMultiLocation, eligibleMultiCurrency, remittanceSelectionComplete, navigateTo]);
 
   return (
     <div className="space-y-4">
@@ -812,6 +844,10 @@ export function DeliveryRemittancesPage({
             desktopActions
             desktop={
               <>
+                {/* Currency scope — placed before Refresh so the single-currency
+                    guarantee is the first control on the header. Self-hides for
+                    single-currency companies. */}
+                <CurrencyFilterSelect className="w-36" />
                 <PageRefreshButton />
                 <Button
                   variant="secondary"
@@ -1158,7 +1194,7 @@ export function DeliveryRemittancesPage({
           <div className="card flex flex-wrap items-center gap-x-4 gap-y-1 !px-3 !py-2.5 text-sm text-app-fg-muted">
             <span>
               Awaiting remittance (all time): <span className="font-medium tabular-nums text-info-600 dark:text-info-400">{Number(summary.awaitingCount).toLocaleString()}</span> orders
-              {' '}(<NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} className="inline font-medium tabular-nums text-info-600 dark:text-info-400" />)
+              {' '}(<NairaPrice amount={summary.awaitingGrossAmount ?? summary.awaitingAmount} currencyCode={activeCurrencyCode} className="inline font-medium tabular-nums text-info-600 dark:text-info-400" />)
             </span>
           </div>
         )}
@@ -1177,13 +1213,13 @@ export function DeliveryRemittancesPage({
               items={[
                 {
                   label: `Total Delivered (${Number(summary.deliveredCount ?? 0)})`,
-                  value: <NairaPrice amount={summary.deliveredAmount ?? '0'} />,
+                  value: <NairaPrice amount={summary.deliveredAmount ?? '0'} currencyCode={activeCurrencyCode} />,
                   valueClassName: 'text-app-fg tabular-nums',
                   title: 'All delivered orders in the selected period (DELIVERED + REMITTED)',
                 },
                 {
                   label: `Awaiting · Period (${awaitingPeriodCount})`,
-                  value: <NairaPrice amount={s.deliveredOnlyAmount as string ?? s.awaitingPeriodGrossAmount as string ?? '0'} />,
+                  value: <NairaPrice amount={s.deliveredOnlyAmount as string ?? s.awaitingPeriodGrossAmount as string ?? '0'} currencyCode={activeCurrencyCode} />,
                   valueClassName: 'text-blue-600 dark:text-blue-400 tabular-nums',
                   title: 'Orders with status DELIVERED in selected period (not yet remitted)',
                   onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('tab'); n.delete('status'); n.set('page', '1'); return n; }, { replace: true }); },
@@ -1191,7 +1227,7 @@ export function DeliveryRemittancesPage({
                 },
                 {
                   label: <span className="flex items-center">Remitted ({remittedCount})<RemittanceInfoIcon onClick={() => setInfoModal('remitted')} /></span>,
-                  value: <NairaPrice amount={remittedGross} />,
+                  value: <NairaPrice amount={remittedGross} currencyCode={activeCurrencyCode} />,
                   valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
                   title: 'Cash collected and confirmed by Finance',
                   onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('page', '1'); return n; }, { replace: true }); },
@@ -1199,7 +1235,7 @@ export function DeliveryRemittancesPage({
                 },
                 {
                   label: <span className="flex items-center">Pending Confirmation ({Number(summary.pendingCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('pending')} /></span>,
-                  value: <NairaPrice amount={pendingGross} />,
+                  value: <NairaPrice amount={pendingGross} currencyCode={activeCurrencyCode} />,
                   valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums',
                   title: 'Sent but not yet confirmed by Finance',
                   onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'SENT'); n.set('page', '1'); return n; }, { replace: true }); },
@@ -1207,7 +1243,7 @@ export function DeliveryRemittancesPage({
                 },
                 {
                   label: <span className="flex items-center">Disputed ({Number(summary.disputedCount ?? 0)})<RemittanceInfoIcon onClick={() => setInfoModal('disputed')} /></span>,
-                  value: <NairaPrice amount={disputedGross} />,
+                  value: <NairaPrice amount={disputedGross} currencyCode={activeCurrencyCode} />,
                   valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' as const,
                   title: 'Needs resolution',
                   onClick: () => { primeSamePathRefetch(); setSearchParams((p: URLSearchParams) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'DISPUTED'); n.set('page', '1'); return n; }, { replace: true }); },
@@ -1610,7 +1646,7 @@ export function DeliveryRemittancesPage({
                   className: 'text-right',
                   render: (r) => {
                     const net = Number(r.totalAmount || 0) - Number(r.deliveryFee || 0);
-                    return <NairaPrice amount={net} className="text-sm font-medium tabular-nums" />;
+                    return <NairaPrice amount={net} currencyCode={r.currencyCode} className="text-sm font-medium tabular-nums" />;
                   },
                 },
                 {
@@ -1619,7 +1655,7 @@ export function DeliveryRemittancesPage({
                   headerClassName: 'text-right',
                   className: 'text-right',
                   render: (r) => (
-                    <NairaPrice amount={Number(r.deliveryFee || 0)} className="text-sm tabular-nums text-app-fg-muted" />
+                    <NairaPrice amount={Number(r.deliveryFee || 0)} currencyCode={r.currencyCode} className="text-sm tabular-nums text-app-fg-muted" />
                   ),
                 },
                 {
@@ -1716,7 +1752,7 @@ export function DeliveryRemittancesPage({
                         </p>
                       </div>
                       <div className="shrink-0 text-right">
-                        <NairaPrice amount={net} className="text-sm font-semibold text-app-fg tabular-nums" />
+                        <NairaPrice amount={net} currencyCode={r.currencyCode} className="text-sm font-semibold text-app-fg tabular-nums" />
                         <p className="text-mini text-app-fg-muted">
                           {new Date(r.sentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                         </p>
@@ -1882,15 +1918,18 @@ export function DeliveryRemittancesPage({
                     onClick={openCreateFromEligibleTab}
                     disabled={
                       eligibleMultiLocation ||
+                      eligibleMultiCurrency ||
                       eligibleTotal === 0 ||
                       !remittanceSelectionComplete
                     }
                     title={
                       eligibleMultiLocation
                         ? 'All selected orders must share the same logistics location'
-                        : !remittanceSelectionComplete
-                          ? 'Could not resolve every selected order — clear selection and select again'
-                          : undefined
+                        : eligibleMultiCurrency
+                          ? 'All selected orders must share the same currency'
+                          : !remittanceSelectionComplete
+                            ? 'Could not resolve every selected order — clear selection and select again'
+                            : undefined
                     }
                   >
                     Continue
@@ -1912,7 +1951,13 @@ export function DeliveryRemittancesPage({
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <span className="text-xs font-semibold text-app-fg sm:text-sm">
-                <NairaPrice amount={eligibleSelectedTotal} />
+                {/* When currencies are mixed, a single total is meaningless — the
+                    guard below blocks Confirm; show a dash instead of a wrong ₦ sum. */}
+                {eligibleMultiCurrency ? (
+                  <span className="text-warning-600 dark:text-warning-400">Mixed currencies</span>
+                ) : (
+                  <NairaPrice amount={eligibleSelectedTotal} currencyCode={eligibleSelectedCurrency} />
+                )}
               </span>
               {canCreateRemittance && (
                 <Button
@@ -1923,17 +1968,20 @@ export function DeliveryRemittancesPage({
                   disabled={
                     eligibleSelectedIds.size === 0 ||
                     eligibleMultiLocation ||
+                    eligibleMultiCurrency ||
                     eligibleTotal === 0 ||
                     !remittanceSelectionComplete
                   }
                   title={
                     eligibleMultiLocation
                       ? 'All selected orders must share the same logistics location'
-                      : eligibleSelectedIds.size === 0
-                        ? 'Select at least one order'
-                        : !remittanceSelectionComplete
-                          ? 'Could not resolve every selected order — clear selection and select again'
-                          : undefined
+                      : eligibleMultiCurrency
+                        ? 'All selected orders must share the same currency'
+                        : eligibleSelectedIds.size === 0
+                          ? 'Select at least one order'
+                          : !remittanceSelectionComplete
+                            ? 'Could not resolve every selected order — clear selection and select again'
+                            : undefined
                   }
                 >
                   Confirm Selection
@@ -1946,6 +1994,13 @@ export function DeliveryRemittancesPage({
             <p className="text-xs text-warning-700 dark:text-warning-300">
               All selected orders must share the same logistics location. Clear the selection or remove orders from
               other locations.
+            </p>
+          )}
+
+          {eligibleMultiCurrency && eligibleSelectedIds.size > 0 && (
+            <p className="text-xs text-warning-700 dark:text-warning-300">
+              All selected orders must share the same currency. A remittance batch is single-currency. Clear the
+              selection or remove orders in a different currency.
             </p>
           )}
 
@@ -2015,6 +2070,7 @@ export function DeliveryRemittancesPage({
                     {o.totalAmount != null ? (
                       <NairaPrice
                         amount={eligibleLineAmount(o)}
+                        currencyCode={o.currencyCode}
                         className="text-sm font-semibold text-app-fg tabular-nums"
                       />
                     ) : (

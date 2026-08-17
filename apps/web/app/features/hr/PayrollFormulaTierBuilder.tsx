@@ -11,6 +11,7 @@ const METRIC_OPTIONS = [
   { value: 'INDIVIDUAL_DR', label: 'Individual DR %' },
   { value: 'TEAM_DR', label: 'Team DR %' },
   { value: 'DELIVERED_COUNT', label: 'Delivered orders (count)' },
+  { value: 'QUALIFYING_REVENUE', label: 'Qualifying revenue (₦, delivered + remitted)' },
   { value: 'CPA', label: 'CPA' },
   { value: 'TARGET_MET', label: 'Target met' },
   { value: 'NONE', label: 'None (flat)' },

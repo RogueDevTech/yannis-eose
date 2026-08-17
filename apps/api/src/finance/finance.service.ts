@@ -143,9 +143,24 @@ export class FinanceService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
     }
 
+    // Invoices carry no currency column — they inherit the order's frozen
+    // currency. Resolve it so the preview/PDF render the right symbol (₦, GH₵…),
+    // mirroring getInvoiceByOrderId. Without this, foreign-currency invoices
+    // fetched by id fell back to ₦.
+    let currencyCode = 'NGN';
+    if (rows[0].orderId) {
+      const [ord] = await this.db
+        .select({ currencyCode: schema.orders.currencyCode })
+        .from(schema.orders)
+        .where(eq(schema.orders.id, rows[0].orderId))
+        .limit(1);
+      currencyCode = ord?.currencyCode ?? 'NGN';
+    }
+
     return {
       ...rows[0],
       referenceFormatted: this.formatReference(rows[0].referenceNumber),
+      currencyCode,
     };
   }
 
@@ -179,10 +194,19 @@ export class FinanceService {
       .limit(1);
     const markedPaid = remittanceLink[0]?.status === 'RECEIVED';
 
+    // Invoices carry no currency column — they inherit the order's frozen
+    // currency. Resolve it so the preview/PDF render the right symbol (₦, GH₵…).
+    const [ord] = await this.db
+      .select({ currencyCode: schema.orders.currencyCode })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+
     return {
       ...rows[0],
       referenceFormatted: this.formatReference(rows[0].referenceNumber),
       markedPaid,
+      currencyCode: ord?.currencyCode ?? 'NGN',
     };
   }
 
@@ -436,6 +460,8 @@ export class FinanceService {
     orderConditions.push(inArray(schema.orders.status, ['DELIVERED', 'REMITTED']));
     orderConditions.push(isNull(schema.orders.deletedAt));
     orderConditions.push(eq(schema.orders.isFollowUp, false));
+    // Currency lens: scope revenue/COGS to one currency when requested.
+    if (input.currencyCode) orderConditions.push(eq(schema.orders.currencyCode, input.currencyCode));
     const orderWhere = and(...orderConditions);
 
     // ── Branch-group scoping helpers ──────────────────────
@@ -583,6 +609,7 @@ export class FinanceService {
     // ── Run all queries in parallel ──────────────────────
     const [
       revenueRows,
+      revenueByCurrencyRows,
       adSpendRows,
       commissionRows,
       fulfillmentRows,
@@ -599,6 +626,17 @@ export class FinanceService {
         })
         .from(schema.orders)
         .where(orderWhere),
+
+      // Revenue grouped by frozen currency — same scope as the SUM above so it
+      // can't drift. Powers the currency lens on P&L / dashboard revenue tiles.
+      this.db
+        .select({
+          currencyCode: schema.orders.currencyCode,
+          total: sql<number>`coalesce(sum(${schema.orders.totalAmount}), 0)`.mapWith(Number),
+        })
+        .from(schema.orders)
+        .where(orderWhere)
+        .groupBy(schema.orders.currencyCode),
 
       // Total ad spend
       this.db
@@ -654,6 +692,12 @@ export class FinanceService {
 
     // ── Parse results ────────────────────────────────────
     const revenue = Number(revenueRows[0]?.totalRevenue ?? 0);
+    // Per-currency revenue map for the currency lens ({ NGN: x, GHS: y }).
+    const revenueByCurrency: Record<string, number> = {};
+    for (const r of revenueByCurrencyRows) {
+      const code = (r.currencyCode ?? 'NGN').toUpperCase();
+      revenueByCurrency[code] = (revenueByCurrency[code] ?? 0) + Number(r.total ?? 0);
+    }
     const landedCost = Number(revenueRows[0]?.totalLandedCost ?? 0);
     const deliveryFee = Number(revenueRows[0]?.totalDeliveryFee ?? 0);
     const adSpend = Number(adSpendRows[0]?.total ?? 0);
@@ -684,6 +728,7 @@ export class FinanceService {
 
     return {
       revenue,
+      revenueByCurrency,
       landedCost,
       deliveryFee,
       adSpend,
@@ -1277,7 +1322,7 @@ export class FinanceService {
       }
 
       // Get ad spend, commission, pipeline from MVs; fulfillment zeroed (see getProfitReport note)
-      const [adSpendRows, commissionRows, pipelineRows, fulfillmentRows] = await Promise.all([
+      const [adSpendRows, commissionRows, pipelineRows, fulfillmentRows, revenueByCurrencyRows] = await Promise.all([
         this.pgClient.unsafe(
           startDate && endDate
             ? `SELECT COALESCE(SUM(total_spend), 0) AS total FROM mv_ad_spend_summary WHERE spend_date >= $1 AND spend_date <= $2`
@@ -1300,7 +1345,32 @@ export class FinanceService {
           `SELECT status, order_count, total_amount FROM mv_order_pipeline`,
         ),
         Promise.resolve([{ total: '0' }]),
+        // Revenue by currency — the MV has no currency dimension, so run a light
+        // live grouped query. Its WHERE must MATCH mv_profit_summary's revenue
+        // definition EXACTLY (materialized-views.ts): status IN DELIVERED/REMITTED
+        // AND delivered_at IS NOT NULL AND is_follow_up = false, grouped by
+        // DATE_TRUNC('day', delivered_at). The MV does NOT filter deleted_at, so
+        // neither do we — otherwise the per-currency map wouldn't sum to `revenue`.
+        this.pgClient.unsafe(
+          startDate && endDate
+            ? `SELECT COALESCE(currency_code, 'NGN') AS currency_code, COALESCE(SUM(total_amount), 0) AS total
+               FROM orders
+               WHERE status IN ('DELIVERED','REMITTED') AND delivered_at IS NOT NULL AND is_follow_up = false
+                 AND DATE_TRUNC('day', delivered_at) >= $1::date AND DATE_TRUNC('day', delivered_at) <= $2::date
+               GROUP BY COALESCE(currency_code, 'NGN')`
+            : `SELECT COALESCE(currency_code, 'NGN') AS currency_code, COALESCE(SUM(total_amount), 0) AS total
+               FROM orders
+               WHERE status IN ('DELIVERED','REMITTED') AND delivered_at IS NOT NULL AND is_follow_up = false
+               GROUP BY COALESCE(currency_code, 'NGN')`,
+          startDate && endDate ? [startDate, endDate] : [],
+        ),
       ]);
+
+      const revenueByCurrency: Record<string, number> = {};
+      for (const r of revenueByCurrencyRows as unknown as Array<{ currency_code: string; total: unknown }>) {
+        const code = (r.currency_code ?? 'NGN').toUpperCase();
+        revenueByCurrency[code] = (revenueByCurrency[code] ?? 0) + Number(r.total ?? 0);
+      }
 
       const revenue = Number(profitRows[0]?.revenue ?? 0);
       const landedCost = Number(profitRows[0]?.landed_cost ?? 0);
@@ -1323,6 +1393,7 @@ export class FinanceService {
 
       return {
         revenue,
+        revenueByCurrency,
         landedCost,
         deliveryFee,
         adSpend,

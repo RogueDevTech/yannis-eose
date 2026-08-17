@@ -48,6 +48,7 @@ export interface FollowUpBatchDetailData {
     orderNumber: number;
     customerName: string;
     totalAmount: string | null;
+    currencyCode?: string;
     orderCreatedAt: string;
     followUpSourceOrderId: string | null;
   }>;
@@ -245,7 +246,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
         align: 'right',
         render: showSkeleton
           ? () => <TableCellTextPulse className="w-[5rem]" />
-          : (item) => <NairaPrice amount={item.totalAmount ? Number(item.totalAmount) : null} />,
+          : (item) => <NairaPrice amount={item.totalAmount ? Number(item.totalAmount) : null} currencyCode={item.currencyCode} />,
       },
       {
         key: 'date',
@@ -504,7 +505,7 @@ export function FollowUpBatchDetailPage({ data, closers = [], deferredLoading = 
               </div>
               <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
                 <span>Was: <OrderStatusBadge status={item.originalStatus} expanded /></span>
-                <NairaPrice amount={item.totalAmount ? Number(item.totalAmount) : null} />
+                <NairaPrice amount={item.totalAmount ? Number(item.totalAmount) : null} currencyCode={item.currencyCode} />
               </div>
               {item.assignedCsName && (
                 <div className="text-xs text-app-fg-muted">Assigned: {item.assignedCsName}</div>

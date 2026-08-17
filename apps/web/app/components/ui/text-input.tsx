@@ -1,11 +1,14 @@
 import { forwardRef } from 'react';
 import { CONTROL_HEIGHT_CLASS } from './_control-heights';
+import { LabelInfo } from './label-info';
 
 type TextInputSize = 'sm' | 'md' | 'lg';
 
 interface TextInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'size'> {
   /** Label displayed above the input */
   label?: string;
+  /** Optional info tooltip shown as an icon next to the label */
+  labelInfo?: string;
   /** Helper text below the input */
   hint?: string;
   /** Error message — replaces hint when set */
@@ -54,6 +57,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
   (
     {
       label,
+      labelInfo,
       hint,
       error,
       leftIcon,
@@ -91,9 +95,10 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
     return (
       <div className={['flex flex-col gap-1', wrapperClassName].filter(Boolean).join(' ')}>
         {label && (
-          <label htmlFor={inputId} className="text-xs font-medium text-app-fg-muted">
+          <label htmlFor={inputId} className="inline-flex items-center gap-1 text-xs font-medium text-app-fg-muted">
             {label}
-            {required && <span className="ml-0.5 text-danger-500">*</span>}
+            {required && <span className="text-danger-500">*</span>}
+            {labelInfo && <LabelInfo text={labelInfo} />}
           </label>
         )}
 

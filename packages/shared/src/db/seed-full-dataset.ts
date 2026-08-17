@@ -20,6 +20,7 @@ import postgres from 'postgres';
 import { createHash } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { uuidv7 } from 'uuidv7';
+import { normalizePhoneForHash } from '../currency/african-countries';
 
 config({ path: resolve(__dirname, '../../../../.env') });
 config({ path: resolve(__dirname, '../../../../apps/api/.env') });
@@ -39,9 +40,7 @@ function pick<T>(arr: T[]): T { return arr[Math.floor(rand() * arr.length)]!; }
 function randInt(lo: number, hi: number): number { return lo + Math.floor(rand() * (hi - lo + 1)); }
 
 function hashPhone(phone: string): string {
-  let d = phone.replace(/\D/g, '');
-  if (d.length === 11 && d.startsWith('0')) d = '234' + d.slice(1);
-  return createHash('sha256').update(`yannis:phone:${d}`).digest('hex');
+  return createHash('sha256').update(`yannis:phone:${normalizePhoneForHash(phone)}`).digest('hex');
 }
 function randomPhone(): string { return '080' + String(randInt(10000000, 99999999)); }
 

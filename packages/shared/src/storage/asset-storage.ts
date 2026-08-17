@@ -7,9 +7,37 @@ export const ASSET_FOLDERS = {
   INVOICES: 'invoices',
   PRODUCT_IMAGES: 'product-images',
   ONBOARDING_DOCS: 'onboarding-docs',
+  TAX_DOCS: 'tax-docs',
 } as const;
 
 export type AssetFolder = (typeof ASSET_FOLDERS)[keyof typeof ASSET_FOLDERS];
+
+/**
+ * Platform-wide default upload cap: 2 MB on images (CEO directive). This is the
+ * baseline every folder inherits unless it opts into a larger cap below.
+ */
+export const DEFAULT_ASSET_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Per-folder upload size caps. Most folders hold images and keep the 2 MB
+ * default. Onboarding documents (utility bills, bank statements, ID / passport
+ * scans, signed contracts) are routinely larger than 2 MB, so they get 10 MB —
+ * matching the "≤10MB" the onboarding form advertises to staff.
+ *
+ * Single source of truth: both the client `FileUpload` and the server
+ * `/api/upload-url` validator read this, so the promise, the client check, and
+ * the authoritative server check can never drift apart.
+ */
+const ASSET_FOLDER_MAX_BYTES: Partial<Record<AssetFolder, number>> = {
+  'onboarding-docs': 10 * 1024 * 1024,
+  // Tax documents (TIN certificates, tax cards, PAYE receipts) are PDFs/scans,
+  // routinely larger than the 2 MB image default — match onboarding's 10 MB.
+  'tax-docs': 10 * 1024 * 1024,
+};
+
+export function resolveAssetMaxBytes(folder: AssetFolder): number {
+  return ASSET_FOLDER_MAX_BYTES[folder] ?? DEFAULT_ASSET_MAX_BYTES;
+}
 
 const ASSET_FOLDER_PREFIXES: Record<AssetFolder, string> = {
   screenshots: 'marketing/screenshots',
@@ -18,6 +46,7 @@ const ASSET_FOLDER_PREFIXES: Record<AssetFolder, string> = {
   invoices: 'finance/invoices',
   'product-images': 'products/images/uploads',
   'onboarding-docs': 'hr/onboarding-docs',
+  'tax-docs': 'hr/tax-docs',
 };
 
 function padDatePart(value: number): string {

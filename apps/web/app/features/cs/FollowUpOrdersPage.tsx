@@ -38,6 +38,7 @@ interface FollowUpOrder {
   campaignName: string | null;
   servicingBranchId: string | null;
   totalAmount: string | null;
+  currencyCode?: string;
   createdAt: string;
   confirmedAt: string | null;
   deliveredAt: string | null;
@@ -253,12 +254,13 @@ export function FollowUpOrdersPage({
                 {o.primaryProductName && (
                   <p className="text-xs text-app-fg-muted truncate">
                     {o.primaryProductName}
+                    {(o.items?.[0]?.quantity ?? 0) >= 1 && <span className="text-app-fg-muted"> · qty {o.items[0]?.quantity}</span>}
                     {o.itemCount > 1 && <span className="text-app-fg-muted"> +{o.itemCount - 1} more</span>}
                   </p>
                 )}
                 <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
                   {o.assignedCsName && <span>CS: {o.assignedCsName}</span>}
-                  {o.totalAmount && <NairaPrice amount={Number(o.totalAmount)} />}
+                  {o.totalAmount && <NairaPrice amount={Number(o.totalAmount)} currencyCode={o.currencyCode} />}
                 </div>
               </Link>
             ))}
@@ -312,7 +314,12 @@ export function FollowUpOrdersPage({
                   header: 'Product',
                   render: (o) => (
                     <div className="min-w-0">
-                      <p className="text-sm text-app-fg truncate max-w-[10rem]">{o.primaryProductName ?? '—'}</p>
+                      <p className="text-sm text-app-fg truncate max-w-[10rem]">
+                        {o.primaryProductName ?? '—'}
+                        {(o.items?.[0]?.quantity ?? 0) >= 1 && (
+                          <span className="text-app-fg-muted"> · qty {o.items[0]?.quantity}</span>
+                        )}
+                      </p>
                       {o.itemCount > 1 && (
                         <p className="text-micro text-app-fg-muted">+{o.itemCount - 1} more</p>
                       )}
@@ -342,7 +349,7 @@ export function FollowUpOrdersPage({
                   key: 'amount',
                   header: 'Amount',
                   align: 'right' as const,
-                  render: (o) => o.totalAmount ? <NairaPrice amount={Number(o.totalAmount)} /> : <span className="text-app-fg-muted">—</span>,
+                  render: (o) => o.totalAmount ? <NairaPrice amount={Number(o.totalAmount)} currencyCode={o.currencyCode} /> : <span className="text-app-fg-muted">—</span>,
                 },
                 {
                   key: 'created',

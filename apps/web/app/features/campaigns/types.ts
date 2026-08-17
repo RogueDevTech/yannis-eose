@@ -64,6 +64,10 @@ export interface CampaignFormConfig {
   allowMultiCurrency?: boolean;
   /** Single currency this form uses when allowMultiCurrency is false. */
   pinnedCurrency?: string;
+  /** Country this form delivers to; drives the Delivery State region list. */
+  deliveryCountry?: string;
+  /** When true, the customer picks their country (region list + currency follow). */
+  allowCountrySelection?: boolean;
   requireDeliveryAddress?: boolean | string;
   requireDeliveryNotes?: boolean | string;
   requireDeliveryState?: boolean | string;
@@ -106,6 +110,8 @@ export interface ProductOfferRow {
   price: string | number;
   /** Tier thumbnails (`offer_templates.image_urls`); first https URL shown when enabled. */
   imageUrls?: string[];
+  /** Non-default currency prices (code → price string). Drives the preview's currency switch. */
+  pricesByCurrency?: Record<string, string>;
 }
 
 export interface Product {
@@ -140,6 +146,8 @@ export interface OfferGroupItemRow {
   imageUrl?: string | null;
   sortOrder: number;
   status: string;
+  /** Non-default currency prices (code → price string). From the API. */
+  pricesByCurrency?: Record<string, string>;
 }
 
 export interface OfferGroupRow {

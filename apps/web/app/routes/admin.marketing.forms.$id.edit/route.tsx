@@ -53,6 +53,10 @@ function parseOfferGroups(payload: unknown): OfferGroupRow[] {
             imageUrl: rr.imageUrl != null ? String(rr.imageUrl) : null,
             sortOrder: typeof rr.sortOrder === 'number' ? rr.sortOrder : parseInt(String(rr.sortOrder ?? '0'), 10) || 0,
             status: rr.status != null ? String(rr.status) : 'ACTIVE',
+            pricesByCurrency:
+              rr.pricesByCurrency && typeof rr.pricesByCurrency === 'object'
+                ? Object.fromEntries(Object.entries(rr.pricesByCurrency as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+                : {},
           }))
           .filter((it) => it.id && it.productId && it.label)
       : [];
@@ -237,6 +241,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const allowMultiCurrency = formData.get('allowMultiCurrency')?.toString() === 'true';
   const pinnedCurrencyRaw = formData.get('pinnedCurrency')?.toString()?.trim().toUpperCase();
   const pinnedCurrency = pinnedCurrencyRaw && pinnedCurrencyRaw.length > 0 && pinnedCurrencyRaw.length <= 5 ? pinnedCurrencyRaw : undefined;
+  const deliveryCountryRaw = formData.get('deliveryCountry')?.toString()?.trim();
+  const deliveryCountry = deliveryCountryRaw && deliveryCountryRaw.length > 0 && deliveryCountryRaw !== 'Nigeria' ? deliveryCountryRaw : undefined;
+  const allowCountrySelection = formData.get('allowCountrySelection')?.toString() === 'true';
   const offerGroupIdRaw = formData.get('offerGroupId')?.toString();
   const offerGroupId = offerGroupIdRaw && offerGroupIdRaw.trim().length > 0 ? offerGroupIdRaw.trim() : null;
 
@@ -290,8 +297,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     successCallbackUrl: successCallbackUrl ?? undefined,
     showProductImages,
     allowMultiCurrency,
-    // Pinned currency only meaningful when the switcher is OFF; clear it otherwise.
-    ...(allowMultiCurrency ? { pinnedCurrency: undefined } : { pinnedCurrency }),
+    // pinnedCurrency = default/starting currency (kept whether the picker is on or off).
+    pinnedCurrency,
+    deliveryCountry,
+    allowCountrySelection,
     standardFields: ensureFixedStandardFields(parsedStandard.fields),
     fieldOrder: normalizeBuilderFieldOrder(
       parsedFieldOrder.fieldOrder,

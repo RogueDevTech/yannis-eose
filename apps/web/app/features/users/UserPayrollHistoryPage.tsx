@@ -6,6 +6,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { Tabs } from '~/components/ui/tabs';
+import { TaxDocumentsPanel } from '~/features/hr/TaxDocumentsPanel';
 import { EmptyState } from '~/components/ui/empty-state';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -36,6 +37,8 @@ export interface UserPayrollHistoryPageProps {
     endDate: string;
     periodAllTime: boolean;
   };
+  /** True when the viewer may upload/delete this staff's tax documents (hr.write). */
+  canManageTaxDocs?: boolean;
 }
 
 function formatPeriod(start: string, end: string): string {
@@ -64,6 +67,7 @@ type PayslipFetcherData =
 const TABS = [
   { value: 'payouts', label: 'Payout history' },
   { value: 'adjustments', label: 'Adjustments and bonuses' },
+  { value: 'documents', label: 'Tax documents' },
 ];
 
 export function UserPayrollHistoryPage({
@@ -72,11 +76,12 @@ export function UserPayrollHistoryPage({
   payouts,
   adjustments,
   filters,
+  canManageTaxDocs = false,
 }: UserPayrollHistoryPageProps) {
   const payslipFetcher = useFetcher<PayslipFetcherData>();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [viewingPayoutId, setViewingPayoutId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'payouts' | 'adjustments'>('payouts');
+  const [activeTab, setActiveTab] = useState<'payouts' | 'adjustments' | 'documents'>('payouts');
 
   const openPayslip = useCallback(
     (payoutId: string) => {
@@ -357,6 +362,10 @@ export function UserPayrollHistoryPage({
             />
           )}
         </>
+      )}
+
+      {activeTab === 'documents' && (
+        <TaxDocumentsPanel staffId={userId} canWrite={canManageTaxDocs} />
       )}
 
       {viewingPdf ? (

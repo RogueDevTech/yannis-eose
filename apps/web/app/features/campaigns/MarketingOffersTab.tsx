@@ -10,6 +10,7 @@ import { Modal } from '~/components/ui/modal';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { Pagination } from '~/components/ui/pagination';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { useCurrenciesCatalog } from '~/contexts/currencies-catalog-context';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { useToast } from '~/components/ui/toast';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
@@ -76,6 +77,34 @@ export function MarketingOffersTab({
   onFilterProductChange,
 }: MarketingOffersTabProps) {
   const { toast } = useToast();
+  const currenciesCatalog = useCurrenciesCatalog();
+  const symbolFor = (code: string) =>
+    currenciesCatalog.find((c) => c.code.toUpperCase() === code.toUpperCase())?.symbol ?? code;
+  /** Distinct non-NGN currency codes priced across an offer group's items. */
+  const offerCurrencyCodes = (g: OfferGroupRow): string[] => {
+    const set = new Set<string>();
+    for (const it of g.items) {
+      for (const [code, v] of Object.entries(it.pricesByCurrency ?? {})) {
+        if (code.toUpperCase() !== 'NGN' && Number(v) > 0) set.add(code.toUpperCase());
+      }
+    }
+    return [...set];
+  };
+  /** Render each non-NGN currency price as a small muted line. */
+  const renderCurrencyPrices = (prices?: Record<string, string>) => {
+    const entries = Object.entries(prices ?? {}).filter(([code, v]) => code.toUpperCase() !== 'NGN' && Number(v) > 0);
+    if (entries.length === 0) return null;
+    return (
+      <span className="mt-0.5 flex flex-wrap justify-end gap-x-1.5">
+        {entries.map(([code, v]) => (
+          <span key={code} className="text-sm font-medium text-app-fg">
+            {symbolFor(code)}
+            {Number(v).toLocaleString('en-US')}
+          </span>
+        ))}
+      </span>
+    );
+  };
   const [searchParams, setSearchParams] = useSearchParams();
   const clearFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const clearSurface = useFetcherActionSurface(clearFetcher);
@@ -273,20 +302,50 @@ export function MarketingOffersTab({
                 </h3>
                 <StatusBadge status={g.status} className="shrink-0" />
               </div>
-              <p className="text-xs text-app-fg-muted mb-3">
-                Product: <span className="font-medium text-app-fg">{titleProduct}</span> · {g.items.length} items
-              </p>
-              <div className="space-y-2 flex-1">
-                {g.items.slice(0, 3).map((it) => (
-                  <div key={it.id} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="text-app-fg line-clamp-1">{it.label}</span>
-                    <span className="text-app-fg-muted whitespace-nowrap">
-                      x{it.quantity} · <NairaPrice amount={Number(it.price)} />
-                    </span>
-                  </div>
-                ))}
+              <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-app-fg-muted">
+                <span>
+                  Product: <span className="font-medium text-app-fg">{titleProduct}</span>
+                </span>
+                <span aria-hidden>·</span>
+                <span>{g.items.length} items</span>
+                {offerCurrencyCodes(g).length > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-600 dark:bg-brand-700/20 dark:text-brand-400">
+                    {['NGN', ...offerCurrencyCodes(g)].map((c) => symbolFor(c)).join(' / ')}
+                  </span>
+                )}
+              </div>
+              <div className="flex-1 space-y-1.5">
+                {g.items.slice(0, 3).map((it) => {
+                  const extra = Object.entries(it.pricesByCurrency ?? {}).filter(
+                    ([code, v]) => code.toUpperCase() !== 'NGN' && Number(v) > 0,
+                  );
+                  return (
+                    <div key={it.id} className="rounded-lg border border-app-border bg-app-surface px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-app-fg">{it.label}</span>
+                        <span className="shrink-0 rounded bg-app-hover px-1.5 py-0.5 text-[11px] font-medium text-app-fg-muted">
+                          x{it.quantity}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
+                        <span className="text-sm font-semibold text-app-fg">
+                          <NairaPrice amount={Number(it.price)} />
+                        </span>
+                        {extra.map(([code, v]) => (
+                          <span key={code} className="flex items-baseline gap-x-1.5 text-sm font-semibold text-app-fg">
+                            <span className="text-app-fg-muted" aria-hidden>·</span>
+                            <span>
+                              {symbolFor(code)}
+                              {Number(v).toLocaleString('en-US')}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
                 {g.items.length > 3 ? (
-                  <div className="text-xs text-app-fg-muted">+{g.items.length - 3} more</div>
+                  <div className="pt-0.5 text-xs text-app-fg-muted">+{g.items.length - 3} more</div>
                 ) : null}
               </div>
               <div className="pt-4 flex flex-wrap justify-start gap-2">
@@ -412,6 +471,7 @@ export function MarketingOffersTab({
                         <p className="text-sm text-app-fg whitespace-nowrap">
                           <NairaPrice amount={Number(it.price)} />
                         </p>
+                        {renderCurrencyPrices(it.pricesByCurrency)}
                         <p className="text-xs text-app-fg-muted whitespace-nowrap">
                           x{it.quantity}
                         </p>

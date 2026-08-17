@@ -458,6 +458,12 @@ export const listOrdersSchema = z
     fromCart: z.boolean().optional(),
     /** Filter to orders where customer_name starts with "test" (whole word). Admin only. */
     testOrders: z.boolean().optional(),
+    /**
+     * Carry-over view: DELIVERED/REMITTED in the range's final month but generated
+     * before that month began (the orders behind the "Carry-over Delivered" tile).
+     * Replaces the normal created_at range filter. Needs startDate/endDate.
+     */
+    carryOver: z.boolean().optional(),
     /** Filter by order source: 'offline' (CS manual entry), 'edge-form' (sales form), 'delivered_follow_up', or 'offline_and_import' (both offline + spreadsheet imports). */
     orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up', 'offline_and_import', 'import', 'edge-form-and-import']).optional(),
     /** Filter offline orders by category: 'website_order' or 'referrals'. */

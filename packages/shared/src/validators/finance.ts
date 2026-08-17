@@ -79,6 +79,8 @@ export const profitReportSchema = z.object({
   mediaBuyerId: z.string().uuid().nullish(),
   /** When true with `groupBy: 'product'`, returns `byProduct` rows (extra query — avoid on hot paths like CEO dashboard). */
   includeProductBreakdown: z.boolean().optional(),
+  /** Currency lens: scope revenue/COGS to a single currency. Absent = all currencies. */
+  currencyCode: z.string().trim().toUpperCase().max(5).optional(),
 });
 export type ProfitReportInput = z.infer<typeof profitReportSchema>;
 

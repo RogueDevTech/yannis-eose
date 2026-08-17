@@ -101,6 +101,8 @@ export interface PayslipPdfInput {
   performanceBonus: number;
   allowancesTotal: number;
   addOnsTotal: number;
+  /** Approved staff refunds — post-tax cash added on top of net (never taxed, not gross). */
+  refundTotal?: number;
   deductionsTotal: number;
   grossPay: number;
   payeTax: number;
@@ -141,6 +143,8 @@ export function formatPayslipTimestamp(iso: string = new Date().toISOString()): 
 export function buildPayslipLines(input: PayslipPdfInput): {
   earningLines: PayslipPdfLine[];
   deductionLines: PayslipPdfLine[];
+  /** Post-tax additions shown AFTER gross/deductions, before net (e.g. refunds). */
+  postTaxLines: PayslipPdfLine[];
 } {
   const earningLines: PayslipPdfLine[] = [
     {
@@ -161,8 +165,18 @@ export function buildPayslipLines(input: PayslipPdfInput): {
     earningLines.push({ label: 'Add-ons', amount: input.addOnsTotal });
   }
 
+  // Refund is post-tax cash added on top of net — NOT gross income. It is shown in
+  // its own section AFTER gross + deductions (never in earningLines / gross), so
+  // the visible earnings always sum to the printed Gross pay. netPay already
+  // includes it (Balance after PAYE + Refund = Net).
+  const postTaxLines: PayslipPdfLine[] = [];
+  if ((input.refundTotal ?? 0) > 0) {
+    postTaxLines.push({ label: 'Refund (post-tax)', amount: input.refundTotal! });
+  }
+
   // Gross may already net return penalties. Show them once under earnings (negative)
   // and exclude that portion from "Other deductions" so NET is not double-penalized.
+  // Refund is intentionally NOT part of componentSum (it is not gross income).
   const componentSum =
     input.baseSalary + input.performanceBonus + input.allowancesTotal + input.addOnsTotal;
   const penaltiesEmbedded = Math.max(0, Math.round((componentSum - input.grossPay) * 100) / 100);
@@ -187,7 +201,7 @@ export function buildPayslipLines(input: PayslipPdfInput): {
     deductionLines.push({ label: 'Other deductions', amount: residual, deduction: true });
   }
 
-  return { earningLines, deductionLines };
+  return { earningLines, deductionLines, postTaxLines };
 }
 
 async function buildPayslipPdf(input: PayslipPdfInput): Promise<jsPDF> {
@@ -279,7 +293,7 @@ async function buildPayslipPdf(input: PayslipPdfInput): Promise<jsPDF> {
   }
   y += 8;
 
-  const { earningLines, deductionLines } = buildPayslipLines(input);
+  const { earningLines, deductionLines, postTaxLines } = buildPayslipLines(input);
   const colLabel = margin;
   const colAmount = pageWidth - margin;
 
@@ -321,6 +335,13 @@ async function buildPayslipPdf(input: PayslipPdfInput): Promise<jsPDF> {
   for (const line of deductionLines) {
     doc.text(`${line.label}:`, pageWidth - margin - 55, y);
     doc.text(`-${naira(line.amount)}`, pageWidth - margin, y, { align: 'right' });
+    y += 6;
+  }
+
+  // Post-tax additions (refunds) — added on top of the after-tax balance.
+  for (const line of postTaxLines) {
+    doc.text(`${line.label}:`, pageWidth - margin - 55, y);
+    doc.text(`+${naira(line.amount)}`, pageWidth - margin, y, { align: 'right' });
     y += 6;
   }
 

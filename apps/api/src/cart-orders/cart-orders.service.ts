@@ -195,6 +195,7 @@ export class CartOrdersService {
       conditions.push(inArray(schema.cartOrders.status, input.statuses));
     }
     if (input.mediaBuyerId) conditions.push(eq(schema.cartOrders.mediaBuyerId, input.mediaBuyerId));
+    if (input.currencyCode) conditions.push(eq(schema.cartOrders.currencyCode, input.currencyCode));
     if (input.unassignedOnly) conditions.push(isNull(schema.cartOrders.assignedCsId));
     if (input.search) {
       const trimmed = input.search.trim();
@@ -348,8 +349,11 @@ export class CartOrdersService {
     branchScope: 'servicing' | 'marketing' = 'servicing',
     /** Filter by multiple media buyer IDs (supervisor team scoping). */
     mediaBuyerIds?: string[] | null,
+    /** Multi-currency filter — restrict to one currency. Undefined = all. */
+    currencyCode?: string,
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.cartOrders.deletedAt)];
+    if (currencyCode) conditions.push(eq(schema.cartOrders.currencyCode, currencyCode));
     if (assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
     if (mediaBuyerIds && mediaBuyerIds.length > 0) {
       conditions.push(inArray(schema.cartOrders.mediaBuyerId, mediaBuyerIds));
@@ -384,6 +388,7 @@ export class CartOrdersService {
 
     // Deleted count (separate query, soft-deleted orders excluded from main)
     const deletedConditions: Parameters<typeof and>[0][] = [sql`${schema.cartOrders.deletedAt} IS NOT NULL`];
+    if (currencyCode) deletedConditions.push(eq(schema.cartOrders.currencyCode, currencyCode));
     {
       const bCond = branchScopeCondition(schema.cartOrders.servicingBranchId, branchId, effectiveBranchIds);
       if (bCond) deletedConditions.push(bCond);
@@ -428,11 +433,14 @@ export class CartOrdersService {
     viewerCloserId?: string | null,
     branchScope: 'servicing' | 'marketing' = 'servicing',
     mediaBuyerIds?: string[] | null,
+    /** Multi-currency filter — restrict to one currency. Undefined = all. */
+    currencyCode?: string,
   ): Promise<number> {
     const conditions: Parameters<typeof and>[0][] = [
       isNull(schema.cartOrders.deletedAt),
       inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
     ];
+    if (currencyCode) conditions.push(eq(schema.cartOrders.currencyCode, currencyCode));
     if (assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
     if (mediaBuyerIds && mediaBuyerIds.length > 0) {
       conditions.push(inArray(schema.cartOrders.mediaBuyerId, mediaBuyerIds));

@@ -12,6 +12,13 @@ import {
 } from './form-field-order';
 import type { CustomFormField, ProductOfferRow, StandardFieldConfig, StandardFieldKey } from './types';
 import {
+  type CurrencyInfo,
+  currencyByCode,
+  formatMoney,
+  hasMultipleCurrencies,
+  phoneRuleForCountry,
+} from '@yannis/shared';
+import {
   cloneDefaultAdditionalFieldSelectOptions,
   DEFAULT_GENDER_OPTIONS,
   type AdditionalFieldSelectOptionsState,
@@ -26,13 +33,6 @@ const DRAG_FIELD_MIME = 'text/yannis-preview-field-token';
 const PREVIEW_FIELD_SURFACE = 'bg-app-elevated border-app-border-strong';
 /** Labels match manual fields: sm semibold, primary fg (not muted). */
 const PREVIEW_LABEL_WRAP = '[&_label]:text-sm [&_label]:font-medium [&_label]:text-app-fg';
-
-function formatOfferPrice(price: string | number): string {
-  const num = typeof price === 'string' ? parseFloat(price) : price;
-  if (Number.isNaN(num)) return String(price);
-  const formatted = Math.abs(num).toLocaleString('en-NG');
-  return num < 0 ? `-₦${formatted}` : `₦${formatted}`;
-}
 
 /** Matches Edge worker: first absolute http(s) image on the tier. */
 function firstOfferThumbnailUrl(urls: string[] | undefined): string {
@@ -91,6 +91,14 @@ export interface FormFullPreviewProps {
   additionalSelectOptions?: AdditionalFieldSelectOptionsState;
   /** When true, show tier thumbnails (same as hosted Edge form). Default true. */
   showProductImages?: boolean;
+  /** Active currencies (from the catalog). Drives the switcher + price conversion. */
+  currencies?: CurrencyInfo[];
+  /** When true and 2+ currencies exist, show the currency switcher (matches Edge). */
+  allowMultiCurrency?: boolean;
+  /** Currency code the form is pinned to when allowMultiCurrency is off. */
+  pinnedCurrency?: string;
+  /** Delivery country — drives the phone input's placeholder/format. */
+  deliveryCountry?: string;
   className?: string;
 }
 
@@ -109,9 +117,76 @@ export function FormFullPreview({
   previewProducts,
   additionalSelectOptions,
   showProductImages = true,
+  currencies = [],
+  allowMultiCurrency = false,
+  pinnedCurrency = '',
+  deliveryCountry = '',
   className = '',
 }: FormFullPreviewProps) {
   const [submitted, setSubmitted] = useState(false);
+
+  // ── Currency (mirrors the hosted Edge form) ──────────────────────────────
+  // Switcher shows only when the toggle is on AND 2+ active currencies exist.
+  // When off, the form is pinned to `pinnedCurrency` (or the base currency).
+  const activeCurrencies = useMemo(() => currencies.filter((c) => c.active), [currencies]);
+  const multiEnabled = allowMultiCurrency && hasMultipleCurrencies(activeCurrencies);
+  const baseCode = useMemo(
+    () => (activeCurrencies.find((c) => c.isDefault) ?? activeCurrencies[0])?.code ?? 'NGN',
+    [activeCurrencies],
+  );
+  const initialCode = (multiEnabled ? '' : pinnedCurrency) || baseCode;
+  const [currentCurrency, setCurrentCurrency] = useState(initialCode);
+  // Keep the selection in sync when the toggle / pinned currency / catalog changes.
+  useEffect(() => {
+    setCurrentCurrency(multiEnabled ? (pinnedCurrency || baseCode) : (pinnedCurrency || baseCode));
+  }, [multiEnabled, pinnedCurrency, baseCode]);
+
+  const currencyInfo = useMemo(
+    () => currencyByCode(activeCurrencies, currentCurrency),
+    [activeCurrencies, currentCurrency],
+  );
+
+  /**
+   * Price of an offer in the selected currency, matching the Edge form: use the
+   * offer's explicit per-currency price when present, else the base price (never
+   * FX-derived — prices are set per currency, not converted).
+   */
+  const priceInCurrency = (offer: Pick<ProductOfferRow, 'price' | 'pricesByCurrency'>): number => {
+    const raw =
+      currentCurrency !== baseCode && offer.pricesByCurrency?.[currentCurrency] != null
+        ? offer.pricesByCurrency[currentCurrency]
+        : offer.price;
+    const num = typeof raw === 'string' ? parseFloat(raw) : Number(raw);
+    return Number.isNaN(num) ? 0 : num;
+  };
+  const formatPrice = (offer: Pick<ProductOfferRow, 'price' | 'pricesByCurrency'>): string =>
+    formatMoney(priceInCurrency(offer), currencyInfo);
+
+  // Country-aware phone placeholder (mirrors the hosted form). Falls back to the
+  // current currency's country when no delivery country is set.
+  const phonePlaceholder = phoneRuleForCountry(
+    deliveryCountry || currencyInfo.countryName,
+  ).example;
+
+  // Currency switcher node, rendered above the offer list (mirrors the Edge form).
+  // Only shown when the toggle is on AND 2+ active currencies exist.
+  const currencySwitcher: ReactNode = multiEnabled ? (
+    <div className="mb-3">
+      <label className="block text-xs font-bold uppercase tracking-wider text-app-fg-muted mb-1.5">Currency</label>
+      <FormSelect
+        value={currentCurrency}
+        onChange={(e) => setCurrentCurrency(e.target.value)}
+        aria-label="Currency"
+      >
+        {activeCurrencies.map((c) => (
+          <option key={c.code} value={c.code}>
+            {c.symbol} {c.code}
+            {c.countryName ? ` · ${c.countryName}` : ''}
+          </option>
+        ))}
+      </FormSelect>
+    </div>
+  ) : null;
   const [paymentMethod, setPaymentMethod] = useState('');
   const [draggingToken, setDraggingToken] = useState<CampaignFieldOrderToken | null>(null);
   const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null);
@@ -411,6 +486,9 @@ export function FormFullPreview({
               offerSections,
               showProductImages,
               multiProduct,
+              formatPrice,
+              currencySwitcher,
+              phonePlaceholder,
             })}
           </ReorderablePreviewField>
           );
@@ -442,6 +520,9 @@ function renderPreviewField({
   offerSections,
   showProductImages,
   multiProduct,
+  formatPrice,
+  currencySwitcher,
+  phonePlaceholder,
 }: {
   field: OrderedPreviewField;
   accentColor: string;
@@ -454,11 +535,15 @@ function renderPreviewField({
   offerSections: PreviewOfferSection[];
   showProductImages: boolean;
   multiProduct: boolean;
+  formatPrice: (offer: Pick<ProductOfferRow, 'price' | 'pricesByCurrency'>) => string;
+  currencySwitcher: ReactNode;
+  phonePlaceholder: string;
 }) {
   if (field.kind === 'offer') {
     if (offerSections.length === 0) return null;
     return (
       <div className="space-y-3 sm:space-y-4">
+        {currencySwitcher}
         <span className="block text-xs font-bold uppercase tracking-wider text-app-fg-muted mb-1.5 sm:mb-2">
           Select Offer
         </span>
@@ -500,7 +585,7 @@ function renderPreviewField({
                           {o.qty} UNIT{o.qty > 1 ? 'S' : ''}
                         </span>
                         <span className="font-semibold" style={{ color: accentColor }}>
-                          {formatOfferPrice(o.price)}
+                          {formatPrice(o)}
                         </span>
                       </span>
                     </span>
@@ -545,7 +630,7 @@ function renderPreviewField({
         label="Phone Number"
         type="tel"
         required
-        placeholder="08012345678"
+        placeholder={phonePlaceholder}
         controlSize="lg"
         className={PREVIEW_FIELD_SURFACE}
         wrapperClassName={PREVIEW_LABEL_WRAP}

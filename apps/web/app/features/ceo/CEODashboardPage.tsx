@@ -19,6 +19,8 @@ import { FormSelect } from '~/components/ui/form-select';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { formatNaira } from '~/lib/format-amount';
+import { CurrencyLens } from '~/components/ui/currency-lens';
+import { LensedMoney } from '~/components/ui/lensed-money';
 import { STATUS_HEX, STATUS_LABELS, STATUS_OPTIONS, STATUS_TEXT_CLASS } from '~/features/shared/order-status';
 import type { CEODashboardData, CEODashboardFilters, ChartDataPayload } from './types';
 
@@ -264,6 +266,7 @@ export function CEODashboardPage({
     approvedSpend: marketing?.approvedSpend ?? marketing?.totalSpend ?? 0,
     pendingSpend: marketing?.pendingSpend ?? 0,
     deliveredRevenue: marketing?.deliveredRevenue ?? 0,
+    deliveredRevenueByCurrency: marketing?.deliveredRevenueByCurrency,
     cpa: marketing?.cpa ?? 0,
     roas: marketing?.roas ?? 0,
     deliveryRate: marketing?.deliveryRate ?? 0,
@@ -308,7 +311,10 @@ export function CEODashboardPage({
             desktopActions
             desktopActionsLabel="Actions"
             desktop={
-              <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
+              <div className="flex items-center gap-2">
+                <CurrencyLens />
+                <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
+              </div>
             }
             sheet={({ closeSheet }) => (
               <>
@@ -507,7 +513,9 @@ export function CEODashboardPage({
           <div className="flex flex-wrap gap-3">
             <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
               <p className="text-mini font-medium text-app-fg-muted">Delivered revenue</p>
-              <p className="text-base font-bold text-app-fg tabular-nums">{fmt(marketingSafe.deliveredRevenue)}</p>
+              <p className="text-base font-bold text-app-fg tabular-nums">
+                <LensedMoney amounts={marketingSafe.deliveredRevenueByCurrency ?? { NGN: marketingSafe.deliveredRevenue }} />
+              </p>
             </div>
             <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
               <p className="text-mini font-medium text-app-fg-muted">Ad Spend</p>
@@ -528,7 +536,11 @@ export function CEODashboardPage({
         </h2>
         <div className="card px-4 py-2">
           <StatRowGroup divided>
-            <StatRow label="Revenue" value={fmt(revenue)} variant="highlight" />
+            <StatRow
+              label="Revenue"
+              value={<LensedMoney amounts={data.revenueByCurrency ?? { NGN: revenue }} />}
+              variant="highlight"
+            />
           </StatRowGroup>
         </div>
       </div>
@@ -577,7 +589,7 @@ export function CEODashboardPage({
         <OverviewStatStrip
           mobileGrid
           items={[
-            { label: 'Revenue', value: fmt(revenue), valueClassName: 'text-app-fg tabular-nums' },
+            { label: 'Revenue', value: <LensedMoney amounts={data.revenueByCurrency ?? { NGN: revenue }} />, valueClassName: 'text-app-fg tabular-nums' },
             {
               label: 'True Profit',
               value: fmt(trueProfit),

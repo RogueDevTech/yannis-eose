@@ -13,18 +13,33 @@ const currencyCode = z
   .toUpperCase()
   .regex(/^[A-Z]{3,5}$/, 'Currency code must be 3–5 uppercase letters');
 
-export const createCurrencySchema = z.object({
-  groupId: z.string().uuid().nullish(),
-  code: currencyCode,
-  symbol: z.string().trim().min(1).max(8),
-  countryName: z.string().trim().min(1).max(100),
-  precision: z.coerce.number().int().min(0).max(6).default(2),
-  /** Only one default per group; the service enforces/relocates it. */
-  isDefault: z.boolean().default(false),
-  active: z.boolean().default(true),
-  /** Optional FX at creation (1 unit of THIS = fxRate base units). Usually set later. */
-  fxRate: z.coerce.number().positive().nullish(),
-});
+export const createCurrencySchema = z
+  .object({
+    groupId: z.string().uuid().nullish(),
+    code: currencyCode,
+    symbol: z.string().trim().min(1).max(8),
+    countryName: z.string().trim().min(1).max(100),
+    precision: z.coerce.number().int().min(0).max(6).default(2),
+    /** Only one default per group; the service enforces/relocates it. */
+    isDefault: z.boolean().default(false),
+    active: z.boolean().default(true),
+    /**
+     * FX at creation (1 unit of THIS = fxRate base units). REQUIRED for a
+     * non-default currency so cross-currency (merged) aggregates always have a
+     * rate to convert with. The default/base currency takes none (it is 1).
+     */
+    fxRate: z.coerce.number().positive().nullish(),
+    /** Accent colour (hex, e.g. '#22c55e') that tints this currency's order#/amount. */
+    color: z
+      .string()
+      .trim()
+      .regex(/^#[0-9a-fA-F]{6}$/, 'Colour must be a hex value like #22c55e')
+      .nullish(),
+  })
+  .refine((v) => v.isDefault || (v.fxRate != null && v.fxRate > 0), {
+    message: 'An FX rate is required when adding a currency.',
+    path: ['fxRate'],
+  });
 export type CreateCurrencyInput = z.infer<typeof createCurrencySchema>;
 
 export const updateCurrencySchema = z.object({
@@ -33,6 +48,12 @@ export const updateCurrencySchema = z.object({
   countryName: z.string().trim().min(1).max(100).optional(),
   precision: z.coerce.number().int().min(0).max(6).optional(),
   active: z.boolean().optional(),
+  /** Accent colour (hex). Pass null to clear it back to neutral. */
+  color: z
+    .string()
+    .trim()
+    .regex(/^#[0-9a-fA-F]{6}$/, 'Colour must be a hex value like #22c55e')
+    .nullish(),
   // code + isDefault are intentionally NOT editable here:
   //  - code is immutable once orders reference it (frozen currency integrity).
   //  - isDefault flips via a dedicated setDefaultCurrency op (relocates the flag).

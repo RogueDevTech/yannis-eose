@@ -38,6 +38,11 @@ export interface FundingBalanceRow {
   confirmedOrders?: number;
   /** Orders delivered + remitted */
   deliveredOrders?: number;
+  /** Delivered revenue (funnel + cart), when merged from leaderboard — Media Buyers only. */
+  deliveredRevenue?: number;
+  /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }). Sums to
+   *  `deliveredRevenue`. Absent/empty on single-currency companies. */
+  deliveredRevenueByCurrency?: Record<string, number>;
   /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
   deliveredThisMonth?: number;
   /** AD_SPEND-only total (drives CPA/ROAS), when merged from leaderboard */
@@ -204,6 +209,9 @@ export interface Metrics {
   /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
   deliveredThisMonth?: number;
   deliveredRevenue: number;
+  /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }). Sums to
+   *  `deliveredRevenue`. Absent/empty on single-currency companies. */
+  deliveredRevenueByCurrency?: Record<string, number>;
   confirmedOrders: number;
   confirmationRate: number;
   cpa: number;
@@ -221,6 +229,9 @@ export interface LeaderboardEntry {
   /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
   deliveredThisMonth?: number;
   deliveredRevenue: number;
+  /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }). Sums to
+   *  `deliveredRevenue`. Absent/empty on single-currency companies. */
+  deliveredRevenueByCurrency?: Record<string, number>;
   confirmedOrders: number;
   confirmationRate: number;
   cpa: number;

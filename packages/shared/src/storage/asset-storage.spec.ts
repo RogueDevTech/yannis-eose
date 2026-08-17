@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   ASSET_FOLDERS,
+  DEFAULT_ASSET_MAX_BYTES,
   buildEnvScopedAssetKey,
   buildProductGalleryRehostKey,
   buildPublicObjectUrl,
+  resolveAssetMaxBytes,
 } from './asset-storage';
 
 describe('asset storage helpers', () => {
@@ -35,6 +37,13 @@ describe('asset storage helpers', () => {
     expect(key).toBe(
       `dev/products/gallery/prod-123/2026/05/12/${now.getTime()}-img001.jpg`,
     );
+  });
+
+  it('caps images at the 2 MB default but allows 10 MB for onboarding docs', () => {
+    expect(DEFAULT_ASSET_MAX_BYTES).toBe(2 * 1024 * 1024);
+    expect(resolveAssetMaxBytes(ASSET_FOLDERS.RECEIPTS)).toBe(2 * 1024 * 1024);
+    expect(resolveAssetMaxBytes(ASSET_FOLDERS.PRODUCT_IMAGES)).toBe(2 * 1024 * 1024);
+    expect(resolveAssetMaxBytes(ASSET_FOLDERS.ONBOARDING_DOCS)).toBe(10 * 1024 * 1024);
   });
 
   it('builds a public URL that preserves path separators', () => {

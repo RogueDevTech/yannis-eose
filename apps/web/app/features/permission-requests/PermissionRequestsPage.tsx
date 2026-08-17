@@ -684,6 +684,8 @@ interface OrderPayload {
   orderNo?: number | null;
   items?: OrderLineItemPayload[];
   totalAmount?: number;
+  /** Frozen order currency (default NGN) for money display in the request preview. */
+  currencyCode?: string | null;
 }
 
 interface UserCreationPayload {
@@ -784,10 +786,10 @@ function OrderPayloadView({ payload, kind }: { payload: OrderPayload; kind: 'ORD
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">{qty}</td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      <NairaPrice amount={unit} />
+                      <NairaPrice amount={unit} currencyCode={payload.currencyCode} />
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums font-medium">
-                      <NairaPrice amount={lineTotal} />
+                      <NairaPrice amount={lineTotal} currencyCode={payload.currencyCode} />
                     </td>
                   </tr>
                 );
@@ -799,7 +801,7 @@ function OrderPayloadView({ payload, kind }: { payload: OrderPayload; kind: 'ORD
                   Total
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums font-semibold text-app-fg">
-                  <NairaPrice amount={total} />
+                  <NairaPrice amount={total} currencyCode={payload.currencyCode} />
                 </td>
               </tr>
             </tfoot>

@@ -12,6 +12,10 @@ export const payrollMetricTypeSchema = z.enum([
   // Raw count of delivered orders in the period. Use with a threshold to gate
   // bonus qualification on volume (e.g. DELIVERED_COUNT >= 60) rather than DR%.
   'DELIVERED_COUNT',
+  // Sum of order totals (₦) for DELIVERED/REMITTED orders the closer serviced in
+  // the period (by delivered_at, servicing branch). Drives the CS closer base
+  // tier: QUALIFYING_REVENUE >= 4,000,000 → ₦120k base, else the flat ₦80k.
+  'QUALIFYING_REVENUE',
   'TARGET_MET',
   'NONE',
 ]);
@@ -110,6 +114,10 @@ export const payrollMetricsSchema = z.object({
   deliveredCarryOverCount: z.number().int().min(0).optional(),
   totalOrders: z.number().int().min(0),
   returnedCount: z.number().int().min(0).optional(),
+  // Sum of DELIVERED/REMITTED order totals (₦) the closer serviced this period.
+  // Drives the CS closer revenue-tier base salary. Optional — 0/absent for
+  // non-CS staff and where not computed.
+  qualifyingRevenue: z.number().min(0).optional(),
   targetMet: z.boolean().optional(),
   deliveredByProduct: z.record(z.string(), z.number().int().min(0)).optional(),
   drByProduct: z.record(z.string(), z.number().min(0).max(100)).optional(),
@@ -185,8 +193,8 @@ export const payeBandConfigSchema = z.object({
   statutoryDeductions: z.array(payeStatutoryDeductionSchema).default([]),
   /**
    * HR low-income PAYE exemption (monthly). When gross < threshold OR
-   * net-before-PAYE < threshold, monthly PAYE is 0. HR policy: ₦66,667
-   * (≈ the ₦800k/yr tax-free floor / 12). Omit/0 disables the exemption.
+   * net-before-PAYE < threshold, monthly PAYE is 0. HR policy: ₦66,000
+   * (statutory minimum-wage floor). Omit/0 disables the exemption.
    */
   lowIncomeExemptionMonthly: z.number().min(0).default(0),
 });
