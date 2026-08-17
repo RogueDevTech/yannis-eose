@@ -179,6 +179,7 @@ async function _ceoOverviewFetch(params: {
     totalSpend: 0, approvedSpend: 0, pendingSpend: 0, totalOrders: 0,
     deliveredOrders: 0, deliveredThisMonth: 0, deliveredRevenue: 0,
     deliveredRevenueBreakdown: { funnel: 0, cart: 0 },
+    deliveredRevenueByCurrency: {} as Record<string, number>,
     confirmedOrders: 0,
     confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0,
   };
@@ -256,6 +257,8 @@ async function _ceoOverviewFetch(params: {
         funnel: safeMarketingMetrics.deliveredRevenueBreakdown?.funnel ?? 0,
         cart: safeMarketingMetrics.deliveredRevenueBreakdown?.cart ?? 0,
       },
+      // Per-currency delivered revenue for the currency lens ({ NGN: x, GHS: y }).
+      deliveredRevenueByCurrency: safeMarketingMetrics.deliveredRevenueByCurrency ?? {},
       totalOrders: safeMarketingMetrics.totalOrders ?? 0,
       confirmedOrders: safeMarketingMetrics.confirmedOrders ?? 0,
       deliveredOrders: safeMarketingMetrics.deliveredOrders ?? 0,

@@ -78,6 +78,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   if (startDate) listInput.startDate = startDate;
   if (endDate) listInput.endDate = endDate;
+  // Currency scope — every total, list, and batch is single-currency (never mix).
+  // The page component defaults `?currency=` to the company base currency, so this
+  // is normally present; when absent (single-currency company) the backend is a
+  // no-op and everything behaves as before.
+  const currencyCode = url.searchParams.get('currency')?.toUpperCase() || undefined;
+  if (currencyCode) listInput.currencyCode = currencyCode;
   const dateScope = url.searchParams.get('dateScope') === 'deliveredAt' ? 'deliveredAt' : 'createdAt';
   listInput.dateScope = dateScope;
   const remittanceSearch = url.searchParams.get('rq')?.trim() ?? undefined;
@@ -116,6 +122,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // 'all_time' clears the window (shows every unremitted delivered order).
   if (startDate) eligibleListBase.startDate = startDate;
   if (endDate) eligibleListBase.endDate = endDate;
+  if (currencyCode) eligibleListBase.currencyCode = currencyCode;
   eligibleListBase.dateScope = dateScope;
 
   const eligibleListInput = JSON.stringify(eligibleListBase);
@@ -154,7 +161,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Orders view: flat list of individual orders across remittance batches
   type RemittanceOrderRow = {
     id: string; customerName: string; orderNumber: string | null;
-    totalAmount: string; deliveryFee: string | null;
+    totalAmount: string; currencyCode?: string; deliveryFee: string | null;
     deliveredAt: string | null; status: string;
     remittanceId: string; remittanceStatus: string;
     sentAt: string; locationName: string | null; providerName: string | null;

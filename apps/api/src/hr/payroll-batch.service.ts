@@ -55,6 +55,39 @@ function pendingAdjustmentForMonth(periodMonth: string) {
 }
 
 /**
+ * A refund is sweepable into a batch for `periodMonth` when it is APPROVED (not
+ * VOIDED), not yet linked to a payout, and either un-earmarked (period_month IS
+ * NULL) or earmarked for exactly this month. Mirrors pendingAdjustmentForMonth so
+ * the link, compute, and preview paths stay in lockstep.
+ */
+function pendingRefundForMonth(periodMonth: string) {
+  return and(
+    eq(schema.payrollRefunds.status, 'APPROVED'),
+    isNull(schema.payrollRefunds.payoutId),
+    or(
+      isNull(schema.payrollRefunds.periodMonth),
+      eq(schema.payrollRefunds.periodMonth, periodMonth),
+    ),
+  );
+}
+
+/**
+ * A per-staff allowance is sweepable into a batch for `periodMonth` when it is
+ * APPROVED (not VOIDED), not yet linked to a payout, and either un-earmarked or
+ * earmarked for exactly this month. Mirrors pendingRefundForMonth.
+ */
+function pendingStaffAllowanceForMonth(periodMonth: string) {
+  return and(
+    eq(schema.payrollStaffAllowances.status, 'APPROVED'),
+    isNull(schema.payrollStaffAllowances.payoutId),
+    or(
+      isNull(schema.payrollStaffAllowances.periodMonth),
+      eq(schema.payrollStaffAllowances.periodMonth, periodMonth),
+    ),
+  );
+}
+
+/**
  * A "null-scope" batch groups contractors (CONTRACTORS) or everyone company-wide
  * (ALL) and carries no department (and usually no branch). scope_type is the
  * authoritative discriminator — see the payroll_batches table doc (migration 0287).
@@ -254,6 +287,8 @@ interface PayoutRow {
   baseSalary: number;
   performanceBonus: number;
   addOnsTotal: number;
+  /** Approved staff refunds paid on top of net (post-tax). Defaults to 0. */
+  refundTotal?: number;
   deductionsTotal: number;
   totalPayout: number;
   allowancesTotal?: number;
@@ -521,6 +556,16 @@ export class PayrollBatchService {
             .update(schema.earningsAdjustments)
             .set({ payoutId: null })
             .where(inArray(schema.earningsAdjustments.payoutId, oldPayoutIds));
+          // Detach linked refunds too so a re-run can re-absorb them (mirrors adjustments).
+          await tx
+            .update(schema.payrollRefunds)
+            .set({ payoutId: null })
+            .where(inArray(schema.payrollRefunds.payoutId, oldPayoutIds));
+          // Detach linked per-staff allowances too (re-swept + re-taxed on recompute).
+          await tx
+            .update(schema.payrollStaffAllowances)
+            .set({ payoutId: null })
+            .where(inArray(schema.payrollStaffAllowances.payoutId, oldPayoutIds));
           await tx.delete(schema.payoutRecords).where(eq(schema.payoutRecords.batchId, existing.id));
         }
         batchId = existing.id;
@@ -674,6 +719,16 @@ export class PayrollBatchService {
             .update(schema.earningsAdjustments)
             .set({ payoutId: null })
             .where(inArray(schema.earningsAdjustments.payoutId, oldPayoutIds));
+          // Detach linked refunds too so a re-run can re-absorb them (mirrors adjustments).
+          await tx
+            .update(schema.payrollRefunds)
+            .set({ payoutId: null })
+            .where(inArray(schema.payrollRefunds.payoutId, oldPayoutIds));
+          // Detach linked per-staff allowances too (re-swept + re-taxed on recompute).
+          await tx
+            .update(schema.payrollStaffAllowances)
+            .set({ payoutId: null })
+            .where(inArray(schema.payrollStaffAllowances.payoutId, oldPayoutIds));
           await tx.delete(schema.payoutRecords).where(eq(schema.payoutRecords.batchId, existing.id));
         }
         batchId = existing.id;
@@ -1009,6 +1064,7 @@ export class PayrollBatchService {
           baseSalary: sql`${computed.baseSalary.toFixed(2)}::numeric`,
           performanceBonus: sql`${computed.performanceBonus.toFixed(2)}::numeric`,
           addOnsTotal: sql`${computed.addOnsTotal.toFixed(2)}::numeric`,
+          refundTotal: sql`${(computed.refundTotal ?? 0).toFixed(2)}::numeric`,
           deductionsTotal: sql`${computed.deductionsTotal.toFixed(2)}::numeric`,
           totalPayout: sql`${computed.totalPayout.toFixed(2)}::numeric`,
           allowancesTotal: sql`${(computed.allowancesTotal ?? 0).toFixed(2)}::numeric`,
@@ -1049,6 +1105,28 @@ export class PayrollBatchService {
             and(
               eq(schema.earningsAdjustments.staffId, row.staffId),
               pendingAdjustmentForMonth(periodMonth),
+            ),
+          );
+        // Link the same member's pending, month-eligible refunds to this payout.
+        await tx
+          .update(schema.payrollRefunds)
+          .set({ payoutId: row.id })
+          .where(
+            and(
+              eq(schema.payrollRefunds.staffId, row.staffId),
+              pendingRefundForMonth(periodMonth),
+            ),
+          );
+        // Link the same member's pending, month-eligible per-staff allowances. The
+        // allowance amount was already folded into gross + PAYE during compute; this
+        // just records which payout consumed it so edits/voids can find + re-roll it.
+        await tx
+          .update(schema.payrollStaffAllowances)
+          .set({ payoutId: row.id })
+          .where(
+            and(
+              eq(schema.payrollStaffAllowances.staffId, row.staffId),
+              pendingStaffAllowanceForMonth(periodMonth),
             ),
           );
       }
@@ -1353,11 +1431,29 @@ export class PayrollBatchService {
     }
 
     // --- 3) Order metrics (delivered/total/cohort/returned) for all staff. ------
+    // Servicing-branch scope for the CS-closer qualifying-revenue metric: ALL
+    // branches in the companies (groups) represented in this batch. This MUST
+    // match the single-member path (computePayoutForMember → computeForMember,
+    // which scopes to the member's whole company via effectiveBranchIds), so a
+    // preview and a generation compute the SAME qualifying revenue and never flip
+    // the 120k/80k tier. Using only the batch's own branches would under-count a
+    // closer whose serviced orders span sibling company branches.
+    const revenueServicingBranchIds = [
+      ...new Set(
+        (groupBranches.size
+          ? [...groupBranches.values()].flat()
+          : // No group (branch has NULL group_id) → fall back to the members' own
+            // branches, matching computeForMember's `effectiveBranchIds ?? [branchId]`.
+            [...memberBranchByUser.values()].map((b) => b.branchId)
+        ).filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    ];
     const metricsById = await this.payrollMetrics.getStaffMetricsBatched(
       staffIds,
       periodStart,
       periodEnd,
       tx,
+      revenueServicingBranchIds.length ? { servicingBranchIds: revenueServicingBranchIds } : null,
     );
 
     // --- 4) Team-DR per Head + CPA for MB/HoM, batched. ------------------------
@@ -1380,8 +1476,8 @@ export class PayrollBatchService {
       totalOrdersByStaff,
     );
 
-    // --- 5) Pending adjustment sums (clawback + add-on) for all staff. ---------
-    const [clawbackRows, addOnRows] = await Promise.all([
+    // --- 5) Pending adjustment sums (clawback + add-on + refund) for all staff. -
+    const [clawbackRows, addOnRows, refundRows, allowanceRows] = await Promise.all([
       tx
         .select({
           staffId: schema.earningsAdjustments.staffId,
@@ -1410,11 +1506,52 @@ export class PayrollBatchService {
           ),
         )
         .groupBy(schema.earningsAdjustments.staffId),
+      // Approved, floating refunds for this month — post-tax cash added to net.
+      tx
+        .select({
+          staffId: schema.payrollRefunds.staffId,
+          total: sum(schema.payrollRefunds.amount),
+        })
+        .from(schema.payrollRefunds)
+        .where(
+          and(
+            inArray(schema.payrollRefunds.staffId, staffIds),
+            pendingRefundForMonth(periodMonth),
+          ),
+        )
+        .groupBy(schema.payrollRefunds.staffId),
+      // Approved, floating per-staff allowances for this month — TAXABLE, into
+      // gross before PAYE. Grouped by (staff, recurring) so the recurring portion
+      // can be prorated and the one-time portion paid in full.
+      tx
+        .select({
+          staffId: schema.payrollStaffAllowances.staffId,
+          recurring: schema.payrollStaffAllowances.recurring,
+          total: sum(schema.payrollStaffAllowances.amount),
+        })
+        .from(schema.payrollStaffAllowances)
+        .where(
+          and(
+            inArray(schema.payrollStaffAllowances.staffId, staffIds),
+            pendingStaffAllowanceForMonth(periodMonth),
+          ),
+        )
+        .groupBy(schema.payrollStaffAllowances.staffId, schema.payrollStaffAllowances.recurring),
     ]);
     const clawbackByStaff = new Map(
       clawbackRows.map((r) => [r.staffId as string, Math.abs(Number(r.total ?? 0))]),
     );
     const addOnByStaff = new Map(addOnRows.map((r) => [r.staffId as string, Number(r.total ?? 0)]));
+    const refundByStaff = new Map(refundRows.map((r) => [r.staffId as string, Number(r.total ?? 0)]));
+    // Split each staff's allowances into recurring (prorated) vs one-time (full).
+    const allowanceByStaff = new Map<string, { recurring: number; oneTime: number }>();
+    for (const r of allowanceRows) {
+      const key = r.staffId as string;
+      const entry = allowanceByStaff.get(key) ?? { recurring: 0, oneTime: 0 };
+      if (r.recurring) entry.recurring += Number(r.total ?? 0);
+      else entry.oneTime += Number(r.total ?? 0);
+      allowanceByStaff.set(key, entry);
+    }
 
     // --- 6) Tax config (memoized per groupId) + plan/pay-role resolution. ------
     const taxConfigCache = new Map<string, Awaited<ReturnType<PayrollComputeService['loadTaxConfig']>>>();
@@ -1495,6 +1632,7 @@ export class PayrollBatchService {
         deliveredCohortCount: base.deliveredCohortCount,
         totalOrders: base.totalOrders,
         returnedCount: base.returnedCount,
+        qualifyingRevenue: base.qualifyingRevenue,
         missingData,
       };
 
@@ -1516,6 +1654,8 @@ export class PayrollBatchService {
             periodEnd,
             crmLinked: true,
             deliveredMetricSource: 'RECOVERY_COMBINED',
+            // Keep the revenue-tier base consistent with the batched path.
+            servicingBranchIds: revenueServicingBranchIds.length ? revenueServicingBranchIds : null,
           },
           tx,
         );
@@ -1531,6 +1671,7 @@ export class PayrollBatchService {
           payRole,
           taxConfig,
           attendanceEligibility: attendanceByStaff.get(member.id) ?? null,
+          adHocAllowance: allowanceByStaff.get(member.id) ?? null,
         },
       );
 
@@ -1547,12 +1688,15 @@ export class PayrollBatchService {
 
       const clawbackTotal = clawbackByStaff.get(member.id) ?? 0;
       const addOnsTotal = addOnByStaff.get(member.id) ?? 0;
+      const refundTotal = refundByStaff.get(member.id) ?? 0;
       const deductionsTotal = computed.deductionsTotal + clawbackTotal;
       const grossPay = computed.grossPay + addOnsTotal;
-      const netPay = Math.max(0, grossPay - computed.payeTax - clawbackTotal);
+      // Refund is post-tax cash added ON TOP of net — never taxed, never in gross.
+      const netPay = Math.max(0, grossPay - computed.payeTax - clawbackTotal) + refundTotal;
       const totalPayout = netPay;
 
-      if (totalPayout <= 0 && deductionsTotal <= 0 && computed.baseSalary <= 0) {
+      // Keep a refund-only payout (base gated to zero but a refund is owed).
+      if (totalPayout <= 0 && deductionsTotal <= 0 && computed.baseSalary <= 0 && refundTotal <= 0) {
         out.set(member.id, null);
         continue;
       }
@@ -1561,6 +1705,7 @@ export class PayrollBatchService {
         baseSalary: computed.baseSalary,
         performanceBonus: computed.performanceBonus,
         addOnsTotal,
+        refundTotal,
         deductionsTotal,
         totalPayout,
         allowancesTotal: computed.allowancesTotal,
@@ -2143,6 +2288,28 @@ export class PayrollBatchService {
       effectiveBranchIds = companyBranches.map((b) => b.id);
     }
 
+    // Per-staff taxable allowances for this member/month, split recurring vs
+    // one-time — folded into gross before PAYE by the compute twin. Mirrors the
+    // batched path's allowanceByStaff so single-member preview matches generation.
+    const allowanceRows = await tx
+      .select({
+        recurring: schema.payrollStaffAllowances.recurring,
+        total: sum(schema.payrollStaffAllowances.amount),
+      })
+      .from(schema.payrollStaffAllowances)
+      .where(
+        and(
+          eq(schema.payrollStaffAllowances.staffId, member.id),
+          pendingStaffAllowanceForMonth(periodMonth),
+        ),
+      )
+      .groupBy(schema.payrollStaffAllowances.recurring);
+    const adHocAllowance = { recurring: 0, oneTime: 0 };
+    for (const r of allowanceRows) {
+      if (r.recurring) adHocAllowance.recurring += Number(r.total ?? 0);
+      else adHocAllowance.oneTime += Number(r.total ?? 0);
+    }
+
     const computed = await this.payrollCompute.computeForMember(
       tx,
       member,
@@ -2150,7 +2317,7 @@ export class PayrollBatchService {
       periodEnd,
       branchRow?.groupId ?? null,
       branchRow?.branchId ?? null,
-      { effectiveBranchIds },
+      { effectiveBranchIds, adHocAllowance },
     );
     if (!computed) {
       return this.computePayoutForMemberLegacy(tx, member, periodStart, periodEnd, periodMonth);
@@ -2179,17 +2346,31 @@ export class PayrollBatchService {
         ),
       );
     const addOnsTotal = Number(positiveAddOnRows[0]?.total ?? 0);
+    // Approved, floating refunds — post-tax cash added on top of net (never taxed).
+    // Mirrors the batched path (refundByStaff) so a single-member preview matches
+    // what generation will pay.
+    const refundRows = await tx
+      .select({ total: sum(schema.payrollRefunds.amount) })
+      .from(schema.payrollRefunds)
+      .where(
+        and(
+          eq(schema.payrollRefunds.staffId, member.id),
+          pendingRefundForMonth(periodMonth),
+        ),
+      );
+    const refundTotal = Number(refundRows[0]?.total ?? 0);
     const deductionsTotal = computed.deductionsTotal + clawbackTotal;
     const grossPay = computed.grossPay + addOnsTotal;
-    const netPay = Math.max(0, grossPay - computed.payeTax - clawbackTotal);
+    const netPay = Math.max(0, grossPay - computed.payeTax - clawbackTotal) + refundTotal;
     const totalPayout = netPay;
 
-    if (totalPayout <= 0 && deductionsTotal <= 0 && computed.baseSalary <= 0) return null;
+    if (totalPayout <= 0 && deductionsTotal <= 0 && computed.baseSalary <= 0 && refundTotal <= 0) return null;
 
     return {
       baseSalary: computed.baseSalary,
       performanceBonus: computed.performanceBonus,
       addOnsTotal,
+      refundTotal,
       deductionsTotal,
       totalPayout,
       allowancesTotal: computed.allowancesTotal,
@@ -2315,15 +2496,30 @@ export class PayrollBatchService {
         ),
       );
     const addOnsTotal = Number(positiveAddOnRows[0]?.total ?? 0);
+    // Approved, floating refunds for this member/month — post-tax cash added on top
+    // of net (never taxed). The main compute path applies these via refundByStaff;
+    // the legacy path must apply them too or refunds silently vanish for these staff.
+    const refundRows = await tx
+      .select({ total: sum(schema.payrollRefunds.amount) })
+      .from(schema.payrollRefunds)
+      .where(
+        and(
+          eq(schema.payrollRefunds.staffId, member.id),
+          pendingRefundForMonth(periodMonth),
+        ),
+      );
+    const refundTotal = Number(refundRows[0]?.total ?? 0);
     const deductionsTotal = penalties + clawbackTotal;
-    const totalPayout = Math.max(0, baseSalary + performanceBonus + addOnsTotal - deductionsTotal);
+    const totalPayout = Math.max(0, baseSalary + performanceBonus + addOnsTotal - deductionsTotal) + refundTotal;
 
-    if (totalPayout <= 0 && deductionsTotal <= 0 && baseSalary <= 0) return null;
+    // Keep a refund-only payout (no earned pay but a refund is owed).
+    if (totalPayout <= 0 && deductionsTotal <= 0 && baseSalary <= 0 && refundTotal <= 0) return null;
     const grossPay = baseSalary + performanceBonus + addOnsTotal;
     return {
       baseSalary,
       performanceBonus,
       addOnsTotal,
+      refundTotal,
       deductionsTotal,
       totalPayout,
       grossPay,
@@ -2452,6 +2648,16 @@ export class PayrollBatchService {
             .update(schema.earningsAdjustments)
             .set({ payoutId: null })
             .where(inArray(schema.earningsAdjustments.payoutId, payoutIds));
+          // Keep refund history too; just unlink it so a later run can re-absorb.
+          await tx
+            .update(schema.payrollRefunds)
+            .set({ payoutId: null })
+            .where(inArray(schema.payrollRefunds.payoutId, payoutIds));
+          // Keep per-staff allowance history too; just unlink it.
+          await tx
+            .update(schema.payrollStaffAllowances)
+            .set({ payoutId: null })
+            .where(inArray(schema.payrollStaffAllowances.payoutId, payoutIds));
           await tx.delete(schema.payoutRecords).where(eq(schema.payoutRecords.batchId, input.batchId));
         }
         // Optimistic guard: refuse if the batch flipped to PAID concurrently.
@@ -2745,6 +2951,16 @@ export class PayrollBatchService {
             .update(schema.earningsAdjustments)
             .set({ payoutId: null })
             .where(inArray(schema.earningsAdjustments.payoutId, oldPayoutIds));
+          // Detach linked refunds too so a re-run can re-absorb them (mirrors adjustments).
+          await tx
+            .update(schema.payrollRefunds)
+            .set({ payoutId: null })
+            .where(inArray(schema.payrollRefunds.payoutId, oldPayoutIds));
+          // Detach linked per-staff allowances too (re-swept + re-taxed on recompute).
+          await tx
+            .update(schema.payrollStaffAllowances)
+            .set({ payoutId: null })
+            .where(inArray(schema.payrollStaffAllowances.payoutId, oldPayoutIds));
           await tx.delete(schema.payoutRecords).where(eq(schema.payoutRecords.batchId, batchId));
         }
         return this.synthesizeDraftBatchContent(
@@ -3715,6 +3931,18 @@ export class PayrollBatchService {
           .set({ payoutId: null })
           .where(eq(schema.earningsAdjustments.payoutId, input.payoutId));
 
+        // Detach linked refunds from the removed line too, so a later run re-absorbs.
+        await tx
+          .update(schema.payrollRefunds)
+          .set({ payoutId: null })
+          .where(eq(schema.payrollRefunds.payoutId, input.payoutId));
+
+        // Detach linked per-staff allowances from the removed line too.
+        await tx
+          .update(schema.payrollStaffAllowances)
+          .set({ payoutId: null })
+          .where(eq(schema.payrollStaffAllowances.payoutId, input.payoutId));
+
         await tx
           .delete(schema.payoutRecords)
           .where(and(eq(schema.payoutRecords.id, input.payoutId), eq(schema.payoutRecords.batchId, input.batchId)));
@@ -3837,6 +4065,77 @@ export class PayrollBatchService {
    * No-op when the adjustment is floating or its payout can't be resolved.
    */
   async recomputeForAdjustment(payoutId: string, actorId: string): Promise<void> {
+    await withActor(this.db, { id: actorId }, async (tx) => {
+      const payoutRows = await tx
+        .select({ batchId: schema.payoutRecords.batchId })
+        .from(schema.payoutRecords)
+        .where(eq(schema.payoutRecords.id, payoutId))
+        .limit(1);
+      const batchId = payoutRows[0]?.batchId;
+      if (!batchId) return;
+      await this.recomputePayoutTotals(tx, payoutId);
+      await this.recomputeBatchTotals(tx, batchId);
+    });
+  }
+
+  /**
+   * Fold an approved, floating refund into the staff member's line in an OPEN
+   * (DRAFT / PENDING_HR) batch for its earmarked month, then re-roll that payout +
+   * batch totals. Mirrors absorbPendingStaffAdjustment (staff-only — refunds never
+   * target contractors). No-op (returns false) when the refund is not eligible or
+   * the staff has no line in an open batch for the month.
+   */
+  async absorbPendingStaffRefund(refundId: string, actorId: string): Promise<boolean> {
+    const refundRows = await this.db
+      .select()
+      .from(schema.payrollRefunds)
+      .where(eq(schema.payrollRefunds.id, refundId))
+      .limit(1);
+    const refund = refundRows[0];
+    // Must mirror pendingRefundForMonth: approved, unlinked, month-earmarked.
+    if (!refund || refund.status !== 'APPROVED' || refund.payoutId || !refund.periodMonth) return false;
+
+    const lineRows = await this.db
+      .select({
+        payoutId: schema.payoutRecords.id,
+        batchId: schema.payrollBatches.id,
+        branchId: schema.payrollBatches.branchId,
+      })
+      .from(schema.payoutRecords)
+      .innerJoin(schema.payrollBatches, eq(schema.payrollBatches.id, schema.payoutRecords.batchId))
+      .where(
+        and(
+          eq(schema.payoutRecords.staffId, refund.staffId),
+          eq(schema.payrollBatches.periodMonth, refund.periodMonth),
+          inArray(schema.payrollBatches.status, ['DRAFT', 'PENDING_HR']),
+        ),
+      )
+      .limit(1);
+    const line = lineRows[0];
+    if (!line) return false;
+
+    const run = async (tx: TxLike) => {
+      await tx
+        .update(schema.payrollRefunds)
+        .set({ payoutId: line.payoutId })
+        .where(eq(schema.payrollRefunds.id, refundId));
+
+      await this.recomputePayoutTotals(tx, line.payoutId);
+      await this.recomputeBatchTotals(tx, line.batchId);
+      return true;
+    };
+
+    if (line.branchId) {
+      return withActorAndBranch(this.db, { id: actorId, currentBranchId: line.branchId }, run);
+    }
+    return withActor(this.db, { id: actorId }, run);
+  }
+
+  /**
+   * After a refund linked to an OPEN batch is edited or detached (voided), re-roll
+   * its payout + batch totals. Same shape as recomputeForAdjustment.
+   */
+  async recomputeForRefund(payoutId: string, actorId: string): Promise<void> {
     await withActor(this.db, { id: actorId }, async (tx) => {
       const payoutRows = await tx
         .select({ batchId: schema.payoutRecords.batchId })
@@ -4217,6 +4516,19 @@ export class PayrollBatchService {
       }
     }
 
+    // Approved refunds linked to this payout — post-tax cash paid ON TOP of net,
+    // never taxed and never part of gross (doc §9). VOIDED refunds are excluded.
+    const refundRows = await tx
+      .select({ total: sum(schema.payrollRefunds.amount) })
+      .from(schema.payrollRefunds)
+      .where(
+        and(
+          eq(schema.payrollRefunds.payoutId, payoutId),
+          eq(schema.payrollRefunds.status, 'APPROVED'),
+        ),
+      );
+    const refundTotal = Number(refundRows[0]?.total ?? 0);
+
     const payoutRows = await tx
       .select({
         baseSalary: schema.payoutRecords.baseSalary,
@@ -4236,13 +4548,16 @@ export class PayrollBatchService {
     const gross = base + bonus + positive + allowances;
     const tax = Number(p.payeTax ?? 0);
     const net = Math.max(0, gross - tax);
-    const total = Math.max(0, net - deductions);
+    // Refund is added AFTER deductions, on top of the settled balance — it is not
+    // gross and not taxable, so it never touches `gross`/`net-before-refund`.
+    const total = Math.max(0, net - deductions) + refundTotal;
 
     const updated = await tx
       .update(schema.payoutRecords)
       .set({
         addOnsTotal: sql`${positive.toFixed(2)}::numeric`,
         deductionsTotal: sql`${deductions.toFixed(2)}::numeric`,
+        refundTotal: sql`${refundTotal.toFixed(2)}::numeric`,
         grossPay: sql`${gross.toFixed(2)}::numeric`,
         netPay: sql`${net.toFixed(2)}::numeric`,
         totalPayout: sql`${total.toFixed(2)}::numeric`,

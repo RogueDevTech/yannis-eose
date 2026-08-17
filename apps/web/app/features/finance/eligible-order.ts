@@ -6,6 +6,8 @@ export interface EligibleOrder {
   orderNumber: number | null;
   customerName: string;
   totalAmount: string | null;
+  /** Frozen order currency (default NGN) for money display. */
+  currencyCode?: string;
   /** Delivery fee already set on the order (e.g. by CS closer). */
   deliveryFee: string | null;
   deliveredAt: string | null;

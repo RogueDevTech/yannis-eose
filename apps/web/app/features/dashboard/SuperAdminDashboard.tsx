@@ -12,6 +12,8 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { formatNaira } from '~/lib/format-amount';
+import { CurrencyLens } from '~/components/ui/currency-lens';
+import { LensedMoney } from '~/components/ui/lensed-money';
 import type { CEODashboardData } from '~/features/ceo/types';
 import { FunnelInfoIcon, FunnelBreakdownModal } from './funnel-breakdown';
 
@@ -199,6 +201,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     approvedSpend: data?.marketing?.approvedSpend ?? data?.marketing?.totalSpend ?? 0,
     pendingSpend: data?.marketing?.pendingSpend ?? 0,
     deliveredRevenue: data?.marketing?.deliveredRevenue ?? 0,
+    deliveredRevenueByCurrency: data?.marketing?.deliveredRevenueByCurrency,
     funnelRevenue: marketingBreakdown?.funnel ?? data?.marketing?.deliveredRevenue ?? 0,
     cartRevenue: marketingBreakdown?.cart ?? 0,
     totalOrders: data?.marketing?.totalOrders ?? 0,
@@ -236,6 +239,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             desktop={
               <>
                 <PageRefreshButton />
+                <CurrencyLens />
                 <DateFilterBar
                     startDate={filters?.startDate ?? ''}
                     endDate={filters?.endDate ?? ''}
@@ -244,6 +248,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             }
             sheet={
               <div className="flex flex-col gap-2.5">
+                <CurrencyLens className="w-full" />
                 {renderRevenueSelect('sheet')}
                 <CompareButton source="admin-overview" />
               </div>
@@ -285,7 +290,11 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 <FunnelInfoIcon onClick={() => setBreakdownModal('heroRevenue')} />
               </span>
             ),
-            value: fmt(marketingSafe.deliveredRevenue),
+            value: (
+              <LensedMoney
+                amounts={marketingSafe.deliveredRevenueByCurrency ?? { NGN: marketingSafe.deliveredRevenue }}
+              />
+            ),
             valueClassName: 'text-success-600 dark:text-success-400',
           },
           {
@@ -916,7 +925,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                 items={[
                   {
                     label: 'Revenue',
-                    value: fmt(revenue),
+                    value: <LensedMoney amounts={data?.revenueByCurrency ?? { NGN: revenue }} />,
                     valueClassName: 'text-success-600 dark:text-success-400',
                     title: 'Total revenue from delivered orders',
                     to: '/admin/finance/overview',

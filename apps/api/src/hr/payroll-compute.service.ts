@@ -98,6 +98,12 @@ export class PayrollComputeService {
        * the Head's primary branch. Falls back to [branchId] when omitted.
        */
       effectiveBranchIds?: string[] | null;
+      /**
+       * Per-staff ad-hoc TAXABLE allowances for this period (doc §3), pre-summed by
+       * the caller. `recurring` is prorated by active days; `oneTime` is paid in
+       * full. Enters gross BEFORE PAYE. Omit → none. Formula/pay-role staff only.
+       */
+      adHocAllowance?: { recurring: number; oneTime: number } | null;
     },
   ): Promise<ComputedPayslipLine | null> {
     // Derive team membership from branch + subordinate role instead of explicit reportsTo links.
@@ -157,6 +163,16 @@ export class PayrollComputeService {
       periodEnd,
     );
 
+    // Servicing-branch scope for the CS-closer qualifying-revenue metric: the
+    // company's effective branches when set, else this member's branch. Non-CS
+    // roles ignore it (computeQualifyingRevenue returns 0 for them).
+    const servicingBranchIds =
+      opts?.effectiveBranchIds && opts.effectiveBranchIds.length > 0
+        ? opts.effectiveBranchIds
+        : branchId
+          ? [branchId]
+          : null;
+
     const metrics = await this.metricsService.getStaffMetrics(
       {
         staffId: member.id,
@@ -166,6 +182,7 @@ export class PayrollComputeService {
         crmLinked: true,
         reporteeIds: reporteeIds.length > 0 ? reporteeIds : undefined,
         deliveredMetricSource,
+        servicingBranchIds,
       },
       tx,
     );
@@ -222,7 +239,13 @@ export class PayrollComputeService {
 
     // Prorate fixed pay by active-days fraction; bonus/penalty stay as-earned.
     const proratedBase = formulaResult.baseSalary * proration.fraction;
-    const proratedAllowances = formulaResult.allowancesTotal * proration.fraction;
+    // Ad-hoc allowances: recurring portion prorated like role allowances, one-time
+    // portion paid in full. Both taxable (folded into gross before PAYE). MUST match
+    // computeForMemberInMemory (the pure twin) exactly — see the INVARIANT there.
+    const adHocAllowance =
+      (opts?.adHocAllowance?.recurring ?? 0) * proration.fraction +
+      (opts?.adHocAllowance?.oneTime ?? 0);
+    const proratedAllowances = formulaResult.allowancesTotal * proration.fraction + adHocAllowance;
     // Attendance gate is ABSOLUTE and applies AFTER proration: it multiplies the
     // already-prorated base. PAYE then follows the reduced base (no separate
     // "remove PAYE"). Only base is affected — bonus/allowances/penalty untouched.
@@ -479,6 +502,13 @@ export class PayrollComputeService {
        * (baseFraction 1). MUST be the same result `computeForMember` would derive.
        */
       attendanceEligibility?: AttendanceEligibilityResult | null;
+      /**
+       * Per-staff ad-hoc TAXABLE allowances for this period (doc §3), pre-summed
+       * by the caller. `recurring` is prorated by active days like role
+       * allowances; `oneTime` is paid in full. Enters gross BEFORE PAYE so it is
+       * taxed. Omit → no ad-hoc allowance. Only applies to formula/pay-role staff.
+       */
+      adHocAllowance?: { recurring: number; oneTime: number } | null;
     },
   ): ComputedPayslipLine | null {
     const attendanceEligibility: AttendanceEligibilityResult = resolved.attendanceEligibility ?? {
@@ -532,7 +562,12 @@ export class PayrollComputeService {
     }
 
     const proratedBase = formulaResult.baseSalary * proration.fraction;
-    const proratedAllowances = formulaResult.allowancesTotal * proration.fraction;
+    // Ad-hoc allowances: recurring portion prorated like role allowances, one-time
+    // portion paid in full. Both are taxable (folded into gross before PAYE).
+    const adHocAllowance =
+      (resolved.adHocAllowance?.recurring ?? 0) * proration.fraction +
+      (resolved.adHocAllowance?.oneTime ?? 0);
+    const proratedAllowances = formulaResult.allowancesTotal * proration.fraction + adHocAllowance;
     // Attendance gate — IDENTICAL to the DB-reading path: multiply the prorated
     // base by the eligibility fraction; PAYE follows the reduced base.
     const gatedBase = proratedBase * attendanceEligibility.baseFraction;

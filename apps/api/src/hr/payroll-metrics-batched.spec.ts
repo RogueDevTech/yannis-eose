@@ -82,8 +82,8 @@ describe('aggregatePayMetrics — OR attribution without double-count', () => {
 
   it('seeds zeroed metrics for staff with no matching orders', () => {
     const m = aggregatePayMetrics([], [A, B], START, END);
-    expect(m.get(A)).toEqual({ deliveredCount: 0, totalOrders: 0, deliveredCohortCount: 0, returnedCount: 0 });
-    expect(m.get(B)).toEqual({ deliveredCount: 0, totalOrders: 0, deliveredCohortCount: 0, returnedCount: 0 });
+    expect(m.get(A)).toEqual({ deliveredCount: 0, totalOrders: 0, deliveredCohortCount: 0, returnedCount: 0, qualifyingRevenue: 0 });
+    expect(m.get(B)).toEqual({ deliveredCount: 0, totalOrders: 0, deliveredCohortCount: 0, returnedCount: 0, qualifyingRevenue: 0 });
   });
 
   it('ignores attribution to staff outside the requested set', () => {

@@ -233,9 +233,10 @@ export function defaultPayeBandConfig(): PayeBandConfig {
     // Pension/NHIS are OFF by default so we never silently start deducting from
     // net pay — HR enables them per company in the tax-band config. The
     // low-income exemption IS on by default: HR policy is staff earning below
-    // ₦66,667/mo pay no PAYE (≈ the ₦800k/yr tax-free floor / 12).
+    // ₦66,000/mo pay no PAYE (statutory minimum-wage floor). HR can tune it per
+    // company in the tax-band config.
     statutoryDeductions: [],
-    lowIncomeExemptionMonthly: 66_667,
+    lowIncomeExemptionMonthly: 66_000,
   };
 }
 

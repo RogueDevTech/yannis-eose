@@ -55,6 +55,7 @@ export interface FollowUpPageData {
     customerName: string;
     customerPhoneDisplay?: string;
     totalAmount: string | null;
+    currencyCode?: string;
     createdAt: string;
     mediaBuyerName?: string | null;
     branchName?: string | null;
@@ -341,7 +342,7 @@ export function FollowUpPage({
         hideable: false,
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[7rem]" />
-          : (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={`/admin/orders/${order.id}`} />,
+          : (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} linkTo={`/admin/orders/${order.id}`} />,
       },
       {
         key: 'customer',
@@ -394,7 +395,7 @@ export function FollowUpPage({
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[5rem]" />
           : (order) => (
-              <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
+              <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} currencyCode={order.currencyCode} />
             ),
       },
       {
@@ -1040,7 +1041,7 @@ export function FollowUpPage({
               </div>
               <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
                 <span>{order.branchName ?? '—'}</span>
-                <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
+                <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} currencyCode={order.currencyCode} />
               </div>
               <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
                 <span>{order.assignedCsName ?? 'Unassigned'}</span>
@@ -1074,12 +1075,12 @@ export function FollowUpPage({
               <OrderStatusBadge status={peekOrder.status} expanded />
             </div>
             {peekOrder.orderNumber && (
-              <OrderIdBadge id={peekOrder.id} orderNumber={peekOrder.orderNumber} />
+              <OrderIdBadge id={peekOrder.id} orderNumber={peekOrder.orderNumber} currencyCode={peekOrder.currencyCode} />
             )}
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <span className="block text-xs text-app-fg-muted">Amount</span>
-                <NairaPrice amount={peekOrder.totalAmount ? Number(peekOrder.totalAmount) : null} />
+                <NairaPrice amount={peekOrder.totalAmount ? Number(peekOrder.totalAmount) : null} currencyCode={peekOrder.currencyCode} />
               </div>
               <div>
                 <span className="block text-xs text-app-fg-muted">Date</span>

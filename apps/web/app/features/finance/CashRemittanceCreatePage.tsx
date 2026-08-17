@@ -5,6 +5,7 @@ import { AmountInput } from '~/components/ui/amount-input';
 import { Checkbox } from '~/components/ui/checkbox';
 import { Modal } from '~/components/ui/modal';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { useCurrencySymbol } from '~/contexts/currencies-catalog-context';
 import { PageHeader } from '~/components/ui/page-header';
 import { useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
@@ -45,6 +46,11 @@ export function CashRemittanceCreatePage({
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const { toast } = useToast();
   const navigate = useNavigate();
+  // A remittance batch is single-currency (the backend rejects a mix), so every
+  // amount + input prefix on this page uses the selected orders' currency. Take
+  // it from the first order; fall back to NGN when the batch is empty.
+  const batchCurrencyCode = selectedOrders[0]?.currencyCode ?? 'NGN';
+  const batchCurrencySymbol = useCurrencySymbol(batchCurrencyCode);
   const [markReceivedNow, setMarkReceivedNow] = useState(true);
   const [deliveryFees, setDeliveryFees] = useState<Record<string, string>>({});
   // Batch-level extra costs (single input for the whole remittance)
@@ -248,7 +254,7 @@ export function CashRemittanceCreatePage({
             {totalOrderAmount > 0 && (
               <>
                 <span className="text-app-fg-muted">·</span>
-                <NairaPrice amount={totalOrderAmount} className="font-semibold text-app-fg" />
+                <NairaPrice amount={totalOrderAmount} currencyCode={batchCurrencyCode} className="font-semibold text-app-fg" />
               </>
             )}
           </span>
@@ -298,7 +304,7 @@ export function CashRemittanceCreatePage({
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
                           <span className="tabular-nums text-sm font-medium text-app-fg">
-                            {orderAmt > 0 ? <NairaPrice amount={orderAmt} /> : '—'}
+                            {orderAmt > 0 ? <NairaPrice amount={orderAmt} currencyCode={o.currencyCode} /> : '—'}
                           </span>
                           <button
                             type="button"
@@ -321,7 +327,7 @@ export function CashRemittanceCreatePage({
                           placeholder="0"
                           value={deliveryFees[o.id] ?? ''}
                           onChange={(raw) => setDeliveryFees((prev) => ({ ...prev, [o.id]: raw }))}
-                          prefix="₦"
+                          prefix={batchCurrencySymbol}
                           className="input w-full text-sm"
                         />
                       </div>
@@ -361,7 +367,7 @@ export function CashRemittanceCreatePage({
                       placeholder="0"
                       value={commitmentFee}
                       onChange={setCommitmentFee}
-                      prefix="₦"
+                      prefix={batchCurrencySymbol}
                       className="input w-full text-sm"
                     />
                   </div>
@@ -371,7 +377,7 @@ export function CashRemittanceCreatePage({
                       placeholder="0"
                       value={posFee}
                       onChange={setPosFee}
-                      prefix="₦"
+                      prefix={batchCurrencySymbol}
                       className="input w-full text-sm"
                     />
                   </div>
@@ -381,7 +387,7 @@ export function CashRemittanceCreatePage({
                       placeholder="0"
                       value={failedDeliveryCost}
                       onChange={setFailedDeliveryCost}
-                      prefix="₦"
+                      prefix={batchCurrencySymbol}
                       className="input w-full text-sm"
                     />
                   </div>
@@ -391,7 +397,7 @@ export function CashRemittanceCreatePage({
                       placeholder="0"
                       value={discount}
                       onChange={setDiscount}
-                      prefix="₦"
+                      prefix={batchCurrencySymbol}
                       className="input w-full text-sm"
                     />
                   </div>
@@ -401,7 +407,7 @@ export function CashRemittanceCreatePage({
                       placeholder="0"
                       value={waybillCost}
                       onChange={setWaybillCost}
-                      prefix="₦"
+                      prefix={batchCurrencySymbol}
                       className="input w-full text-sm"
                     />
                   </div>
@@ -435,14 +441,14 @@ export function CashRemittanceCreatePage({
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-app-fg-muted">Order total</span>
                   <span className="text-sm tabular-nums text-app-fg-muted">
-                    <NairaPrice amount={totalOrderAmount} />
+                    <NairaPrice amount={totalOrderAmount} currencyCode={batchCurrencyCode} />
                   </span>
                 </div>
                 {totalDeliveryFees > 0 && (
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-app-fg-muted">Delivery costs</span>
                     <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                      -<NairaPrice amount={totalDeliveryFees} />
+                      -<NairaPrice amount={totalDeliveryFees} currencyCode={batchCurrencyCode} />
                     </span>
                   </div>
                 )}
@@ -450,7 +456,7 @@ export function CashRemittanceCreatePage({
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-app-fg-muted">Commitment fee</span>
                     <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                      -<NairaPrice amount={totalCommitmentFee} />
+                      -<NairaPrice amount={totalCommitmentFee} currencyCode={batchCurrencyCode} />
                     </span>
                   </div>
                 )}
@@ -458,7 +464,7 @@ export function CashRemittanceCreatePage({
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-app-fg-muted">POS fee</span>
                     <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                      -<NairaPrice amount={totalPosFee} />
+                      -<NairaPrice amount={totalPosFee} currencyCode={batchCurrencyCode} />
                     </span>
                   </div>
                 )}
@@ -466,7 +472,7 @@ export function CashRemittanceCreatePage({
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-app-fg-muted">Failed delivery</span>
                     <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                      -<NairaPrice amount={totalFailedDeliveryCost} />
+                      -<NairaPrice amount={totalFailedDeliveryCost} currencyCode={batchCurrencyCode} />
                     </span>
                   </div>
                 )}
@@ -474,7 +480,7 @@ export function CashRemittanceCreatePage({
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-app-fg-muted">Discount</span>
                     <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                      -<NairaPrice amount={totalDiscount} />
+                      -<NairaPrice amount={totalDiscount} currencyCode={batchCurrencyCode} />
                     </span>
                   </div>
                 )}
@@ -482,7 +488,7 @@ export function CashRemittanceCreatePage({
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-app-fg-muted">Waybill sent/pickup</span>
                     <span className="text-sm tabular-nums text-danger-600 dark:text-danger-400">
-                      -<NairaPrice amount={totalWaybillCost} />
+                      -<NairaPrice amount={totalWaybillCost} currencyCode={batchCurrencyCode} />
                     </span>
                   </div>
                 )}
@@ -492,7 +498,7 @@ export function CashRemittanceCreatePage({
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-app-fg">Remittance due</span>
               <span className="text-xl font-bold text-brand-700 dark:text-brand-300">
-                <NairaPrice amount={totalAmount} />
+                <NairaPrice amount={totalAmount} currencyCode={batchCurrencyCode} />
               </span>
             </div>
 

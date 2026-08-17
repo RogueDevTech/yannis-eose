@@ -13,6 +13,8 @@ import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { CurrencyLens } from '~/components/ui/currency-lens';
+import { LensedMoney } from '~/components/ui/lensed-money';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SortMenu } from '~/components/ui/sort-menu';
@@ -800,6 +802,20 @@ export function MarketingTeamPage({
         render: (m) => m.adSpend != null ? <span className="text-app-fg-muted">{formatNaira(m.adSpend)}</span> : '\u2014',
       },
       {
+        key: 'deliveredRevenue',
+        header: 'Del. Revenue',
+        align: 'right',
+        nowrap: true,
+        render: (m) =>
+          m.deliveredRevenue != null ? (
+            <span className="text-app-fg-muted">
+              <LensedMoney amounts={m.deliveredRevenueByCurrency ?? { NGN: m.deliveredRevenue }} />
+            </span>
+          ) : (
+            '\u2014'
+          ),
+      },
+      {
         key: 'cpa',
         header: 'CPA',
         align: 'right',
@@ -954,6 +970,7 @@ export function MarketingTeamPage({
             desktopActions
             desktop={
               <>
+                <CurrencyLens />
                 <PageRefreshButton />
                 <DateFilterBar
                     startDate={dateFilters.startDate}

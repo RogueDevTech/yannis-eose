@@ -4,7 +4,7 @@ import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { and, desc, eq, isNull, notInArray, or, sql } from 'drizzle-orm';
-import { db as schema, SYSTEM_ACTOR_ID, targetGroupFilterSchema, type TargetGroupFilter } from '@yannis/shared';
+import { db as schema, SYSTEM_ACTOR_ID, targetGroupFilterSchema, normalizePhoneForHash, type TargetGroupFilter } from '@yannis/shared';
 import type {
   CreateTargetGroupInput,
   UpdateTargetGroupInput,
@@ -308,10 +308,10 @@ export class TargetGroupService {
   // ── CSV/Excel member import ─────────────────────────────────
 
   /** SHA-256 of the normalized phone — MUST match OrdersService.hashPhone so an
-   *  imported member lines up with the same customer's orders. */
+   *  imported member lines up with the same customer's orders. Uses the shared
+   *  country-aware normalizer so both sides stay in lockstep. */
   private hashPhone(phone: string): string {
-    let digits = phone.replace(/\D/g, '');
-    if (digits.length === 11 && digits.startsWith('0')) digits = '234' + digits.slice(1);
+    const digits = normalizePhoneForHash(phone);
     return createHash('sha256').update(`yannis:phone:${digits}`).digest('hex');
   }
 

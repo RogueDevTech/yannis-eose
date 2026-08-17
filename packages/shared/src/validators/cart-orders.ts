@@ -17,6 +17,8 @@ export const listCartOrdersSchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   showDeleted: z.boolean().optional(),
+  /** Multi-currency filter — restrict to one currency. Undefined = all currencies. */
+  currencyCode: z.string().trim().toUpperCase().max(5).optional(),
 });
 
 export const cartOrderDetailSchema = z.object({

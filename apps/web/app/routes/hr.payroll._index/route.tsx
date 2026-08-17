@@ -225,6 +225,125 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  // ── Staff refund intents (post-tax) ────────────────────────
+
+  if (intent === 'createRefund') {
+    const rawMonth = formData.get('periodMonth')?.toString() ?? '';
+    const refundPeriodMonth = /^\d{4}-\d{2}$/.test(rawMonth) ? `${rawMonth}-01` : rawMonth;
+    const docUrl = formData.get('docUrl')?.toString()?.trim();
+    const notes = formData.get('notes')?.toString()?.trim();
+    const res = await apiRequest<unknown>('/trpc/hr.createRefund', {
+      method: 'POST',
+      cookie,
+      body: {
+        staffId: formData.get('staffId')?.toString() ?? '',
+        amount: formData.get('amount')?.toString() ?? '',
+        reason: formData.get('reason')?.toString() ?? '',
+        refundDate: formData.get('refundDate')?.toString() ?? '',
+        periodMonth: refundPeriodMonth,
+        ...(notes ? { notes } : {}),
+        ...(docUrl ? { docUrl } : {}),
+      },
+    });
+    if (!res.ok) return json({ error: extractError(res, 'Failed to add refund') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
+  if (intent === 'updateRefund') {
+    const rawMonth = formData.get('periodMonth')?.toString() ?? '';
+    const refundPeriodMonth = /^\d{4}-\d{2}$/.test(rawMonth)
+      ? `${rawMonth}-01`
+      : /^\d{4}-\d{2}-01$/.test(rawMonth)
+        ? rawMonth
+        : undefined;
+    const docUrl = formData.get('docUrl')?.toString()?.trim();
+    const notes = formData.get('notes')?.toString()?.trim();
+    const res = await apiRequest<unknown>('/trpc/hr.updateRefund', {
+      method: 'POST',
+      cookie,
+      body: {
+        refundId: formData.get('refundId')?.toString() ?? '',
+        amount: formData.get('amount')?.toString() ?? '',
+        reason: formData.get('reason')?.toString() ?? '',
+        refundDate: formData.get('refundDate')?.toString() ?? '',
+        ...(refundPeriodMonth ? { periodMonth: refundPeriodMonth } : {}),
+        ...(notes ? { notes } : {}),
+        ...(docUrl ? { docUrl } : {}),
+      },
+    });
+    if (!res.ok) return json({ error: extractError(res, 'Failed to update refund') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
+  if (intent === 'voidRefund') {
+    const res = await apiRequest<unknown>('/trpc/hr.voidRefund', {
+      method: 'POST',
+      cookie,
+      body: { refundId: formData.get('refundId')?.toString() ?? '' },
+    });
+    if (!res.ok) return json({ error: extractError(res, 'Failed to void refund') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
+  // ── Per-staff allowance intents (taxable) ──────────────────
+
+  if (intent === 'createStaffAllowance') {
+    const rawMonth = formData.get('periodMonth')?.toString() ?? '';
+    const periodMonth = /^\d{4}-\d{2}$/.test(rawMonth) ? `${rawMonth}-01` : rawMonth;
+    // Unchecked checkbox is absent from formData → false.
+    const recurring = formData.get('recurring') != null;
+    const notes = formData.get('notes')?.toString()?.trim();
+    const res = await apiRequest<unknown>('/trpc/hr.createStaffAllowance', {
+      method: 'POST',
+      cookie,
+      body: {
+        staffId: formData.get('staffId')?.toString() ?? '',
+        amount: formData.get('amount')?.toString() ?? '',
+        name: formData.get('name')?.toString() ?? '',
+        recurring,
+        periodMonth,
+        ...(notes ? { notes } : {}),
+      },
+    });
+    if (!res.ok) return json({ error: extractError(res, 'Failed to add allowance') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
+  if (intent === 'updateStaffAllowance') {
+    const rawMonth = formData.get('periodMonth')?.toString() ?? '';
+    const periodMonth = /^\d{4}-\d{2}$/.test(rawMonth)
+      ? `${rawMonth}-01`
+      : /^\d{4}-\d{2}-01$/.test(rawMonth)
+        ? rawMonth
+        : undefined;
+    const recurring = formData.get('recurring') != null;
+    const notes = formData.get('notes')?.toString()?.trim();
+    const res = await apiRequest<unknown>('/trpc/hr.updateStaffAllowance', {
+      method: 'POST',
+      cookie,
+      body: {
+        allowanceId: formData.get('allowanceId')?.toString() ?? '',
+        amount: formData.get('amount')?.toString() ?? '',
+        name: formData.get('name')?.toString() ?? '',
+        recurring,
+        ...(periodMonth ? { periodMonth } : {}),
+        ...(notes ? { notes } : {}),
+      },
+    });
+    if (!res.ok) return json({ error: extractError(res, 'Failed to update allowance') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
+  if (intent === 'voidStaffAllowance') {
+    const res = await apiRequest<unknown>('/trpc/hr.voidStaffAllowance', {
+      method: 'POST',
+      cookie,
+      body: { allowanceId: formData.get('allowanceId')?.toString() ?? '' },
+    });
+    if (!res.ok) return json({ error: extractError(res, 'Failed to void allowance') }, { status: safeStatus(res.status) });
+    return json({ success: true });
+  }
+
   // ── Monthly batch lifecycle intents ────────────────────────
 
   if (intent === 'generateBatch') {

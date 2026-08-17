@@ -228,6 +228,12 @@ export const listDeliveryRemittancesSchema = z.object({
   limit: z.number().int().min(1).max(10000).default(20),
   /** When true, skip paginated records and only return summary stats + empty records array. */
   summaryOnly: z.boolean().optional().default(false),
+  /**
+   * Scope EVERY total, list, and batch to a single currency. Remittances never
+   * mix currencies (a batch is single-currency; totals summed across currencies
+   * are meaningless). When set, all SUMs + rows filter to this currency code.
+   */
+  currencyCode: z.string().trim().toUpperCase().max(5).optional(),
 });
 export type ListDeliveryRemittancesInput = z.infer<typeof listDeliveryRemittancesSchema>;
 
@@ -246,6 +252,8 @@ export const listDeliveryRemittanceEligibleOrdersSchema = z.object({
   // to createdAt to mirror the tile's default.
   dateScope: z.enum(['createdAt', 'deliveredAt']).optional(),
   orderIds: z.array(z.string().uuid()).max(200).optional(),
+  /** Scope the awaiting-remittance list to a single currency (never mix). */
+  currencyCode: z.string().trim().toUpperCase().max(5).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(500).default(100),
 });

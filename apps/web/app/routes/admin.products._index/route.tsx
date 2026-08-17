@@ -95,6 +95,10 @@ function parseOfferGroups(payload: unknown): OfferGroupRow[] {
                 ? rr.sortOrder
                 : parseInt(String(rr.sortOrder ?? '0'), 10) || 0,
             status: rr.status != null ? String(rr.status) : 'ACTIVE',
+            pricesByCurrency:
+              rr.pricesByCurrency && typeof rr.pricesByCurrency === 'object'
+                ? Object.fromEntries(Object.entries(rr.pricesByCurrency as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+                : {},
           }))
           .filter((it) => it.id && it.productId && it.label)
       : [];

@@ -159,6 +159,22 @@ export const adjustmentCategoryEnum = pgEnum('adjustment_category', [
   'OTHER',
 ]);
 
+// Staff refund lifecycle. HR-recorded refunds are APPROVED on creation (they are
+// post-tax cash owed back to staff, not a request needing sign-off); VOIDED lets
+// HR cancel one without a hard delete so the audit trail is preserved.
+export const refundStatusEnum = pgEnum('refund_status', ['APPROVED', 'VOIDED']);
+
+// Staff tax-document taxonomy (doc §5). TIN_CERTIFICATE = Tax ID cert;
+// TAX_CARD = state tax card; PAYE_RECEIPT = remittance receipt; TAX_CLEARANCE =
+// annual clearance certificate; OTHER = anything else HR files.
+export const taxDocumentTypeEnum = pgEnum('tax_document_type', [
+  'TIN_CERTIFICATE',
+  'TAX_CARD',
+  'PAYE_RECEIPT',
+  'TAX_CLEARANCE',
+  'OTHER',
+]);
+
 export const deploymentTypeEnum = pgEnum('deployment_type', [
   'SNIPPET',
   'IFRAME',

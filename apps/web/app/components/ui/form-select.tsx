@@ -15,6 +15,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { CONTROL_HEIGHT_CLASS } from './_control-heights';
+import { LabelInfo } from './label-info';
 
 type FormSelectSize = 'sm' | 'md' | 'lg';
 
@@ -33,6 +34,8 @@ export interface SelectGroup {
 
 interface FormSelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'size'> {
   label?: string;
+  /** Optional info tooltip shown as an icon next to the label */
+  labelInfo?: string;
   hint?: string;
   error?: string;
   /** Flat options list */
@@ -142,6 +145,7 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
   (
     {
       label,
+      labelInfo,
       hint,
       error,
       options,
@@ -363,9 +367,10 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
     return (
       <div className={['flex flex-col gap-1', wrapperClassName].filter(Boolean).join(' ')}>
         {label && (
-          <label htmlFor={inputId} className="text-xs font-medium text-app-fg-muted">
+          <label htmlFor={inputId} className="inline-flex items-center gap-1 text-xs font-medium text-app-fg-muted">
             {label}
-            {required && <span className="ml-0.5 text-danger-500">*</span>}
+            {required && <span className="text-danger-500">*</span>}
+            {labelInfo && <LabelInfo text={labelInfo} />}
           </label>
         )}
 

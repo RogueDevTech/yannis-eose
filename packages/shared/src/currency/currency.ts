@@ -16,6 +16,8 @@ export interface CurrencyInfo {
   active: boolean;
   /** 1 unit of THIS currency = fxRateToBase units of the base currency. NULL = unset. */
   fxRateToBase: number | null;
+  /** Accent colour (hex) for tinting this currency's order#/amount. NULL = neutral. */
+  color?: string | null;
 }
 
 /** The hard-coded fallback when no currency config has loaded (pre-config / legacy). */
@@ -27,6 +29,7 @@ export const NGN: CurrencyInfo = {
   isDefault: true,
   active: true,
   fxRateToBase: 1,
+  color: null,
 };
 
 /**
@@ -49,6 +52,24 @@ export function currencyByCode(currencies: CurrencyInfo[], code: string | null |
   if (!code) return baseCurrency(currencies);
   const up = code.toUpperCase();
   return currencies.find((c) => c.code.toUpperCase() === up) ?? { ...NGN, code: up, symbol: up + ' ' };
+}
+
+/**
+ * The accent colour to tint a record's order#/amount for a given currency code,
+ * or `null` when it should render neutral (the current default look).
+ *
+ * Returns null for: the base/default currency (base rows stay neutral by
+ * design), any currency without a colour set, and unknown codes. This keeps the
+ * common NGN case and the dormant single-currency world byte-for-byte unchanged.
+ */
+export function currencyColorForCode(
+  currencies: CurrencyInfo[],
+  code: string | null | undefined,
+): string | null {
+  if (!code) return null;
+  const info = currencies.find((c) => c.code.toUpperCase() === code.toUpperCase());
+  if (!info || info.isDefault) return null;
+  return info.color ?? null;
 }
 
 /**

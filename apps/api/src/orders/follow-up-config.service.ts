@@ -595,6 +595,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
               customerAddress: orig.customerAddress,
               deliveryAddress: orig.deliveryAddress,
               totalAmount: orig.totalAmount,
+              // Carry the source order's currency into the follow-up copy.
+              currencyCode: orig.currencyCode ?? 'NGN',
               landedCost: orig.landedCost,
               deliveryFee: orig.deliveryFee,
               deliveryNotes: orig.deliveryNotes,
@@ -976,6 +978,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (input.assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, input.assignedCsId));
     if (input.unassignedOnly) conditions.push(isNull(schema.followUpOrders.assignedCsId));
     if (input.ruleId) conditions.push(eq(schema.followUpOrders.followUpRuleId, input.ruleId));
+    if (input.currencyCode) conditions.push(eq(schema.followUpOrders.currencyCode, input.currencyCode));
     if (input.search) {
       const trimmed = input.search.trim();
       if (trimmed.length > 0) {
@@ -1132,8 +1135,9 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     };
   }
 
-  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, startDate?: string, endDate?: string, effectiveBranchIds?: string[] | null, viewerCloserId?: string | null) {
+  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, startDate?: string, endDate?: string, effectiveBranchIds?: string[] | null, viewerCloserId?: string | null, currencyCode?: string) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
+    if (currencyCode) conditions.push(eq(schema.followUpOrders.currencyCode, currencyCode));
     if (assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, assignedCsId));
     {
       const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, branchId, effectiveBranchIds);
@@ -1161,6 +1165,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     // Separate deleted count (soft-deleted orders are excluded from the main query)
     const deletedConditions: Parameters<typeof and>[0][] = [sql`${schema.followUpOrders.deletedAt} IS NOT NULL`];
+    if (currencyCode) deletedConditions.push(eq(schema.followUpOrders.currencyCode, currencyCode));
     if (assignedCsId) deletedConditions.push(eq(schema.followUpOrders.assignedCsId, assignedCsId));
     {
       const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, branchId, effectiveBranchIds);
@@ -2162,6 +2167,8 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           customerAddress: fuOrder.customerAddress,
           deliveryAddress: fuOrder.deliveryAddress,
           totalAmount: fuOrder.totalAmount,
+          // Carry the follow-up order's currency onto the graduated orders copy.
+          currencyCode: fuOrder.currencyCode ?? 'NGN',
           landedCost: fuOrder.landedCost,
           deliveryFee: fuOrder.deliveryFee,
           deliveryNotes: fuOrder.deliveryNotes,

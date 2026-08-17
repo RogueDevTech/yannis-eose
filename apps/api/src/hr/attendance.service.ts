@@ -596,10 +596,22 @@ export class AttendanceService {
   }
 
   /** Monthly summary for one staff member (self-view or HR). */
-  async summary(input: AttendanceSummaryInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+  async summary(
+    input: AttendanceSummaryInput,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+    /**
+     * True when the caller is a team supervisor of `staffId` (resolved by the
+     * router via BranchTeamsService). Lets a CS manager view their team members'
+     * attendance without the broad attendance.read/hr.read permission, while still
+     * enforcing company isolation below.
+     */
+    viaSupervisor = false,
+  ) {
     const staffId = input.staffId ?? actor.id;
-    // Staff may only view their own; HR/admins may view anyone.
-    if (staffId !== actor.id && !canReadAllAttendance(actor)) {
+    // Staff may only view their own; HR/admins may view anyone; a team supervisor
+    // may view their own team members (viaSupervisor, resolved by the router).
+    if (staffId !== actor.id && !canReadAllAttendance(actor) && !viaSupervisor) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only view your own attendance.' });
     }
     // Company isolation: viewing another staff member requires them to be in the
@@ -700,6 +712,105 @@ export class AttendanceService {
         reason: elig?.reason ?? null,
       },
     };
+  }
+
+  /**
+   * Team attendance summary for a CS manager (doc §1). Given the supervisor's CS
+   * staff ids (pre-resolved by the router via BranchTeamsService), returns each
+   * member's monthly present/absent/sick/off totals plus their "in payroll?"
+   * status — so a manager can monitor attendance and payroll inclusion in one
+   * view. The router is responsible for the supervisor authorization; this method
+   * trusts the id set it is given (and still applies company isolation).
+   */
+  async teamMonthlySummary(
+    staffIds: string[],
+    month: string,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<
+    Array<{
+      staffId: string;
+      staffName: string | null;
+      staffRole: string | null;
+      present: number;
+      absent: number;
+      offDuty: number;
+      sick: number;
+      inPayroll: boolean;
+      payrollStatus: string;
+    }>
+  > {
+    const requested = [...new Set(staffIds.filter(Boolean))];
+    if (requested.length === 0) return [];
+    // Company isolation: keep only members within the caller's active company.
+    // assertStaffInScope returns the in-scope subset; we filter to it rather than
+    // throwing, so a supervisor whose squad spans a company boundary still sees the
+    // members they legitimately can (and never leaks out-of-company staff).
+    const inScope = await this.assertStaffInScope(requested, effectiveBranchIds, { throwOnStray: false });
+    const ids = effectiveBranchIds?.length ? requested.filter((id) => inScope.has(id)) : requested;
+    if (ids.length === 0) return [];
+    const { start, end } = monthBounds(month);
+
+    // Per-staff status tallies in one grouped query.
+    const tallyRows = await this.db
+      .select({
+        staffId: schema.attendanceRecords.staffId,
+        status: schema.attendanceRecords.status,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(schema.attendanceRecords)
+      .where(
+        and(
+          inArray(schema.attendanceRecords.staffId, ids),
+          gte(schema.attendanceRecords.attendanceDate, start),
+          lte(schema.attendanceRecords.attendanceDate, end),
+        ),
+      )
+      .groupBy(schema.attendanceRecords.staffId, schema.attendanceRecords.status);
+
+    const tallies = new Map<string, { present: number; absent: number; offDuty: number; sick: number }>();
+    for (const id of ids) tallies.set(id, { present: 0, absent: 0, offDuty: 0, sick: 0 });
+    for (const r of tallyRows) {
+      const t = tallies.get(r.staffId);
+      if (!t) continue;
+      const n = Number(r.n ?? 0);
+      if (r.status === 'PRESENT') t.present += n;
+      else if (r.status === 'ABSENT') t.absent += n;
+      else if (r.status === 'OFF_DUTY') t.offDuty += n;
+      else if (r.status === 'SICK') t.sick += n;
+    }
+
+    // Staff meta + payroll-inclusion inputs.
+    const staffRows = await this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        role: schema.users.role,
+        status: schema.users.status,
+        payRoleId: schema.users.payRoleId,
+        flatMonthlyAmount: schema.users.flatMonthlyAmount,
+        onboardingPayrollStatus: schema.users.onboardingPayrollStatus,
+      })
+      .from(schema.users)
+      .where(inArray(schema.users.id, ids));
+
+    return staffRows.map((s) => {
+      const t = tallies.get(s.id) ?? { present: 0, absent: 0, offDuty: 0, sick: 0 };
+      // "In payroll" ≡ ACTIVE + has a comp basis + not awaiting payroll approval.
+      const hasCompBasis = s.payRoleId != null || s.flatMonthlyAmount != null;
+      const status = s.onboardingPayrollStatus ?? 'NOT_APPLICABLE';
+      const inPayroll = s.status === 'ACTIVE' && hasCompBasis && status !== 'PENDING_APPROVAL';
+      return {
+        staffId: s.id,
+        staffName: s.name,
+        staffRole: s.role,
+        present: t.present,
+        absent: t.absent,
+        offDuty: t.offDuty,
+        sick: t.sick,
+        inPayroll,
+        payrollStatus: status,
+      };
+    });
   }
 
   /** Save a pay role's attendance config (bands + on/off). HR only. Audited. */

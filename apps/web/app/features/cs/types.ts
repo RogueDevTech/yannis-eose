@@ -24,6 +24,8 @@ export interface CloserWorkloadOrder {
   createdAt: string;
   updatedAt: string;
   totalAmount: string | null;
+  /** Frozen order currency (default NGN) for money display. */
+  currencyCode?: string;
   items: CloserWorkloadOrderItem[];
 }
 
@@ -43,6 +45,8 @@ export interface CSOrder {
   customerPhoneDisplay: string;
   status: string;
   totalAmount: string | null;
+  /** Frozen order currency (default NGN) for money display. */
+  currencyCode?: string;
   createdAt: string;
   assignedCsId: string | null;
   callbackScheduledAt?: string | null;
@@ -173,6 +177,8 @@ export interface LiveActivityItem {
   linkedOrderId: string | null;
   /** Order total, else offer price, else product base sale price (see cart.listActivity) */
   totalAmount: string | null;
+  /** Order currency (default NGN) for money display. */
+  currencyCode?: string;
   updatedAt: string;
 }
 

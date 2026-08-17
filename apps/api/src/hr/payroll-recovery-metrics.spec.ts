@@ -126,6 +126,6 @@ describe('aggregateRecoveryCombinedMetrics — recovery delivered count', () => 
 
   it('returns zeros when nothing is attributed', () => {
     const m = aggregateRecoveryCombinedMetrics({ orders: [], cartOrders: [] }, CS, START, END);
-    expect(m).toEqual({ deliveredCount: 0, totalOrders: 0, deliveredCohortCount: 0, returnedCount: 0 });
+    expect(m).toEqual({ deliveredCount: 0, totalOrders: 0, deliveredCohortCount: 0, returnedCount: 0, qualifyingRevenue: 0 });
   });
 });

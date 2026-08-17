@@ -4,6 +4,7 @@ import {
   markAttendanceBulkSchema,
   markAttendanceRangeSchema,
   attendanceSummarySchema,
+  teamAttendanceSummarySchema,
   savePayRoleAttendanceConfigSchema,
   setUserAttendanceOverrideSchema,
   attendancePolicySchema,
@@ -12,6 +13,7 @@ import {
 } from '@yannis/shared';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { AttendanceService } from '../../hr/attendance.service';
+import { getBranchTeamsService } from './branches.router';
 
 let attendanceServiceInstance: AttendanceService | null = null;
 export function setAttendanceService(service: AttendanceService) {
@@ -53,11 +55,44 @@ export const attendanceRouter = router({
       return getAttendanceService().markRange(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
-  /** Monthly summary — self (any authed user) or, for HR, any staff member. */
+  /**
+   * Monthly summary — self (any authed user), HR (any staff), or a team
+   * supervisor viewing one of their own team members (e.g. a CS manager). The
+   * supervisor relationship is resolved here so the service stays DB-only.
+   */
   summary: authedProcedure
     .input(attendanceSummarySchema)
     .query(async ({ input, ctx }) => {
-      return getAttendanceService().summary(input, ctx.user, ctx.effectiveBranchIds);
+      let viaSupervisor = false;
+      if (input.staffId && input.staffId !== ctx.user.id) {
+        viaSupervisor = await getBranchTeamsService().isSupervisorOfUserAnywhere(
+          ctx.user.id,
+          input.staffId,
+        );
+      }
+      return getAttendanceService().summary(input, ctx.user, ctx.effectiveBranchIds, viaSupervisor);
+    }),
+
+  /**
+   * Team attendance summary for a CS manager (doc §1): each supervised CS staff
+   * member's monthly present/absent/sick/off totals + "in payroll?" status. Scoped
+   * to the caller's own CS team (explicit squad membership) — no broad attendance
+   * permission needed. Returns [] for non-supervisors.
+   */
+  teamSummary: authedProcedure
+    .input(teamAttendanceSummarySchema)
+    .query(async ({ input, ctx }) => {
+      const branchId = input.branchId ?? ctx.currentBranchId;
+      if (!branchId) return [];
+      const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, branchId);
+      // Only the CS-lane supervisees (exclude the supervisor's own row from the list).
+      const teamIds = scope.csUserIds.filter((id) => id !== ctx.user.id);
+      if (teamIds.length === 0) return [];
+      return getAttendanceService().teamMonthlySummary(
+        teamIds,
+        input.month,
+        ctx.effectiveBranchIds,
+      );
     }),
 
   /** Save a pay role's attendance config (bands + on/off). */

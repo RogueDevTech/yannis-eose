@@ -13,7 +13,7 @@ import { formatNaira } from '~/lib/format-amount';
  */
 
 function PdfLikePayslip({ payslip }: { payslip: PayslipPdfInput }) {
-  const { earningLines, deductionLines } = buildPayslipLines(payslip);
+  const { earningLines, deductionLines, postTaxLines } = buildPayslipLines(payslip);
   const money = (n: number) =>
     formatNaira(n, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -124,6 +124,12 @@ function PdfLikePayslip({ payslip }: { payslip: PayslipPdfInput }) {
             <div key={line.label} className="flex w-[220px] max-w-full justify-between gap-4">
               <span className="text-black">{line.label}:</span>
               <span className="tabular-nums text-right text-black">-{money(line.amount)}</span>
+            </div>
+          ))}
+          {postTaxLines.map((line) => (
+            <div key={line.label} className="flex w-[220px] max-w-full justify-between gap-4">
+              <span className="text-black">{line.label}:</span>
+              <span className="tabular-nums text-right text-black">+{money(line.amount)}</span>
             </div>
           ))}
           <div className="flex w-[220px] max-w-full justify-between gap-4 text-mini font-bold">

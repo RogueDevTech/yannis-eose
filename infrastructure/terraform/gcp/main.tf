@@ -9,6 +9,9 @@ locals {
     "artifactregistry.googleapis.com",
     "compute.googleapis.com",
     "iam.googleapis.com",
+    # Required for ADC-based GCS v4 signed-URL creation (signBlob). Without it,
+    # asset uploads fail with "Unable to start upload".
+    "iamcredentials.googleapis.com",
     "secretmanager.googleapis.com",
   ])
 
@@ -41,6 +44,19 @@ resource "google_project_iam_member" "vm_runtime_roles" {
   project = var.project_id
   role    = each.value
   member  = "serviceAccount:${google_service_account.vm_runtime.email}"
+}
+
+# GCS v4 signed URLs (used by the web app's /api/upload-url presign) are signed
+# via the IAM signBlob API when running under ADC (the VM's attached service
+# account, no key file). That requires the SA to be able to impersonate ITSELF —
+# i.e. hold Token Creator on its own identity. Without this, getSignedUrl()
+# throws and every asset upload fails with "Unable to start upload".
+# storage.objectAdmin alone is NOT sufficient — it grants object access, not
+# blob signing. See apps/web/app/lib/object-storage.server.ts.
+resource "google_service_account_iam_member" "vm_runtime_self_sign" {
+  service_account_id = google_service_account.vm_runtime.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.vm_runtime.email}"
 }
 
 resource "google_secret_manager_secret" "runtime_env" {

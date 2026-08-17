@@ -177,6 +177,8 @@ export interface UserDetail {
   payRoleId?: string | null;
   employmentType?: string | null;
   salaryBasis?: string | null;
+  /** Payroll onboarding state: NOT_APPLICABLE | PENDING_APPROVAL | ACTIVE. */
+  onboardingPayrollStatus?: string | null;
   taxStatus?: string | null;
   /** Flat monthly salary (₦) when salaryBasis is FLAT_RATE. */
   flatMonthlyAmount?: string | number | null;

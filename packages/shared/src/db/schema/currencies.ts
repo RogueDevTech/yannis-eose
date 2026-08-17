@@ -35,6 +35,13 @@ export const currencies = pgTable('currencies', {
   isDefault: boolean('is_default').notNull().default(false),
   /** Deactivated currencies stop appearing in dropdowns but keep historical rows valid. */
   active: boolean('active').notNull().default(true),
+  /**
+   * Accent colour (hex, e.g. '#22c55e') for this currency. Tints the order
+   * number + amount of records in this currency so foreign-currency rows stand
+   * out from the base (NGN) rows. NULL = neutral (the base currency, and any
+   * currency the admin left uncoloured, render with the default text colour).
+   */
+  color: text('color'),
   /** 1 unit of THIS currency = N base-currency units. NULL until set. Base = 1. */
   fxRateToBase: numeric('fx_rate_to_base', { precision: 18, scale: 6 }),
   fxRateUpdatedAt: timestamp('fx_rate_updated_at', { withTimezone: true }),

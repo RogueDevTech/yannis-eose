@@ -30,6 +30,13 @@ export interface StaffMetricsInput {
   reporteeIds?: string[];
   /** Pipeline source for delivered-order metrics. Defaults to FUNNEL. */
   deliveredMetricSource?: DeliveredMetricSource;
+  /**
+   * Servicing-branch scope for the CS-closer qualifying-revenue metric. When
+   * present, qualifyingRevenue sums DELIVERED/REMITTED order totals the staff
+   * serviced (assigned_cs_id) within these branches, by delivered_at. Omit for
+   * non-CS staff (revenue is left 0 and never feeds their base).
+   */
+  servicingBranchIds?: string[] | null;
 }
 
 /**
@@ -43,6 +50,8 @@ export interface PayBatchedMetric {
   totalOrders: number;
   deliveredCohortCount: number;
   returnedCount: number;
+  /** CS-closer qualifying revenue (₦). 0 unless a servicing-branch revenue scope is supplied. */
+  qualifyingRevenue: number;
 }
 
 /** Minimal order shape for the pure OR-attribution aggregation reference. */
@@ -71,7 +80,8 @@ export function aggregatePayMetrics(
 ): Map<string, PayBatchedMetric> {
   const ids = new Set(staffIds.filter(Boolean));
   const out = new Map<string, PayBatchedMetric>();
-  for (const id of ids) out.set(id, { deliveredCount: 0, totalOrders: 0, deliveredCohortCount: 0, returnedCount: 0 });
+  for (const id of ids)
+    out.set(id, { deliveredCount: 0, totalOrders: 0, deliveredCohortCount: 0, returnedCount: 0, qualifyingRevenue: 0 });
 
   const inWindow = (d: Date | null) => d != null && d >= periodStart && d <= periodEnd;
   const isDelivered = (s: string) => s === 'DELIVERED' || s === 'REMITTED';
@@ -129,7 +139,7 @@ export function aggregateRecoveryCombinedMetrics(
   const attributed = (o: RecoveryMetricRow) =>
     o.assignedCsId === staffId || o.mediaBuyerId === staffId;
 
-  const out: PayBatchedMetric = { deliveredCount: 0, totalOrders: 0, deliveredCohortCount: 0, returnedCount: 0 };
+  const out: PayBatchedMetric = { deliveredCount: 0, totalOrders: 0, deliveredCohortCount: 0, returnedCount: 0, qualifyingRevenue: 0 };
 
   const fold = (rows: RecoveryMetricRow[], requireDeliveredFollowUp: boolean) => {
     for (const o of rows) {
@@ -235,6 +245,19 @@ export class PayrollMetricsService {
     const deliveredCarryOverCount = Number(carryOverRows[0]?.count ?? 0);
     const individualDr = totalOrders > 0 ? (deliveredCohortCount / totalOrders) * 100 : 0;
 
+    // CS-closer qualifying revenue: SUM(total_amount) for DELIVERED/REMITTED orders
+    // this staff SERVICED (assigned_cs_id), by delivered_at, scoped to the servicing
+    // branch(es). Drives the revenue-tier base salary. Only computed for CS roles
+    // with a servicing-branch scope; 0 otherwise (never feeds a non-CS base).
+    const qualifyingRevenue = await this.computeQualifyingRevenue(
+      tx,
+      input.staffId,
+      input.staffRole,
+      input.periodStart,
+      input.periodEnd,
+      input.servicingBranchIds,
+    );
+
     let teamDr: number | undefined;
     if (input.reporteeIds?.length) {
       teamDr = await this.computeTeamDr(tx, input.reporteeIds, input.periodStart, input.periodEnd);
@@ -269,10 +292,43 @@ export class PayrollMetricsService {
       deliveredCarryOverCount,
       totalOrders,
       returnedCount,
+      qualifyingRevenue,
       deliveredByProduct,
       drByProduct,
       missingData,
     };
+  }
+
+  /**
+   * CS-closer qualifying revenue for the period: SUM(total_amount) over
+   * DELIVERED/REMITTED orders the staff serviced (assigned_cs_id), by delivered_at,
+   * within the given servicing branch(es). Returns 0 for non-CS roles or when no
+   * servicing-branch scope is supplied (the tier only applies to CS closers).
+   * DELETED is excluded implicitly by the DELIVERED/REMITTED allow-list.
+   */
+  private async computeQualifyingRevenue(
+    tx: TxLike,
+    staffId: string,
+    staffRole: string,
+    periodStart: Date,
+    periodEnd: Date,
+    servicingBranchIds?: string[] | null,
+  ): Promise<number> {
+    if (staffRole !== 'CS_CLOSER' && staffRole !== 'HEAD_OF_CS') return 0;
+    if (!servicingBranchIds?.length) return 0;
+    const rows = await tx
+      .select({ total: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)` })
+      .from(schema.orders)
+      .where(
+        and(
+          inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+          gte(schema.orders.deliveredAt, periodStart),
+          lte(schema.orders.deliveredAt, periodEnd),
+          eq(schema.orders.assignedCsId, staffId),
+          inArray(schema.orders.servicingBranchId, servicingBranchIds),
+        ),
+      );
+    return Number(rows[0]?.total ?? 0);
   }
 
   /**
@@ -469,6 +525,17 @@ export class PayrollMetricsService {
       deliveredCount === 0 &&
       !['FINANCE_OFFICER', 'BRANCH_ADMIN', 'STOCK_MANAGER'].includes(input.staffRole);
 
+    // Recovery closers are CS staff too — their revenue-tier base uses the same
+    // qualifying-revenue definition (DELIVERED/REMITTED they serviced, scoped).
+    const qualifyingRevenue = await this.computeQualifyingRevenue(
+      tx,
+      staffId,
+      input.staffRole,
+      periodStart,
+      periodEnd,
+      input.servicingBranchIds,
+    );
+
     return {
       individualDr,
       teamDr,
@@ -480,6 +547,7 @@ export class PayrollMetricsService {
       deliveredCarryOverCount,
       totalOrders,
       returnedCount,
+      qualifyingRevenue,
       deliveredByProduct: {},
       drByProduct: {},
       missingData,
@@ -561,6 +629,7 @@ export class PayrollMetricsService {
     totalOrders: 0,
     deliveredCohortCount: 0,
     returnedCount: 0,
+    qualifyingRevenue: 0,
   };
 
   /**
@@ -580,6 +649,13 @@ export class PayrollMetricsService {
     periodStart: Date,
     periodEnd: Date,
     tx: TxLike = this.db,
+    /**
+     * Optional CS-closer qualifying-revenue scope. When present, a second scoped
+     * query sums DELIVERED/REMITTED order totals (by delivered_at) attributed to
+     * each closer via assigned_cs_id within `servicingBranchIds`, and merges the
+     * result onto `qualifyingRevenue`. Omitted → qualifyingRevenue stays 0.
+     */
+    revenueScope?: { servicingBranchIds: string[] } | null,
   ): Promise<Map<string, PayBatchedMetric>> {
     const result = new Map<string, PayBatchedMetric>();
     const ids = [...new Set(staffIds.filter(Boolean))];
@@ -640,7 +716,37 @@ export class PayrollMetricsService {
         totalOrders: Number(r['total_orders'] ?? 0),
         deliveredCohortCount: Number(r['delivered_cohort_count'] ?? 0),
         returnedCount: Number(r['returned_count'] ?? 0),
+        qualifyingRevenue: 0,
       });
+    }
+
+    // CS-closer qualifying revenue: SUM(total_amount) for DELIVERED/REMITTED orders
+    // each closer SERVICED (assigned_cs_id), by delivered_at, within the servicing
+    // branch scope. Attribution is assigned_cs_id ONLY (no media-buyer OR) and is
+    // branch-scoped, so it is a separate query from the LATERAL count above.
+    if (revenueScope?.servicingBranchIds?.length) {
+      const branchList = sql.join(
+        revenueScope.servicingBranchIds.map((b) => sql`${b}::uuid`),
+        sql`, `,
+      );
+      const revRows = await tx.execute(sql`
+        SELECT o.assigned_cs_id AS staff_id, COALESCE(SUM(o.total_amount), 0) AS revenue
+        FROM ${schema.orders} o
+        WHERE o.assigned_cs_id IN (${idList})
+          AND o.servicing_branch_id IN (${branchList})
+          AND o.status IN ('DELIVERED','REMITTED')
+          AND o.delivered_at >= ${startIso}::timestamptz
+          AND o.delivered_at <= ${endIso}::timestamptz
+        GROUP BY o.assigned_cs_id
+      `);
+      const revRaw = Array.isArray(revRows)
+        ? (revRows as unknown[])
+        : ((revRows as unknown as { rows?: unknown[] })?.rows ?? []);
+      for (const r of revRaw as Array<Record<string, unknown>>) {
+        const staffId = String(r['staff_id']);
+        const entry = result.get(staffId);
+        if (entry) entry.qualifyingRevenue = Number(r['revenue'] ?? 0);
+      }
     }
 
     return result;

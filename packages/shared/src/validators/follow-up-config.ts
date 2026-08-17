@@ -105,6 +105,8 @@ export const listFollowUpOrdersSchema = z.object({
   endDate: z.string().optional(),
   /** When true, show only soft-deleted follow-up orders (unfrozen originals). */
   showDeleted: z.boolean().optional(),
+  /** Multi-currency filter — restrict to one currency. Undefined = all currencies. */
+  currencyCode: z.string().trim().toUpperCase().max(5).optional(),
 });
 
 export const followUpOrderDetailSchema = z.object({

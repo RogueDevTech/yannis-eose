@@ -42,6 +42,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
   const branchId = url.searchParams.get('branchId') || undefined;
+  // Multi-currency filter (dormant unless the company added a 2nd currency).
+  const currencyCode = url.searchParams.get('currency')?.toUpperCase() || undefined;
 
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
@@ -79,6 +81,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (startDate) listInput.startDate = startDate;
   if (endDate) listInput.endDate = endDate;
   if (branchId) listInput.branchId = branchId;
+  if (currencyCode) listInput.currencyCode = currencyCode;
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
@@ -114,6 +117,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             ...(assignedCsId ? { assignedCsId } : {}),
             ...(startDate ? { startDate } : {}),
             ...(endDate ? { endDate } : {}),
+            ...(currencyCode ? { currencyCode } : {}),
           }))}`,
           deferredOpt,
         ).catch(() => ({ ok: false as const, status: 500, data: null })),
@@ -150,6 +154,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         mediaBuyerId: (o.mediaBuyerId as string) ?? null,
         mediaBuyerName: (o.mediaBuyerName as string) ?? null,
         primaryProductName: ((o.orderItems as Array<{ productName?: string }>)?.[0]?.productName) ?? null,
+        primaryQuantity: ((o.orderItems as Array<{ quantity?: number }>)?.[0]?.quantity) ?? null,
         itemCount: (o.orderItems as unknown[])?.length ?? 0,
         campaignId: (o.campaignId as string) ?? null,
         campaignName: (o.campaignName as string) ?? null,

@@ -155,7 +155,7 @@ export function ToolbarFiltersCollapsible({
         <Modal
           open={open}
           onClose={() => setOpen(false)}
-          maxWidth="max-w-lg"
+          maxWidth="max-w-2xl"
           aria-labelledby={titleId}
           contentClassName="p-0"
         >
@@ -178,19 +178,16 @@ export function ToolbarFiltersCollapsible({
           </div>
           <div
             className={[
-              'flex flex-col gap-3 overflow-y-auto p-4',
+              // 2-column responsive grid on desktop (single column on the narrow
+              // mobile-sheet reuse). Each filter fills one grid cell so six filters
+              // read as three tidy rows instead of one tall single-column stack.
+              'grid grid-cols-1 gap-x-4 gap-y-3 overflow-y-auto p-4 sm:grid-cols-2',
               sheetBodyMaxHeightClassName,
-              // Filter controls stack full-width inside the modal, matching the
-              // mobile sheet treatment so both surfaces look identical. Direct
-              // children stack (the body is already flex-col); the descendant
-              // rules override the `sm:w-*` / `w-auto` width presets that these
-              // controls carry for the (now-retired) inline desktop strip.
-              '[&>*]:w-full [&>*]:shrink-0',
+              // Grid items fill their cell; min-w-0 lets long option labels truncate
+              // instead of blowing out the column. Absolutely-positioned children
+              // (the FilterDismiss ✕ badge) keep their own size + pinned position.
+              '[&>*]:w-full [&>*]:min-w-0',
               '[&_[data-toolbar-filter]]:!w-full',
-              // Full-width the control wrappers (including any nested `.relative`
-              // container), but NOT absolutely-positioned children like
-              // FilterDismiss (the small red ✕ badge) — that keeps its own size
-              // and stays pinned to the wrapper's top-right corner.
               '[&_[data-toolbar-filter]>*:not(.absolute)]:!w-full [&_[data-toolbar-filter]>*:not(.absolute)]:!max-w-none',
               '[&_[data-toolbar-filter]_.relative]:!w-full',
               // Each filter control reads as an elevated card with a CENTERED

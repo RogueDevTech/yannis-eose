@@ -13,6 +13,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { CsCommentIcon, MobileCommentPreview } from '~/components/ui/cs-comment-icon';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { NairaPrice } from '~/components/ui/naira-price';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
@@ -29,6 +30,8 @@ import { OrdersChartViewShellSkeleton, StatValuePulse } from '~/components/ui/de
 import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
+import { CurrencyFilterSelect } from '~/components/ui/currency-filter-select';
+import { useCurrencySymbol } from '~/contexts/currencies-catalog-context';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Spinner } from '~/components/ui/spinner';
 import {
@@ -274,14 +277,20 @@ function LogisticsOrdersPageImpl({
   const [bulkResult, setBulkResult] = useState<{ succeeded: number; failed: number; errors: string[] } | null>(null);
 
   const [peekOrder, setPeekOrder] = useState<LogisticsOrderRow | null>(null);
-  const [deliverConfirm, setDeliverConfirm] = useState<{ orderId: string; customerName: string } | null>(null);
+  const [deliverConfirm, setDeliverConfirm] = useState<{ orderId: string; customerName: string; currencyCode?: string | null } | null>(null);
+  // Symbol for the order being marked delivered — money-input labels (₦, GH₵…).
+  const deliverConfirmSymbol = useCurrencySymbol(deliverConfirm?.currencyCode);
   const [deliverConfirmDiscount, setDeliverConfirmDiscount] = useState('');
   const [deliverConfirmDeliveryCost, setDeliverConfirmDeliveryCost] = useState('');
   const [editDeliveryDateOrder, setEditDeliveryDateOrder] = useState<{
     orderId: string;
     customerName: string;
     preferredDeliveryDate: string | null;
+    currencyCode?: string | null;
   } | null>(null);
+  // Symbol for the order whose delivery date is being edited (declared after the
+  // state it reads, so it isn't used before assignment).
+  const editDeliveryCurrencySymbol = useCurrencySymbol(editDeliveryDateOrder?.currencyCode);
 
   const fetcher = useFetcher();
   const fetcherSurface = useFetcherActionSurface(fetcher);
@@ -392,8 +401,12 @@ function LogisticsOrdersPageImpl({
   };
 
   const logisticsOrdersToolbarFilterBadge = useMemo(
-    () => (selectedStatus !== 'ALL' ? 1 : 0) + (selectedLocation ? 1 : 0) + (selectedBranch ? 1 : 0),
-    [selectedStatus, selectedLocation, selectedBranch],
+    () =>
+      (selectedStatus !== 'ALL' ? 1 : 0) +
+      (selectedLocation ? 1 : 0) +
+      (selectedBranch ? 1 : 0) +
+      (searchParams.get('currency') ? 1 : 0),
+    [selectedStatus, selectedLocation, selectedBranch, searchParams],
   );
 
   const confirmedOrders = displayOrders.filter((o) => o.status === 'CONFIRMED');
@@ -432,7 +445,7 @@ function LogisticsOrdersPageImpl({
         header: 'Order ID',
         hideable: false,
         render: (order) => (
-          <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={toOrderDetail(order.id, order.orderCategory)} />
+          <OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} linkTo={toOrderDetail(order.id, order.orderCategory)} />
         ),
       },
       {
@@ -444,6 +457,19 @@ function LogisticsOrdersPageImpl({
         key: 'status',
         header: 'Status',
         render: (order) => <OrderStatusBadge status={order.status} expanded />,
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        render: (order) => (
+          <span className="font-medium">
+            <NairaPrice
+              amount={order.totalAmount ? Number(order.totalAmount) : null}
+              currencyCode={order.currencyCode}
+            />
+          </span>
+        ),
       },
       {
         key: 'category',
@@ -508,6 +534,7 @@ function LogisticsOrdersPageImpl({
                       orderId: order.id,
                       customerName: order.customerName,
                       preferredDeliveryDate: order.preferredDeliveryDate ?? null,
+                      currencyCode: order.currencyCode,
                     })
                   }
                 >
@@ -518,7 +545,7 @@ function LogisticsOrdersPageImpl({
                 <Button
                   variant="success"
                   size="sm"
-                  onClick={() => setDeliverConfirm({ orderId: order.id, customerName: order.customerName })}
+                  onClick={() => setDeliverConfirm({ orderId: order.id, customerName: order.customerName, currencyCode: order.currencyCode })}
                 >
                   Mark Delivered
                 </Button>
@@ -607,6 +634,7 @@ function LogisticsOrdersPageImpl({
           <OrderIdBadge
             id={order.id}
             orderNumber={order.orderNumber}
+            currencyCode={order.currencyCode}
             textClassName="text-sm font-medium text-app-fg"
           />
         </div>
@@ -658,6 +686,12 @@ function LogisticsOrdersPageImpl({
               }
               filters={
                 <>
+                  {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
+                  <div className="relative w-full">
+                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                      <CurrencyFilterSelect className="!bg-transparent !border-transparent !text-center w-full" />
+                    </div>
+                  </div>
                   <div className="relative w-full">
                     {selectedStatus !== 'ALL' && (
                       <FilterDismiss onClear={() => handleStatusChange('ALL')} />
@@ -935,6 +969,10 @@ function LogisticsOrdersPageImpl({
           }
           desktopInlineFilters={
             <>
+                {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
+                <div className="relative" data-toolbar-filter>
+                  <CurrencyFilterSelect className="w-full min-w-0 sm:w-40" />
+                </div>
                 <div className="relative" data-toolbar-filter>
                   {selectedStatus !== 'ALL' && (
                     <FilterDismiss onClear={() => handleStatusChange('ALL')} />
@@ -998,8 +1036,11 @@ function LogisticsOrdersPageImpl({
       <TableLoadingOverlay show={isFilterLoading}>
         {/* Card chrome is desktop-only — on mobile each order renders as its
             own elevated card, so an outer card would just double the chrome
-            and waste horizontal space. */}
-        <div className="md:bg-app-elevated md:rounded-xl md:border md:border-app-border md:shadow-card dark:md:shadow-none md:overflow-hidden">
+            and waste horizontal space. Use the shared `list-panel` class (not a
+            hand-rolled card) so it does NOT set `overflow-hidden` — an
+            overflow-hidden ancestor breaks the sticky <thead>, clipping the first
+            row up into the header. See CompactTable's list-panel note. */}
+        <div className="list-panel">
           <CompactTable<LogisticsOrderRow>
             columnVisibilityKey="admin.logistics.orders"
             withCard={false}
@@ -1070,7 +1111,7 @@ function LogisticsOrdersPageImpl({
             <div className="space-y-2">
               <TextInput
                 type="number"
-                label="Cost of delivery (₦), optional"
+                label={`Cost of delivery (${deliverConfirmSymbol}), optional`}
                 min={0}
                 step="0.01"
                 value={deliverConfirmDeliveryCost}
@@ -1081,7 +1122,7 @@ function LogisticsOrdersPageImpl({
               />
               <TextInput
                 type="number"
-                label="Discount at delivery (₦), optional"
+                label={`Discount at delivery (${deliverConfirmSymbol}), optional`}
                 min={0}
                 step="0.01"
                 value={deliverConfirmDiscount}
@@ -1119,6 +1160,7 @@ function LogisticsOrdersPageImpl({
         <EditDeliveryDateModal
           orderId={editDeliveryDateOrder.orderId}
           customerName={editDeliveryDateOrder.customerName}
+          currencySymbol={editDeliveryCurrencySymbol}
           initialDate={editDeliveryDateOrder.preferredDeliveryDate}
           submissionError={fetcherSurface.errorMatchingIntent('updateDeliveryDate')}
           onClose={() => setEditDeliveryDateOrder(null)}
@@ -1158,7 +1200,7 @@ function LogisticsOrdersPageImpl({
               {/* Header */}
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-app-fg truncate min-w-0" title={o.customerName ?? undefined}>{clipName(o.customerName)}</p>
-                <OrderIdBadge id={o.id} orderNumber={o.orderNumber} textClassName="text-sm font-medium text-app-fg" />
+                <OrderIdBadge id={o.id} orderNumber={o.orderNumber} currencyCode={o.currencyCode} textClassName="text-sm font-medium text-app-fg" />
               </div>
 
               {/* Details */}
@@ -1166,6 +1208,15 @@ function LogisticsOrdersPageImpl({
                 <div className="flex justify-between">
                   <span className="text-app-fg-muted">Status</span>
                   <OrderStatusBadge status={o.status} expanded />
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Amount</span>
+                  <span className="font-medium text-app-fg">
+                    <NairaPrice
+                      amount={o.totalAmount ? Number(o.totalAmount) : null}
+                      currencyCode={o.currencyCode}
+                    />
+                  </span>
                 </div>
                 {companyLine && companyLine !== '—' && (
                   <div className="flex justify-between">
@@ -1326,6 +1377,7 @@ function getTodayYYYYMMDD(): string {
 function EditDeliveryDateModal({
   orderId,
   customerName,
+  currencySymbol,
   initialDate,
   submissionError,
   onClose,
@@ -1334,6 +1386,8 @@ function EditDeliveryDateModal({
 }: {
   orderId: string;
   customerName: string;
+  /** Symbol for the order's frozen currency (₦, GH₵…) for money-input labels. */
+  currencySymbol: string;
   initialDate: string | null;
   submissionError?: string | null;
   onClose: () => void;
@@ -1381,7 +1435,7 @@ function EditDeliveryDateModal({
           />
           <TextInput
             type="number"
-            label="Cost of delivery (₦), optional"
+            label={`Cost of delivery (${currencySymbol}), optional`}
             min={0}
             step="0.01"
             value={deliveryCost}
@@ -1391,7 +1445,7 @@ function EditDeliveryDateModal({
           />
           <TextInput
             type="number"
-            label="Discount at delivery (₦), optional"
+            label={`Discount at delivery (${currencySymbol}), optional`}
             min={0}
             step="0.01"
             value={discount}

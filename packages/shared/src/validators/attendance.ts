@@ -108,6 +108,14 @@ export const attendanceSummarySchema = z.object({
 });
 export type AttendanceSummaryInput = z.infer<typeof attendanceSummarySchema>;
 
+/** Team attendance summary for a supervisor (CS manager). */
+export const teamAttendanceSummarySchema = z.object({
+  month: monthSchema,
+  // Branch whose CS team to scope to. Omitted → the caller's current branch.
+  branchId: z.string().uuid().optional(),
+});
+export type TeamAttendanceSummaryInput = z.infer<typeof teamAttendanceSummarySchema>;
+
 /** Save a pay role's attendance config. */
 export const savePayRoleAttendanceConfigSchema = z.object({
   payRoleId: z.string().uuid(),

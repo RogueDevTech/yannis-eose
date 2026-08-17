@@ -14,6 +14,8 @@ export interface CEODashboardFilters {
 export interface CEODashboardData {
   // Revenue & Profit
   revenue: number;
+  /** Per-currency revenue map for the currency lens (base/single/merged). Absent → NGN-only. */
+  revenueByCurrency?: Record<string, number>;
   trueProfit: number;
   margin: number;
   costBreakdown: {
@@ -49,6 +51,8 @@ export interface CEODashboardData {
     approvedSpend?: number;
     pendingSpend?: number;
     deliveredRevenue?: number;
+    /** Per-currency delivered revenue map for the currency lens. Absent → NGN-only. */
+    deliveredRevenueByCurrency?: Record<string, number>;
     /** Pieces of deliveredRevenue for hero breakdown (funnel orders + cart graduated). */
     deliveredRevenueBreakdown?: { funnel: number; cart: number };
     totalOrders: number;

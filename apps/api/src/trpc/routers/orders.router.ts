@@ -654,7 +654,13 @@ export const ordersRouter = router({
    */
   listProductsForAdjust: permissionProcedure('orders.read')
     .input(z.object({ orderId: z.string().uuid() }))
-    .query(async ({ ctx }) => {
+    .query(async ({ input, ctx }) => {
+      // Embedded product offers (products.offers JSON) are BASE-currency (NGN)
+      // only — they have no per-currency price. For a foreign-currency order,
+      // strip them so the product-swap picker doesn't show an NGN price mislabelled
+      // with the foreign symbol; the modal falls back to Custom entry. Matches
+      // listOrderItemOffers' embedded-offer handling.
+      const isForeignCurrency = await getOrdersService().isOrderNonBaseCurrency(input.orderId);
       const result = await getProductsService().list(
         { page: 1, limit: 200, status: 'ACTIVE', sortBy: 'name', sortOrder: 'asc' },
         ctx.user.id,
@@ -664,7 +670,7 @@ export const ordersRouter = router({
       return (result?.products ?? []).map((p: { id: string; name: string; offers?: unknown }) => ({
         id: p.id,
         name: p.name,
-        offers: p.offers,
+        offers: isForeignCurrency ? [] : p.offers,
       }));
     }),
 
@@ -1528,6 +1534,8 @@ export const ordersRouter = router({
         orderSource: z.enum(['offline', 'edge-form', 'delivered_follow_up', 'offline_and_import', 'import', 'edge-form-and-import']).optional(),
         /** When set, scope to orders assigned to members of this team. */
         teamId: z.string().uuid().optional(),
+        /** Multi-currency filter — mirror orders.list so the strip matches the table. */
+        currencyCode: z.string().trim().toUpperCase().max(5).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -1618,6 +1626,7 @@ export const ordersRouter = router({
           undefined, // servicingBranchId
           bundleTeamMemberIds, // teamMemberIds
           !input.orderSource ? true : undefined, // onlyGraduateNonMarketing — Total strip only
+          input.currencyCode, // currencyCode — mirror orders.list so strip == table
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(
@@ -2030,6 +2039,8 @@ export const ordersRouter = router({
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
         logisticsLocationId: z.string().uuid().optional(),
+        /** Multi-currency filter — mirror the list so the strip matches the table. */
+        currencyCode: z.string().trim().toUpperCase().max(5).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -2056,6 +2067,7 @@ export const ordersRouter = router({
         ...(input.startDate && { startDate: input.startDate }),
         ...(input.endDate && { endDate: input.endDate }),
         ...(input.logisticsLocationId && { logisticsLocationId: input.logisticsLocationId }),
+        ...(input.currencyCode && { currencyCode: input.currencyCode }),
       };
 
       const [ordersResult, statusCounts, locationsResult] =
@@ -2072,6 +2084,15 @@ export const ordersRouter = router({
             undefined,
             'servicing',
             ctx.effectiveBranchIds,
+            undefined, // isFollowUp
+            undefined, // excludeOffline
+            undefined, // excludeGraduated
+            undefined, // excludeCartGraduated
+            undefined, // onlyOffline
+            undefined, // servicingBranchId
+            undefined, // teamMemberIds
+            undefined, // onlyGraduateNonMarketing
+            input.currencyCode, // currencyCode — strip mirrors the list's currency filter
           ),
           getLogisticsService().listLocations({ page: 1, limit: 20, status: 'ACTIVE' }),
         ]);
@@ -2830,12 +2851,14 @@ export const ordersRouter = router({
       startDate: z.string().optional(),
       endDate: z.string().optional(),
       assignedCsId: z.string().uuid().optional(),
+      /** Multi-currency filter — mirror the list so the strip matches the table. */
+      currencyCode: z.string().trim().toUpperCase().max(5).optional(),
     }).optional().default({}))
     .query(async ({ input, ctx }) => {
       const assignedCsId = input.assignedCsId ?? (ctx.user?.role === 'CS_CLOSER' ? ctx.user.id : null);
       const branchId = input.branchId ?? ctx.currentBranchId ?? undefined;
       const viewerCloserId = ctx.user?.role === 'CS_CLOSER' ? ctx.user.id : null;
-      return getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, assignedCsId, input.startDate, input.endDate, ctx.effectiveBranchIds, viewerCloserId);
+      return getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, assignedCsId, input.startDate, input.endDate, ctx.effectiveBranchIds, viewerCloserId, input.currencyCode);
     }),
 
   /** Lightweight follow-up counts for dashboard stat strips (assigned + delivered). */

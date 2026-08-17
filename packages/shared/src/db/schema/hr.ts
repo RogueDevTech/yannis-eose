@@ -3,6 +3,8 @@ import { branchGroups } from './branch-groups';
 import {
   payoutStatusEnum,
   adjustmentCategoryEnum,
+  refundStatusEnum,
+  taxDocumentTypeEnum,
   userRoleEnum,
   payrollBatchStatusEnum,
   payrollDepartmentEnum,
@@ -105,7 +107,7 @@ export const payrollTaxBandConfigs = pgTable('payroll_tax_band_configs', {
   statutoryDeductions: jsonb('statutory_deductions').notNull().default([]),
   /** HR low-income PAYE exemption (monthly). gross/net below this → PAYE 0. 0 = off. */
   lowIncomeExemptionMonthly: numeric('low_income_exemption_monthly', { precision: 14, scale: 2 })
-    .default('66667')
+    .default('66000')
     .notNull(),
   effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull(),
   effectiveTo: timestamp('effective_to', { withTimezone: true }),
@@ -239,6 +241,8 @@ export const payoutRecords = pgTable('payout_records', {
   baseSalary: numeric('base_salary', { precision: 12, scale: 2 }).default('0').notNull(),
   performanceBonus: numeric('performance_bonus', { precision: 12, scale: 2 }).default('0').notNull(),
   addOnsTotal: numeric('add_ons_total', { precision: 12, scale: 2 }).default('0').notNull(),
+  /** Approved staff refunds paid on top of net (post-PAYE, never taxed). See payroll_refunds. */
+  refundTotal: numeric('refund_total', { precision: 12, scale: 2 }).default('0').notNull(),
   deductionsTotal: numeric('deductions_total', { precision: 12, scale: 2 }).default('0').notNull(),
   totalPayout: numeric('total_payout', { precision: 12, scale: 2 }).default('0').notNull(),
   /** PRD PayslipLine extended fields */
@@ -278,6 +282,96 @@ export const earningsAdjustments = pgTable('earnings_adjustments', {
   // for this party regardless of month (legacy behavior). When set, the batch
   // sweep only links this row into a batch for the matching period_month.
   periodMonth: date('period_month'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  ...temporalColumns,
+});
+
+// Table 21: payroll_staff_allowances — per-staff ad-hoc TAXABLE allowances.
+// Unlike a refund, an allowance is earnings: it is added to GROSS before PAYE
+// (so it is taxed), on top of any role/formula allowances. `recurring` drives
+// proration — a recurring monthly allowance is prorated by active days for
+// mid-month joiners/leavers (like role allowances); a one-time allowance is paid
+// in full. No group column: company scope via staff_id → user_branches ∩
+// effectiveBranchIds (mirrors earnings_adjustments / payroll_refunds).
+export const payrollStaffAllowances = pgTable('payroll_staff_allowances', {
+  id: uuidv7Pk(),
+  staffId: uuid('staff_id')
+    .notNull()
+    .references(() => users.id),
+  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+  /** Short label shown on the payslip allowance breakdown (e.g. "Transport"). */
+  name: text('name').notNull(),
+  notes: text('notes'),
+  /** true = recurring monthly (prorated); false = one-time (paid in full). */
+  recurring: boolean('recurring').default(false).notNull(),
+  /** Reuse the refund lifecycle enum: APPROVED on creation, VOIDED to soft-cancel. */
+  status: refundStatusEnum('status').default('APPROVED').notNull(),
+  approvedBy: uuid('approved_by')
+    .notNull()
+    .references(() => users.id),
+  /** Payout this allowance was swept into — NULL until a batch links it. */
+  payoutId: uuid('payout_id').references(() => payoutRecords.id),
+  // Target payroll month (YYYY-MM-01). Mirrors payroll_refunds.period_month.
+  periodMonth: date('period_month'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  ...temporalColumns,
+});
+
+// Table 20: payroll_refunds — post-tax cash owed back to a staff member.
+// A refund is money the company reimburses (out-of-pocket expense, over-deduction,
+// etc.). It is added to net pay AFTER PAYE and statutory — it is NEVER taxed —
+// so it is kept in its own table, independently traceable from bonuses/add-ons
+// (doc §10: Base ≠ Allowance ≠ Bonus ≠ Add-on ≠ Deduction ≠ PAYE ≠ Refund).
+// Like earnings_adjustments, it has NO group column: company scope is enforced
+// at query time via staff_id → user_branches ∩ effectiveBranchIds.
+export const payrollRefunds = pgTable('payroll_refunds', {
+  id: uuidv7Pk(),
+  staffId: uuid('staff_id')
+    .notNull()
+    .references(() => users.id),
+  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+  reason: text('reason').notNull(),
+  /** Optional free-text detail beyond the short reason. */
+  notes: text('notes'),
+  /** Supporting document (receipt/proof) in GCS — signed-download on demand. */
+  docUrl: text('doc_url'),
+  /** Date the refund was incurred/approved (distinct from created_at book-keeping). */
+  refundDate: date('refund_date').notNull(),
+  status: refundStatusEnum('status').default('APPROVED').notNull(),
+  /** HR user who recorded it (auto-approver — HR-recorded refunds are approved on creation). */
+  approvedBy: uuid('approved_by')
+    .notNull()
+    .references(() => users.id),
+  /** Payout this refund was swept into — NULL until a batch links it. */
+  payoutId: uuid('payout_id').references(() => payoutRecords.id),
+  // Target payroll month (YYYY-MM-01). NULL = attach to the next batch generated
+  // for this staff regardless of month. When set, the batch sweep only links it
+  // into a batch for the matching period. Mirrors earnings_adjustments.period_month.
+  periodMonth: date('period_month'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  ...temporalColumns,
+});
+
+// Table 22: staff_tax_documents — HR-filed tax documents per staff (doc §5).
+// TIN certificates, tax cards, PAYE receipts, clearance certs. The file lives in
+// GCS (docUrl, tax-docs folder); a signed URL is minted on demand for download.
+// No group column: company scope via staff_id → user_branches ∩ effectiveBranchIds.
+export const staffTaxDocuments = pgTable('staff_tax_documents', {
+  id: uuidv7Pk(),
+  staffId: uuid('staff_id')
+    .notNull()
+    .references(() => users.id),
+  docType: taxDocumentTypeEnum('doc_type').notNull(),
+  /** Human-readable title (e.g. "2026 Tax Clearance Certificate"). */
+  title: text('title').notNull(),
+  /** GCS object URL (tax-docs folder). Download via signed URL. */
+  docUrl: text('doc_url').notNull(),
+  notes: text('notes'),
+  /** Optional validity/expiry date (e.g. a clearance cert year). */
+  expiresOn: date('expires_on'),
+  uploadedBy: uuid('uploaded_by')
+    .notNull()
+    .references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   ...temporalColumns,
 });

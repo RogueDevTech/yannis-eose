@@ -327,7 +327,7 @@ export function TaxBandConfigModal({
           defaultValue={
             config?.lowIncomeExemptionMonthly != null
               ? String(Number(config.lowIncomeExemptionMonthly))
-              : '66667'
+              : '66000'
           }
           hint="Staff whose monthly gross or net falls below this pay ₦0 PAYE. Set 0 to disable."
         />

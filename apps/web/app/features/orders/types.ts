@@ -5,6 +5,8 @@ export interface Order {
   customerPhoneDisplay: string;
   status: string;
   totalAmount: string | null;
+  /** Frozen order currency (default NGN) for money display. */
+  currencyCode?: string;
   createdAt: string;
   /** ISO `YYYY-MM-DD` when set (CS confirm); list API includes full row. */
   preferredDeliveryDate?: string | null;
@@ -23,6 +25,8 @@ export interface Order {
    */
   primaryProductId?: string | null;
   primaryProductName?: string | null;
+  /** Quantity of the primary line item — the offer/pack size (e.g. 3 for a "3 pack"). */
+  primaryQuantity?: number | null;
   itemCount?: number;
   /** Form / campaign the order came in from. Used by the Media Buyer view. */
   campaignId?: string | null;
@@ -65,6 +69,8 @@ export interface OrderDetail {
   deliveryNotes: string | null;
   status: string;
   totalAmount: string | null;
+  /** Frozen order currency (default NGN). Drives money display on this order. */
+  currencyCode?: string;
   /** When true, order is frozen — pulled into follow-up pipeline. No mutations allowed. */
   frozenForFollowUp?: boolean;
   createdAt: string;
@@ -342,6 +348,8 @@ export interface OrderInvoice {
   recipientInfo: { name: string; address?: string; email?: string; phone?: string };
   lineItems: { description: string; quantity: number; unitPrice: string }[];
   totalAmount: string;
+  /** Currency of the invoice amounts (default NGN). Mirrors the order's currency. */
+  currencyCode?: string;
   taxRate: string | null;
   status: string;
   dueDate: string | null;

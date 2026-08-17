@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { SearchInput } from './search-input';
 import { Spinner } from './spinner';
 import { CONTROL_HEIGHT_CLASS } from './_control-heights';
+import { LabelInfo } from './label-info';
 
 type SearchableSelectSize = 'sm' | 'md' | 'lg';
 
@@ -10,6 +11,8 @@ export interface SearchableSelectOption {
   value: string;
   label: string;
   description?: string;
+  /** Inline node rendered after the label (e.g. colored currency chips). */
+  labelSuffix?: React.ReactNode;
   disabled?: boolean;
   leading?: React.ReactNode;
 }
@@ -330,7 +333,10 @@ export function SearchableSelect({
               <div className="flex items-start gap-2">
                 {opt.leading ? <span className="mt-0.5">{opt.leading}</span> : null}
                 <div className="min-w-0">
-                  <p className="text-sm text-app-fg truncate">{opt.label}</p>
+                  <p className="text-sm text-app-fg truncate">
+                    {opt.label}
+                    {opt.labelSuffix ? <span className="ml-1.5">{opt.labelSuffix}</span> : null}
+                  </p>
                   {opt.description ? (
                     <p className="text-xs text-app-fg-muted truncate">{opt.description}</p>
                   ) : null}
@@ -349,16 +355,7 @@ export function SearchableSelect({
         <label htmlFor={inputId} className="text-xs font-medium text-app-fg-muted flex items-center gap-1">
           {label}
           {required && <span className="text-danger-500">*</span>}
-          {labelInfo && (
-            <span className="group relative inline-flex">
-              <svg className="w-3.5 h-3.5 text-app-fg-muted/60 cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-              </svg>
-              <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-52 rounded-md bg-gray-900 dark:bg-gray-700 px-2.5 py-1.5 text-[11px] leading-snug font-normal text-white whitespace-normal opacity-0 transition-opacity group-hover:opacity-100 z-50 text-center">
-                {labelInfo}
-              </span>
-            </span>
-          )}
+          {labelInfo && <LabelInfo text={labelInfo} />}
         </label>
       )}
       <div className="relative">

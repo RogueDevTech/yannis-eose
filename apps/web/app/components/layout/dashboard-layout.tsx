@@ -85,7 +85,7 @@ interface DashboardLayoutProps {
   /** When set with `isBlocked: true`, shows a non-dismissable modal forcing the MB to fill ad spend. */
   adSpendBacklog?: { missingDates: string[]; isBlocked: boolean } | null;
   /** Active currency catalog for the company. Undefined until streamed; provider falls back to NGN. */
-  currencies?: Array<{ code: string; symbol: string; countryName: string; precision: number; isDefault: boolean; active: boolean; fxRateToBase: number | null }>;
+  currencies?: Array<{ code: string; symbol: string; countryName: string; precision: number; isDefault: boolean; active: boolean; fxRateToBase: number | null; color?: string | null }>;
 }
 
 interface NavItemDef {
@@ -513,6 +513,14 @@ const navStructure: NavGroupDef[] = [
         icon: SidebarIcons.hr,
         permission: ['attendance.read', 'attendance.manage'],
         roles: ['BRANCH_ADMIN'],
+      },
+      {
+        // Team-scoped, read-only attendance for CS managers (their squad only).
+        // The route also enforces the team-supervisor flag for non-HR roles.
+        label: 'Team Attendance',
+        href: '/hr/attendance/team',
+        icon: SidebarIcons.hr,
+        roles: ['HEAD_OF_CS'],
       },
       {
         label: 'Payroll Config',

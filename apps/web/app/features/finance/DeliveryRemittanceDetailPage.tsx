@@ -127,7 +127,7 @@ export function DeliveryRemittanceDetailPage({
         header: 'Order',
         nowrap: true,
         render: (o) => (
-          <OrderIdBadge id={o.id} orderNumber={o.orderNumber} ellipsis="" textClassName="font-mono text-xs text-app-fg-muted" />
+          <OrderIdBadge id={o.id} orderNumber={o.orderNumber} currencyCode={o.currencyCode} ellipsis="" textClassName="font-mono text-xs text-app-fg-muted" />
         ),
       },
       {
@@ -162,10 +162,10 @@ export function DeliveryRemittanceDetailPage({
           if (amt === 0) return <span className="text-app-fg-muted">—</span>;
           return (
             <div className="text-right">
-              <NairaPrice amount={amt} className="text-sm font-medium tabular-nums" />
+              <NairaPrice amount={amt} currencyCode={o.currencyCode} className="text-sm font-medium tabular-nums" />
               {fee > 0 && (
                 <p className="text-xs tabular-nums text-danger-600 dark:text-danger-400">
-                  -<NairaPrice amount={fee} /> delivery
+                  -<NairaPrice amount={fee} currencyCode={o.currencyCode} /> delivery
                 </p>
               )}
             </div>
@@ -493,12 +493,13 @@ export function DeliveryRemittanceDetailPage({
                   <p className="text-sm font-medium text-app-fg truncate" title={o.customerName}>
                     {o.customerName}
                   </p>
-                  <OrderIdBadge id={o.id} orderNumber={o.orderNumber} ellipsis="" textClassName="font-mono text-mini text-app-fg-muted" />
+                  <OrderIdBadge id={o.id} orderNumber={o.orderNumber} currencyCode={o.currencyCode} ellipsis="" textClassName="font-mono text-mini text-app-fg-muted" />
                 </div>
                 <div className="shrink-0 text-right">
                   {o.totalAmount != null ? (
                     <NairaPrice
                       amount={Number(o.totalAmount)}
+                      currencyCode={o.currencyCode}
                       className="text-sm font-semibold text-app-fg tabular-nums"
                     />
                   ) : (
@@ -506,7 +507,7 @@ export function DeliveryRemittanceDetailPage({
                   )}
                   {o.deliveryFee != null && Number(o.deliveryFee) > 0 && (
                     <p className="text-mini tabular-nums text-danger-600 dark:text-danger-400">
-                      -<NairaPrice amount={Number(o.deliveryFee)} /> delivery
+                      -<NairaPrice amount={Number(o.deliveryFee)} currencyCode={o.currencyCode} /> delivery
                     </p>
                   )}
                   <p className="text-mini text-app-fg-muted">

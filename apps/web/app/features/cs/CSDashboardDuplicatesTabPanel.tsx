@@ -158,6 +158,7 @@ export function CSDashboardDuplicatesTabPanel({
                         <OrderIdBadge
                           id={pair.original.id}
                           orderNumber={pair.original.orderNumber}
+                          currencyCode={pair.original.currencyCode}
                           length={8}
                           ellipsis=""
                           linkTo={`/admin/orders/${pair.original.id}`}

@@ -383,10 +383,10 @@ function AgentWorkloadDetailModal({
                   <span className="text-sm font-medium text-app-fg truncate min-w-0 flex-1">{ord.customerName}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <OrderIdBadge id={ord.id} orderNumber={ord.orderNumber} linkTo={`/admin/orders/${ord.id}`} />
+                  <OrderIdBadge id={ord.id} orderNumber={ord.orderNumber} currencyCode={ord.currencyCode} linkTo={`/admin/orders/${ord.id}`} />
                   {ord.totalAmount != null && (
                     <span className="text-xs text-app-fg-muted">
-                      <NairaPrice amount={ord.totalAmount} />
+                      <NairaPrice amount={ord.totalAmount} currencyCode={ord.currencyCode} />
                     </span>
                   )}
                 </div>
@@ -486,7 +486,7 @@ function ActiveOrderDetailModal({
             <div className="bg-app-elevated rounded-xl shadow-sm border border-app-border divide-y divide-app-border mb-4">
               <DetailRow
                 label="Order ID"
-                value={<OrderIdBadge id={order.id} orderNumber={order.orderNumber} uppercase ellipsis="" textClassName="text-app-fg" />}
+                value={<OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} uppercase ellipsis="" textClassName="text-app-fg" />}
                 icon={
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -496,7 +496,7 @@ function ActiveOrderDetailModal({
               {order.totalAmount && (
                 <DetailRow
                   label="Amount"
-                  value={<NairaPrice amount={Number(order.totalAmount)} />}
+                  value={<NairaPrice amount={Number(order.totalAmount)} currencyCode={order.currencyCode} />}
                   icon={
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -781,6 +781,7 @@ function CSDashboardPageLoaded({
         <OrderIdBadge
           id={order.id}
           orderNumber={order.orderNumber}
+          currencyCode={order.currencyCode}
           uppercase
           ellipsis=""
           linkTo={`/admin/orders/${order.id}`}
@@ -806,7 +807,7 @@ function CSDashboardPageLoaded({
       align: 'right',
       render: (order) => (
         <span className="text-sm">
-          {order.totalAmount ? <NairaPrice amount={Number(order.totalAmount)} /> : '—'}
+          {order.totalAmount ? <NairaPrice amount={Number(order.totalAmount)} currencyCode={order.currencyCode} /> : '—'}
         </span>
       ),
     },
@@ -2111,7 +2112,7 @@ function CSDashboardPageLoaded({
                           </p>
                           {order.totalAmount && (
                             <span className="text-mini font-bold text-app-fg shrink-0 tabular-nums">
-                              <NairaPrice amount={Number(order.totalAmount)} />
+                              <NairaPrice amount={Number(order.totalAmount)} currencyCode={order.currencyCode} />
                             </span>
                           )}
                         </div>
@@ -2214,7 +2215,7 @@ function CSDashboardPageLoaded({
                 <div className="bg-app-elevated rounded-xl shadow-sm border border-app-border divide-y divide-app-border mb-4">
                   <DetailRow
                     label="Order ID"
-                    value={<OrderIdBadge id={qOrder.id} orderNumber={qOrder.orderNumber} uppercase ellipsis="" textClassName="text-app-fg" />}
+                    value={<OrderIdBadge id={qOrder.id} orderNumber={qOrder.orderNumber} currencyCode={qOrder.currencyCode} uppercase ellipsis="" textClassName="text-app-fg" />}
                     icon={
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -2224,7 +2225,7 @@ function CSDashboardPageLoaded({
                   {qOrder.totalAmount && (
                     <DetailRow
                       label="Amount"
-                      value={<NairaPrice amount={Number(qOrder.totalAmount)} />}
+                      value={<NairaPrice amount={Number(qOrder.totalAmount)} currencyCode={qOrder.currencyCode} />}
                       icon={
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -2298,7 +2299,7 @@ function CSDashboardPageLoaded({
                               </p>
                             </div>
                             <span className="text-sm font-semibold text-app-fg shrink-0">
-                              <NairaPrice amount={Number(item.unitPrice)} />
+                              <NairaPrice amount={Number(item.unitPrice)} currencyCode={qOrder.currencyCode} />
                             </span>
                           </li>
                         );
@@ -2480,6 +2481,7 @@ function CSDashboardPageLoaded({
                             <OrderIdBadge
                               id={order.id}
                               orderNumber={order.orderNumber}
+                              currencyCode={order.currencyCode}
                               linkTo={`/admin/orders/${order.id}`}
                               textClassName="text-sm font-medium text-brand-500 hover:text-brand-600"
                             />

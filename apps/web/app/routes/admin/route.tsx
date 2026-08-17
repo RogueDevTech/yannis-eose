@@ -106,11 +106,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // provider, so the single-currency world is unaffected.
   type CurrencyRow = {
     code: string; symbol: string; countryName: string; precision: number;
-    isDefault: boolean; active: boolean; fxRateToBase: string | null;
+    isDefault: boolean; active: boolean; fxRateToBase: string | null; color: string | null;
   };
   type CurrencyEntry = {
     code: string; symbol: string; countryName: string; precision: number;
-    isDefault: boolean; active: boolean; fxRateToBase: number | null;
+    isDefault: boolean; active: boolean; fxRateToBase: number | null; color: string | null;
   };
   const currenciesPromise: Promise<CurrencyEntry[]> = apiRequest<unknown>('/trpc/currencies.listActive', { method: 'GET', cookie })
     .then((res) => {
@@ -120,6 +120,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         code: r.code, symbol: r.symbol, countryName: r.countryName, precision: r.precision,
         isDefault: r.isDefault, active: r.active,
         fxRateToBase: r.fxRateToBase == null ? null : Number(r.fxRateToBase),
+        color: r.color ?? null,
       }));
     })
     .catch(() => [] as CurrencyEntry[]);
@@ -267,7 +268,7 @@ export default function AdminLayout() {
   const [resolvedGroups, setResolvedGroups] = useState<Array<{ id: string; name: string }> | null>(null);
   const [resolvedAdSpendBacklog, setResolvedAdSpendBacklog] = useState<{ missingDates: string[]; isBlocked: boolean } | null>(null);
   const [resolvedCurrencies, setResolvedCurrencies] = useState<
-    Array<{ code: string; symbol: string; countryName: string; precision: number; isDefault: boolean; active: boolean; fxRateToBase: number | null }> | null
+    Array<{ code: string; symbol: string; countryName: string; precision: number; isDefault: boolean; active: boolean; fxRateToBase: number | null; color: string | null }> | null
   >(null);
 
   useEffect(() => {

@@ -9,9 +9,12 @@ function isResolved<T>(v: T | Promise<T>): v is T {
 import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
-import { Checkbox } from '~/components/ui/checkbox';
+import { FormSelect } from '~/components/ui/form-select';
+import { useCurrenciesCatalog } from '~/contexts/currencies-catalog-context';
+import { regionsForCountry } from '@yannis/shared';
 import { TextInput } from '~/components/ui/text-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
+import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import type { Campaign, CustomFormField, OfferGroupRow, StandardFieldConfig } from './types';
 import { AccentColorInput } from './accent-color-input';
@@ -119,6 +122,7 @@ export function MarketingFormCreatePage({
   );
   const [dismissedOffersError, setDismissedOffersError] = useState(false);
   const [dismissedActionError, setDismissedActionError] = useState(false);
+  const [offerInfoOpen, setOfferInfoOpen] = useState(false);
   const [formHeading, setFormHeading] = useState(dupCfg?.heading ?? '');
   const [formSubtitle, setFormSubtitle] = useState(dupCfg?.subtitle ?? '');
   const [formButtonText, setFormButtonText] = useState(dupCfg?.buttonText ?? '');
@@ -126,10 +130,61 @@ export function MarketingFormCreatePage({
   const [showProductImages, setShowProductImages] = useState(
     dupCfg?.showProductImages !== false && dupCfg?.showProductImages !== 'false',
   );
+  const [allowMultiCurrency, setAllowMultiCurrency] = useState(
+    (dupCfg as { allowMultiCurrency?: boolean } | undefined)?.allowMultiCurrency === true,
+  );
+  const [pinnedCurrency, setPinnedCurrency] = useState(
+    (dupCfg as { pinnedCurrency?: string } | undefined)?.pinnedCurrency ?? '',
+  );
+  const currenciesForForm = useCurrenciesCatalog();
+  const baseCurrency = currenciesForForm.find((c) => c.isDefault && c.active) ?? currenciesForForm[0];
+  // Only countries configured in Country & Currency settings (the catalog's
+  // active currencies carry a country name). Deduped, base country first.
+  const configuredCountries = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const c of currenciesForForm) {
+      if (c.active && c.countryName && !seen.has(c.countryName)) {
+        seen.add(c.countryName);
+        out.push(c.countryName);
+      }
+    }
+    return out;
+  }, [currenciesForForm]);
   const [additionalSelectOptions, setAdditionalSelectOptions] = useState(() =>
     dupCfg ? additionalFieldSelectOptionsFromConfig(dupCfg) : cloneDefaultAdditionalFieldSelectOptions(),
   );
   const [selectedOfferGroupId, setSelectedOfferGroupId] = useState(duplicateFrom?.offerGroupId ?? '');
+
+  // Delivery country — drives the "Delivery State" region list. Defaults from the
+  // form's currency; the MB can override it below. Picking a country fills the
+  // delivery-state options with that country's regions (still editable).
+  const [deliveryCountry, setDeliveryCountry] = useState<string>(
+    (dupCfg as { deliveryCountry?: string } | null)?.deliveryCountry ?? 'Nigeria',
+  );
+  const [allowCountrySelection, setAllowCountrySelection] = useState<boolean>(
+    (dupCfg as { allowCountrySelection?: boolean } | null)?.allowCountrySelection === true,
+  );
+  const onDeliveryCountryChange = (country: string) => {
+    setDeliveryCountry(country);
+    const regions = regionsForCountry(country);
+    if (regions.length > 0) {
+      setAdditionalSelectOptions((prev) => ({ ...prev, deliveryStateOptions: [...regions] }));
+    }
+    // Auto-select the currency for this country (when the offer is priced in it).
+    const countryCurrency = currenciesForForm.find(
+      (c) => c.active && c.countryName.toLowerCase() === country.toLowerCase(),
+    );
+    if (countryCurrency) {
+      // Base currency (e.g. Nigeria/NGN) → '' means "default"; others → their code
+      // only if the selected offer actually has that currency priced.
+      if (countryCurrency.isDefault) {
+        setPinnedCurrency('');
+      } else if (selectedOfferCurrencies.includes(countryCurrency.code.toUpperCase())) {
+        setPinnedCurrency(countryCurrency.code);
+      }
+    }
+  };
 
   useEffect(() => {
     setFieldOrder((current) => normalizeBuilderFieldOrder(current, standardFields, fields));
@@ -166,14 +221,54 @@ export function MarketingFormCreatePage({
   }, [offerGroups]);
   const offerGroupsLoading = offerGroups === null;
 
+  // Every currency an offer group is priced in — base (NGN) is always present,
+  // plus any per-currency prices set on its items. Lets the MB see at a glance
+  // which offers carry multiple currencies.
+  const baseCode = (baseCurrency?.code ?? 'NGN').toUpperCase();
+  const offerGroupCurrencies = (g: (typeof compatibleOfferGroups)[number]): string[] => {
+    const codes = new Set<string>([baseCode]);
+    for (const it of g.items) {
+      for (const [code, v] of Object.entries(it.pricesByCurrency ?? {})) {
+        if (Number(v) > 0) codes.add(code.toUpperCase());
+      }
+    }
+    return [...codes];
+  };
+
   const offerGroupOptions = useMemo(
     () =>
-      compatibleOfferGroups.map((g) => ({
-        value: g.id,
-        label: `${g.name} (${g.items.length} items)`,
-      })),
-    [compatibleOfferGroups],
+      compatibleOfferGroups.map((g) => {
+        const codes = offerGroupCurrencies(g);
+        return {
+          value: g.id,
+          label: `${g.name} (${g.items.length} items)`,
+          // Always show the offer's currencies (NGN alone, or all when multi).
+          labelSuffix: (
+            <span className="text-xs font-medium text-amber-600 dark:text-amber-400">
+              {codes.join(', ')}
+            </span>
+          ),
+        };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [compatibleOfferGroups, baseCode],
   );
+
+  // The currencies (beyond base) the SELECTED offer is actually priced in. The
+  // multi-currency toggle only appears when the chosen offer has 2nd-currency
+  // prices — that's what makes multi-currency meaningful for this form.
+  const selectedOfferCurrencies = useMemo(() => {
+    const g = compatibleOfferGroups.find((x) => x.id === selectedOfferGroupId);
+    if (!g) return [] as string[];
+    const codes = new Set<string>();
+    for (const it of g.items) {
+      for (const [code, v] of Object.entries(it.pricesByCurrency ?? {})) {
+        if (code.toUpperCase() !== 'NGN' && Number(v) > 0) codes.add(code.toUpperCase());
+      }
+    }
+    return [...codes];
+  }, [compatibleOfferGroups, selectedOfferGroupId]);
+  const offerHasMultiCurrency = selectedOfferCurrencies.length > 0;
 
   const { previewMultiProduct, previewOffers, previewProducts } = useMemo(() => {
     if (!selectedOfferGroupId) {
@@ -208,6 +303,7 @@ export function MarketingFormCreatePage({
       qty: Number(it.quantity ?? 1) || 1,
       price: typeof it.price === 'number' ? String(it.price) : String(it.price ?? ''),
       ...(typeof it.imageUrl === 'string' && it.imageUrl.length > 0 ? { imageUrls: [it.imageUrl] } : {}),
+      ...(it.pricesByCurrency ? { pricesByCurrency: it.pricesByCurrency } : {}),
     });
 
     if (orderedProductIds.length <= 1) {
@@ -276,14 +372,36 @@ export function MarketingFormCreatePage({
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
             <input type="hidden" name="offerGroupId" value={selectedOfferGroupId} readOnly />
             <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
+            {/* Only send the toggle as ON when the selected offer actually has multi-currency prices. */}
+            <input type="hidden" name="allowMultiCurrency" value={offerHasMultiCurrency && allowMultiCurrency ? 'true' : 'false'} readOnly />
+            {/* pinnedCurrency = the form's default/starting currency (used whether the
+                picker is on or off). Only sent when the offer supports multi-currency. */}
+            <input type="hidden" name="pinnedCurrency" value={offerHasMultiCurrency ? pinnedCurrency : ''} readOnly />
+            <input type="hidden" name="deliveryCountry" value={deliveryCountry} readOnly />
+            <input type="hidden" name="allowCountrySelection" value={allowCountrySelection ? 'true' : 'false'} readOnly />
 
             <div className="card space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <TextInput name="name" label="Form name" required placeholder="Form name" className="sm:col-span-2" />
                 <div className="sm:col-span-2">
+                  <div className="mb-1 flex items-center gap-1">
+                    <label htmlFor="marketing-form-offer-group" className="text-sm font-medium text-app-fg">
+                      Offer <span className="text-red-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setOfferInfoOpen(true)}
+                      className="text-app-fg-muted/70 hover:text-app-fg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 rounded-full"
+                      aria-label="What is the offer?"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <circle cx="12" cy="12" r="9" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 16v-4m0-4h.01" />
+                      </svg>
+                    </button>
+                  </div>
                   <SearchableSelect
                     id="marketing-form-offer-group"
-                    label="Offer"
                     value={selectedOfferGroupId}
                     onChange={setSelectedOfferGroupId}
                     required
@@ -302,7 +420,7 @@ export function MarketingFormCreatePage({
                         ? 'Fetching available offer packages…'
                         : compatibleOfferGroups.length === 0
                           ? 'Create an offer package on the Offers tab first.'
-                          : 'Required. Catalog products and tiers come from this offer.'
+                          : undefined
                     }
                   />
                 </div>
@@ -321,7 +439,6 @@ export function MarketingFormCreatePage({
                   <TextInput
                     name="formSubtitle"
                     label="Form subtitle"
-                    hint="Optional. Leave blank to hide subtitle text on the public form."
                     placeholder="e.g. Fill in your details below"
                     value={formSubtitle}
                     onChange={(e) => setFormSubtitle(e.target.value)}
@@ -333,23 +450,91 @@ export function MarketingFormCreatePage({
                     value={formButtonText}
                     onChange={(e) => setFormButtonText(e.target.value)}
                   />
-                  <AccentColorInput value={accentColor} onChange={setAccentColor} hint="Preview updates on the right." />
+                  <AccentColorInput value={accentColor} onChange={setAccentColor} />
                   <TextInput
                     name="successCallbackUrl"
                     type="url"
                     label="Success URL (optional)"
                     placeholder="e.g. https://funnel.example.com/thank-you"
-                    hint="Skips the inline success message when set."
                     value={successCallbackUrl}
                     onChange={(e) => setSuccessCallbackUrl(e.target.value)}
                     className="sm:col-span-2"
                   />
-                  <label className="sm:col-span-2 inline-flex items-center gap-2 text-sm text-app-fg-muted cursor-pointer">
-                    <Checkbox checked={showProductImages} onChange={(e) => setShowProductImages(e.target.checked)} />
-                    Show product images on the form
-                  </label>
+                  {/* Show product images as a dropdown, grouped with the other inputs. */}
+                  <FormSelect
+                    label="Product images"
+                    value={showProductImages ? 'show' : 'hide'}
+                    onChange={(e) => setShowProductImages(e.target.value === 'show')}
+                    options={[
+                      { value: 'show', label: 'Show on the form' },
+                      { value: 'hide', label: 'Hide' },
+                    ]}
+                  />
                 </div>
               </div>
+
+              {/* Multi country and currency — country + currency controls in one section. */}
+              {configuredCountries.length > 1 && (
+                <div className="rounded-2xl border border-app-border p-4">
+                  <h2 className="mb-3 text-sm font-semibold text-app-fg">Multi country and currency</h2>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {/* Country selection only matters when the offer is priced in
+                        more than one currency — a single-currency (Naira-only)
+                        offer has nothing to switch between. */}
+                    {offerHasMultiCurrency && (
+                      <FormSelect
+                        label="Country mode"
+                        value={allowCountrySelection ? 'multi' : 'single'}
+                        onChange={(e) => setAllowCountrySelection(e.target.value === 'multi')}
+                        options={[
+                          { value: 'multi', label: 'Allow country selection' },
+                          { value: 'single', label: 'Lock one country' },
+                        ]}
+                      />
+                    )}
+                    {offerHasMultiCurrency && (
+                      <FormSelect
+                        label={allowCountrySelection ? 'Default country (shown first)' : 'Country'}
+                        value={deliveryCountry}
+                        onChange={(e) => onDeliveryCountryChange(e.target.value)}
+                        options={configuredCountries.map((country) => ({ value: country, label: country }))}
+                      />
+                    )}
+                    {offerHasMultiCurrency && (
+                      <FormSelect
+                        label="Currency mode"
+                        value={allowMultiCurrency ? 'multi' : 'single'}
+                        onChange={(e) => setAllowMultiCurrency(e.target.value === 'multi')}
+                        options={[
+                          { value: 'multi', label: 'Allow multi currency selection' },
+                          { value: 'single', label: 'Lock one currency' },
+                        ]}
+                      />
+                    )}
+                    {offerHasMultiCurrency && (
+                      <FormSelect
+                        label={allowMultiCurrency ? 'Default currency (shown first)' : 'Currency'}
+                        value={pinnedCurrency}
+                        onChange={(e) => setPinnedCurrency(e.target.value)}
+                        options={[
+                          { value: '', label: `${baseCurrency?.symbol ?? '₦'} ${baseCurrency?.code ?? 'NGN'} (default)` },
+                          ...selectedOfferCurrencies.map((code) => ({
+                            value: code,
+                            label: `${currenciesForForm.find((c) => c.code === code)?.symbol ?? ''} ${code}`,
+                          })),
+                        ]}
+                      />
+                    )}
+                  </div>
+                  {!offerHasMultiCurrency && (
+                    <p className="mt-2 text-xs text-app-fg-muted">
+                      {selectedOfferGroupId
+                        ? 'The selected offer only has a Naira price. Add other currency prices to the offer to let customers pick a currency.'
+                        : 'Select an offer with multiple currency prices to enable customer currency selection.'}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>
@@ -404,9 +589,33 @@ export function MarketingFormCreatePage({
             previewProducts={previewProducts}
             additionalSelectOptions={additionalSelectOptions}
             showProductImages={showProductImages}
+            currencies={currenciesForForm}
+            allowMultiCurrency={allowMultiCurrency}
+            pinnedCurrency={pinnedCurrency}
+            deliveryCountry={deliveryCountry}
           />
         </div>
       </div>
+
+      <Modal open={offerInfoOpen} onClose={() => setOfferInfoOpen(false)} maxWidth="max-w-md">
+        <div className="p-5 sm:p-6 space-y-3">
+          <h2 className="text-base font-semibold text-app-fg">About the Offer</h2>
+          <p className="text-sm text-app-fg-muted leading-relaxed">
+            The offer is the package this form sells. It is required: the products,
+            pricing tiers, and any bundle options shown on the public form all come
+            from the selected offer.
+          </p>
+          <p className="text-sm text-app-fg-muted leading-relaxed">
+            To change what a form sells, pick a different offer, or create a new
+            offer package on the Offers tab first.
+          </p>
+          <div className="flex justify-end pt-1">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setOfferInfoOpen(false)}>
+              Got it
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -36,6 +36,8 @@ import type { Adjustment, HRUser, HRStreamData } from './types';
 import { humanizeZodIssuesString } from '~/lib/api-error';
 import { formatNaira } from '~/lib/format-amount';
 import { MonthlyPayrolls } from './MonthlyPayrolls';
+import { RefundsTab } from './RefundsTab';
+import { StaffAllowancesTab } from './StaffAllowancesTab';
 import { PayrollBankPayExportModal } from './PayrollBankPayExportModal';
 import { ADMIN_ROLES, DEPT_OWNER_ROLE, ALL_DEPARTMENTS } from './payroll-constants';
 import { hasFinanceAccess, isAdminLevel } from '~/lib/rbac';
@@ -99,7 +101,7 @@ export function HRPage({
   const navigate = useNavigate();
   const fetcher = useFetcher();
   const hrSurface = useFetcherActionSurface(fetcher);
-  const [activeTab, setActiveTab] = useState<'monthly' | 'adjustments'>('monthly');
+  const [activeTab, setActiveTab] = useState<'monthly' | 'adjustments' | 'refunds' | 'allowances'>('monthly');
   // Adjustments tab filters. Search matches staff/contractor name + reason and
   // runs SERVER-SIDE (across the whole table, not just the loaded page), so an
   // adjustment stays reachable no matter how many newer ones exist. Category /
@@ -368,6 +370,8 @@ export function HRPage({
           tabs={[
             { value: 'monthly', label: `Monthly Payrolls (${monthlyPayrolls.length})` },
             { value: 'adjustments', label: 'Adjustments' },
+            { value: 'refunds', label: 'Refunds' },
+            { value: 'allowances', label: 'Allowances' },
           ]}
         />
       ) : null}
@@ -733,6 +737,36 @@ export function HRPage({
                 );
               }}
             </DeferredSection>
+          )}
+        </DeferredSection>
+      )}
+
+      {activeTab === 'refunds' && isHrOrFinance && (
+        <DeferredSection resolve={users} skeleton="table">
+          {(resolvedUsers) => (
+            <RefundsTab
+              users={resolvedUsers}
+              canWrite={
+                isAdmin ||
+                viewer.role === 'HR_MANAGER' ||
+                (viewer.permissions ?? []).includes('hr.write')
+              }
+            />
+          )}
+        </DeferredSection>
+      )}
+
+      {activeTab === 'allowances' && isHrOrFinance && (
+        <DeferredSection resolve={users} skeleton="table">
+          {(resolvedUsers) => (
+            <StaffAllowancesTab
+              users={resolvedUsers}
+              canWrite={
+                isAdmin ||
+                viewer.role === 'HR_MANAGER' ||
+                (viewer.permissions ?? []).includes('hr.write')
+              }
+            />
           )}
         </DeferredSection>
       )}

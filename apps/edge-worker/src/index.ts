@@ -1,5 +1,11 @@
 import { Redis } from '@upstash/redis/cloudflare';
-import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX, normalizeCampaignFieldOrder } from '@yannis/shared';
+import {
+  DEFAULT_CAMPAIGN_FORM_ACCENT_HEX,
+  normalizeCampaignFieldOrder,
+  COUNTRY_PHONE_RULES,
+  phoneRuleForCountry,
+  normalizePhoneForHash,
+} from '@yannis/shared';
 
 /**
  * Yannis EOSE — Edge Worker
@@ -206,6 +212,8 @@ interface FormCurrency {
   symbol: string;
   precision: number;
   isDefault: boolean;
+  /** The country this currency belongs to (for the country picker → currency link). */
+  countryName?: string;
 }
 
 interface CampaignConfig {
@@ -228,6 +236,8 @@ interface CampaignConfig {
    * Absent/length<=1 → single-currency form, byte-identical to today.
    */
   currencies?: FormCurrency[];
+  /** Region ("Delivery State") lists per configured country. Drives the country picker. */
+  regionsByCountry?: Record<string, string[]>;
   formConfig?: {
     heading?: string;
     subtitle?: string;
@@ -259,6 +269,10 @@ interface CampaignConfig {
     allowMultiCurrency?: boolean;
     /** Single currency this form uses when allowMultiCurrency is false. Defaults to base. */
     pinnedCurrency?: string;
+    /** When true, show a country picker; region list + currency follow the choice. */
+    allowCountrySelection?: boolean;
+    /** Default/starting country (locked country when allowCountrySelection is false). */
+    deliveryCountry?: string;
     standardFields?: Array<{
       key:
         | 'deliveryAddress'
@@ -354,22 +368,9 @@ function corsResponse(body: unknown, status = 200): Response {
 
 // ── Crypto Helpers ─────────────────────────────────────────────
 
-/**
- * Normalize a phone number to a canonical digit string before hashing.
- * Handles Nigerian local (0…) → international (234…) so the same physical
- * phone always produces the same hash regardless of how the customer typed it.
- */
-function normalizePhoneDigits(phone: string): string {
-  let digits = phone.replace(/\D/g, '');
-  // Nigerian local: 0XXXXXXXXXX (11 digits) → 234XXXXXXXXXX
-  if (digits.length === 11 && digits.startsWith('0')) {
-    digits = '234' + digits.slice(1);
-  }
-  return digits;
-}
-
 async function hashPhone(phone: string): Promise<string> {
-  const normalized = normalizePhoneDigits(phone);
+  // Country-aware canonicalization (shared with API/seed so hashes match).
+  const normalized = normalizePhoneForHash(phone);
   const encoder = new TextEncoder();
   const data = encoder.encode(`yannis:phone:${normalized}`);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -390,15 +391,18 @@ function validateSubmission(body: unknown): { valid: true; data: SubmissionPaylo
     return { valid: false, error: 'Customer name is required (min 2 characters)' };
   }
 
-  // Nigerian phone format only — same regex used everywhere else in the system.
-  // Accepts `0XXXXXXXXXX` (11 digits, leading 0 + 7/8/9) or `+234XXXXXXXXXX` (13 chars).
-  // Reject anything longer (e.g. `08031234567899`) so we don't store trailing junk.
+  // Phone: STAMP-never-reject (multi-country, edge-freeze rule). The public form
+  // enforces the per-country format client-side; here we only reject obvious
+  // junk (too few / too many digits) so a valid Ghanaian/other-country number is
+  // never blocked at intake (a 4xx here = a lost order). Nigerian numbers are a
+  // subset of 7-15 digits, so they pass exactly as before.
   {
     const phoneStr = typeof b['customerPhone'] === 'string' ? (b['customerPhone'] as string).trim() : '';
-    if (!/^(?:0[789]\d{9}|\+234[789]\d{9})$/.test(phoneStr)) {
+    const digitCount = phoneStr.replace(/\D/g, '').length;
+    if (digitCount < 7 || digitCount > 15) {
       return {
         valid: false,
-        error: 'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567).',
+        error: 'Enter a valid phone number.',
       };
     }
     b['customerPhone'] = phoneStr;
@@ -1436,6 +1440,60 @@ function getFormScript(
       // Initial paint in the starting currency (no-op for base/single-currency).
       if (currencyList.length > 1) rerenderCurrencyPrices();
 
+      // ── Country-aware phone input ─────────────────────────────────────────
+      // Apply the phone placeholder/pattern/hint for the selected country so a
+      // Ghana form accepts Ghanaian numbers. Rules come from data-phone-rules
+      // (COUNTRY_PHONE_RULES); unknown countries keep the current attributes.
+      var _phoneRules = {};
+      try { _phoneRules = JSON.parse((form && form.dataset.phoneRules) || '{}') || {}; } catch (e) { _phoneRules = {}; }
+      function applyPhoneRule(country) {
+        var rule = _phoneRules[country];
+        if (!rule) return;
+        var pEl = document.getElementById('customerPhone') || form.querySelector('[name="customerPhone"]');
+        if (!pEl) return;
+        pEl.setAttribute('placeholder', rule.example || '');
+        pEl.setAttribute('pattern', '^' + (rule.pattern || '') + '$');
+        pEl.setAttribute('title', 'Enter a valid ' + (rule.country || country) + ' phone number, e.g. ' + (rule.example || '') + ' or ' + (rule.exampleIntl || ''));
+        pEl.setAttribute('data-phone-country', rule.country || country);
+      }
+      // Seed the phone rule from the form's initial country on load.
+      try { applyPhoneRule((form && form.dataset.initialCountry) || ''); } catch (e) {}
+
+      // ── Country picker (additive; no-op when single-country) ──────────────
+      // Changing country rebuilds the Delivery State options and switches the
+      // currency to that country's currency (which re-prices the offers).
+      var countrySwitcherEl = document.getElementById('countrySwitcher');
+      if (countrySwitcherEl) {
+        var _csWrap = countrySwitcherEl.closest('.country-switcher');
+        var _regionsByCountry = {};
+        var _countryToCurrency = {};
+        try { _regionsByCountry = JSON.parse((_csWrap && _csWrap.dataset.regions) || '{}') || {}; } catch (e) {}
+        try { _countryToCurrency = JSON.parse((_csWrap && _csWrap.dataset.countryCurrency) || '{}') || {}; } catch (e) {}
+        // Rebuild the Delivery State dropdown options for a country using the
+        // widget's own _ydSetOptions hook (exposed in the [data-yd] init below).
+        function applyCountryRegions(country) {
+          var regions = _regionsByCountry[country] || [];
+          var hidden = document.getElementById('deliveryState');
+          if (!hidden) return;
+          var yd = hidden.closest('[data-yd]');
+          if (yd && yd._ydSetOptions) {
+            yd._ydSetOptions(regions.map(function(r) { return { value: r, label: r }; }));
+          }
+        }
+        countrySwitcherEl.addEventListener('change', function() {
+          var country = countrySwitcherEl.value;
+          applyCountryRegions(country);
+          applyPhoneRule(country);
+          // Switch currency to this country's currency (re-prices offers).
+          var code = _countryToCurrency[country];
+          if (code && currencySwitcherEl) {
+            currencySwitcherEl.value = code;
+            currentCurrency = code;
+            rerenderCurrencyPrices();
+          }
+        });
+      }
+
       // Online/Offline detection
       var isOnline = navigator.onLine;
       function updateOnlineStatus() {
@@ -1694,7 +1752,20 @@ function getFormScript(
         var phoneError = document.createElement('p');
         phoneError.className = 'field-error';
         phoneError.style.cssText = 'color:#dc2626;font-size:0.875rem;margin:0.25rem 0 0;display:none;';
-        phoneError.textContent = 'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567).';
+        // Country-aware hint: mirror the input's own title (set per country).
+        function _phoneHint() {
+          return phoneInput.getAttribute('title') || 'Enter a valid phone number.';
+        }
+        // Validate against the input's LIVE pattern (set per country), falling
+        // back to the Nigerian validator if no pattern is present.
+        function _phoneOk(v) {
+          var pat = phoneInput.getAttribute('pattern');
+          if (pat) {
+            try { return new RegExp('^(?:' + pat + ')$').test(v); } catch (e) {}
+          }
+          return isValidNgPhone(v);
+        }
+        phoneError.textContent = _phoneHint();
         if (phoneInput.parentNode) {
           phoneInput.parentNode.insertBefore(phoneError, phoneInput.nextSibling);
         }
@@ -1708,7 +1779,10 @@ function getFormScript(
           var raw = phoneInput.value || '';
           var hadPlus = raw.charAt(0) === '+';
           var digits = raw.replace(/\\D/g, '');
-          var maxDigits = hadPlus ? 13 : 11; // +234XXXXXXXXXX (13) or 0XXXXXXXXXX (11)
+          // Loosened cap so non-Nigerian numbers fit: E.164 max is 15 digits.
+          // With a leading '+' the dial code is included, so allow up to 15;
+          // without '+', a national number never exceeds ~13.
+          var maxDigits = hadPlus ? 15 : 13;
           if (digits.length > maxDigits) digits = digits.substring(0, maxDigits);
           var next = hadPlus ? '+' + digits : digits;
           if (next !== raw) {
@@ -1720,7 +1794,8 @@ function getFormScript(
         });
         phoneInput.addEventListener('blur', function() {
           var v = (phoneInput.value || '').trim();
-          phoneError.style.display = v.length > 0 && !isValidNgPhone(v) ? '' : 'none';
+          phoneError.textContent = _phoneHint();
+          phoneError.style.display = v.length > 0 && !_phoneOk(v) ? '' : 'none';
         });
         phoneInput.addEventListener('input', function() {
           if (phoneError.style.display !== 'none') phoneError.style.display = 'none';
@@ -1822,6 +1897,28 @@ function getFormScript(
         });
         // Expose reset for form.reset().
         yd._ydReset = resetDropdown;
+        // Expose a rebuild hook so the country picker can swap this dropdown's
+        // options (e.g. Delivery State to Ghana regions). Regenerates .yd-opt
+        // nodes, refreshes the captured opts list, and rebinds click + reset.
+        yd._ydSetOptions = function(newOptions) {
+          var list = yd.querySelector('.yd-list');
+          if (!list) return;
+          // Remove existing options + any empty state.
+          list.querySelectorAll('.yd-opt').forEach(function(o) { o.remove(); });
+          var emptyEl = yd.querySelector('.yd-empty'); if (emptyEl) emptyEl.remove();
+          (newOptions || []).forEach(function(o) {
+            var d = document.createElement('div');
+            d.className = 'yd-opt';
+            d.setAttribute('role', 'option');
+            d.setAttribute('data-value', o.value);
+            d.textContent = o.label;
+            list.appendChild(d);
+          });
+          // Refresh the captured opts list + rebind clicks.
+          opts = yd.querySelectorAll('.yd-opt');
+          opts.forEach(function(opt) { opt.addEventListener('click', function() { selectOpt(opt); }); });
+          resetDropdown();
+        };
       });
 
       // Clear inline errors on regular inputs when user starts typing
@@ -2252,12 +2349,38 @@ function getFormInnerHTML(config: CampaignConfig): string {
   const currencyList = Array.isArray(config.currencies) ? config.currencies : [];
   const baseCurrency = currencyList.find((c) => c.isDefault) ?? currencyList[0];
   const showCurrencySwitcher = currencyList.length > 1 && fc.allowMultiCurrency === true;
-  const pinnedCurrency =
-    !showCurrencySwitcher && fc.pinnedCurrency
-      ? currencyList.find((c) => c.code === fc.pinnedCurrency)?.code
-      : undefined;
+  // pinnedCurrency = the form's chosen DEFAULT/starting currency. Honoured whether
+  // the switcher is on (customer starts here, can switch) or off (form stays here).
+  const chosenCurrency = fc.pinnedCurrency
+    ? currencyList.find((c) => c.code === fc.pinnedCurrency)?.code
+    : undefined;
   // The currency the form STARTS in (and, when the switcher is off, stays in).
-  const initialCurrency = pinnedCurrency ?? baseCurrency?.code ?? 'NGN';
+  const initialCurrency = chosenCurrency ?? baseCurrency?.code ?? 'NGN';
+
+  // Country selection: a picker appears only when the API supplied region lists
+  // for 2+ countries AND the MB toggled it on. Otherwise single-country (locked),
+  // byte-identical to today. Picking a country swaps the delivery-state list and
+  // (when priced) the currency.
+  const regionsByCountry = (config.regionsByCountry ?? {}) as Record<string, string[]>;
+  const countryList = Object.keys(regionsByCountry);
+  const showCountrySwitcher = countryList.length > 1 && fc.allowCountrySelection === true;
+  // The country the form STARTS in (locked country when the picker is off).
+  const initialCountry =
+    (fc.deliveryCountry && regionsByCountry[fc.deliveryCountry] ? fc.deliveryCountry : undefined) ??
+    // Fall back to the base currency's country, else the first configured country.
+    currencyList.find((c) => c.isDefault)?.countryName ??
+    countryList[0] ??
+    '';
+  // Map country → currency code (for the picker's country→currency cascade).
+  const countryToCurrency: Record<string, string> = {};
+  for (const c of currencyList) {
+    if (c.countryName && !countryToCurrency[c.countryName]) countryToCurrency[c.countryName] = c.code;
+  }
+  // Phone rule for the form's starting country (drives the input's placeholder,
+  // pattern + hint). Client JS re-applies the matching rule on country change,
+  // reading COUNTRY_PHONE_RULES from a data attribute (see data-phone-rules).
+  const initialPhoneRule = phoneRuleForCountry(initialCountry);
+
   const standardFieldEntries = (
     [
       'gender',
@@ -2345,7 +2468,20 @@ function getFormInnerHTML(config: CampaignConfig): string {
       </div>`
     : '';
 
-  const offerSelectionHtml = `${currencySwitcherHtml}<label>Select Offer</label>
+  // Country picker — customer chooses their country; the delivery-state list and
+  // (when priced) the currency follow. Only when enabled; else no DOM change.
+  const countrySwitcherHtml = showCountrySwitcher
+    ? `<div class="country-switcher" style="margin-bottom:12px" data-regions='${escapeHtml(JSON.stringify(regionsByCountry))}' data-country-currency='${escapeHtml(JSON.stringify(countryToCurrency))}'>
+        <label for="countrySwitcher">Country</label>
+        <select id="countrySwitcher" name="countrySwitcher">
+          ${countryList
+            .map((country) => `<option value="${escapeHtml(country)}"${country === initialCountry ? ' selected' : ''}>${escapeHtml(country)}</option>`)
+            .join('')}
+        </select>
+      </div>`
+    : '';
+
+  const offerSelectionHtml = `${countrySwitcherHtml}${currencySwitcherHtml}<label>Select Offer</label>
       ${offerGroupsHtml}`;
 
   // If single product, auto-set selectedProduct via hidden data attribute
@@ -2358,8 +2494,10 @@ function getFormInnerHTML(config: CampaignConfig): string {
       <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name" autocomplete="one-time-code">`;
       }
       if (token === 'fixed.phoneNumber') {
+        const pr = initialPhoneRule;
+        const phoneTitle = `Enter a valid ${pr.country} phone number, e.g. ${pr.example} or ${pr.exampleIntl}`;
         return `<label for="customerPhone">Phone Number</label>
-      <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">`;
+      <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="${escapeHtml(pr.example)}" maxlength="16" pattern="^${escapeHtml(pr.pattern)}$" title="${escapeHtml(phoneTitle)}" data-phone-country="${escapeHtml(pr.country)}" autocomplete="tel-national">`;
       }
       if (token === 'offer') {
         return offerSelectionHtml;
@@ -2386,7 +2524,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
     <h2>${escapeHtml(heading)}</h2>
     ${subtitleBlock}
     <div id="yannisMsg" class="msg hidden"></div>
-    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${showPaymentMethod ? 'true' : 'false'}" data-show-customer-email="${showStandaloneEmail ? 'true' : 'false'}" data-require-customer-email="${requiredField('customerEmail') ? 'true' : 'false'}" data-success-callback="${escapeHtml(fc.successCallbackUrl ?? '')}" data-initial-currency="${escapeHtml(initialCurrency)}" data-currency-meta="${escapeHtml(JSON.stringify(currencyList))}"${singleProductAttr}>
+    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${showPaymentMethod ? 'true' : 'false'}" data-show-customer-email="${showStandaloneEmail ? 'true' : 'false'}" data-require-customer-email="${requiredField('customerEmail') ? 'true' : 'false'}" data-success-callback="${escapeHtml(fc.successCallbackUrl ?? '')}" data-initial-currency="${escapeHtml(initialCurrency)}" data-currency-meta="${escapeHtml(JSON.stringify(currencyList))}" data-initial-country="${escapeHtml(initialCountry)}" data-phone-rules="${escapeHtml(JSON.stringify(COUNTRY_PHONE_RULES))}"${singleProductAttr}>
       <!-- Honeypot: bots auto-fill every input they see; humans never touch this. Field is
            visually hidden + tabindex=-1 + autocomplete=off + aria-hidden so real users and
            screen readers skip it entirely. If submitted with a value, the worker silently
@@ -3017,15 +3155,18 @@ function validateCart(body: unknown): { valid: true; data: CartFormData } | { va
     b['customerName'] = 'Unknown';
   }
 
-  // Nigerian phone format only — same regex used everywhere else in the system.
-  // Accepts `0XXXXXXXXXX` (11 digits, leading 0 + 7/8/9) or `+234XXXXXXXXXX` (13 chars).
-  // Reject anything longer (e.g. `08031234567899`) so we don't store trailing junk.
+  // Phone: STAMP-never-reject (multi-country, edge-freeze rule). The public form
+  // enforces the per-country format client-side; here we only reject obvious
+  // junk (too few / too many digits) so a valid Ghanaian/other-country number is
+  // never blocked at intake (a 4xx here = a lost order). Nigerian numbers are a
+  // subset of 7-15 digits, so they pass exactly as before.
   {
     const phoneStr = typeof b['customerPhone'] === 'string' ? (b['customerPhone'] as string).trim() : '';
-    if (!/^(?:0[789]\d{9}|\+234[789]\d{9})$/.test(phoneStr)) {
+    const digitCount = phoneStr.replace(/\D/g, '').length;
+    if (digitCount < 7 || digitCount > 15) {
       return {
         valid: false,
-        error: 'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567).',
+        error: 'Enter a valid phone number.',
       };
     }
     b['customerPhone'] = phoneStr;

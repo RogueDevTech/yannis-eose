@@ -1227,7 +1227,7 @@ function OrdersListPageImpl({
         header: 'Order ID',
         nowrap: true,
         hideable: false,
-        render: (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={toOrderDetail(order.id)} />,
+        render: (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} linkTo={toOrderDetail(order.id)} />,
       },
       {
         key: 'customer',
@@ -1304,12 +1304,15 @@ function OrdersListPageImpl({
       header: 'Product',
       render: (order) => {
         const name = order.primaryProductName?.trim();
+        const qty = order.primaryQuantity ?? 0;
+        const packLabel = qty > 1 ? ` · qty ${qty}` : '';
         const extra = (order.itemCount ?? 0) > 1 ? ` · +${(order.itemCount ?? 0) - 1} more` : '';
         return (
           <span className="text-sm text-app-fg truncate">
             {name ? (
               <>
                 {name}
+                {packLabel ? <span className="text-app-fg-muted">{packLabel}</span> : null}
                 {extra ? <span className="text-app-fg-muted">{extra}</span> : null}
               </>
             ) : (
@@ -1479,7 +1482,7 @@ function OrdersListPageImpl({
                 <span className="ml-1.5 inline-flex shrink-0 w-2 h-2 rounded-full bg-slate-400 opacity-70" title="Frozen" />
               )}
             </span>
-            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName={`text-sm font-medium ${mobileFrozen ? 'text-app-fg/60' : 'text-app-fg'}`} />
+            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} textClassName={`text-sm font-medium ${mobileFrozen ? 'text-app-fg/60' : 'text-app-fg'}`} />
           </div>
           <div className="flex items-center justify-between gap-2">
             {isCart ? (
@@ -1579,6 +1582,7 @@ function OrdersListPageImpl({
     if (categoryFilter) n += 1;
     if (frozenFilterProp) n += 1;
     if (searchParams.get('teamId')) n += 1;
+    if (searchParams.get('currency')) n += 1;
     return n;
   }, [
     selectedStatus,
@@ -1710,6 +1714,10 @@ function OrdersListPageImpl({
               filters={
                 <>
                   {renderScheduleFilter(true)}
+                  {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
+                  <div className={mobileFilterBoxClass}>
+                    <CurrencyFilterSelect className={mobileSelectTransparent} />
+                  </div>
                   <div className={mobileFilterBoxClass}>
                     {selectedStatus !== 'ALL' && (
                       <FilterDismiss
@@ -1729,10 +1737,6 @@ function OrdersListPageImpl({
                       wrapperClassName="w-full"
                       className={mobileSelectTransparent} inlineChevron
                     />
-                  </div>
-                  {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
-                  <div className={mobileFilterBoxClass}>
-                    <CurrencyFilterSelect className={mobileSelectTransparent} />
                   </div>
                   {showCSCloserColumn && ((csClosersForFilter?.length ?? 0) > 0 || deferredLoading) ? (
                     <div className={mobileFilterBoxClass}>
@@ -2428,6 +2432,10 @@ function OrdersListPageImpl({
           }
           desktopInlineFilters={
             <>
+                {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
+                <div className="relative" data-toolbar-filter>
+                  <CurrencyFilterSelect className="w-full min-w-0 sm:w-40" />
+                </div>
                 <div className="relative" data-toolbar-filter>
                   {selectedStatus !== 'ALL' && (
                     <FilterDismiss

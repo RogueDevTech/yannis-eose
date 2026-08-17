@@ -1,16 +1,17 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
 import {
   ASSET_FOLDERS,
+  resolveAssetMaxBytes,
   type AssetFolder,
 } from '@yannis/shared';
 import { getCurrentUser } from '~/lib/api.server';
 import { createSignedAssetUpload } from '~/lib/object-storage.server';
 
 const ALLOWED_FOLDERS = new Set<AssetFolder>(Object.values(ASSET_FOLDERS));
-// Platform-wide cap (CEO directive): 2 MB on every uploaded image. The
-// client-side `FileUpload` component pre-validates the same number, but this
-// is the authoritative limit — a hand-crafted POST cannot bypass it.
-const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+// Authoritative per-folder size cap — a hand-crafted POST cannot bypass it.
+// Images default to 2 MB (CEO directive); onboarding documents get 10 MB. The
+// client-side `FileUpload` pre-validates the SAME per-folder number, so the two
+// checks stay in lockstep. See `resolveAssetMaxBytes` in @yannis/shared.
 
 interface UploadUrlRequest {
   folder?: AssetFolder;
@@ -57,15 +58,30 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!fileName || fileName.length > 255) {
     return jsonResponse({ error: 'Invalid file name' }, 400);
   }
-  if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > MAX_FILE_SIZE_BYTES) {
-    return jsonResponse({ error: 'Invalid file size' }, 400);
+  const maxFileSizeBytes = resolveAssetMaxBytes(folder);
+  if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > maxFileSizeBytes) {
+    const maxMb = Math.round(maxFileSizeBytes / (1024 * 1024));
+    return jsonResponse({ error: `File too large. Maximum size is ${maxMb}MB.` }, 400);
   }
 
-  const signedUpload = await createSignedAssetUpload({
-    folder,
-    fileName,
-    fileType,
-  });
+  let signedUpload;
+  try {
+    signedUpload = await createSignedAssetUpload({ folder, fileName, fileType });
+  } catch (err) {
+    // Presign can throw at runtime even when storage IS configured — most often
+    // GCS v4 signing under ADC without the `iam.serviceAccounts.signBlob`
+    // permission (grant Token Creator on the runtime SA), or S3 credential
+    // errors. Surface a clear, logged message instead of a bare 500 so the
+    // client stops showing the useless generic "Unable to start upload".
+    console.error('[upload-url] presign failed', {
+      folder,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return jsonResponse(
+      { error: 'Upload service is misconfigured. Please contact support.' },
+      503,
+    );
+  }
   if (!signedUpload) {
     return jsonResponse({ error: 'Upload service not configured' }, 503);
   }

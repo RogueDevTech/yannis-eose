@@ -1066,7 +1066,10 @@ export const marketingRouter = router({
     .input(createCampaignProcedureSchema)
     .mutation(async ({ input, ctx }) => {
       const { branchId, ...campaignInput } = input;
-      return getMarketingService().createCampaign(campaignInput, ctx.user.id, branchId ?? ctx.currentBranchId);
+      return getMarketingService().createCampaign(campaignInput, ctx.user.id, branchId ?? ctx.currentBranchId, {
+        activeGroupId: ctx.activeGroupId,
+        effectiveBranchIds: ctx.effectiveBranchIds,
+      });
     }),
 
   updateCampaign: permissionProcedure('marketing.campaigns')
@@ -1137,10 +1140,14 @@ export const marketingRouter = router({
         // Only HoM / admin loaders ask for the buyer picklist (Media Buyers don't
         // have the export modal). When false, the buyers query is skipped.
         includeMarketingExportPicklists: z.boolean().optional().default(false),
+        // Multi-currency filter — mirrors orders.list so the stat strip matches
+        // the table when a currency is selected. Dormant unless the company has
+        // a 2nd active currency (the client only sends it once one exists).
+        currencyCode: z.string().trim().toUpperCase().max(5).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
-      const { mediaBuyerId, status, startDate, endDate, includeMarketingExportPicklists } = input;
+      const { mediaBuyerId, status, startDate, endDate, includeMarketingExportPicklists, currencyCode } = input;
       // Branch scope must mirror `orders.list` (`orderListBranchIdOwnerAware`)
       // so the overview strip matches the orders table:
       //  - A plain Media Buyer scopes by their header branch lens — the
@@ -1214,6 +1221,7 @@ export const marketingRouter = router({
             orderSource: mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import',
             excludeFollowUps: true,
             excludeCartGraduated: true,
+            currencyCode,
           },
         ),
         // Cart orders — count from cart_orders table, scoped by marketing branch
@@ -1228,6 +1236,7 @@ export const marketingRouter = router({
           undefined,
           'marketing',
           supervisorBuyerIds,
+          currencyCode,
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
@@ -1321,6 +1330,7 @@ export const marketingRouter = router({
           ordersScope.supervisorScope,
           'marketing',
           ctx.effectiveBranchIds,
+          currencyCode,
         ),
         // "Total Delivered This Month" (carry-over-inclusive, by delivered_at).
         // SAME scope as statusCounts/cartStatusCounts above so it's comparable.
@@ -1337,6 +1347,7 @@ export const marketingRouter = router({
           orderSource: mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import',
           excludeFollowUps: true,
           excludeCartGraduated: true,
+          currencyCode,
         }),
         getCartOrdersService().getDeliveredCarryOverCount(
           branchId,
@@ -1348,6 +1359,7 @@ export const marketingRouter = router({
           undefined,
           'marketing',
           supervisorBuyerIds,
+          currencyCode,
         ),
       ]);
 

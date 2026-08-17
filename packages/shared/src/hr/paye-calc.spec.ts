@@ -8,21 +8,27 @@ const base = defaultPayeBandConfig();
 const noExemption: PayeBandConfig = { ...base, lowIncomeExemptionMonthly: 0 };
 
 describe('computePaye — low-income exemption', () => {
-  it('exempts staff earning below ₦66,667/mo (gross check)', () => {
+  it('exempts staff earning below ₦66,000/mo (gross check)', () => {
     const r = computePaye({ monthlyGross: 60_000, taxStatus: 'STANDARD_PAYE' }, base);
     expect(r.exempt).toBe(true);
     expect(r.monthlyPaye).toBe(0);
     expect(r.employeePaye).toBe(0);
   });
 
-  it('does NOT exempt staff at exactly the threshold (₦66,667)', () => {
-    // threshold is strict "<", so 66,667 is NOT exempt
-    const r = computePaye({ monthlyGross: 66_667, taxStatus: 'STANDARD_PAYE' }, base);
+  it('does NOT exempt staff at exactly the threshold (₦66,000)', () => {
+    // threshold is strict "<", so 66,000 is NOT exempt
+    const r = computePaye({ monthlyGross: 66_000, taxStatus: 'STANDARD_PAYE' }, base);
     expect(r.exempt).toBe(false);
   });
 
+  it('exempts staff just below the ₦66,000 threshold', () => {
+    const r = computePaye({ monthlyGross: 65_999, taxStatus: 'STANDARD_PAYE' }, base);
+    expect(r.exempt).toBe(true);
+    expect(r.monthlyPaye).toBe(0);
+  });
+
   it('exempts when net-before-PAYE falls below threshold after statutory deductions', () => {
-    // gross 70,000 is above threshold, but 8% pension drops net to 64,400 < 66,667
+    // gross 70,000 is above threshold, but 8% pension drops net to 64,400 < 66,000
     const cfg: PayeBandConfig = {
       ...base,
       statutoryDeductions: [{ name: 'Pension', basis: 'PERCENT_OF_MONTHLY_GROSS', rate: 8 }],

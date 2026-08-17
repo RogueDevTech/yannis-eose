@@ -180,7 +180,7 @@ export function CSDashboardHotSwapTabPanel({
                                 {order.customerName}
                               </p>
                               {order.totalAmount ? (
-                                <NairaPrice amount={order.totalAmount} className="text-mini font-bold text-app-fg shrink-0 tabular-nums" />
+                                <NairaPrice amount={order.totalAmount} currencyCode={order.currencyCode} className="text-mini font-bold text-app-fg shrink-0 tabular-nums" />
                               ) : null}
                             </div>
                             <div className="flex items-center gap-1.5 mb-1 min-w-0">
@@ -197,6 +197,7 @@ export function CSDashboardHotSwapTabPanel({
                             <OrderIdBadge
                               id={order.id}
                               orderNumber={order.orderNumber}
+                              currencyCode={order.currencyCode}
                               length={8}
                               ellipsis=""
                               textClassName="text-micro text-app-fg-muted"

@@ -1329,6 +1329,7 @@ export class LogisticsService implements OnModuleInit {
     scheduleKind?: string;
     sortBy?: string;
     sortOrder?: string;
+    currencyCode?: string;
   }, effectiveBranchIds?: string[] | null) {
     const offset = (input.page - 1) * input.limit;
 
@@ -1354,6 +1355,10 @@ export class LogisticsService implements OnModuleInit {
     }
     if (input.servicingBranchId) {
       paramConditions.push(sql`servicing_branch_id = ${input.servicingBranchId}`);
+    }
+    // Multi-currency filter — all three unified tables carry currency_code.
+    if (input.currencyCode) {
+      paramConditions.push(sql`currency_code = ${input.currencyCode}`);
     }
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       paramConditions.push(sql`servicing_branch_id IN (${sql.join(effectiveBranchIds.map((id) => sql`${id}`), sql`, `)})`);
@@ -1395,7 +1400,7 @@ export class LogisticsService implements OnModuleInit {
 
     const unionQuery = sql`
       WITH unified AS (
-        SELECT id, order_number, customer_name, status::text AS status, total_amount, delivery_fee,
+        SELECT id, order_number, customer_name, status::text AS status, total_amount, currency_code, delivery_fee,
                logistics_location_id, preferred_delivery_date, delivered_at,
                servicing_branch_id, created_at, 'funnel' AS order_category
         FROM orders
@@ -1403,7 +1408,7 @@ export class LogisticsService implements OnModuleInit {
 
         UNION ALL
 
-        SELECT id, order_number, customer_name, status, total_amount, delivery_fee,
+        SELECT id, order_number, customer_name, status, total_amount, currency_code, delivery_fee,
                logistics_location_id, NULL AS preferred_delivery_date, delivered_at,
                servicing_branch_id, created_at, 'cart' AS order_category
         FROM cart_orders
@@ -1411,7 +1416,7 @@ export class LogisticsService implements OnModuleInit {
 
         UNION ALL
 
-        SELECT id, order_number, customer_name, status, total_amount, delivery_fee,
+        SELECT id, order_number, customer_name, status, total_amount, currency_code, delivery_fee,
                logistics_location_id, preferred_delivery_date, delivered_at,
                servicing_branch_id, created_at, 'follow-up' AS order_category
         FROM follow_up_orders
@@ -1437,6 +1442,7 @@ export class LogisticsService implements OnModuleInit {
         customer_name: string;
         status: string;
         total_amount: string | null;
+        currency_code: string | null;
         delivery_fee: string | null;
         logistics_location_id: string | null;
         preferred_delivery_date: string | null;
@@ -1450,7 +1456,7 @@ export class LogisticsService implements OnModuleInit {
 
     const records = (rows as unknown as Array<{
       id: string; order_number: number; customer_name: string;
-      status: string; total_amount: string | null; delivery_fee: string | null;
+      status: string; total_amount: string | null; currency_code: string | null; delivery_fee: string | null;
       logistics_location_id: string | null; preferred_delivery_date: string | null;
       delivered_at: string | null; servicing_branch_id: string | null;
       created_at: string; order_category: 'funnel' | 'cart' | 'follow-up';
@@ -1460,6 +1466,7 @@ export class LogisticsService implements OnModuleInit {
       customerName: r.customer_name,
       status: r.status,
       totalAmount: r.total_amount,
+      currencyCode: r.currency_code ?? 'NGN',
       deliveryFee: r.delivery_fee,
       logisticsLocationId: r.logistics_location_id,
       preferredDeliveryDate: r.preferred_delivery_date,
@@ -1487,6 +1494,7 @@ export class LogisticsService implements OnModuleInit {
     servicingBranchId?: string;
     startDate?: string;
     endDate?: string;
+    currencyCode?: string;
   }, effectiveBranchIds?: string[] | null): Promise<Record<string, number>> {
     const paramConditions: SQL[] = [];
     if (input.logisticsLocationId) {
@@ -1494,6 +1502,10 @@ export class LogisticsService implements OnModuleInit {
     }
     if (input.servicingBranchId) {
       paramConditions.push(sql`servicing_branch_id = ${input.servicingBranchId}`);
+    }
+    // Multi-currency filter — all three unified tables carry currency_code.
+    if (input.currencyCode) {
+      paramConditions.push(sql`currency_code = ${input.currencyCode}`);
     }
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       paramConditions.push(sql`servicing_branch_id IN (${sql.join(effectiveBranchIds.map((id) => sql`${id}`), sql`, `)})`);
@@ -2269,6 +2281,11 @@ export class LogisticsService implements OnModuleInit {
     if (input.status) {
       conditions.push(eq(schema.deliveryRemittances.status, input.status));
     }
+    // Currency scope — batches are single-currency, so filter the batch list by
+    // the batch's own currency_code (keeps the list consistent with the totals).
+    if (input.currencyCode) {
+      conditions.push(eq(schema.deliveryRemittances.currencyCode, input.currencyCode));
+    }
     if (input.startDate) {
       conditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
     }
@@ -2457,6 +2474,10 @@ export class LogisticsService implements OnModuleInit {
     if (input.sentBy) {
       summaryConditions.push(eq(schema.deliveryRemittances.sentBy, input.sentBy));
     }
+    // NOTE: currency is NOT added to summaryConditions here — summaryWhere is also
+    // applied to outcomeSummaryQuery (which does NOT join orders), so an
+    // orders.currency_code predicate would break that query. The currency filter
+    // is applied to baseSummaryWhere (orders-joined) below instead.
     const summaryWhere = summaryConditions.length > 0 ? and(...summaryConditions) : undefined;
 
     // Sum order value on remittance batches. Do NOT require orders.status = DELIVERED — after
@@ -2528,6 +2549,9 @@ export class LogisticsService implements OnModuleInit {
     if (input.sentBy) {
       outcomeCountConditions.push(sql`dr.sent_by = ${input.sentBy}`);
     }
+    if (input.currencyCode) {
+      outcomeCountConditions.push(sql`o.currency_code = ${input.currencyCode}`);
+    }
     // Outcome amounts + order counts. The old approach used expensive correlated
     // scalar subqueries (SELECT COUNT(...) FROM ... WHERE ... IN (SELECT ...))
     // inside the SELECT clause. Replace with a single JOIN-based aggregation that
@@ -2573,6 +2597,7 @@ export class LogisticsService implements OnModuleInit {
           .from(schema.deliveryRemittanceOrders)
           .where(eq(schema.deliveryRemittanceOrders.orderId, schema.orders.id)),
       ),
+      ...(input.currencyCode ? [eq(schema.orders.currencyCode, input.currencyCode)] : []),
     ];
     // Company-group isolation on awaiting orders — scope via logistics location's provider group.
     // Include orders with NULL logisticsLocationId (not yet assigned to a 3PL).
@@ -2627,6 +2652,7 @@ export class LogisticsService implements OnModuleInit {
     const deliveredConditions: SQL[] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       isNull(schema.orders.deletedAt),
+      ...(input.currencyCode ? [eq(schema.orders.currencyCode, input.currencyCode)] : []),
     ];
     if (isTplCaller && !canListGlobal) {
       deliveredConditions.push(eq(schema.orders.logisticsLocationId, actor.logisticsLocationId!));
@@ -2657,6 +2683,9 @@ export class LogisticsService implements OnModuleInit {
     const batchDateConditions: SQL[] = [];
     if (input.startDate) batchDateConditions.push(gte(dateScopeCol, nigeriaDayStart(input.startDate)));
     if (input.endDate) batchDateConditions.push(lte(dateScopeCol, nigeriaDayEnd(input.endDate)));
+    // Currency scope for the orders-joined summary (baseSummaryQuery) — kept out of
+    // the shared summaryWhere because outcomeSummaryQuery has no orders join.
+    if (input.currencyCode) batchDateConditions.push(eq(schema.orders.currencyCode, input.currencyCode));
     const baseSummaryWhere = summaryWhere
       ? (batchDateConditions.length > 0 ? and(summaryWhere, ...batchDateConditions) : summaryWhere)
       : (batchDateConditions.length > 0 ? and(...batchDateConditions) : undefined);
@@ -2664,7 +2693,19 @@ export class LogisticsService implements OnModuleInit {
     // 6 parallel queries (down from 7): received + disputed outcome counts merged.
     const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows, awaitingPeriodRows, deliveredRows, outcomeCountRows] = await Promise.all([
       baseSummaryWhere ? baseSummaryQuery.where(baseSummaryWhere) : baseSummaryQuery,
-      summaryWhere ? outcomeSummaryQuery.where(summaryWhere) : outcomeSummaryQuery,
+      // Outcome (Received/Disputed) amounts are per-BATCH totals with no orders
+      // join. A batch is single-currency (enforced at creation), so scope by the
+      // batch's own currency_code — combine with summaryWhere (batch-level filters).
+      (() => {
+        const outcomeCurrencyWhere = input.currencyCode
+          ? eq(schema.deliveryRemittances.currencyCode, input.currencyCode)
+          : undefined;
+        const combined =
+          summaryWhere && outcomeCurrencyWhere
+            ? and(summaryWhere, outcomeCurrencyWhere)
+            : (summaryWhere ?? outcomeCurrencyWhere);
+        return combined ? outcomeSummaryQuery.where(combined) : outcomeSummaryQuery;
+      })(),
       awaitingSummaryQuery,
       awaitingPeriodQuery,
       deliveredCountQuery,
@@ -2824,6 +2865,7 @@ export class LogisticsService implements OnModuleInit {
     }
     if (input.sentBy) conditions.push(eq(schema.deliveryRemittances.sentBy, input.sentBy));
     if (input.status) conditions.push(eq(schema.deliveryRemittances.status, input.status));
+    if (input.currencyCode) conditions.push(eq(schema.orders.currencyCode, input.currencyCode));
     if (input.startDate) conditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
     if (input.endDate) conditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
     if (groupId) {
@@ -2902,6 +2944,7 @@ export class LogisticsService implements OnModuleInit {
         customerName: schema.orders.customerName,
         orderNumber: schema.orders.orderNumber,
         totalAmount: schema.orders.totalAmount,
+        currencyCode: schema.orders.currencyCode,
         deliveryFee: schema.orders.deliveryFee,
         deliveredAt: schema.orders.deliveredAt,
         status: schema.orders.status,
@@ -2964,6 +3007,7 @@ export class LogisticsService implements OnModuleInit {
         customerName: r.customerName,
         orderNumber: r.orderNumber,
         totalAmount: r.totalAmount ? String(r.totalAmount) : '0',
+        currencyCode: r.currencyCode ?? 'NGN',
         deliveryFee: r.deliveryFee ? String(r.deliveryFee) : null,
         deliveredAt: r.deliveredAt?.toISOString() ?? null,
         status: r.status,
@@ -3051,6 +3095,7 @@ export class LogisticsService implements OnModuleInit {
         orderNumber: schema.orders.orderNumber,
         customerName: schema.orders.customerName,
         totalAmount: schema.orders.totalAmount,
+        currencyCode: schema.orders.currencyCode,
         deliveryFee: schema.orders.deliveryFee,
         status: schema.orders.status,
         orderSource: schema.orders.orderSource,
@@ -3157,6 +3202,7 @@ export class LogisticsService implements OnModuleInit {
           orderNumber: o.orderNumber,
           customerName: o.customerName,
           totalAmount: o.totalAmount ? String(o.totalAmount) : '0',
+          currencyCode: o.currencyCode ?? 'NGN',
           deliveryFee: o.deliveryFee ? String(o.deliveryFee) : null,
           status: o.status,
           orderSource: o.orderSource,
@@ -3550,6 +3596,12 @@ export class LogisticsService implements OnModuleInit {
 
     const conditions = [eq(schema.orders.status, 'DELIVERED')];
 
+    // Currency scope — only surface awaiting orders in the selected currency, so a
+    // batch built from this list can never mix currencies (matches the totals).
+    if (input.currencyCode) {
+      conditions.push(eq(schema.orders.currencyCode, input.currencyCode));
+    }
+
     if (isTplCaller && !canListGlobal) {
       conditions.push(eq(schema.orders.logisticsLocationId, actor.logisticsLocationId!));
     } else if (input.logisticsLocationId) {
@@ -3631,6 +3683,7 @@ export class LogisticsService implements OnModuleInit {
           orderNumber: schema.orders.orderNumber,
           customerName: schema.orders.customerName,
           totalAmount: schema.orders.totalAmount,
+          currencyCode: schema.orders.currencyCode,
           deliveredAt: schema.orders.deliveredAt,
           deliveryFee: schema.orders.deliveryFee,
           logisticsLocationId: schema.orders.logisticsLocationId,
@@ -3665,6 +3718,7 @@ export class LogisticsService implements OnModuleInit {
         orderNumber: o.orderNumber ?? null,
         customerName: o.customerName,
         totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
+        currencyCode: o.currencyCode ?? 'NGN',
         deliveryFee: o.deliveryFee != null ? String(o.deliveryFee) : null,
         deliveredAt: o.deliveredAt?.toISOString() ?? null,
         logisticsLocationId: o.logisticsLocationId ?? null,
@@ -3687,6 +3741,9 @@ export class LogisticsService implements OnModuleInit {
                 status: o.invoiceStatus ?? 'DRAFT',
                 dueDate: o.invoiceDueDate?.toISOString() ?? null,
                 createdAt: o.invoiceCreatedAt.toISOString(),
+                // Invoices inherit the order's frozen currency so the preview +
+                // PDF render the right symbol (₦, GH₵…) instead of falling to ₦.
+                currencyCode: o.currencyCode ?? 'NGN',
               }
             : null,
       })),
@@ -4253,6 +4310,7 @@ export class LogisticsService implements OnModuleInit {
       orderNumber: number | null;
       customerName: string;
       totalAmount: string | null;
+      currencyCode: string;
       deliveryFee: string | null;
       deliveredAt: string | null;
       status: string;
@@ -4269,6 +4327,7 @@ export class LogisticsService implements OnModuleInit {
         dueDate: string | null;
         createdAt: string;
         markedPaid: boolean;
+        currencyCode: string;
       } | null;
     }> = [];
     if (orderIds.length > 0) {
@@ -4278,6 +4337,7 @@ export class LogisticsService implements OnModuleInit {
           orderNumber: schema.orders.orderNumber,
           customerName: schema.orders.customerName,
           totalAmount: schema.orders.totalAmount,
+          currencyCode: schema.orders.currencyCode,
           deliveryFee: schema.orders.deliveryFee,
           deliveredAt: schema.orders.deliveredAt,
           status: schema.orders.status,
@@ -4301,6 +4361,7 @@ export class LogisticsService implements OnModuleInit {
         orderNumber: o.orderNumber ?? null,
         customerName: o.customerName,
         totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
+        currencyCode: o.currencyCode ?? 'NGN',
         deliveryFee: o.deliveryFee != null ? String(o.deliveryFee) : null,
         deliveredAt: o.deliveredAt?.toISOString() ?? null,
         status: o.status,
@@ -4322,6 +4383,8 @@ export class LogisticsService implements OnModuleInit {
                 dueDate: o.invoiceDueDate?.toISOString() ?? null,
                 createdAt: o.invoiceCreatedAt.toISOString(),
                 markedPaid: markedPaidForBatch,
+                // Inherit the order's frozen currency for correct symbol on preview/PDF.
+                currencyCode: o.currencyCode ?? 'NGN',
               }
             : null,
       }));

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@remix-run/react';
 import { formatOrderNumber } from '@yannis/shared';
+import { useCurrencyColor } from '~/contexts/currencies-catalog-context';
 
 export interface OrderIdBadgeProps {
   /**
@@ -34,6 +35,13 @@ export interface OrderIdBadgeProps {
   className?: string;
   /** Hide the copy button (display-only). Default false. */
   hideCopy?: boolean;
+  /**
+   * The order's frozen currency code. When it maps to a non-base currency with
+   * an accent colour, the visible order number is tinted that colour so
+   * foreign-currency orders stand out. Base/NGN and uncoloured currencies keep
+   * the current look.
+   */
+  currencyCode?: string | null;
 }
 
 /**
@@ -58,7 +66,10 @@ export function OrderIdBadge({
   textClassName,
   className,
   hideCopy = false,
+  currencyCode,
 }: OrderIdBadgeProps) {
+  const accent = useCurrencyColor(currencyCode);
+  const accentStyle = accent ? { color: accent } : undefined;
   const visible = orderNumber != null
     ? formatOrderNumber(orderNumber)
     : uppercase
@@ -69,12 +80,13 @@ export function OrderIdBadge({
     <Link
       to={linkTo}
       className={textClassName ?? 'text-brand-500 hover:text-brand-600 font-medium'}
+      style={accentStyle}
       {...(newTab ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
     >
       {visible}
     </Link>
   ) : (
-    <span className={textClassName ?? 'font-mono text-app-fg-muted'}>{visible}</span>
+    <span className={textClassName ?? 'font-mono text-app-fg-muted'} style={accentStyle}>{visible}</span>
   );
 
   return (

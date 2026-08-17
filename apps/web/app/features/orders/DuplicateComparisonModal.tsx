@@ -22,6 +22,7 @@ interface ComparisonOrder {
   deliveryState?: string | null;
   status: string;
   totalAmount: string | null;
+  currencyCode?: string;
   createdAt: string;
   paymentMethod?: string | null;
   assignedCsName?: string | null;
@@ -165,10 +166,10 @@ export function DuplicateComparisonModal({
       {
         label: 'Order',
         newValue: (
-          <OrderIdBadge id={n.id} orderNumber={n.orderNumber} length={8} textClassName="font-mono text-xs" className="inline-flex" />
+          <OrderIdBadge id={n.id} orderNumber={n.orderNumber} currencyCode={n.currencyCode} length={8} textClassName="font-mono text-xs" className="inline-flex" />
         ),
         origValue: (
-          <OrderIdBadge id={orig.id} orderNumber={orig.orderNumber} length={8} linkTo={`/admin/orders/${orig.id}`} newTab textClassName="font-mono text-xs text-brand-600 dark:text-brand-400 hover:underline" className="inline-flex" />
+          <OrderIdBadge id={orig.id} orderNumber={orig.orderNumber} currencyCode={orig.currencyCode} length={8} linkTo={`/admin/orders/${orig.id}`} newTab textClassName="font-mono text-xs text-brand-600 dark:text-brand-400 hover:underline" className="inline-flex" />
         ),
       },
       {
@@ -189,8 +190,8 @@ export function DuplicateComparisonModal({
       { label: 'Items / Offer', newValue: newItems, origValue: origItems, newStr: newItems, origStr: origItems },
       {
         label: 'Total',
-        newValue: n.totalAmount ? <span className="font-semibold"><NairaPrice amount={Number(n.totalAmount)} /></span> : '—',
-        origValue: orig.totalAmount ? <span className="font-semibold"><NairaPrice amount={Number(orig.totalAmount)} /></span> : '—',
+        newValue: n.totalAmount ? <span className="font-semibold"><NairaPrice amount={Number(n.totalAmount)} currencyCode={n.currencyCode} /></span> : '—',
+        origValue: orig.totalAmount ? <span className="font-semibold"><NairaPrice amount={Number(orig.totalAmount)} currencyCode={orig.currencyCode} /></span> : '—',
         newStr: n.totalAmount ?? '—',
         origStr: orig.totalAmount ?? '—',
       },

@@ -84,6 +84,8 @@ export class CurrenciesService {
           precision: input.precision,
           isDefault: input.isDefault,
           active: input.active,
+          // Base currency stays neutral; only non-default currencies carry a colour.
+          color: input.isDefault ? null : (input.color ?? null),
           fxRateToBase: input.fxRate != null ? sql`${input.fxRate}::numeric` : null,
           fxRateUpdatedAt: input.fxRate != null ? new Date() : null,
           fxRateUpdatedBy: input.fxRate != null ? actor.id : null,
@@ -109,6 +111,8 @@ export class CurrenciesService {
       if (input.countryName !== undefined) patch['countryName'] = input.countryName;
       if (input.precision !== undefined) patch['precision'] = input.precision;
       if (input.active !== undefined) patch['active'] = input.active;
+      if (input.color !== undefined) patch['color'] = input.color; // null clears it
+
       if (Object.keys(patch).length === 0) return existing;
       patch['updatedAt'] = new Date();
       const [row] = await tx.update(schema.currencies).set(patch).where(eq(schema.currencies.id, input.id)).returning();

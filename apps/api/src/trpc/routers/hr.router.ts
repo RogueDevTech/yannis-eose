@@ -9,6 +9,15 @@ import {
   approveAdjustmentSchema,
   updateAdjustmentSchema,
   deleteAdjustmentSchema,
+  createRefundSchema,
+  updateRefundSchema,
+  voidRefundSchema,
+  createStaffAllowanceSchema,
+  updateStaffAllowanceSchema,
+  voidStaffAllowanceSchema,
+  createTaxDocumentSchema,
+  deleteTaxDocumentSchema,
+  listTaxDocumentsSchema,
   setSettlementConfigSchema,
   generateBatchSchema,
   generateBatchesBulkSchema,
@@ -284,6 +293,97 @@ export const hrRouter = router({
         page: input.page,
         pageSize: input.pageSize,
       });
+    }),
+
+  // Staff Refunds (post-tax, doc §2)
+  createRefund: permissionProcedure('hr.write')
+    .input(createRefundSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getHrService().createRefund(input, ctx.user.id, ctx.effectiveBranchIds);
+    }),
+
+  updateRefund: permissionProcedure('hr.write')
+    .input(updateRefundSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getHrService().updateRefund(input, ctx.user.id, ctx.effectiveBranchIds);
+    }),
+
+  voidRefund: permissionProcedure('hr.write')
+    .input(voidRefundSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getHrService().voidRefund(input, ctx.user.id, ctx.effectiveBranchIds);
+    }),
+
+  listRefunds: permissionProcedure('hr.read')
+    .input(
+      z.object({
+        staffId: z.string().uuid().optional(),
+        search: z.string().trim().max(200).optional(),
+        page: z.number().int().min(1).optional(),
+        pageSize: z.number().int().min(1).max(200).optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      return getHrService().listRefunds(input.staffId, ctx.effectiveBranchIds, {
+        search: input.search,
+        page: input.page,
+        pageSize: input.pageSize,
+      });
+    }),
+
+  // Per-staff Allowances (taxable, doc §3)
+  createStaffAllowance: permissionProcedure('hr.write')
+    .input(createStaffAllowanceSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getHrService().createStaffAllowance(input, ctx.user.id, ctx.effectiveBranchIds);
+    }),
+
+  updateStaffAllowance: permissionProcedure('hr.write')
+    .input(updateStaffAllowanceSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getHrService().updateStaffAllowance(input, ctx.user.id, ctx.effectiveBranchIds);
+    }),
+
+  voidStaffAllowance: permissionProcedure('hr.write')
+    .input(voidStaffAllowanceSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getHrService().voidStaffAllowance(input, ctx.user.id, ctx.effectiveBranchIds);
+    }),
+
+  listStaffAllowances: permissionProcedure('hr.read')
+    .input(
+      z.object({
+        staffId: z.string().uuid().optional(),
+        search: z.string().trim().max(200).optional(),
+        page: z.number().int().min(1).optional(),
+        pageSize: z.number().int().min(1).max(200).optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      return getHrService().listStaffAllowances(input.staffId, ctx.effectiveBranchIds, {
+        search: input.search,
+        page: input.page,
+        pageSize: input.pageSize,
+      });
+    }),
+
+  // Staff Tax Documents (doc §5)
+  createTaxDocument: permissionProcedure('hr.write')
+    .input(createTaxDocumentSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getHrService().createTaxDocument(input, ctx.user.id, ctx.effectiveBranchIds);
+    }),
+
+  deleteTaxDocument: permissionProcedure('hr.write')
+    .input(deleteTaxDocumentSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getHrService().deleteTaxDocument(input, ctx.user.id, ctx.effectiveBranchIds);
+    }),
+
+  listTaxDocuments: permissionProcedure('hr.read')
+    .input(listTaxDocumentsSchema)
+    .query(async ({ input, ctx }) => {
+      return getHrService().listTaxDocuments(input, ctx.effectiveBranchIds);
     }),
 
   // Settlement Window Config

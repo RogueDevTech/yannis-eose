@@ -330,6 +330,8 @@ export const logisticsRouter = router({
         scheduleKind: z.enum(['delivery_overdue']).optional(),
         sortBy: z.string().optional(),
         sortOrder: z.enum(['asc', 'desc']).optional(),
+        /** Multi-currency filter — mirror the list so the strip matches the table. */
+        currencyCode: z.string().trim().toUpperCase().max(5).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -342,6 +344,7 @@ export const logisticsRouter = router({
             servicingBranchId: input.servicingBranchId,
             startDate: input.startDate,
             endDate: input.endDate,
+            currencyCode: input.currencyCode,
           },
           ctx.effectiveBranchIds,
         ),
@@ -376,6 +379,8 @@ export const logisticsRouter = router({
         dateScope: z.enum(['createdAt', 'deliveredAt']).optional().default('createdAt'),
         /** When true, skip paginated records and only return summary + locations + users. */
         summaryOnly: z.boolean().optional().default(false),
+        /** Scope every total + list to a single currency (never mix currencies). */
+        currencyCode: z.string().trim().toUpperCase().max(5).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {

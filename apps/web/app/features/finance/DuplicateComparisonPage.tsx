@@ -9,6 +9,8 @@ interface DuplicateOrder {
   orderNumber: number | null;
   customerName: string;
   totalAmount: string;
+  /** Order currency (default NGN) for money display. */
+  currencyCode?: string;
   deliveryFee: string | null;
   status: string;
   orderSource: string | null;
@@ -94,11 +96,11 @@ function OrderCard({ order, isFirst }: { order: DuplicateOrder; isFirst: boolean
           <span className="rounded bg-app-hover px-1.5 py-0.5 text-[10px] font-medium text-app-fg-muted">{source}</span>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <span className="text-xs text-app-fg-muted tabular-nums">Gross <NairaPrice amount={Number(order.totalAmount || 0)} className="text-xs font-medium text-app-fg" /></span>
+          <span className="text-xs text-app-fg-muted tabular-nums">Gross <NairaPrice amount={Number(order.totalAmount || 0)} currencyCode={order.currencyCode} className="text-xs font-medium text-app-fg" /></span>
           {order.deliveryFee && Number(order.deliveryFee) > 0 && (
-            <span className="text-xs text-app-fg-muted tabular-nums">Fee <NairaPrice amount={Number(order.deliveryFee)} className="text-xs font-medium text-danger-600 dark:text-danger-400" /></span>
+            <span className="text-xs text-app-fg-muted tabular-nums">Fee <NairaPrice amount={Number(order.deliveryFee)} currencyCode={order.currencyCode} className="text-xs font-medium text-danger-600 dark:text-danger-400" /></span>
           )}
-          <NairaPrice amount={net} className="text-sm font-semibold tabular-nums" />
+          <NairaPrice amount={net} currencyCode={order.currencyCode} className="text-sm font-semibold tabular-nums" />
           <StatusBadge status={order.status} />
         </div>
       </div>
@@ -109,7 +111,7 @@ function OrderCard({ order, isFirst }: { order: DuplicateOrder; isFirst: boolean
           <span>Created {formatDate(order.createdAt)}</span>
           {order.deliveredAt && <span>Delivered {formatDate(order.deliveredAt)}</span>}
           {order.invoice && (
-            <span>INV-{String(order.invoice.referenceNumber).padStart(6, '0')} · <NairaPrice amount={Number(order.invoice.totalAmount || 0)} className="text-xs" /></span>
+            <span>INV-{String(order.invoice.referenceNumber).padStart(6, '0')} · <NairaPrice amount={Number(order.invoice.totalAmount || 0)} currencyCode={order.currencyCode} className="text-xs" /></span>
           )}
           {order.remittance && (
             <span>Remittance: {REMITTANCE_STATUS_LABEL[order.remittance.status] ?? order.remittance.status}</span>

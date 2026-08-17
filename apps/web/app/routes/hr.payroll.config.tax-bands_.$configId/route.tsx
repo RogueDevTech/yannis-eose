@@ -106,7 +106,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const lowIncomeExemptionMonthly =
       lowIncomeExemptionRaw != null && lowIncomeExemptionRaw !== ''
         ? Number(lowIncomeExemptionRaw)
-        : 66667;
+        : 66000;
 
     const configId = formData.get('configId')?.toString();
     const body: Record<string, unknown> = {

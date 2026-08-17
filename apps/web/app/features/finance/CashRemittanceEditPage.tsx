@@ -169,7 +169,7 @@ export function CashRemittanceEditPage({ detail }: CashRemittanceEditPageProps) 
                         <span className="text-xs text-app-fg-muted">{o.customerName}</span>
                       </div>
                       <span className="shrink-0 tabular-nums text-sm font-medium text-app-fg">
-                        {orderAmt > 0 ? <NairaPrice amount={orderAmt} /> : '—'}
+                        {orderAmt > 0 ? <NairaPrice amount={orderAmt} currencyCode={o.currencyCode} /> : '—'}
                       </span>
                     </div>
 
@@ -188,7 +188,7 @@ export function CashRemittanceEditPage({ detail }: CashRemittanceEditPageProps) 
                       <div className="flex items-center justify-between gap-3 pt-1 border-t border-app-border/50">
                         <span className="text-xs text-app-fg-muted">Net remittance</span>
                         <span className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">
-                          {netAmount > 0 ? <NairaPrice amount={netAmount} /> : '—'}
+                          {netAmount > 0 ? <NairaPrice amount={netAmount} currencyCode={o.currencyCode} /> : '—'}
                         </span>
                       </div>
                     )}

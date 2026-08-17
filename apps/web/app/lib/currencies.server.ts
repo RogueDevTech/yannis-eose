@@ -13,6 +13,7 @@ export interface CurrencyRow {
   active: boolean;
   fxRateToBase: string | null;
   fxRateUpdatedAt: string | null;
+  color: string | null;
 }
 
 /** Load the full currency list (incl. inactive) for the config panel. */
@@ -42,6 +43,8 @@ export async function handleCurrenciesForm(request: Request, formData: FormData)
     case 'create': {
       const fxRaw = formData.get('fxRate')?.toString()?.trim();
       const fxRate = fxRaw && Number(fxRaw) > 0 ? Number(fxRaw) : undefined;
+      const colorRaw = formData.get('color')?.toString()?.trim();
+      const color = colorRaw ? colorRaw : undefined;
       return post(
         'currencies.create',
         {
@@ -53,6 +56,8 @@ export async function handleCurrenciesForm(request: Request, formData: FormData)
           active: true,
           // Optional FX at creation; admin can also set/change it later per row.
           ...(fxRate !== undefined ? { fxRate } : {}),
+          // Optional accent colour that tints this currency's order#/amount.
+          ...(color !== undefined ? { color } : {}),
         },
         'Failed to add currency',
       );
@@ -60,6 +65,9 @@ export async function handleCurrenciesForm(request: Request, formData: FormData)
     case 'update': {
       const id = String(formData.get('id') ?? '');
       // 1. Update editable fields (symbol/country/precision).
+      // Accent colour is always submitted (hidden input): '' clears it to null,
+      // a hex value sets it. The base currency ignores colour server-side.
+      const colorRaw = formData.get('color')?.toString()?.trim();
       const res = await apiRequest<unknown>('/trpc/currencies.update', {
         method: 'POST',
         cookie,
@@ -68,6 +76,7 @@ export async function handleCurrenciesForm(request: Request, formData: FormData)
           symbol: String(formData.get('symbol') ?? ''),
           countryName: String(formData.get('countryName') ?? ''),
           precision: Number(formData.get('precision') ?? 2),
+          color: colorRaw ? colorRaw : null,
         },
       });
       if (!res.ok) return json({ error: extractApiErrorMessage(res.data, 'Failed to update currency') }, { status: 400 });

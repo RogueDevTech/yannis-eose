@@ -72,15 +72,26 @@ describe('listOrdersSchema currency filter', () => {
 });
 
 describe('createCurrencySchema (config)', () => {
-  it('accepts a valid new currency with defaults', () => {
-    const r = createCurrencySchema.safeParse({ code: 'ghs', symbol: 'GH₵', countryName: 'Ghana' });
+  it('accepts a valid new currency with defaults (FX rate required for non-default)', () => {
+    const r = createCurrencySchema.safeParse({ code: 'ghs', symbol: 'GH₵', countryName: 'Ghana', fxRate: 240 });
     expect(r.success).toBe(true);
     if (r.success) {
       expect(r.data.code).toBe('GHS'); // uppercased
       expect(r.data.precision).toBe(2); // default
       expect(r.data.isDefault).toBe(false); // default
       expect(r.data.active).toBe(true); // default
+      expect(r.data.fxRate).toBe(240);
     }
+  });
+  it('requires an FX rate for a non-default currency', () => {
+    // A non-default currency without a rate can't be converted in merged/FX
+    // aggregates, so creation must reject it (the Add-currency form enforces this too).
+    expect(createCurrencySchema.safeParse({ code: 'GHS', symbol: 'GH₵', countryName: 'Ghana' }).success).toBe(false);
+    expect(createCurrencySchema.safeParse({ code: 'GHS', symbol: 'GH₵', countryName: 'Ghana', fxRate: 0 }).success).toBe(false);
+  });
+  it('does not require an FX rate for the default (base) currency', () => {
+    const r = createCurrencySchema.safeParse({ code: 'NGN', symbol: '₦', countryName: 'Nigeria', isDefault: true });
+    expect(r.success).toBe(true);
   });
   it('rejects a bad code (too long / non-alpha)', () => {
     expect(createCurrencySchema.safeParse({ code: 'TOOLONG', symbol: 'X', countryName: 'Y' }).success).toBe(false);

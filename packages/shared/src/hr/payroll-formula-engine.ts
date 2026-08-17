@@ -41,6 +41,8 @@ function metricValue(_formula: PayrollFormula, metrics: PayrollMetrics, metric: 
       return metrics.cpa ?? 0;
     case 'DELIVERED_COUNT':
       return metrics.deliveredCount ?? 0;
+    case 'QUALIFYING_REVENUE':
+      return metrics.qualifyingRevenue ?? 0;
     case 'TARGET_MET':
       return metrics.targetMet ? 1 : 0;
     case 'NONE':

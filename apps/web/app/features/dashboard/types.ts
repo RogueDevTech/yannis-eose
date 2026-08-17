@@ -22,6 +22,8 @@ export interface DashboardData {
     /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
     deliveredThisMonth?: number;
     deliveredRevenue: number;
+    /** Per-currency delivered revenue map for the currency lens. Absent → NGN-only. */
+    deliveredRevenueByCurrency?: Record<string, number>;
     confirmedOrders: number;
     confirmationRate: number;
     cpa: number;
@@ -30,6 +32,8 @@ export interface DashboardData {
   };
   profit: {
     revenue: number;
+    /** Per-currency revenue map for the currency lens (base/single/merged). Absent → NGN-only. */
+    revenueByCurrency?: Record<string, number>;
     landedCost: number;
     deliveryFee: number;
     adSpend: number;
