@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, gte, lte, isNull, sql } from 'drizzle-orm';
+import { and, gte, lte, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import { DRIZZLE } from '../../database/database.module';
@@ -20,7 +20,7 @@ export class SlackDailyReportService {
     private readonly errorBuffer: SlackErrorBufferService,
   ) {}
 
-  @Cron('0 0 20 * * *', { timeZone: 'Africa/Lagos' })
+  @Cron('0 59 23 * * *', { timeZone: 'Africa/Lagos' })
   async sendDailyReport(): Promise<void> {
     const reportDate = nigeriaToday();
     try {
@@ -70,6 +70,39 @@ export class SlackDailyReportService {
         ),
       );
 
+    // Ad spend today: AD_SPEND rows only (the sole category that feeds CPA/ROAS),
+    // PENDING + APPROVED, matching the marketing service's spend conventions.
+    const [spendRow] = await this.db
+      .select({ total: sql<string>`coalesce(sum(${schema.adSpendLogs.spendAmount}), 0)::text` })
+      .from(schema.adSpendLogs)
+      .where(
+        and(
+          gte(schema.adSpendLogs.spendDate, dayStart),
+          lte(schema.adSpendLogs.spendDate, dayEnd),
+          eq(schema.adSpendLogs.category, 'AD_SPEND'),
+          inArray(schema.adSpendLogs.status, ['PENDING', 'APPROVED']),
+        ),
+      );
+    const adSpendToday = Number(spendRow?.total ?? '0');
+
+    // Orders delivered today (by delivered_at) — the acquisition CPA denominator.
+    const [deliveredRow] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.orders)
+      .where(
+        and(
+          gte(schema.orders.deliveredAt, dayStart),
+          lte(schema.orders.deliveredAt, dayEnd),
+          isNull(schema.orders.deletedAt),
+        ),
+      );
+    const ordersDelivered = Number(deliveredRow?.count ?? 0);
+
+    // Blended CPA. Headline = spend / orders created today (mirrors the orders-created
+    // number above); delivered = spend / orders delivered today. null when no orders.
+    const cpaCreated = ordersCreated > 0 ? adSpendToday / ordersCreated : null;
+    const cpaDelivered = ordersDelivered > 0 ? adSpendToday / ordersDelivered : null;
+
     const { dbHealthy, dbLatencyMs } = await this.checkDbHealth();
     const errors = await this.errorBuffer.snapshot(today);
 
@@ -78,6 +111,10 @@ export class SlackDailyReportService {
       ordersCreated,
       ordersByStatus: statusRows.map((r) => ({ status: r.status, count: Number(r.count) })),
       newUsers: Number(usersRow?.count ?? 0),
+      adSpendToday,
+      ordersDelivered,
+      cpaCreated,
+      cpaDelivered,
       errorTotal: errors.total,
       errorGroups: errors.groups,
       dbHealthy,

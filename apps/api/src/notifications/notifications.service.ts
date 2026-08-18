@@ -140,15 +140,29 @@ export class NotificationsService {
     }
 
     try {
+      // Outbound-only: force replies to an unmonitored no-reply address so staff
+      // replies never land in the real "from" inbox. Hardcoded (not env) so the
+      // reply-to is guaranteed regardless of deployment config. The Bricklage
+      // SendGrid identity must never surface to users — the display name stays
+      // "Yannis". Auto-Submitted is the RFC 3834 signal that this is a
+      // machine-generated message and should not be auto-replied to.
       await sgMail.send({
         to: opts.to,
         from: {
           email: process.env['SENDGRID_FROM_EMAIL'] ?? 'noreply@yannis.com',
-          name: process.env['SENDGRID_FROM_NAME'] ?? 'Yannis EOSE',
+          name: 'Yannis',
+        },
+        replyTo: {
+          email: 'noreply@bricklage.com',
+          name: 'Yannis',
         },
         subject: opts.subject,
         html: opts.html,
         text: opts.text,
+        headers: {
+          'Auto-Submitted': 'auto-generated',
+          'X-Auto-Response-Suppress': 'All',
+        },
       });
       this.logger.log(`Email sent: ${opts.subject} → ${opts.to}`);
       return true;
