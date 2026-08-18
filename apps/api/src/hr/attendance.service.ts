@@ -554,6 +554,10 @@ export class AttendanceService {
         })
         .onConflictDoUpdate({
           target: [schema.attendanceRecords.staffId, schema.attendanceRecords.attendanceDate],
+          // Partial unique index (uq_attendance_staff_day is WHERE staff_id IS NOT
+          // NULL) — the ON CONFLICT must carry the matching predicate or Postgres
+          // can't match the index ("no unique or exclusion constraint matching...").
+          targetWhere: sql`${schema.attendanceRecords.staffId} IS NOT NULL`,
           set: {
             status: input.status,
             remark: input.remark ?? null,
@@ -671,6 +675,8 @@ export class AttendanceService {
         })
         .onConflictDoUpdate({
           target: [schema.attendanceRecords.contractorId, schema.attendanceRecords.attendanceDate],
+          // Partial unique index (uq_attendance_contractor_day) — carry the predicate.
+          targetWhere: sql`${schema.attendanceRecords.contractorId} IS NOT NULL`,
           set: {
             status,
             remark,
@@ -776,6 +782,8 @@ export class AttendanceService {
           })
           .onConflictDoUpdate({
             target: [schema.attendanceRecords.contractorId, schema.attendanceRecords.attendanceDate],
+            // Partial unique index (uq_attendance_contractor_day) — carry the predicate.
+            targetWhere: sql`${schema.attendanceRecords.contractorId} IS NOT NULL`,
             set: {
               status: input.status,
               remark: input.remark ?? null,
@@ -864,6 +872,8 @@ export class AttendanceService {
           })
           .onConflictDoUpdate({
             target: [schema.attendanceRecords.staffId, schema.attendanceRecords.attendanceDate],
+            // Partial unique index (uq_attendance_staff_day) — carry the predicate.
+            targetWhere: sql`${schema.attendanceRecords.staffId} IS NOT NULL`,
             set: {
               status: input.status,
               remark: input.remark ?? null,
@@ -891,6 +901,8 @@ export class AttendanceService {
           })
           .onConflictDoUpdate({
             target: [schema.attendanceRecords.contractorId, schema.attendanceRecords.attendanceDate],
+            // Partial unique index (uq_attendance_contractor_day) — carry the predicate.
+            targetWhere: sql`${schema.attendanceRecords.contractorId} IS NOT NULL`,
             set: {
               status: input.status,
               remark: input.remark ?? null,
@@ -1003,6 +1015,8 @@ export class AttendanceService {
           })
           .onConflictDoUpdate({
             target: [schema.attendanceRecords.staffId, schema.attendanceRecords.attendanceDate],
+            // Partial unique index (uq_attendance_staff_day) — carry the predicate.
+            targetWhere: sql`${schema.attendanceRecords.staffId} IS NOT NULL`,
             set: {
               status: input.status,
               remark: input.remark ?? null,
@@ -1416,8 +1430,10 @@ export class AttendanceService {
             markedBy: SYSTEM_ACTOR_ID,
           })
           // Race guard: if a real mark landed between the SELECT and here, keep it.
+          // Partial unique index (uq_attendance_staff_day) — carry the predicate.
           .onConflictDoNothing({
             target: [schema.attendanceRecords.staffId, schema.attendanceRecords.attendanceDate],
+            where: sql`${schema.attendanceRecords.staffId} IS NOT NULL`,
           });
       }
     });
