@@ -8,10 +8,23 @@ export interface ApiErrorAlertData {
   message: string;
   page?: string;
   userId?: string;
+  /** Human name of the user, resolved from the session. Rendered alongside the id. */
+  userName?: string;
   userRole?: string;
   branchId?: string;
+  /** Human name of the branch, resolved from a cached lookup. Rendered alongside the id. */
+  branchName?: string;
   requestId?: string;
   stack?: string;
+}
+
+/**
+ * Renders a "Name (id)" label so the alert is readable at a glance while keeping
+ * the raw id for lookups. Falls back to the id alone (no name), or `fallback`.
+ */
+function labelWithId(id: string | undefined, name: string | undefined, fallback: string): string {
+  if (!id) return fallback;
+  return name ? `${name} (${id})` : id;
 }
 
 export function apiErrorTemplate(data: ApiErrorAlertData): SlackTemplateResult {
@@ -27,9 +40,9 @@ export function apiErrorTemplate(data: ApiErrorAlertData): SlackTemplateResult {
       { label: 'Procedure', value: '`' + data.path + '`' },
       { label: 'Page', value: data.page ?? '—' },
       { label: 'Code', value: data.code },
-      { label: 'User', value: data.userId ? `${data.userId}` : 'anonymous' },
+      { label: 'User', value: labelWithId(data.userId, data.userName, 'anonymous') },
       { label: 'Role', value: data.userRole ?? '—' },
-      { label: 'Branch', value: data.branchId ?? '—' },
+      { label: 'Branch', value: labelWithId(data.branchId, data.branchName, '—') },
       { label: 'Request', value: data.requestId ?? '—' },
     ],
     extraBlocks,
