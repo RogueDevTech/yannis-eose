@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from '@remix-run/react';
+import { Link, useLocation, useSearchParams } from '@remix-run/react';
+import { useFilterPreferences } from '~/hooks/useFilterPreferences';
 import { useBaseCurrency, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { Modal } from '~/components/ui/modal';
@@ -49,15 +50,20 @@ export function FinanceCashRemittanceSection({
   const [infoModal, setInfoModal] = useState<string | null>(null);
   const [dateScopeModalOpen, setDateScopeModalOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
 
   // Cash remittance is single-currency. When the company has 2+ currencies and
   // no currency is chosen yet, default the URL to the base currency so the
-  // figures are never a mixed-currency ₦+GH₵ sum. Single-currency companies are
-  // untouched (the filter self-hides and the param stays off).
+  // figures are never a mixed-currency ₦+GH₵ sum. BUT if the user saved a
+  // currency filter for this page, defer to the saved-prefs restore instead of
+  // clobbering it with base. Single-currency companies are untouched.
   const hasMultipleCurrencies = useHasMultipleCurrencies();
   const baseCurrency = useBaseCurrency();
+  const overviewFilterKey = location.pathname.replace(/^\//, '').replace(/\//g, '.');
+  const { savedFilters } = useFilterPreferences(overviewFilterKey);
+  const savedCurrency = savedFilters?.currency;
   useEffect(() => {
-    if (hasMultipleCurrencies && !searchParams.get('currency')) {
+    if (hasMultipleCurrencies && !searchParams.get('currency') && !savedCurrency) {
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -67,7 +73,7 @@ export function FinanceCashRemittanceSection({
         { replace: true, preventScrollReset: true },
       );
     }
-  }, [hasMultipleCurrencies, baseCurrency.code, searchParams, setSearchParams]);
+  }, [hasMultipleCurrencies, baseCurrency.code, searchParams, setSearchParams, savedCurrency]);
 
   // Label the "this period" figures with the actual month when the selected
   // range is a single calendar month (e.g. "July 2026"); fall back to "This

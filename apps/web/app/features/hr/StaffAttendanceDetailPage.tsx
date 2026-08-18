@@ -27,6 +27,8 @@ interface Props {
   month: string;
   startDate: string;
   endDate: string;
+  /** True when this party is a contractor; forms echo it so mutations target contractorId. */
+  isContractor?: boolean;
 }
 
 function parseMonth(month: string): { y: number; m: number } {
@@ -39,7 +41,7 @@ function leadingBlanks(month: string): number {
   return (new Date(Date.UTC(y, m - 1, 1)).getUTCDay() + 6) % 7;
 }
 
-export function StaffAttendanceDetailPage({ summary, canManage, month, startDate, endDate }: Props) {
+export function StaffAttendanceDetailPage({ summary, canManage, month, startDate, endDate, isContractor }: Props) {
   const markFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const revalidator = useRevalidator();
   const location = useLocation();
@@ -210,6 +212,7 @@ export function StaffAttendanceDetailPage({ summary, canManage, month, startDate
             }}
           >
             <input type="hidden" name="intent" value="markAttendance" />
+            {isContractor && <input type="hidden" name="contractor" value="1" />}
             <input type="hidden" name="attendanceDate" value={editing.date} />
             <div>
               <h2 className="text-base font-semibold text-app-fg">{summary.staffName}</h2>

@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, asc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { uuidv7 } from 'uuidv7';
 import {
@@ -291,6 +291,7 @@ export class AttendanceService {
       Map<string, { status: string; remark: string | null; markedAt: string | null }>
     >();
     for (const r of records) {
+      if (!r.staffId) continue; // staff-scoped query; contractor rows handled separately
       const day = String(r.attendanceDate).slice(0, 10);
       if (!byStaff.has(r.staffId)) byStaff.set(r.staffId, new Map());
       byStaff.get(r.staffId)!.set(day, {
@@ -349,7 +350,152 @@ export class AttendanceService {
       };
     });
 
-    // Status filter: keep only staff with >= 1 day marked with a requested status.
+    // ── Contractors (doc: contractors visible on attendance) ──────────────────
+    // Contractors live in payroll_contractors, not users. They're tracked on the
+    // same sheet (record.contractor_id) and grouped by their branch_id, tagged so
+    // the UI shows a "Contractor" chip. Same branch-scope + search filters.
+    //
+    // Company isolation differs from staff: a contractor often has NO branch
+    // (branch_id NULL) and belongs to a company via group_id (mig 0287). Scoping
+    // ONLY by branch_id would (a) drop every branchless contractor whenever a
+    // company/branch scope is active — emptying the "Contractor" group the UI
+    // relies on — and (b) fail to isolate branchless contractors by company. So
+    // branch-scoped rows match by branch_id while branchless rows match by the
+    // group_id(s) of the in-scope branches (matching payroll-batch.service.ts).
+    const contractorConds = [eq(schema.payrollContractors.active, true)];
+    if (baViewBranch) {
+      // A Branch Admin sees only their own branch's contractors — branchless
+      // contractors have no office and aren't part of a single branch's sheet.
+      contractorConds.push(eq(schema.payrollContractors.branchId, baViewBranch.id));
+    } else if (input.branchId) {
+      // Explicit single-branch narrowing: only that branch's contractors (a
+      // branchless contractor has no office, so it isn't "in" a chosen branch).
+      contractorConds.push(eq(schema.payrollContractors.branchId, input.branchId));
+    } else if (branchScope.length) {
+      // Company scope (no explicit branch): branched contractors in-scope OR
+      // branchless contractors whose company (group_id) is in scope.
+      const scopeGroupIds = [
+        ...new Set(
+          (
+            await this.db
+              .select({ groupId: schema.branches.groupId })
+              .from(schema.branches)
+              .where(inArray(schema.branches.id, branchScope as string[]))
+          )
+            .map((b) => b.groupId)
+            .filter(Boolean),
+        ),
+      ] as string[];
+      const branchless =
+        scopeGroupIds.length > 0
+          ? and(
+              isNull(schema.payrollContractors.branchId),
+              inArray(schema.payrollContractors.groupId, scopeGroupIds),
+            )
+          : undefined;
+      contractorConds.push(
+        or(inArray(schema.payrollContractors.branchId, branchScope as string[]), branchless)!,
+      );
+    }
+    if (input.search) {
+      contractorConds.push(sql`${schema.payrollContractors.name} ILIKE ${'%' + input.search + '%'}`);
+    }
+    const contractors = await this.db
+      .select({
+        id: schema.payrollContractors.id,
+        name: schema.payrollContractors.name,
+        jobTitle: schema.payrollContractors.jobTitle,
+        payRoleId: schema.payrollContractors.payRoleId,
+        branchId: schema.payrollContractors.branchId,
+        branchName: schema.branches.name,
+      })
+      .from(schema.payrollContractors)
+      .leftJoin(schema.branches, eq(schema.branches.id, schema.payrollContractors.branchId))
+      .where(and(...contractorConds))
+      .orderBy(asc(schema.payrollContractors.name));
+
+    if (contractors.length > 0) {
+      const contractorIds = contractors.map((c) => c.id);
+      const cRecords = await this.db
+        .select({
+          contractorId: schema.attendanceRecords.contractorId,
+          attendanceDate: schema.attendanceRecords.attendanceDate,
+          status: schema.attendanceRecords.status,
+          remark: schema.attendanceRecords.remark,
+          markedAt: schema.attendanceRecords.markedAt,
+        })
+        .from(schema.attendanceRecords)
+        .where(
+          and(
+            inArray(schema.attendanceRecords.contractorId, contractorIds),
+            gte(schema.attendanceRecords.attendanceDate, start),
+            lte(schema.attendanceRecords.attendanceDate, end),
+          ),
+        );
+      const byContractor = new Map<
+        string,
+        Map<string, { status: string; remark: string | null; markedAt: string | null }>
+      >();
+      for (const r of cRecords) {
+        if (!r.contractorId) continue;
+        const day = String(r.attendanceDate).slice(0, 10);
+        if (!byContractor.has(r.contractorId)) byContractor.set(r.contractorId, new Map());
+        byContractor.get(r.contractorId)!.set(day, {
+          status: r.status,
+          remark: r.remark,
+          markedAt: r.markedAt ? new Date(r.markedAt).toISOString() : null,
+        });
+      }
+      // Contractor pay-role attendance configs (for the at-risk flag), reusing the
+      // same roleConfigById map — fetch any contractor role configs not loaded yet.
+      const cRoleIds = [...new Set(contractors.map((c) => c.payRoleId).filter(Boolean))] as string[];
+      const missingRoleIds = cRoleIds.filter((id) => !roleConfigById.has(id));
+      if (missingRoleIds.length) {
+        const cRoles = await this.db
+          .select({ id: schema.payrollPayRoles.id, cfg: schema.payrollPayRoles.attendanceConfig })
+          .from(schema.payrollPayRoles)
+          .where(inArray(schema.payrollPayRoles.id, missingRoleIds));
+        for (const r of cRoles) roleConfigById.set(r.id, (r.cfg as AttendanceConfig) ?? { enabled: false, bands: [] });
+      }
+      for (const c of contractors) {
+        const cells = byContractor.get(c.id) ?? new Map();
+        let present = 0, absent = 0, off = 0, sick = 0;
+        for (const cell of cells.values()) {
+          if (cell.status === 'ABSENT') absent++;
+          else if (cell.status === 'OFF_DUTY') off++;
+          else if (cell.status === 'SICK') sick++;
+          else if (cell.status === 'PRESENT') present++;
+        }
+        const marked = present + absent + off + sick;
+        const numerator = present + off + sick;
+        const pct = marked > 0 ? Math.round((numerator / marked) * 100) : 100;
+        const roleCfg = c.payRoleId ? roleConfigById.get(c.payRoleId) ?? null : null;
+        const enabled = resolveAttendanceEnabled(roleCfg?.enabled ?? false, null);
+        const elig = enabled
+          ? computeAttendanceEligibility({ absences: absent, config: { enabled: true, bands: roleCfg?.bands ?? [] } })
+          : null;
+        // A contractor with a branch groups under THAT branch (Lagos contractor →
+        // Lagos). A contractor with NO branch has no office, so they group under a
+        // dedicated "Contractor" section (sentinel branchId) rather than the mixed
+        // "No branch" staff group.
+        const CONTRACTOR_GROUP_ID = '__contractor__';
+        rows.push({
+          staffId: c.id,
+          isContractor: true,
+          name: c.name,
+          role: c.jobTitle ?? 'Contractor',
+          branchId: c.branchId ?? CONTRACTOR_GROUP_ID,
+          branchName: c.branchId ? (c.branchName ?? null) : 'Contractor',
+          exceptions: Object.fromEntries(cells),
+          summary: { present, absent, offDuty: off, sick, attendancePct: pct },
+          attendanceGated: enabled,
+          baseAtRisk: !!elig?.baseReduced,
+          deductionPercent: elig?.deductionPercent ?? 0,
+        });
+      }
+    }
+
+    // Status filter: keep only rows with >= 1 day marked with a requested status.
     const wanted = input.statuses && input.statuses.length ? new Set(input.statuses) : null;
     const filtered = wanted
       ? rows.filter((r) => Object.values(r.exceptions).some((c) => wanted.has(c.status as never)))
@@ -358,11 +504,14 @@ export class AttendanceService {
     return { month: input.month, days, staff: filtered };
   }
 
-  /** Upsert one staff/day cell. HR only. Actor-stamped + audited via history trigger. */
+  /** Upsert one staff-or-contractor/day cell. HR only. Actor-stamped + audited. */
   async mark(input: MarkAttendanceInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     this.assertCanManage(actor);
+    if (input.contractorId) {
+      return this.markContractorCell(input.contractorId, input.attendanceDate, input.status, input.remark ?? null, actor, effectiveBranchIds);
+    }
     // Company isolation: only mark staff in the caller's active company.
-    await this.assertStaffInScope([input.staffId], effectiveBranchIds, { throwOnStray: true });
+    await this.assertStaffInScope([input.staffId!], effectiveBranchIds, { throwOnStray: true });
 
     // Stamp branch/group from the staff member so the grid + summaries scope correctly.
     const [staff] = await this.db
@@ -373,7 +522,7 @@ export class AttendanceService {
         exitDate: schema.users.exitDate,
       })
       .from(schema.users)
-      .where(eq(schema.users.id, input.staffId))
+      .where(eq(schema.users.id, input.staffId!))
       .limit(1);
     if (!staff) throw new TRPCError({ code: 'NOT_FOUND', message: 'Staff not found.' });
     assertMarkableDate(input.attendanceDate, staff.dateOfJoining, staff.exitDate);
@@ -395,7 +544,7 @@ export class AttendanceService {
         .insert(schema.attendanceRecords)
         .values({
           id: uuidv7(),
-          staffId: input.staffId,
+          staffId: input.staffId!,
           attendanceDate: input.attendanceDate,
           status: input.status,
           remark: input.remark ?? null,
@@ -417,13 +566,236 @@ export class AttendanceService {
     });
   }
 
+  /**
+   * Company-scope guard for contractors, mirroring assertStaffInScope. A
+   * contractor is reachable when org-wide (no effectiveBranchIds), OR its branch_id
+   * is in the caller's allowed set, OR — for a BRANCHLESS contractor (branch_id
+   * NULL, e.g. an agency contractor with no office) — its group_id is one of the
+   * groups the allowed branches belong to. Checking group_id is essential: a
+   * branchless contractor still belongs to exactly one company, so "no branch"
+   * must NOT mean "reachable from any company" (that would leak Company B's
+   * contractors to a Company A HR manager). Returns the in-scope contractor ids.
+   */
+  private async assertContractorInScope(
+    contractorIds: string[],
+    effectiveBranchIds: string[] | null | undefined,
+    opts: { throwOnStray?: boolean } = {},
+  ): Promise<Set<string>> {
+    const ids = [...new Set(contractorIds.filter(Boolean))];
+    if (ids.length === 0) return new Set();
+    if (!effectiveBranchIds) return new Set(ids);
+    const allowed = new Set(effectiveBranchIds.filter(Boolean));
+    // Groups the allowed branches belong to — the scope for branchless contractors.
+    const allowedGroups = new Set(
+      (
+        await this.db
+          .select({ groupId: schema.branches.groupId })
+          .from(schema.branches)
+          .where(inArray(schema.branches.id, [...allowed]))
+      )
+        .map((b) => b.groupId)
+        .filter(Boolean) as string[],
+    );
+    const rows = await this.db
+      .select({
+        id: schema.payrollContractors.id,
+        branchId: schema.payrollContractors.branchId,
+        groupId: schema.payrollContractors.groupId,
+      })
+      .from(schema.payrollContractors)
+      .where(inArray(schema.payrollContractors.id, ids));
+    const inScope = new Set<string>();
+    for (const r of rows) {
+      if (r.branchId) {
+        if (allowed.has(r.branchId)) inScope.add(r.id);
+      } else if (r.groupId && allowedGroups.has(r.groupId)) {
+        // Branchless: reachable only within its own company.
+        inScope.add(r.id);
+      }
+    }
+    if (opts.throwOnStray && inScope.size !== ids.length) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'This contractor is not in your company.' });
+    }
+    return inScope;
+  }
+
+  /** Upsert one contractor/day cell. HR only. Actor-stamped + audited. */
+  private async markContractorCell(
+    contractorId: string,
+    attendanceDate: string,
+    status: MarkAttendanceInput['status'],
+    remark: string | null,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    await this.assertContractorInScope([contractorId], effectiveBranchIds, { throwOnStray: true });
+    const [contractor] = await this.db
+      .select({
+        id: schema.payrollContractors.id,
+        branchId: schema.payrollContractors.branchId,
+        groupId: schema.payrollContractors.groupId,
+      })
+      .from(schema.payrollContractors)
+      .where(eq(schema.payrollContractors.id, contractorId))
+      .limit(1);
+    if (!contractor) throw new TRPCError({ code: 'NOT_FOUND', message: 'Contractor not found.' });
+    // Contractors have no join/exit window; still block future dates + policy locks.
+    assertMarkableDate(attendanceDate, null, null);
+    assertDateEditable(attendanceDate, await this.getPolicy(actor));
+
+    const branchId: string | null = contractor.branchId ?? null;
+    // Denormalise the company (group_id) so scoped reads see branchless contractor
+    // rows too: prefer the branch's group, else fall back to the contractor's own.
+    let groupId: string | null = contractor.groupId ?? null;
+    if (branchId) {
+      const [b] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, branchId))
+        .limit(1);
+      groupId = b?.groupId ?? contractor.groupId ?? null;
+    }
+
+    return withActor(this.db, actor, async (tx) => {
+      await tx
+        .insert(schema.attendanceRecords)
+        .values({
+          id: uuidv7(),
+          contractorId,
+          attendanceDate,
+          status,
+          remark,
+          branchId,
+          groupId,
+          markedBy: actor.id,
+        })
+        .onConflictDoUpdate({
+          target: [schema.attendanceRecords.contractorId, schema.attendanceRecords.attendanceDate],
+          set: {
+            status,
+            remark,
+            markedBy: actor.id,
+            markedAt: sql`now()`,
+            updatedAt: sql`now()`,
+          },
+        });
+      return { success: true };
+    });
+  }
+
+  /**
+   * Mark an inclusive date range for ONE contractor (HR). Contractors have no
+   * join/exit window, so the range is clamped only by the future + policy locks.
+   */
+  private async markContractorRange(
+    input: MarkAttendanceRangeInput,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    await this.assertContractorInScope([input.contractorId!], effectiveBranchIds, { throwOnStray: true });
+    const [contractor] = await this.db
+      .select({
+        id: schema.payrollContractors.id,
+        branchId: schema.payrollContractors.branchId,
+        groupId: schema.payrollContractors.groupId,
+      })
+      .from(schema.payrollContractors)
+      .where(eq(schema.payrollContractors.id, input.contractorId!))
+      .limit(1);
+    if (!contractor) throw new TRPCError({ code: 'NOT_FOUND', message: 'Contractor not found.' });
+
+    // Clamp: never mark the future.
+    const today = nigeriaToday();
+    let start = input.startDate;
+    let end = input.endDate < today ? input.endDate : today;
+
+    // Strict-marking policy: clamp the editable window rather than rejecting.
+    const policy = await this.getPolicy(actor);
+    const { hhmm } = lagosNow();
+    if (policy.lockPreviousDays && start < today) start = today; // past days locked
+    if (policy.autoAbsentEnabled && hhmm >= policy.autoAbsentCutoff && end >= today) {
+      const y = new Date(`${today}T00:00:00Z`);
+      y.setUTCDate(y.getUTCDate() - 1);
+      end = y.toISOString().slice(0, 10);
+    }
+    if (start > end) return { success: true, count: 0 };
+
+    const branchId: string | null = contractor.branchId ?? null;
+    // Denormalise company (see markContractorCell): branch's group, else own.
+    let groupId: string | null = contractor.groupId ?? null;
+    if (branchId) {
+      const [b] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, branchId))
+        .limit(1);
+      groupId = b?.groupId ?? contractor.groupId ?? null;
+    }
+
+    // Enumerate day strings in [start, end].
+    const dates: string[] = [];
+    {
+      const s = new Date(`${start}T00:00:00Z`);
+      const e = new Date(`${end}T00:00:00Z`);
+      for (let t = s.getTime(); t <= e.getTime(); t += 86_400_000) {
+        dates.push(new Date(t).toISOString().slice(0, 10));
+      }
+    }
+
+    let targetDates = dates;
+    if (input.onlyBlank) {
+      const existing = await this.db
+        .select({ d: schema.attendanceRecords.attendanceDate })
+        .from(schema.attendanceRecords)
+        .where(
+          and(
+            eq(schema.attendanceRecords.contractorId, input.contractorId!),
+            gte(schema.attendanceRecords.attendanceDate, start),
+            lte(schema.attendanceRecords.attendanceDate, end),
+          ),
+        );
+      const have = new Set(existing.map((r) => String(r.d).slice(0, 10)));
+      targetDates = dates.filter((d) => !have.has(d));
+    }
+
+    if (targetDates.length === 0) return { success: true, count: 0 };
+
+    return withActor(this.db, actor, async (tx) => {
+      for (const attendanceDate of targetDates) {
+        await tx
+          .insert(schema.attendanceRecords)
+          .values({
+            id: uuidv7(),
+            contractorId: input.contractorId!,
+            attendanceDate,
+            status: input.status,
+            remark: input.remark ?? null,
+            branchId,
+            groupId,
+            markedBy: actor.id,
+          })
+          .onConflictDoUpdate({
+            target: [schema.attendanceRecords.contractorId, schema.attendanceRecords.attendanceDate],
+            set: {
+              status: input.status,
+              remark: input.remark ?? null,
+              markedBy: actor.id,
+              markedAt: sql`now()`,
+              updatedAt: sql`now()`,
+            },
+          });
+      }
+      return { success: true, count: targetDates.length };
+    });
+  }
+
   /** Bulk-mark one day for many staff (HR). One tx; each row upserted + audited. */
   async markBulk(input: MarkAttendanceBulkInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     this.assertCanManage(actor);
     // Company isolation: drop any staff outside the caller's active company
     // rather than failing the whole batch. Org-wide callers keep every id.
-    const inScope = await this.assertStaffInScope(input.staffIds, effectiveBranchIds);
-    const ids = [...new Set(input.staffIds)].filter((id) => inScope.has(id));
+    const inScope = await this.assertStaffInScope(input.staffIds ?? [], effectiveBranchIds);
+    const ids = [...new Set(input.staffIds ?? [])].filter((id) => inScope.has(id));
 
     // A future date is invalid for everyone — reject up front.
     if (input.attendanceDate > nigeriaToday()) {
@@ -447,6 +819,27 @@ export class AttendanceService {
     const scopeById = new Map(
       staffRows.map((r) => [r.id, { branchId: r.branchId, groupId: r.groupId, joining: r.dateOfJoining, exit: r.exitDate }]),
     );
+
+    // Contractors in the same batch (company-scoped like staff). Resolve their
+    // branch/group for the denormalised scope stamp.
+    const cInScope = await this.assertContractorInScope(input.contractorIds ?? [], effectiveBranchIds);
+    const cIds = [...new Set(input.contractorIds ?? [])].filter((id) => cInScope.has(id));
+    const contractorScopeById = new Map<string, { branchId: string | null; groupId: string | null }>();
+    if (cIds.length) {
+      const cRows = await this.db
+        .select({
+          id: schema.payrollContractors.id,
+          branchId: schema.branches.id,
+          branchGroupId: schema.branches.groupId,
+          ownGroupId: schema.payrollContractors.groupId,
+        })
+        .from(schema.payrollContractors)
+        .leftJoin(schema.branches, eq(schema.branches.id, schema.payrollContractors.branchId))
+        .where(inArray(schema.payrollContractors.id, cIds));
+      // Denormalise company: branch's group when branched, else the contractor's own.
+      for (const r of cRows)
+        contractorScopeById.set(r.id, { branchId: r.branchId, groupId: r.branchGroupId ?? r.ownGroupId ?? null });
+    }
 
     let count = 0;
     return withActor(this.db, actor, async (tx) => {
@@ -480,6 +873,33 @@ export class AttendanceService {
             },
           });
       }
+      for (const contractorId of cIds) {
+        const scope = contractorScopeById.get(contractorId);
+        if (!scope) continue;
+        count++;
+        await tx
+          .insert(schema.attendanceRecords)
+          .values({
+            id: uuidv7(),
+            contractorId,
+            attendanceDate: input.attendanceDate,
+            status: input.status,
+            remark: input.remark ?? null,
+            branchId: scope.branchId ?? null,
+            groupId: scope.groupId ?? null,
+            markedBy: actor.id,
+          })
+          .onConflictDoUpdate({
+            target: [schema.attendanceRecords.contractorId, schema.attendanceRecords.attendanceDate],
+            set: {
+              status: input.status,
+              remark: input.remark ?? null,
+              markedBy: actor.id,
+              markedAt: sql`now()`,
+              updatedAt: sql`now()`,
+            },
+          });
+      }
       return { success: true, count };
     });
   }
@@ -491,8 +911,9 @@ export class AttendanceService {
    */
   async markRange(input: MarkAttendanceRangeInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     this.assertCanManage(actor);
+    if (input.contractorId) return this.markContractorRange(input, actor, effectiveBranchIds);
     // Company isolation: only mark staff in the caller's active company.
-    await this.assertStaffInScope([input.staffId], effectiveBranchIds, { throwOnStray: true });
+    await this.assertStaffInScope([input.staffId!], effectiveBranchIds, { throwOnStray: true });
 
     const [staff] = await this.db
       .select({
@@ -502,7 +923,7 @@ export class AttendanceService {
         exitDate: schema.users.exitDate,
       })
       .from(schema.users)
-      .where(eq(schema.users.id, input.staffId))
+      .where(eq(schema.users.id, input.staffId!))
       .limit(1);
     if (!staff) throw new TRPCError({ code: 'NOT_FOUND', message: 'Staff not found.' });
 
@@ -555,7 +976,7 @@ export class AttendanceService {
         .from(schema.attendanceRecords)
         .where(
           and(
-            eq(schema.attendanceRecords.staffId, input.staffId),
+            eq(schema.attendanceRecords.staffId, input.staffId!),
             gte(schema.attendanceRecords.attendanceDate, start),
             lte(schema.attendanceRecords.attendanceDate, end),
           ),
@@ -572,7 +993,7 @@ export class AttendanceService {
           .insert(schema.attendanceRecords)
           .values({
             id: uuidv7(),
-            staffId: input.staffId,
+            staffId: input.staffId!,
             attendanceDate,
             status: input.status,
             remark: input.remark ?? null,
@@ -608,6 +1029,7 @@ export class AttendanceService {
      */
     viaSupervisor = false,
   ) {
+    if (input.contractorId) return this.contractorSummary(input, actor, effectiveBranchIds);
     const staffId = input.staffId ?? actor.id;
     // Staff may only view their own; HR/admins may view anyone; a team supervisor
     // may view their own team members (viaSupervisor, resolved by the router).
@@ -715,102 +1137,81 @@ export class AttendanceService {
   }
 
   /**
-   * Team attendance summary for a CS manager (doc §1). Given the supervisor's CS
-   * staff ids (pre-resolved by the router via BranchTeamsService), returns each
-   * member's monthly present/absent/sick/off totals plus their "in payroll?"
-   * status — so a manager can monitor attendance and payroll inclusion in one
-   * view. The router is responsible for the supervisor authorization; this method
-   * trusts the id set it is given (and still applies company isolation).
+   * Monthly summary for ONE contractor (HR only). Contractors have no pay-role
+   * attendance bands, so eligibility is never gated — this is a pure record view.
    */
-  async teamMonthlySummary(
-    staffIds: string[],
-    month: string,
+  private async contractorSummary(
+    input: AttendanceSummaryInput,
+    actor: SessionUser,
     effectiveBranchIds?: string[] | null,
-  ): Promise<
-    Array<{
-      staffId: string;
-      staffName: string | null;
-      staffRole: string | null;
-      present: number;
-      absent: number;
-      offDuty: number;
-      sick: number;
-      inPayroll: boolean;
-      payrollStatus: string;
-    }>
-  > {
-    const requested = [...new Set(staffIds.filter(Boolean))];
-    if (requested.length === 0) return [];
-    // Company isolation: keep only members within the caller's active company.
-    // assertStaffInScope returns the in-scope subset; we filter to it rather than
-    // throwing, so a supervisor whose squad spans a company boundary still sees the
-    // members they legitimately can (and never leaks out-of-company staff).
-    const inScope = await this.assertStaffInScope(requested, effectiveBranchIds, { throwOnStray: false });
-    const ids = effectiveBranchIds?.length ? requested.filter((id) => inScope.has(id)) : requested;
-    if (ids.length === 0) return [];
-    const { start, end } = monthBounds(month);
+  ) {
+    // Viewing a contractor's attendance is HR-only (no self-view for contractors).
+    if (!canReadAllAttendance(actor)) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot view this attendance.' });
+    }
+    await this.assertContractorInScope([input.contractorId!], effectiveBranchIds, { throwOnStray: true });
+    const { start, end, days } = monthBounds(input.month);
 
-    // Per-staff status tallies in one grouped query.
-    const tallyRows = await this.db
+    const records = await this.db
       .select({
-        staffId: schema.attendanceRecords.staffId,
+        attendanceDate: schema.attendanceRecords.attendanceDate,
         status: schema.attendanceRecords.status,
-        n: sql<number>`count(*)::int`,
+        remark: schema.attendanceRecords.remark,
       })
       .from(schema.attendanceRecords)
       .where(
         and(
-          inArray(schema.attendanceRecords.staffId, ids),
+          eq(schema.attendanceRecords.contractorId, input.contractorId!),
           gte(schema.attendanceRecords.attendanceDate, start),
           lte(schema.attendanceRecords.attendanceDate, end),
         ),
-      )
-      .groupBy(schema.attendanceRecords.staffId, schema.attendanceRecords.status);
+      );
+    const byDay = new Map(records.map((r) => [String(r.attendanceDate).slice(0, 10), r]));
 
-    const tallies = new Map<string, { present: number; absent: number; offDuty: number; sick: number }>();
-    for (const id of ids) tallies.set(id, { present: 0, absent: 0, offDuty: 0, sick: 0 });
-    for (const r of tallyRows) {
-      const t = tallies.get(r.staffId);
-      if (!t) continue;
-      const n = Number(r.n ?? 0);
-      if (r.status === 'PRESENT') t.present += n;
-      else if (r.status === 'ABSENT') t.absent += n;
-      else if (r.status === 'OFF_DUTY') t.offDuty += n;
-      else if (r.status === 'SICK') t.sick += n;
+    const [c] = await this.db
+      .select({ name: schema.payrollContractors.name, jobTitle: schema.payrollContractors.jobTitle })
+      .from(schema.payrollContractors)
+      .where(eq(schema.payrollContractors.id, input.contractorId!))
+      .limit(1);
+
+    let present = 0, absent = 0, off = 0, sick = 0;
+    const calendar: Array<{ date: string; status: string; remark: string | null }> = [];
+    for (let d = 1; d <= days; d++) {
+      const date = `${input.month}-${String(d).padStart(2, '0')}`;
+      const rec = byDay.get(date);
+      const status = rec?.status ?? 'NONE';
+      if (rec) {
+        if (status === 'ABSENT') absent++;
+        else if (status === 'OFF_DUTY') off++;
+        else if (status === 'SICK') sick++;
+        else if (status === 'PRESENT') present++;
+      }
+      calendar.push({ date, status, remark: rec?.remark ?? null });
     }
 
-    // Staff meta + payroll-inclusion inputs.
-    const staffRows = await this.db
-      .select({
-        id: schema.users.id,
-        name: schema.users.name,
-        role: schema.users.role,
-        status: schema.users.status,
-        payRoleId: schema.users.payRoleId,
-        flatMonthlyAmount: schema.users.flatMonthlyAmount,
-        onboardingPayrollStatus: schema.users.onboardingPayrollStatus,
-      })
-      .from(schema.users)
-      .where(inArray(schema.users.id, ids));
+    const policy = await this.getPolicy(actor);
 
-    return staffRows.map((s) => {
-      const t = tallies.get(s.id) ?? { present: 0, absent: 0, offDuty: 0, sick: 0 };
-      // "In payroll" ≡ ACTIVE + has a comp basis + not awaiting payroll approval.
-      const hasCompBasis = s.payRoleId != null || s.flatMonthlyAmount != null;
-      const status = s.onboardingPayrollStatus ?? 'NOT_APPLICABLE';
-      const inPayroll = s.status === 'ACTIVE' && hasCompBasis && status !== 'PENDING_APPROVAL';
-      return {
-        staffId: s.id,
-        staffName: s.name,
-        staffRole: s.role,
-        present: t.present,
-        absent: t.absent,
-        offDuty: t.offDuty,
-        sick: t.sick,
-        inPayroll,
-        payrollStatus: status,
-      };
-    });
+    return {
+      month: input.month,
+      days,
+      staffId: input.contractorId!,
+      staffName: c?.name ?? null,
+      staffRole: c?.jobTitle ?? 'Contractor',
+      excluded: false,
+      workDays: policy.workDays,
+      calendar,
+      summary: {
+        present,
+        absent,
+        offDuty: off,
+        sick,
+        attendancePct:
+          present + absent + off + sick > 0
+            ? Math.round(((present + off + sick) / (present + absent + off + sick)) * 100)
+            : 100,
+      },
+      eligibility: { gated: false, baseAtRisk: false, deductionPercent: 0, reason: null },
+    };
   }
 
   /** Save a pay role's attendance config (bands + on/off). HR only. Audited. */
@@ -1052,7 +1453,10 @@ export class AttendanceService {
 }
 
 interface GridRow {
+  /** Party id — a users.id for staff rows, a payroll_contractors.id for contractors. */
   staffId: string;
+  /** True when this row is a contractor (payroll_contractors), not a staff user. */
+  isContractor?: boolean;
   name: string;
   role: string;
   branchId: string | null;

@@ -178,7 +178,15 @@ export const createStaffSchema = z.object({
       message: 'Primary branch is required for this role',
     });
   }
-  if (data.primaryBranchId && data.branchIds && !data.branchIds.includes(data.primaryBranchId)) {
+  // For branch-eligible roles the primary must be one of the assigned branches.
+  // Org-wide roles carry no branch memberships: their primaryBranchId is a
+  // reporting office (attendance/payroll home), so it need not appear in branchIds.
+  if (
+    roleNeedsBranch &&
+    data.primaryBranchId &&
+    data.branchIds &&
+    !data.branchIds.includes(data.primaryBranchId)
+  ) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['primaryBranchId'],
@@ -214,7 +222,10 @@ export const updateStaffSchema = z.object({
   restrictProductAccess: z.boolean().optional(),
   productIds: z.array(z.string().uuid()).optional(),
   branchIds: z.array(z.string().uuid()).optional(),
-  primaryBranchId: z.string().uuid().optional(),
+  // Nullable so an org-wide user's reporting office can be cleared (set to null),
+  // not just changed. Branch-eligible roles still require a non-null primary,
+  // enforced in the service layer.
+  primaryBranchId: z.string().uuid().nullable().optional(),
   primaryBranchByGroup: z.record(z.string().uuid(), z.string().uuid()).optional(),
 });
 

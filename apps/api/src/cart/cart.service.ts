@@ -16,6 +16,34 @@ type CartDbOrTx =
   | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
 
 /**
+ * Strip NUL bytes (U+0000) and other C0 control chars that Postgres text columns
+ * reject, recursing into objects/arrays. The public cart form occasionally
+ * receives a stray control byte (bad paste / broken autofill), which Postgres
+ * rejects with `invalid byte sequence for encoding "UTF8": 0x00`, failing the
+ * whole `cart.save`. Sanitising the payload up front keeps this Pillar-1 intake
+ * path from ever 500ing on unclean input. Tab, newline, and CR are preserved.
+ */
+// C0 controls except \t (\u0009), \n (\u000A), \r (\u000D).
+// eslint-disable-next-line no-control-regex
+const INVALID_TEXT_CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g;
+function stripNulDeep<T>(value: T): T {
+  if (typeof value === 'string') {
+    return value.replace(INVALID_TEXT_CONTROL_CHARS, '') as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => stripNulDeep(v)) as unknown as T;
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = stripNulDeep(v);
+    }
+    return out as unknown as T;
+  }
+  return value;
+}
+
+/**
  * Best-effort display from cart row: digit mask when raw phone is present,
  * otherwise "Hidden" / "—" when only a hash or nothing (never hash fragments as a "phone").
  */
@@ -91,6 +119,10 @@ export class CartService {
     },
     actorId?: string | null,
   ) {
+    // Sanitize first: strip NUL / control bytes from every string (incl. nested
+    // customFieldValues) so a stray control char in the public form never 500s
+    // the whole save with a Postgres "invalid byte sequence 0x00" (Pillar 1).
+    input = stripNulDeep(input);
     const trimmedPhone = input.customerPhone?.trim() || null;
     // Pick only fields that arrived in this payload — never overwrite an earlier
     // captured value with `null` on a partial save. Keys map 1:1 to schema columns.

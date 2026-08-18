@@ -1,9 +1,11 @@
 import { uuid, pgTable, text, date, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { attendanceStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { branches } from './branches';
 import { branchGroups } from './branch-groups';
+import { payrollContractors } from './hr';
 
 /**
  * Table: attendance_records — one row per staff member per marked day (Track C).
@@ -24,9 +26,13 @@ export const attendanceRecords = pgTable(
   'attendance_records',
   {
     id: uuidv7Pk(),
-    staffId: uuid('staff_id')
-      .notNull()
-      .references(() => users.id),
+    /**
+     * The party this record covers — EXACTLY ONE of staffId (a users row) OR
+     * contractorId (a payroll_contractors row) is set (DB CHECK enforces the XOR,
+     * migration 0327). Contractors are tracked on the same sheet as staff.
+     */
+    staffId: uuid('staff_id').references(() => users.id),
+    contractorId: uuid('contractor_id').references(() => payrollContractors.id),
     /** The calendar day this record covers (WAT day). */
     attendanceDate: date('attendance_date').notNull(),
     status: attendanceStatusEnum('status').notNull(),
@@ -46,7 +52,14 @@ export const attendanceRecords = pgTable(
     ...timestampColumns,
   },
   (t) => ({
-    // One record per staff per day — markCell UPSERTs on this.
-    uqStaffDay: uniqueIndex('uq_attendance_staff_day').on(t.staffId, t.attendanceDate),
+    // One record per staff per day — markCell UPSERTs on this. Partial so it only
+    // applies to staff rows (contractor rows have staff_id NULL).
+    uqStaffDay: uniqueIndex('uq_attendance_staff_day')
+      .on(t.staffId, t.attendanceDate)
+      .where(sql`${t.staffId} IS NOT NULL`),
+    // Mirror for contractors — one record per contractor per day.
+    uqContractorDay: uniqueIndex('uq_attendance_contractor_day')
+      .on(t.contractorId, t.attendanceDate)
+      .where(sql`${t.contractorId} IS NOT NULL`),
   }),
 );

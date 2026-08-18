@@ -5,6 +5,7 @@ import { Modal } from '~/components/ui/modal';
 import type { OrderInvoice } from '~/features/orders/types';
 import { formatOrderNumber } from '@yannis/shared';
 import { Link, useFetcher, useLocation, useNavigation, useSearchParams } from '@remix-run/react';
+import { useFilterPreferences } from '~/hooks/useFilterPreferences';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -62,6 +63,9 @@ export interface DeliveryRemittanceListItem {
   outcomeReason?: string | null;
   receivedAt?: string | null;
   duplicateOrderCount?: number;
+  /** Frozen currency of the batch (single-currency per batch). NGN/absent → ₦. */
+  currencyCode?: string | null;
+  deliveryFeeTotal?: string | null;
 }
 
 export interface DeliveryRemittanceDetail extends DeliveryRemittanceListItem {
@@ -239,18 +243,25 @@ export function DeliveryRemittancesPage({
   // or the base currency). Passed to <NairaPrice> so the strip shows the right
   // symbol (e.g. GH₵) instead of always ₦ when a foreign currency is selected.
   const activeCurrencyCode = searchParams.get('currency') || baseCurrency.code;
+  const location = useLocation();
+  // Saved filter prefs for this page (same pageKey PageHeaderMobileTools derives
+  // from the pathname). Lets the base-default effect defer to a SAVED currency so
+  // "save filter" carrying a currency isn't clobbered by the default on mount.
+  const pageFilterKey = location.pathname.replace(/^\//, '').replace(/\//g, '.');
+  const { savedFilters } = useFilterPreferences(pageFilterKey);
+  const savedCurrency = savedFilters?.currency;
   // Never show a mixed-currency view: when the company has 2+ currencies and no
   // currency is chosen, default the URL to the base currency so every total and
-  // list on this financial page is single-currency from first paint. Single-
-  // currency companies are untouched (the filter self-hides, the param stays off).
+  // list on this financial page is single-currency from first paint. BUT if the
+  // user saved a currency filter, let the saved-prefs restore apply it instead of
+  // overwriting with base. Single-currency companies are untouched.
   useEffect(() => {
-    if (hasMultipleCurrencies && !searchParams.get('currency')) {
+    if (hasMultipleCurrencies && !searchParams.get('currency') && !savedCurrency) {
       const next = new URLSearchParams(searchParams);
       next.set('currency', baseCurrency.code);
       setSearchParams(next, { replace: true, preventScrollReset: true });
     }
-  }, [hasMultipleCurrencies, baseCurrency.code, searchParams, setSearchParams]);
-  const location = useLocation();
+  }, [hasMultipleCurrencies, baseCurrency.code, searchParams, setSearchParams, savedCurrency]);
   const navigation = useNavigation();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   // Also treat same-page navigation as loading so skeleton stays visible
@@ -498,6 +509,7 @@ export function DeliveryRemittancesPage({
         render: (r) => (
           <NairaPrice
             amount={Number(r.outcomeAmount ?? 0)}
+            currencyCode={r.currencyCode ?? activeCurrencyCode}
             className="text-sm font-medium text-app-fg tabular-nums"
           />
         ),
@@ -510,6 +522,7 @@ export function DeliveryRemittancesPage({
         render: (r) => (
           <NairaPrice
             amount={Number((r as any).deliveryFeeTotal ?? 0)}
+            currencyCode={r.currencyCode ?? activeCurrencyCode}
             className="text-sm tabular-nums text-app-fg-muted"
           />
         ),
@@ -571,7 +584,7 @@ export function DeliveryRemittancesPage({
         ),
       },
     ],
-    [userMap, remittanceDetailLinkState],
+    [userMap, remittanceDetailLinkState, page, pageSize, activeCurrencyCode],
   );
 
   const remittanceSelectedOrders = useMemo(() => {
@@ -1264,52 +1277,52 @@ export function DeliveryRemittancesPage({
             items={[
               {
                 label: <span className="flex items-center">Gross Order Value ({remittedCount})<RemittanceInfoIcon onClick={() => setInfoModal('gross')} /></span>,
-                value: <NairaPrice amount={grossVal} />,
+                value: <NairaPrice amount={grossVal} currencyCode={activeCurrencyCode} />,
                 valueClassName: 'text-app-fg tabular-nums',
                 onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('view', 'orders'); n.delete('deduction'); n.set('page', '1'); return n; }, { replace: true }); },
                 active: viewTab === 'remittances' && pendingStatus === 'RECEIVED' && !new URLSearchParams(location.search).get('deduction'),
               },
               {
                 label: `Delivery Fees (${Number(summary.deliveryFeeCount ?? 0)})`,
-                value: <NairaPrice amount={summary.totalDeliveryFees ?? '0'} />,
+                value: <NairaPrice amount={summary.totalDeliveryFees ?? '0'} currencyCode={activeCurrencyCode} />,
                 valueClassName: 'text-red-500 tabular-nums',
                 onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('view', 'orders'); n.set('deduction', 'deliveryFee'); n.set('page', '1'); return n; }, { replace: true }); },
                 active: new URLSearchParams(location.search).get('deduction') === 'deliveryFee',
               },
               {
                 label: `Commitment Fees (${Number(summary.commitmentFeeCount ?? 0)})`,
-                value: <NairaPrice amount={summary.totalCommitmentFees ?? '0'} />,
+                value: <NairaPrice amount={summary.totalCommitmentFees ?? '0'} currencyCode={activeCurrencyCode} />,
                 valueClassName: 'text-red-500 tabular-nums',
                 onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('view', 'orders'); n.set('deduction', 'commitmentFee'); n.set('page', '1'); return n; }, { replace: true }); },
                 active: new URLSearchParams(location.search).get('deduction') === 'commitmentFee',
               },
               {
                 label: `POS Fees (${Number(summary.posFeeCount ?? 0)})`,
-                value: <NairaPrice amount={summary.totalPosFees ?? '0'} />,
+                value: <NairaPrice amount={summary.totalPosFees ?? '0'} currencyCode={activeCurrencyCode} />,
                 valueClassName: 'text-red-500 tabular-nums',
                 onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('view', 'orders'); n.set('deduction', 'posFee'); n.set('page', '1'); return n; }, { replace: true }); },
                 active: new URLSearchParams(location.search).get('deduction') === 'posFee',
               },
               {
                 label: `Failed Delivery (${Number(summary.failedDeliveryCount ?? 0)})`,
-                value: <NairaPrice amount={summary.totalFailedDeliveryCosts ?? '0'} />,
+                value: <NairaPrice amount={summary.totalFailedDeliveryCosts ?? '0'} currencyCode={activeCurrencyCode} />,
                 valueClassName: 'text-red-500 tabular-nums',
                 onClick: () => { primeSamePathRefetch(); setSearchParams((p) => { const n = new URLSearchParams(p); n.set('tab', 'remittances'); n.set('status', 'RECEIVED'); n.set('view', 'orders'); n.set('deduction', 'failedDeliveryCost'); n.set('page', '1'); return n; }, { replace: true }); },
                 active: new URLSearchParams(location.search).get('deduction') === 'failedDeliveryCost',
               },
               {
                 label: `Discount (${Number((summary as unknown as Record<string, string>).discountCount ?? 0)})`,
-                value: <NairaPrice amount={(summary as unknown as Record<string, string>).totalDiscounts ?? '0'} />,
+                value: <NairaPrice amount={(summary as unknown as Record<string, string>).totalDiscounts ?? '0'} currencyCode={activeCurrencyCode} />,
                 valueClassName: 'text-red-500 tabular-nums',
               },
               {
                 label: `Waybill (${Number((summary as unknown as Record<string, string>).waybillCostCount ?? 0)})`,
-                value: <NairaPrice amount={(summary as unknown as Record<string, string>).totalWaybillCosts ?? '0'} />,
+                value: <NairaPrice amount={(summary as unknown as Record<string, string>).totalWaybillCosts ?? '0'} currencyCode={activeCurrencyCode} />,
                 valueClassName: 'text-red-500 tabular-nums',
               },
               {
                 label: <span className="flex items-center">Expected Net<RemittanceInfoIcon onClick={() => setInfoModal('net')} /></span>,
-                value: <NairaPrice amount={netRemittable} />,
+                value: <NairaPrice amount={netRemittable} currencyCode={activeCurrencyCode} />,
                 valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
               },
             ]}
@@ -1824,6 +1837,7 @@ export function DeliveryRemittancesPage({
                     <div className="shrink-0 text-right">
                       <NairaPrice
                         amount={Number(r.outcomeAmount ?? 0)}
+                        currencyCode={r.currencyCode ?? activeCurrencyCode}
                         className="text-sm font-semibold text-app-fg tabular-nums"
                       />
                       <p className="text-mini text-app-fg-muted">

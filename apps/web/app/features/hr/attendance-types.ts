@@ -19,7 +19,10 @@ export interface AttendanceSummaryCounts {
 }
 
 export interface AttendanceGridRow {
+  /** Party id: a users.id for staff, or a payroll_contractors.id when isContractor. */
   staffId: string;
+  /** True when this row is a contractor (marked via contractorId, not staffId). */
+  isContractor?: boolean;
   name: string;
   role: string;
   branchId: string | null;

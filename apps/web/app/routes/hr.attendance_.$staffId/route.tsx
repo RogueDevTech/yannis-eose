@@ -46,9 +46,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const month = monthFromDateFilter(url);
+  // When ?contractor=1, staffId is actually a payroll_contractors id — summarise
+  // it as a contractor (different table, no pay-role gating).
+  const isContractor = url.searchParams.get('contractor') === '1';
 
   const pageData = (async () => {
-    const inputEnc = encodeURIComponent(JSON.stringify({ month, staffId }));
+    const inputEnc = encodeURIComponent(
+      JSON.stringify(isContractor ? { month, contractorId: staffId } : { month, staffId }),
+    );
     const res = await apiRequest<unknown>(`/trpc/attendance.summary?input=${inputEnc}`, {
       method: 'GET',
       cookie,
@@ -66,6 +71,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       summary,
       canManage,
       month,
+      isContractor,
       startDate: url.searchParams.get('startDate') ?? `${month}-01`,
       endDate: url.searchParams.get('endDate') ?? `${month}-${String(daysInMonth(month)).padStart(2, '0')}`,
     };
@@ -82,10 +88,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
   const staffId = params.staffId!;
+  // The page echoes back whether this party is a contractor so the mutation
+  // targets the right column (staffId vs contractorId; XOR-enforced server-side).
+  const isContractor = formData.get('contractor')?.toString() === '1';
+  const partyField = isContractor ? 'contractorId' : 'staffId';
 
   if (intent === 'markAttendance') {
     const body: Record<string, unknown> = {
-      staffId,
+      [partyField]: staffId,
       attendanceDate: formData.get('attendanceDate')?.toString(),
       status: formData.get('status')?.toString(),
     };
@@ -106,7 +116,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   // employment window + today, and onlyBlank skipping).
   if (intent === 'markMonth') {
     const body: Record<string, unknown> = {
-      staffId,
+      [partyField]: staffId,
       startDate: formData.get('startDate')?.toString(),
       endDate: formData.get('endDate')?.toString(),
       status: formData.get('status')?.toString(),
@@ -130,7 +140,7 @@ export default function StaffAttendanceDetailRoute() {
   return (
     <CachedAwait resolve={pageData} fallback={<StaffAttendanceDetailLoadingShell />} loaderShell={{}} deferredKey="pageData">
       {(data) => (
-        <StaffAttendanceDetailPage summary={data.summary} canManage={data.canManage} month={data.month} startDate={data.startDate} endDate={data.endDate} />
+        <StaffAttendanceDetailPage summary={data.summary} canManage={data.canManage} month={data.month} startDate={data.startDate} endDate={data.endDate} isContractor={data.isContractor} />
       )}
     </CachedAwait>
   );

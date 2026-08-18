@@ -518,7 +518,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const primaryBranchId = formData.get('primaryBranchId')?.toString() ?? '';
     const nextPrimary = primaryBranchId || null;
     const prevPrimary = target.primaryBranchId ?? null;
-    if (nextPrimary !== prevPrimary && nextPrimary) {
+    // Send on any change, including clearing to null (org-wide reporting office
+    // being removed). Branch-eligible roles never submit an empty value here.
+    if (nextPrimary !== prevPrimary) {
       body.primaryBranchId = nextPrimary;
     }
   }

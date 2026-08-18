@@ -24,6 +24,11 @@ const PERSISTABLE_PARAMS = new Set([
   'sortBy',
   'sortOrder',
   'sortDir',
+  // Multi-currency: persist the chosen currency filter (order lists / finance)
+  // and the aggregate currency lens (dashboards), plus the finance date scope.
+  'currency',
+  'curLens',
+  'dateScope',
 ]);
 
 const LS_PREFIX = 'yannis:filters:';

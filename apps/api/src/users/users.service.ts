@@ -1873,9 +1873,20 @@ export class UsersService {
       .from(schema.userBranches)
       .where(eq(schema.userBranches.userId, input.userId));
     const existingBranchIds = [...new Set(existingMembershipRows.map((r) => r.branchId))];
+    // Org-wide roles carry NO branch memberships: their primaryBranchId is a
+    // reporting office (attendance/payroll home), not an operational branch. So
+    // it must NOT be folded into the membership list for these roles (mirrors the
+    // `roleNeedsBranch` gate in `createStaff`). Branch-eligible roles keep the
+    // old behaviour where the primary is always part of the assigned branches.
+    const effectiveRoleForBranch = input.role ?? beforeRow.role;
+    const roleNeedsBranchForMembership = BRANCH_ELIGIBLE_ROLES.has(effectiveRoleForBranch);
     const nextBranchIds =
       input.branchIds !== undefined ? [...new Set(input.branchIds)] : [...existingBranchIds];
-    if (input.primaryBranchId && !nextBranchIds.includes(input.primaryBranchId)) {
+    if (
+      roleNeedsBranchForMembership &&
+      input.primaryBranchId &&
+      !nextBranchIds.includes(input.primaryBranchId)
+    ) {
       nextBranchIds.push(input.primaryBranchId);
     }
     // Ensure per-group primaries are also in the branch list
