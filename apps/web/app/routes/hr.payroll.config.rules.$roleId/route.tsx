@@ -186,9 +186,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const sampleCpa = Number(formData.get('sampleCpa') ?? 0);
     const sampleDeliveredCount = Number(formData.get('sampleDeliveredCount') ?? 10);
     const sampleReturnedCount = Number(formData.get('sampleReturnedCount') ?? 0);
+    const sampleQualifyingRevenue = Number(formData.get('sampleQualifyingRevenue') ?? 0);
     const sampleTargetMet = formData.get('sampleTargetMet')?.toString() === 'true';
     const delivered = Number.isFinite(sampleDeliveredCount) ? Math.max(0, Math.floor(sampleDeliveredCount)) : 10;
     const returned = Number.isFinite(sampleReturnedCount) ? Math.max(0, Math.floor(sampleReturnedCount)) : 0;
+    const qualifyingRevenue = Number.isFinite(sampleQualifyingRevenue) ? Math.max(0, sampleQualifyingRevenue) : 0;
     const input = encodeURIComponent(
       JSON.stringify({
         formula,
@@ -199,6 +201,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
           deliveredCount: delivered,
           totalOrders: Math.max(delivered + returned, delivered || 1),
           returnedCount: returned,
+          qualifyingRevenue,
           targetMet: sampleTargetMet,
         },
       }),

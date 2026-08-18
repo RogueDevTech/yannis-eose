@@ -515,14 +515,6 @@ const navStructure: NavGroupDef[] = [
         roles: ['BRANCH_ADMIN'],
       },
       {
-        // Team-scoped, read-only attendance for CS managers (their squad only).
-        // The route also enforces the team-supervisor flag for non-HR roles.
-        label: 'Team Attendance',
-        href: '/hr/attendance/team',
-        icon: SidebarIcons.hr,
-        roles: ['HEAD_OF_CS'],
-      },
-      {
         label: 'Payroll Config',
         href: '/hr/payroll/config/roles',
         icon: SidebarIcons.settings,

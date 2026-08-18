@@ -89,6 +89,12 @@ export function DeliveryRemittanceDetailPage({
   const totalExtraCosts = commitmentFee + posFee + failedDeliveryCost + discountAmount + waybillAmount;
   const remittanceTotal = totalOrderAmount - totalDeliveryFees - totalExtraCosts;
 
+  // A remittance batch is single-currency (orders of differing currencies can't
+  // be batched together), so every batch-level total renders in the shared
+  // currency of its orders. Without this the totals fall back to ₦ even when
+  // the batch is in a foreign currency (e.g. TZS).
+  const batchCurrency = detail.orders.find((o) => o.currencyCode)?.currencyCode ?? undefined;
+
   const recordedByLabel =
     detail.sentByName?.trim() || userMap[detail.sentBy] || `${detail.sentBy.slice(0, 8)}…`;
 
@@ -239,7 +245,7 @@ export function DeliveryRemittanceDetailPage({
             <span className="text-app-fg-muted">·</span>
             <span>{detail.orders.length} order(s)</span>
             <span className="text-app-fg-muted">·</span>
-            <NairaPrice amount={remittanceTotal} className="font-semibold text-app-fg" />
+            <NairaPrice amount={remittanceTotal} currencyCode={batchCurrency} className="font-semibold text-app-fg" />
           </span>
         }
         actions={
@@ -355,17 +361,17 @@ export function DeliveryRemittanceDetailPage({
         ) : null}
         <div className="pt-2 border-t border-app-border flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <span className="text-lg font-bold text-brand-700 dark:text-brand-300 tabular-nums">
-            <NairaPrice amount={remittanceTotal} />
+            <NairaPrice amount={remittanceTotal} currencyCode={batchCurrency} />
           </span>
           {(totalDeliveryFees > 0 || totalExtraCosts > 0) ? (
             <span className="text-xs text-app-fg-muted tabular-nums">
-              <NairaPrice amount={totalOrderAmount} /> gross
-              {totalDeliveryFees > 0 && <> · -<NairaPrice amount={totalDeliveryFees} /> delivery</>}
-              {commitmentFee > 0 && <> · -<NairaPrice amount={commitmentFee} /> commitment</>}
-              {posFee > 0 && <> · -<NairaPrice amount={posFee} /> POS</>}
-              {failedDeliveryCost > 0 && <> · -<NairaPrice amount={failedDeliveryCost} /> failed</>}
-              {discountAmount > 0 && <> · -<NairaPrice amount={discountAmount} /> discount</>}
-              {waybillAmount > 0 && <> · -<NairaPrice amount={waybillAmount} /> waybill</>}
+              <NairaPrice amount={totalOrderAmount} currencyCode={batchCurrency} /> gross
+              {totalDeliveryFees > 0 && <> · -<NairaPrice amount={totalDeliveryFees} currencyCode={batchCurrency} /> delivery</>}
+              {commitmentFee > 0 && <> · -<NairaPrice amount={commitmentFee} currencyCode={batchCurrency} /> commitment</>}
+              {posFee > 0 && <> · -<NairaPrice amount={posFee} currencyCode={batchCurrency} /> POS</>}
+              {failedDeliveryCost > 0 && <> · -<NairaPrice amount={failedDeliveryCost} currencyCode={batchCurrency} /> failed</>}
+              {discountAmount > 0 && <> · -<NairaPrice amount={discountAmount} currencyCode={batchCurrency} /> discount</>}
+              {waybillAmount > 0 && <> · -<NairaPrice amount={waybillAmount} currencyCode={batchCurrency} /> waybill</>}
             </span>
           ) : null}
           <span className="text-xs text-brand-500 dark:text-brand-400">

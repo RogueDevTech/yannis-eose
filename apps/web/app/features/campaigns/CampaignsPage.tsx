@@ -16,6 +16,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
+import { currencyColorForCode, symbolForCurrencyCode } from '@yannis/shared';
 import type { Campaign, CampaignFormConfig, FormsPageProps } from './types';
 
 function isOptionOn(value: boolean | string | undefined): boolean {
@@ -24,12 +25,14 @@ function isOptionOn(value: boolean | string | undefined): boolean {
 
 function FormOptionsSummary({
   config,
-  currencySymbols,
+  currencyCodes,
 }: {
   config: CampaignFormConfig | null;
-  /** Currency symbols this form's offer is priced in (e.g. ['₦','GH₵']). */
-  currencySymbols?: string[];
+  /** Currency CODES this form's offer is priced in (e.g. ['NGN','TZS']). The chip
+   *  resolves each code's symbol + accent colour from the live catalog. */
+  currencyCodes?: string[];
 }) {
+  const currenciesCatalog = useCurrenciesCatalog();
   if (!config) return null;
 
   const hasCustomText =
@@ -44,9 +47,9 @@ function FormOptionsSummary({
     { label: 'Payment method', on: isOptionOn(config.showPaymentMethod) },
   ].filter((f) => f.on);
 
-  // Currency badge — the caller decides the set: one symbol when the form is
+  // Currency badge — the caller decides the set: one code when the form is
   // locked to a single currency, all when it lets customers choose.
-  const showCurrencies = (currencySymbols?.length ?? 0) >= 1;
+  const showCurrencies = (currencyCodes?.length ?? 0) >= 1;
 
   if (!hasCustomText && optionalFields.length === 0 && !showCurrencies) return null;
 
@@ -94,23 +97,36 @@ function FormOptionsSummary({
           ))}
           {showCurrencies &&
             (() => {
-              const multi = currencySymbols!.length > 1;
-              return (
-                <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold ${
-                    multi
-                      ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                      : 'bg-app-hover text-app-fg-muted'
-                  }`}
-                  title={
-                    multi
-                      ? 'Customers can choose their currency on this form'
-                      : 'This form is priced in a single currency'
-                  }
-                >
-                  {currencySymbols!.join(' / ')}
-                </span>
-              );
+              const multi = currencyCodes!.length > 1;
+              // One chip per currency, tinted with that currency's accent colour
+              // (null for the base currency → neutral). Foreign currencies (e.g.
+              // TZS) stand out in their own colour instead of the generic grey.
+              return currencyCodes!.map((code) => {
+                const color = currencyColorForCode(currenciesCatalog, code);
+                // Prefer the catalog's configured symbol; fall back to the static
+                // ISO-symbol lookup for any code not in the live catalog.
+                const symbol =
+                  currenciesCatalog.find((cc) => cc.code.toUpperCase() === code.toUpperCase())?.symbol ??
+                  symbolForCurrencyCode(code);
+                return (
+                  <span
+                    key={code}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold ${
+                      color ? '' : 'bg-app-hover text-app-fg-muted'
+                    }`}
+                    // Foreign currency → tint bg + text with its accent colour;
+                    // base currency (color null) keeps the neutral classes above.
+                    style={color ? { backgroundColor: `${color}22`, color } : undefined}
+                    title={
+                      multi
+                        ? 'Customers can choose their currency on this form'
+                        : 'This form is priced in a single currency'
+                    }
+                  >
+                    {symbol}
+                  </span>
+                );
+              });
             })()}
         </div>
       )}
@@ -163,12 +179,10 @@ export function FormsPage({
   // Map each offer group → the currency SYMBOLS it's priced in (base always +
   // any per-currency prices). Used to badge multi-currency forms on the cards.
   const baseCurr = currenciesCatalog.find((c) => c.isDefault && c.active) ?? currenciesCatalog[0];
-  const symbolByCode = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const c of currenciesCatalog) m.set(c.code.toUpperCase(), c.symbol);
-    return m;
-  }, [currenciesCatalog]);
-  const offerGroupCurrencySymbols = useMemo(() => {
+  // Per offer group: the set of currency CODES it is priced in (base + any
+  // priced foreign currency). Codes (not just symbols) so the card can tint each
+  // currency chip with its accent colour.
+  const offerGroupCurrencyCodes = useMemo(() => {
     const baseCode = (baseCurr?.code ?? 'NGN').toUpperCase();
     const out = new Map<string, string[]>();
     for (const g of offerGroups) {
@@ -178,10 +192,10 @@ export function FormsPage({
           if (Number(v) > 0) codes.add(code.toUpperCase());
         }
       }
-      out.set(g.id, [...codes].map((code) => symbolByCode.get(code) ?? code));
+      out.set(g.id, [...codes]);
     }
     return out;
-  }, [offerGroups, symbolByCode, baseCurr]);
+  }, [offerGroups, baseCurr]);
   const tabParam = searchParams.get('tab');
   /** URL: no/`all` → all forms (non-MB); `mine` → my forms. */
   const navFormsScope: 'all' | 'mine' = isMediaBuyer || tabParam === 'mine' ? 'mine' : 'all';
@@ -553,19 +567,18 @@ export function FormsPage({
               // Currencies to badge on the card:
               //  - Form NOT locked (allowMultiCurrency ON) → show ALL offer currencies.
               //  - Form locked to one currency → show only that one (pinned, or base).
-              const offerSymbols = c.offerGroupId
-                ? offerGroupCurrencySymbols.get(c.offerGroupId) ?? []
+              const offerCodes = c.offerGroupId
+                ? offerGroupCurrencyCodes.get(c.offerGroupId) ?? []
                 : [];
               const allowMulti = isOptionOn(
                 (c.formConfig as { allowMultiCurrency?: boolean | string } | null)?.allowMultiCurrency,
               );
               const pinned = (c.formConfig as { pinnedCurrency?: string } | null)?.pinnedCurrency;
-              const lockedSymbol =
-                (pinned && symbolByCode.get(pinned.toUpperCase())) ||
-                symbolByCode.get((baseCurr?.code ?? 'NGN').toUpperCase()) ||
-                '₦';
-              const cardCurrencySymbols = allowMulti ? offerSymbols : [lockedSymbol];
-              const hasCurrencyBadge = cardCurrencySymbols.length >= 1;
+              const lockedCode = (pinned || baseCurr?.code || 'NGN').toUpperCase();
+              // Currency CODES for this card — one when locked, all priced when the
+              // form lets customers choose. Codes let the chip resolve symbol + colour.
+              const cardCurrencyCodes = allowMulti ? offerCodes : [lockedCode];
+              const hasCurrencyBadge = cardCurrencyCodes.length >= 1;
               const hasFormOptions =
                 !!c.formConfig &&
                 (c.formConfig.heading ||
@@ -583,7 +596,7 @@ export function FormsPage({
               return (
                 <div className="mb-4 pt-3 border-t border-app-border">
                   <p className="text-xs font-medium text-app-fg-muted dark:text-app-fg-muted uppercase tracking-wider mb-2">Form options</p>
-                  <FormOptionsSummary config={c.formConfig} currencySymbols={cardCurrencySymbols} />
+                  <FormOptionsSummary config={c.formConfig} currencyCodes={cardCurrencyCodes} />
                 </div>
               );
             })()}

@@ -66,22 +66,36 @@ export const attendanceGridSchema = z.object({
 });
 export type AttendanceGridInput = z.infer<typeof attendanceGridSchema>;
 
-/** Mark (upsert) one staff/day cell. HR only. */
-export const markAttendanceSchema = z.object({
-  staffId: z.string().uuid(),
-  attendanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
-  status: attendanceStatusSchema,
-  remark: z.string().trim().max(500).optional(),
-});
+/** Mark (upsert) one staff-or-contractor/day cell. HR only. Exactly one party. */
+export const markAttendanceSchema = z
+  .object({
+    staffId: z.string().uuid().optional(),
+    /** Set instead of staffId to mark a contractor's cell (payroll_contractors id). */
+    contractorId: z.string().uuid().optional(),
+    attendanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+    status: attendanceStatusSchema,
+    remark: z.string().trim().max(500).optional(),
+  })
+  .refine((v) => (v.staffId ? 1 : 0) + (v.contractorId ? 1 : 0) === 1, {
+    message: 'Provide exactly one of staffId or contractorId',
+    path: ['staffId'],
+  });
 export type MarkAttendanceInput = z.infer<typeof markAttendanceSchema>;
 
-/** Bulk-mark one day for many staff at once (HR). */
-export const markAttendanceBulkSchema = z.object({
-  staffIds: z.array(z.string().uuid()).min(1).max(500),
-  attendanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
-  status: attendanceStatusSchema,
-  remark: z.string().trim().max(500).optional(),
-});
+/** Bulk-mark one day for many staff and/or contractors at once (HR). */
+export const markAttendanceBulkSchema = z
+  .object({
+    staffIds: z.array(z.string().uuid()).max(500).optional(),
+    /** Contractor ids to mark alongside (or instead of) staffIds. */
+    contractorIds: z.array(z.string().uuid()).max(500).optional(),
+    attendanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+    status: attendanceStatusSchema,
+    remark: z.string().trim().max(500).optional(),
+  })
+  .refine((v) => (v.staffIds?.length ?? 0) + (v.contractorIds?.length ?? 0) >= 1, {
+    message: 'Provide at least one staff or contractor id',
+    path: ['staffIds'],
+  });
 export type MarkAttendanceBulkInput = z.infer<typeof markAttendanceBulkSchema>;
 
 /**
@@ -90,7 +104,9 @@ export type MarkAttendanceBulkInput = z.infer<typeof markAttendanceBulkSchema>;
  */
 export const markAttendanceRangeSchema = z
   .object({
-    staffId: z.string().uuid(),
+    staffId: z.string().uuid().optional(),
+    /** Set instead of staffId to mark a contractor's range. */
+    contractorId: z.string().uuid().optional(),
     startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
     endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
     status: attendanceStatusSchema,
@@ -98,23 +114,21 @@ export const markAttendanceRangeSchema = z
     /** When true, only fill days with no existing record. */
     onlyBlank: z.boolean().optional(),
   })
-  .refine((v) => v.startDate <= v.endDate, { message: 'startDate must be on or before endDate', path: ['endDate'] });
+  .refine((v) => v.startDate <= v.endDate, { message: 'startDate must be on or before endDate', path: ['endDate'] })
+  .refine((v) => (v.staffId ? 1 : 0) + (v.contractorId ? 1 : 0) === 1, {
+    message: 'Provide exactly one of staffId or contractorId',
+    path: ['staffId'],
+  });
 export type MarkAttendanceRangeInput = z.infer<typeof markAttendanceRangeSchema>;
 
-/** Monthly summary for one staff member (staff self-view or HR). */
+/** Monthly summary for one staff member or contractor (staff self-view or HR). */
 export const attendanceSummarySchema = z.object({
   month: monthSchema,
   staffId: z.string().uuid().optional(), // omitted → self
+  /** Set instead of staffId to view a contractor's monthly summary (HR only). */
+  contractorId: z.string().uuid().optional(),
 });
 export type AttendanceSummaryInput = z.infer<typeof attendanceSummarySchema>;
-
-/** Team attendance summary for a supervisor (CS manager). */
-export const teamAttendanceSummarySchema = z.object({
-  month: monthSchema,
-  // Branch whose CS team to scope to. Omitted → the caller's current branch.
-  branchId: z.string().uuid().optional(),
-});
-export type TeamAttendanceSummaryInput = z.infer<typeof teamAttendanceSummarySchema>;
 
 /** Save a pay role's attendance config. */
 export const savePayRoleAttendanceConfigSchema = z.object({

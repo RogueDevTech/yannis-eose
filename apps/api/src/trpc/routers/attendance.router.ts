@@ -4,7 +4,6 @@ import {
   markAttendanceBulkSchema,
   markAttendanceRangeSchema,
   attendanceSummarySchema,
-  teamAttendanceSummarySchema,
   savePayRoleAttendanceConfigSchema,
   setUserAttendanceOverrideSchema,
   attendancePolicySchema,
@@ -71,28 +70,6 @@ export const attendanceRouter = router({
         );
       }
       return getAttendanceService().summary(input, ctx.user, ctx.effectiveBranchIds, viaSupervisor);
-    }),
-
-  /**
-   * Team attendance summary for a CS manager (doc §1): each supervised CS staff
-   * member's monthly present/absent/sick/off totals + "in payroll?" status. Scoped
-   * to the caller's own CS team (explicit squad membership) — no broad attendance
-   * permission needed. Returns [] for non-supervisors.
-   */
-  teamSummary: authedProcedure
-    .input(teamAttendanceSummarySchema)
-    .query(async ({ input, ctx }) => {
-      const branchId = input.branchId ?? ctx.currentBranchId;
-      if (!branchId) return [];
-      const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, branchId);
-      // Only the CS-lane supervisees (exclude the supervisor's own row from the list).
-      const teamIds = scope.csUserIds.filter((id) => id !== ctx.user.id);
-      if (teamIds.length === 0) return [];
-      return getAttendanceService().teamMonthlySummary(
-        teamIds,
-        input.month,
-        ctx.effectiveBranchIds,
-      );
     }),
 
   /** Save a pay role's attendance config (bands + on/off). */

@@ -7,6 +7,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { CompactTable } from '~/components/ui/compact-table';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { useFetcherToast } from '~/components/ui/toast';
 import { AFRICAN_COUNTRY_CURRENCIES, AFRICAN_CURRENCY_CODES, currencyForCountry } from '@yannis/shared';
 import type { CurrencyRow } from '~/lib/currencies.server';
@@ -45,6 +46,8 @@ export function CurrenciesSettingsPage({ currencies }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<CurrencyRow | null>(null);
   const [fxFor, setFxFor] = useState<CurrencyRow | null>(null);
+  // Activate/Deactivate goes through a confirmation modal.
+  const [toggleTarget, setToggleTarget] = useState<CurrencyRow | null>(null);
 
   const base = currencies.find((c) => c.isDefault);
 
@@ -54,6 +57,7 @@ export function CurrenciesSettingsPage({ currencies }: Props) {
       setAddOpen(false);
       setEditing(null);
       setFxFor(null);
+      setToggleTarget(null);
     }
   }, [fetcher.state, fetcher.data]);
 
@@ -131,14 +135,9 @@ export function CurrenciesSettingsPage({ currencies }: Props) {
                   <Button variant="ghost" size="sm" onClick={() => setFxFor(c)}>
                     FX rate
                   </Button>
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="intent" value="toggleActive" />
-                    <input type="hidden" name="id" value={c.id} />
-                    <input type="hidden" name="active" value={c.active ? 'false' : 'true'} />
-                    <Button type="submit" variant="ghost" size="sm">
-                      {c.active ? 'Deactivate' : 'Activate'}
-                    </Button>
-                  </fetcher.Form>
+                  <Button variant="ghost" size="sm" onClick={() => setToggleTarget(c)}>
+                    {c.active ? 'Deactivate' : 'Activate'}
+                  </Button>
                 </div>
               ),
           },
@@ -169,6 +168,34 @@ export function CurrenciesSettingsPage({ currencies }: Props) {
           />
         )}
       </Modal>
+
+      {/* Activate / Deactivate confirmation */}
+      <ConfirmActionModal
+        open={toggleTarget != null}
+        onClose={() => setToggleTarget(null)}
+        title={toggleTarget?.active ? 'Deactivate currency' : 'Activate currency'}
+        description={
+          toggleTarget
+            ? toggleTarget.active
+              ? `Deactivate ${toggleTarget.symbol} ${toggleTarget.code}? It stops appearing in currency dropdowns and new records, but existing ${toggleTarget.code} orders and totals stay valid.`
+              : `Activate ${toggleTarget.symbol} ${toggleTarget.code}? It becomes selectable again in currency dropdowns and on new records.`
+            : ''
+        }
+        confirmLabel={toggleTarget?.active ? 'Deactivate' : 'Activate'}
+        variant={toggleTarget?.active ? 'danger' : 'warning'}
+        loading={fetcher.state === 'submitting'}
+        onConfirm={() => {
+          if (!toggleTarget) return;
+          fetcher.submit(
+            {
+              intent: 'toggleActive',
+              id: toggleTarget.id,
+              active: toggleTarget.active ? 'false' : 'true',
+            },
+            { method: 'post' },
+          );
+        }}
+      />
 
       {/* Set FX rate */}
       <Modal open={fxFor != null} onClose={() => setFxFor(null)}>

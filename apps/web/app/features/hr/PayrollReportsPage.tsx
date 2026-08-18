@@ -250,6 +250,19 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
     );
   };
 
+  // The PAYE remittance + reconciliation schedules are single-month documents, so
+  // the loader only fetches them when a single month is selected. When it hasn't
+  // (the page defaults to "All time"), the buttons are disabled — surface WHY so
+  // it doesn't read as a dead control. A single calendar month is selected when
+  // startDate and endDate fall in the same YYYY-MM.
+  const singleMonthSelected =
+    !filters.periodAllTime &&
+    /^\d{4}-\d{2}-\d{2}$/.test(filters.startDate) &&
+    filters.startDate.slice(0, 7) === filters.endDate.slice(0, 7);
+  const monthExportHint = singleMonthSelected
+    ? undefined
+    : 'Select a single month with the date filter to export the PAYE remittance schedule.';
+
   const remittanceDisabled = !payeRemittance || !payeRemittance.rows?.length;
 
   const handleExportRemittance = () => {
@@ -325,6 +338,7 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
                   size="sm"
                   onClick={handleExportRemittance}
                   disabled={remittanceDisabled}
+                  title={remittanceDisabled ? monthExportHint : undefined}
                 >
                   PAYE Remittance
                 </Button>
@@ -333,6 +347,7 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
                   size="sm"
                   onClick={handleExportReconciliation}
                   disabled={reconciliationDisabled}
+                  title={reconciliationDisabled ? monthExportHint : undefined}
                 >
                   Reconciliation
                 </Button>
@@ -376,6 +391,9 @@ export function PayrollReportsPage({ rows, costByBranch, costByRole, trend, bran
                 >
                   Reconciliation
                 </Button>
+                {monthExportHint && (remittanceDisabled || reconciliationDisabled) ? (
+                  <p className="px-1 pt-1 text-xs text-app-fg-muted">{monthExportHint}</p>
+                ) : null}
               </div>
             )}
           />

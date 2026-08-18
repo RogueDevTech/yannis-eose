@@ -149,7 +149,7 @@ export function CompareButton({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-3">
             <div>
               <label className="mb-1 block text-sm font-medium text-app-fg-muted">
                 {granularity === 'day' ? 'First day' : 'First month'}
@@ -179,16 +179,22 @@ export function CompareButton({
             <label className="mb-1 block text-sm font-medium text-app-fg-muted">
               Time window <span className="text-2xs font-normal text-app-fg-muted">(optional; leave blank for full day)</span>
             </label>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex items-center gap-1.5">
-                <TextInput type="time" value={timeAFrom} onChange={(e) => setTimeAFrom(e.target.value)} aria-label="First period from time" />
-                <span className="text-xs text-app-fg-muted">to</span>
-                <TextInput type="time" value={timeATo} onChange={(e) => setTimeATo(e.target.value)} aria-label="First period to time" />
+            <div className="space-y-2">
+              <div>
+                <span className="mb-1 block text-2xs font-medium text-app-fg-muted">First period</span>
+                <div className="flex items-center gap-1.5">
+                  <TextInput type="time" value={timeAFrom} onChange={(e) => setTimeAFrom(e.target.value)} aria-label="First period from time" />
+                  <span className="text-xs text-app-fg-muted">to</span>
+                  <TextInput type="time" value={timeATo} onChange={(e) => setTimeATo(e.target.value)} aria-label="First period to time" />
+                </div>
               </div>
-              <div className="flex items-center gap-1.5">
-                <TextInput type="time" value={timeBFrom} onChange={(e) => setTimeBFrom(e.target.value)} aria-label="Second period from time" />
-                <span className="text-xs text-app-fg-muted">to</span>
-                <TextInput type="time" value={timeBTo} onChange={(e) => setTimeBTo(e.target.value)} aria-label="Second period to time" />
+              <div>
+                <span className="mb-1 block text-2xs font-medium text-app-fg-muted">Second period</span>
+                <div className="flex items-center gap-1.5">
+                  <TextInput type="time" value={timeBFrom} onChange={(e) => setTimeBFrom(e.target.value)} aria-label="Second period from time" />
+                  <span className="text-xs text-app-fg-muted">to</span>
+                  <TextInput type="time" value={timeBTo} onChange={(e) => setTimeBTo(e.target.value)} aria-label="Second period to time" />
+                </div>
               </div>
             </div>
           </div>
@@ -209,7 +215,7 @@ export function CompareButton({
                   {allMetrics ? 'Clear all' : 'Select all'}
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-1.5 rounded-lg border border-app-border p-2 max-h-44 overflow-y-auto">
+              <div className="flex flex-col gap-1.5 rounded-lg border border-app-border p-2 max-h-44 overflow-y-auto">
                 {metricOptions.map((m) => (
                   <label
                     key={m.key}

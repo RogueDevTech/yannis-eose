@@ -442,6 +442,19 @@ export function UserCreatePage({
   const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>(
     editingUser?.branchIds ?? [],
   );
+  // Reporting office for org-wide roles. These roles operate company-wide but
+  // still clock in at a physical office, so we tie them to a branch for
+  // attendance/payroll purposes ONLY: it sets users.primary_branch_id without
+  // creating a branch membership (the backend skips memberships for these roles).
+  // Only seed from the existing primary when the user is ALREADY org-wide —
+  // for a branch-eligible user, primaryBranchId is a membership primary, not a
+  // reporting office, and must not pre-fill this field (it would mislead an
+  // admin who switches the role to org-wide in this same form).
+  const [reportingBranchId, setReportingBranchId] = useState<string>(
+    editingUser && !BRANCH_ELIGIBLE_ROLES.has(editingUser.role)
+      ? editingUser.primaryBranchId ?? ''
+      : '',
+  );
   /**
    * True only for roles that the backend's `branches.assignUser` accepts —
    * Marketing, CS, and Branch Admin. Org-wide roles (Finance, Stock Manager,
@@ -905,7 +918,7 @@ export function UserCreatePage({
         <input
           type="hidden"
           name="primaryBranchId"
-          value={roleNeedsBranch ? selectedBranchId : ''}
+          value={roleNeedsBranch ? selectedBranchId : reportingBranchId}
         />
         {roleNeedsBranch && hasMultiGroupSelection && (
           <input
@@ -1147,6 +1160,31 @@ export function UserCreatePage({
               <div className="sm:col-span-2 rounded-md border border-app-border bg-app-hover/60 px-3 py-2 text-xs text-app-fg-muted">
                 <span className="font-medium text-app-fg">{formatRole(selectedRole)}</span> is an
                 {' '}org-wide role — branch assignment is not required. They have visibility across every branch.
+              </div>
+            ) : null}
+
+            {/* Reporting office — org-wide roles operate company-wide but still
+                report to a physical office. This ties them to a branch for
+                attendance and payroll only; it does not restrict their scope. */}
+            {!roleNeedsBranch && selectedRole && activeBranches.length > 0 ? (
+              <div className="sm:col-span-2 space-y-1.5">
+                <SearchableSelect
+                  id="reportingBranchId"
+                  label="Reporting office"
+                  clearable
+                  placeholder="Select reporting office"
+                  searchPlaceholder="Search offices..."
+                  value={reportingBranchId}
+                  onChange={setReportingBranchId}
+                  options={activeBranches.map((branch: UserCreateBranch) => ({
+                    value: branch.id,
+                    label: branch.name,
+                    description: branch.code,
+                  }))}
+                />
+                <p className="text-xs text-app-fg-muted">
+                  The office this staff clocks in at, for attendance. Their access stays company-wide.
+                </p>
               </div>
             ) : null}
 

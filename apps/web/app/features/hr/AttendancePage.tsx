@@ -413,6 +413,12 @@ export function AttendancePage({ grid, policy, canManage, canConfigure, month, s
     );
   }
 
+  // Detail-page link. Contractors carry ?contractor=1 so the detail loader/action
+  // resolve them via contractorId (they live on payroll_contractors, not users).
+  function detailHref(row: AttendanceGridRow): string {
+    return row.isContractor ? `/hr/attendance/${row.staffId}?contractor=1` : `/hr/attendance/${row.staffId}`;
+  }
+
   // ── Cell helpers ─────────────────────────────────────────────
   function statusFor(row: AttendanceGridRow, day: number): CellStatus {
     const key = `${month}-${String(day).padStart(2, '0')}`;
@@ -465,6 +471,12 @@ export function AttendancePage({ grid, policy, canManage, canConfigure, month, s
 
   const staff = grid?.staff ?? [];
   const allSelected = staff.length > 0 && staff.every((s) => selected.has(s.staffId));
+  // Party ids that belong to contractors — bulk mark routes these to
+  // `contractorIds` (not `staffIds`) since the two are stored on different tables.
+  const contractorIdSet = useMemo(
+    () => new Set(staff.filter((s) => s.isContractor).map((s) => s.staffId)),
+    [staff],
+  );
 
   function toggleAll() {
     setSelected(allSelected ? new Set() : new Set(staff.map((s) => s.staffId)));
@@ -531,6 +543,7 @@ export function AttendancePage({ grid, policy, canManage, canConfigure, month, s
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate font-medium text-app-fg">{row.name}</span>
+            {row.isContractor && <StatusBadge status="Contractor" variant="info" size="sm" pill />}
             {row.baseAtRisk && <StatusBadge status="At risk" variant="danger" size="sm" pill label={`-${row.deductionPercent}%`} />}
           </div>
           <div className="mt-1">
@@ -554,7 +567,7 @@ export function AttendancePage({ grid, policy, canManage, canConfigure, month, s
         {content}
       </button>
     ) : (
-      <Link to={`/hr/attendance/${row.staffId}`} className="block">
+      <Link to={detailHref(row)} className="block">
         {content}
       </Link>
     );
@@ -592,6 +605,7 @@ export function AttendancePage({ grid, policy, canManage, canConfigure, month, s
         render: (row) => (
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate font-medium text-app-fg">{row.name}</span>
+            {row.isContractor && <StatusBadge status="Contractor" variant="info" size="sm" pill />}
             {row.baseAtRisk && (
               <StatusBadge status="At risk" variant="danger" size="sm" pill label={`-${row.deductionPercent}% base`} />
             )}
@@ -685,7 +699,7 @@ export function AttendancePage({ grid, policy, canManage, canConfigure, month, s
       tight: true,
       render: (row) => (
         <Link
-          to={`/hr/attendance/${row.staffId}`}
+          to={detailHref(row)}
           className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
         >
           View
@@ -1011,7 +1025,11 @@ export function AttendancePage({ grid, policy, canManage, canConfigure, month, s
         {editing && (
           <markFetcher.Form method="post" className="space-y-5 p-5 sm:p-6">
             <input type="hidden" name="intent" value="markAttendance" />
-            <input type="hidden" name="staffId" value={editing.row.staffId} />
+            {editing.row.isContractor ? (
+              <input type="hidden" name="contractorId" value={editing.row.staffId} />
+            ) : (
+              <input type="hidden" name="staffId" value={editing.row.staffId} />
+            )}
             <input type="hidden" name="attendanceDate" value={editing.date} />
             <div>
               <h2 className="text-base font-semibold text-app-fg">{editing.row.name}</h2>
@@ -1060,7 +1078,8 @@ export function AttendancePage({ grid, policy, canManage, canConfigure, month, s
           key={`${bulkOpen}-${selectedDay}`}
           fetcher={bulkFetcher}
           count={selected.size}
-          staffIds={[...selected]}
+          staffIds={[...selected].filter((id) => !contractorIdSet.has(id))}
+          contractorIds={[...selected].filter((id) => contractorIdSet.has(id))}
           month={month}
           maxDay={grid?.days ?? 31}
           initialDay={selectedDay}
@@ -1173,6 +1192,7 @@ function BulkMarkForm({
   fetcher,
   count,
   staffIds,
+  contractorIds,
   month,
   maxDay,
   initialDay,
@@ -1181,6 +1201,7 @@ function BulkMarkForm({
   fetcher: ReturnType<typeof useFetcher<{ success?: boolean; error?: string }>>;
   count: number;
   staffIds: string[];
+  contractorIds: string[];
   month: string;
   maxDay: number;
   /** Default day = the day the page is currently viewing. */
@@ -1195,6 +1216,7 @@ function BulkMarkForm({
     <fetcher.Form method="post" className="space-y-5 p-5 sm:p-6">
       <input type="hidden" name="intent" value="markAttendanceBulk" />
       <input type="hidden" name="staffIds" value={staffIds.join(',')} />
+      <input type="hidden" name="contractorIds" value={contractorIds.join(',')} />
       <input type="hidden" name="attendanceDate" value={date} />
       <div>
         <h2 className="text-base font-semibold text-app-fg">Bulk mark attendance</h2>

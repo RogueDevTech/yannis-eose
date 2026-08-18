@@ -95,6 +95,7 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
           sampleCpa: String(samples.cpa),
           sampleDeliveredCount: String(samples.deliveredCount),
           sampleReturnedCount: String(samples.returnedCount),
+          sampleQualifyingRevenue: String(samples.qualifyingRevenue),
           sampleTargetMet: samples.targetMet ? 'true' : 'false',
         },
         { method: 'post' },

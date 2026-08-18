@@ -40,9 +40,9 @@ function MetricSelect({
 }
 
 const BONUS_GRID =
-  'grid grid-cols-[1.25rem_minmax(11rem,1.5fr)_minmax(7.5rem,1fr)_4.5rem_minmax(6.5rem,0.9fr)_minmax(7rem,1fr)_1.5rem] gap-x-2 gap-y-1.5 items-center';
+  'grid grid-cols-[1.25rem_minmax(11rem,1.5fr)_minmax(7.5rem,1fr)_minmax(6.5rem,0.9fr)_minmax(6.5rem,0.9fr)_minmax(7rem,1fr)_1.5rem] gap-x-2 gap-y-1.5 items-center';
 const BASE_GRID =
-  'grid grid-cols-[1.25rem_minmax(11rem,1.5fr)_minmax(7.5rem,1fr)_4.5rem_minmax(7rem,1fr)_1.5rem] gap-x-2 gap-y-1.5 items-center';
+  'grid grid-cols-[1.25rem_minmax(11rem,1.5fr)_minmax(7.5rem,1fr)_minmax(6.5rem,0.9fr)_minmax(7rem,1fr)_1.5rem] gap-x-2 gap-y-1.5 items-center';
 
 const OPERATOR_OPTIONS = [
   { value: 'GTE', label: 'At least (≥)' },
@@ -188,6 +188,7 @@ export interface FormulaPreviewSamples {
   cpa: number;
   deliveredCount: number;
   returnedCount: number;
+  qualifyingRevenue: number;
   targetMet: boolean;
 }
 
@@ -243,6 +244,7 @@ export function PayrollFormulaTierBuilder({
   const [sampleCpa, setSampleCpa] = useState('10000');
   const [sampleDelivered, setSampleDelivered] = useState('10');
   const [sampleReturned, setSampleReturned] = useState('1');
+  const [sampleQualifyingRevenue, setSampleQualifyingRevenue] = useState('4000000');
   const [sampleTargetMet, setSampleTargetMet] = useState(true);
 
   const formula = useMemo((): PayrollFormula => {
@@ -261,9 +263,10 @@ export function PayrollFormulaTierBuilder({
       cpa: Number(sampleCpa) || 0,
       deliveredCount: Number(sampleDelivered) || 0,
       returnedCount: Number(sampleReturned) || 0,
+      qualifyingRevenue: Number(sampleQualifyingRevenue) || 0,
       targetMet: sampleTargetMet,
     }),
-    [sampleDr, sampleTeamDr, sampleCpa, sampleDelivered, sampleReturned, sampleTargetMet],
+    [sampleDr, sampleTeamDr, sampleCpa, sampleDelivered, sampleReturned, sampleQualifyingRevenue, sampleTargetMet],
   );
 
   /** Which sample inputs to show: driven only by metrics/kinds currently on the form. */
@@ -286,6 +289,9 @@ export function PayrollFormulaTierBuilder({
       // Delivered-order count input is relevant both for PER_ORDER bonus math
       // and for any tier gated on the DELIVERED_COUNT metric.
       delivered: bonusTiers.some((t) => t.kind === 'PER_ORDER') || usedMetrics.has('DELIVERED_COUNT'),
+      // Qualifying revenue (delivered + remitted) input — shown when a base or
+      // bonus tier is gated on the QUALIFYING_REVENUE metric (revenue tiers).
+      qualifyingRevenue: usedMetrics.has('QUALIFYING_REVENUE'),
       returned: Number(penaltyPerReturn) > 0,
     };
   }, [baseTiers, bonusTiers, penaltyPerReturn]);
@@ -604,13 +610,15 @@ export function PayrollFormulaTierBuilder({
               />
             )}
             {sampleFields.cpa && (
-              <TextInput
-                label="Sample CPA (NGN)"
-                type="number"
-                min={0}
-                value={sampleCpa}
-                onChange={(e) => setSampleCpa(e.target.value)}
-              />
+              <div>
+                <label className="mb-1 block text-sm font-medium text-app-fg-muted">Sample CPA (NGN)</label>
+                <AmountInput
+                  prefix="NGN"
+                  className="input w-full"
+                  value={sampleCpa}
+                  onChange={(v) => setSampleCpa(v)}
+                />
+              </div>
             )}
             {sampleFields.delivered && (
               <TextInput
@@ -620,6 +628,17 @@ export function PayrollFormulaTierBuilder({
                 value={sampleDelivered}
                 onChange={(e) => setSampleDelivered(e.target.value)}
               />
+            )}
+            {sampleFields.qualifyingRevenue && (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-app-fg-muted">Sample qualifying revenue (NGN)</label>
+                <AmountInput
+                  prefix="NGN"
+                  className="input w-full"
+                  value={sampleQualifyingRevenue}
+                  onChange={(v) => setSampleQualifyingRevenue(v)}
+                />
+              </div>
             )}
             {sampleFields.returned && (
               <TextInput
@@ -645,6 +664,7 @@ export function PayrollFormulaTierBuilder({
               !sampleFields.teamDr &&
               !sampleFields.cpa &&
               !sampleFields.delivered &&
+              !sampleFields.qualifyingRevenue &&
               !sampleFields.returned &&
               !sampleFields.targetMet && (
                 <p className="text-sm text-app-fg-muted col-span-2">

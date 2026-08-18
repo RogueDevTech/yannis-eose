@@ -117,11 +117,14 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'markAttendance') {
+    // A cell belongs to exactly one party — a staff member OR a contractor.
+    const contractorId = formData.get('contractorId')?.toString();
     const body: Record<string, unknown> = {
-      staffId: formData.get('staffId')?.toString(),
       attendanceDate: formData.get('attendanceDate')?.toString(),
       status: formData.get('status')?.toString(),
     };
+    if (contractorId) body.contractorId = contractorId;
+    else body.staffId = formData.get('staffId')?.toString();
     const remark = formData.get('remark')?.toString()?.trim();
     if (remark) body.remark = remark;
 
@@ -137,11 +140,13 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'markAttendanceBulk') {
     const staffIds = (formData.get('staffIds')?.toString() ?? '').split(',').filter(Boolean);
+    const contractorIds = (formData.get('contractorIds')?.toString() ?? '').split(',').filter(Boolean);
     const body: Record<string, unknown> = {
-      staffIds,
       attendanceDate: formData.get('attendanceDate')?.toString(),
       status: formData.get('status')?.toString(),
     };
+    if (staffIds.length) body.staffIds = staffIds;
+    if (contractorIds.length) body.contractorIds = contractorIds;
     const remark = formData.get('remark')?.toString()?.trim();
     if (remark) body.remark = remark;
 

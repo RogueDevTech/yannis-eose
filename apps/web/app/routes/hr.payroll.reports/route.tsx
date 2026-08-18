@@ -77,15 +77,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const inputEnc = encodeURIComponent(JSON.stringify(input));
     const rangeEnc = encodeURIComponent(JSON.stringify(rangeInput));
 
-    // PAYE Remittance export needs a concrete month. Only fetch it when a
-    // single month is selected (fromMonth is a valid 'YYYY-MM-01').
-    const canExportRemittance = /^\d{4}-\d{2}-01$/.test(fromMonth);
+    // PAYE Remittance + Reconciliation are SINGLE-MONTH documents (PAYE is remitted
+    // per month). Only fetch them when the selected range is one calendar month:
+    // fromMonth is a valid 'YYYY-MM-01' AND toMonth is the same month (or unset).
+    // Requiring same-month avoids silently exporting only the start month of a
+    // multi-month range while the filter shows a wider window.
+    const singleMonthSelected =
+      /^\d{4}-\d{2}-01$/.test(fromMonth) && (!toMonth || toMonth === fromMonth);
+    const canExportRemittance = singleMonthSelected;
     const remittanceInput: Record<string, string> = { periodMonth: fromMonth };
     if (input.branchId) remittanceInput.branchId = input.branchId;
     const remittanceEnc = encodeURIComponent(JSON.stringify(remittanceInput));
 
     // Reconciliation export needs a concrete month, same as PAYE Remittance.
-    const canExportReconciliation = /^\d{4}-\d{2}-01$/.test(fromMonth);
+    const canExportReconciliation = singleMonthSelected;
     const reconciliationInput: Record<string, string> = { periodMonth: fromMonth };
     if (input.branchId) reconciliationInput.branchId = input.branchId;
     const reconciliationEnc = encodeURIComponent(JSON.stringify(reconciliationInput));
