@@ -13,6 +13,7 @@ import {
   defaultThisMonthRange,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { canViewAllBranches } from '~/lib/rbac';
 import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
 import { LogisticsOrdersPage } from '~/features/logistics/LogisticsOrdersPage';
 import type { Order } from '~/features/orders/types';
@@ -25,7 +26,17 @@ export const meta: MetaFunction = () => [
 /** Default page size for the logistics orders table — historical default is 40. The user
  *  can switch via `?perPage=`. Keeps 40 in the allowed set so the default URL works. */
 const LOGISTICS_PAGE_SIZE_OPTIONS = [20, 40, 50, 100, 200, 500, 1000];
+// Logistics is the middle-man between marketing/CS and delivery, so they need
+// full-funnel visibility — including pre-confirmation orders (UNPROCESSED /
+// CS_ASSIGNED / CS_ENGAGED) they can't act on yet but must be able to see and
+// chase. Excludes only CANCELLED (legacy-deleted) and DELETED (soft-removed:
+// including it would also drop the deletedAt filter server-side and pollute the
+// working list with removed orders). Customer phones stay role-masked server-side
+// regardless of status, so widening this does not expose raw PII (Pillar 2).
 const LOGISTICS_STATUS_SCOPE = [
+  'UNPROCESSED',
+  'CS_ASSIGNED',
+  'CS_ENGAGED',
   'CONFIRMED',
   'AGENT_ASSIGNED',
   'DISPATCHED',
@@ -59,6 +70,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 
   const isTplManager = user.role === 'TPL_MANAGER';
+  // Head-of-Logistics / org-wide viewers see orders across branches, so they get a
+  // Branch column to tell rows apart. Single-branch logistics staff don't (every
+  // row would show the same branch). Mirrors the API's canViewAllBranches gate.
+  const canViewBranchColumn = canViewAllBranches(user);
   const branchFilter = url.searchParams.get('branch') || undefined;
   const userLocationFilter = url.searchParams.get('location') || undefined;
   // Multi-currency filter (dormant unless the company added a 2nd currency).
@@ -120,12 +135,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     locationFilter: userLocationFilter ?? '',
     branchFilter: branchFilter ?? '',
     isTplManagerScoped: isTplManager && !!user.logisticsLocationId,
+    canViewBranchColumn,
     canEditDeliveryDate: false,
     allocationOnDetailOnly: true,
     orderDetailBasePath: '/admin/orders',
     orderDetailFrom: 'logistics' as const,
     pageDescription:
-      'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
+      'All orders across the funnel. Open a confirmed one to allocate, dispatch, or confirm delivery.',
   };
 
   const pageData = (async () => {
@@ -208,6 +224,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       dailyCounts: undefined,
       filters: logisticsOrdersShell.filters,
       isTplManagerScoped: logisticsOrdersShell.isTplManagerScoped,
+      canViewBranchColumn: logisticsOrdersShell.canViewBranchColumn,
       canEditDeliveryDate: logisticsOrdersShell.canEditDeliveryDate,
       allocationOnDetailOnly: logisticsOrdersShell.allocationOnDetailOnly,
       orderDetailBasePath: logisticsOrdersShell.orderDetailBasePath,
@@ -413,6 +430,7 @@ export default function LogisticsOrdersRoute() {
           searchFilter={logisticsOrdersShell.searchFilter}
           filters={logisticsOrdersShell.filters}
           isTplManagerScoped={logisticsOrdersShell.isTplManagerScoped}
+          canViewBranchColumn={logisticsOrdersShell.canViewBranchColumn}
           canEditDeliveryDate={logisticsOrdersShell.canEditDeliveryDate}
           allocationOnDetailOnly={logisticsOrdersShell.allocationOnDetailOnly}
           orderDetailBasePath={logisticsOrdersShell.orderDetailBasePath}

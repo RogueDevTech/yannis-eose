@@ -48,7 +48,10 @@ import { formatOrderTimestamp } from '~/lib/format-date';
 import type { Order } from '~/features/orders/types';
 import type { Location } from './types';
 
-const LOGISTICS_STATUS_OPTIONS = ['ALL', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED'] as const;
+// Logistics can now see the full funnel (pre-confirmation included) so they can
+// track/chase orders CS hasn't confirmed yet. The pre-confirmation options let
+// them filter to those explicitly; they still can't act until CONFIRMED.
+const LOGISTICS_STATUS_OPTIONS = ['ALL', 'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'DELIVERED'] as const;
 
 export interface LogisticsOrderRow extends Order {
   logisticsLocationId?: string | null;
@@ -58,6 +61,7 @@ export interface LogisticsOrderRow extends Order {
   locationName: string;
   locationProviderName: string | null;
   riderName: string;
+  servicingBranchId?: string | null;
   orderCategory?: 'funnel' | 'cart' | 'follow-up';
 }
 
@@ -100,6 +104,9 @@ interface LogisticsOrdersPageProps {
   riders: RiderOption[];
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
   isTplManagerScoped?: boolean;
+  /** Show the Branch column — only for Head-of-Logistics / org-wide viewers who
+   *  see orders across branches. Off for single-branch logistics staff. */
+  canViewBranchColumn?: boolean;
   /** Override page title (e.g. "Orders" for 3PL layout) */
   pageTitle?: string;
   /** Base path for order detail links (e.g. "/tpl/orders" for TPL, "/admin/logistics/orders" for admin) */
@@ -205,6 +212,7 @@ function LogisticsOrdersPageImpl({
   riders,
   filters,
   isTplManagerScoped = false,
+  canViewBranchColumn = false,
   pageTitle = 'Logistics Orders',
   orderDetailBasePath = '/admin/logistics/orders',
   orderDetailFrom = null,
@@ -212,12 +220,18 @@ function LogisticsOrdersPageImpl({
   canEditDeliveryDate = false,
   markInTransitLabel = 'Start Delivery',
   dailyCounts,
-  pageDescription = 'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
+  pageDescription = 'All orders across the funnel. Open a confirmed one to allocate, dispatch, or confirm delivery.',
   deferredLoading = false,
 }: LogisticsOrdersPageProps & { deferredLoading?: boolean }) {
   const statusCounts = statusCountsProp ?? {};
   const locations = locationsProp ?? [];
   const branches = branchesProp ?? [];
+  // Resolve an order's servicing branch id → branch name for the Branch column
+  // (Head of Logistics needs to see which branch each order belongs to).
+  const branchNameById = useMemo(
+    () => new Map(branches.map((b) => [b.id, b.name])),
+    [branches],
+  );
 
   const displayOrders = useMemo((): LogisticsOrderRow[] => {
     const locationNameById = new Map(locations.map((l) => [l.id, l.name]));
@@ -496,16 +510,30 @@ function LogisticsOrdersPageImpl({
           <DeliveryDateCell date={order.preferredDeliveryDate} status={order.status} />
         ),
       },
+      ...(canViewBranchColumn
+        ? [{
+            key: 'branch',
+            header: 'Branch',
+            render: (order: LogisticsOrderRow) => (
+              <span className="text-app-fg-muted">
+                {(order.servicingBranchId && branchNameById.get(order.servicingBranchId)) || '—'}
+              </span>
+            ),
+          } as CompactTableColumn<LogisticsOrderRow>]
+        : []),
       {
         key: 'location',
         header: 'Company',
-        render: (order) => (
-          <span className="text-app-fg-muted">
-            {order.locationProviderName
-              ? `${order.locationProviderName} · ${order.locationName}`
-              : order.locationName}
-          </span>
-        ),
+        render: (order) => {
+          const company = order.locationProviderName
+            ? `${order.locationProviderName} · ${order.locationName}`
+            : order.locationName;
+          return (
+            <span className="block max-w-[9rem] truncate text-app-fg-muted" title={company}>
+              {company}
+            </span>
+          );
+        },
       },
       {
         key: 'actions',
@@ -613,6 +641,8 @@ function LogisticsOrdersPageImpl({
     rowAllocateLocationByOrder,
     allocatableLocations,
     markInTransitLabel,
+    branchNameById,
+    canViewBranchColumn,
   ]);
 
   const renderLogisticsOrderMobileCard = (
@@ -795,7 +825,7 @@ function LogisticsOrdersPageImpl({
         <OverviewStatStrip
           mobileGrid
           items={[
-            { label: 'Total Confirmed', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+            { label: 'Total Orders', value: <StatValuePulse className="min-w-[2.5rem]" /> },
             { label: 'Agent Unassigned', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Agent Assigned', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -807,7 +837,7 @@ function LogisticsOrdersPageImpl({
         <OverviewStatStrip
           mobileGrid
           items={[
-            { label: <span className="flex items-center">Total Confirmed<button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setInfoModalOpen(true); }} className="ml-1 inline-flex items-center justify-center rounded-full text-app-fg-muted hover:text-app-fg transition-colors" aria-label="View breakdown"><svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><path strokeLinecap="round" d="M12 16v-4M12 8h.01" /></svg></button></span>, value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg', to: buildStatusQuery('ALL'), active: selectedStatus === 'ALL' },
+            { label: <span className="flex items-center">Total Orders<button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setInfoModalOpen(true); }} className="ml-1 inline-flex items-center justify-center rounded-full text-app-fg-muted hover:text-app-fg transition-colors" aria-label="View breakdown"><svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><path strokeLinecap="round" d="M12 16v-4M12 8h.01" /></svg></button></span>, value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg', to: buildStatusQuery('ALL'), active: selectedStatus === 'ALL' },
             { label: 'Agent Unassigned', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('CONFIRMED'), active: selectedStatus === 'CONFIRMED' },
             { label: 'Agent Assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400', to: buildStatusQuery('AGENT_ASSIGNED'), active: selectedStatus === 'AGENT_ASSIGNED' },
             { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusQuery('DELIVERED'), active: selectedStatus === 'DELIVERED' },
@@ -1318,12 +1348,12 @@ function LogisticsOrdersPageImpl({
         })()}
       </Modal>
 
-      {/* Info modal: breakdown of Total Confirmed by order category */}
+      {/* Info modal: breakdown of Total Orders by order category */}
       <FunnelBreakdownModal
         open={infoModalOpen}
         onClose={() => setInfoModalOpen(false)}
-        title="Total Confirmed Breakdown"
-        description="Confirmed and in-flight orders across every order category."
+        title="Total Orders Breakdown"
+        description="All orders across every order category."
         lines={[
           { label: 'Funnel (standard orders)', value: statusCounts['__FUNNEL'] ?? 0 },
           { label: 'Cart (recovered carts)', value: statusCounts['__CART'] ?? 0 },
