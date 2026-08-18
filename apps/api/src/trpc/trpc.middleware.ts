@@ -5,9 +5,13 @@ import { appRouter } from './routers';
 import { createContext } from './context';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { canViewAllBranches } from '../common/authz';
+import { eq } from 'drizzle-orm';
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { db as schema } from '@yannis/shared';
 import { SessionStoreService } from '../auth/session-store.service';
 import { UserBundleCacheService } from '../auth/user-bundle-cache.service';
 import { BranchTeamsService } from '../branches/branch-teams.service';
+import { DRIZZLE } from '../database/database.module';
 import {
   SlackService,
   SlackErrorBufferService,
@@ -19,12 +23,20 @@ import {
 export class TrpcMiddleware implements NestMiddleware {
   private readonly logger = new Logger(TrpcMiddleware.name);
 
+  /**
+   * Branch id → name cache for the Slack error alert. The error path is
+   * fire-and-forget, so we never want it to add a live query per error; each
+   * branch is looked up at most once for the process lifetime.
+   */
+  private readonly branchNameCache = new Map<string, string | null>();
+
   constructor(
     @Inject(SessionStoreService) private readonly sessionStore: SessionStoreService,
     private readonly userBundleCache: UserBundleCacheService,
     private readonly branchTeams: BranchTeamsService,
     private readonly slack: SlackService,
     private readonly slackErrorBuffer: SlackErrorBufferService,
+    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
   async use(req: Request, res: Response, _next: NextFunction) {
@@ -72,7 +84,8 @@ export class TrpcMiddleware implements NestMiddleware {
       onError: ({ path, error }) => {
         if (error.code === 'INTERNAL_SERVER_ERROR') {
           this.logger.error(`trpc_error path=${path ?? 'unknown'} ${error.message}`, error.stack);
-          this.reportErrorToSlack(path, error, req);
+          // Fire-and-forget: alerting must never affect the request/response path.
+          void this.reportErrorToSlack(path, error, req).catch(() => {});
         }
       },
     });
@@ -92,28 +105,56 @@ export class TrpcMiddleware implements NestMiddleware {
    * fire-and-forget Slack alert. Never awaited and never throws into the tRPC
    * response path — alerting must not affect request handling.
    */
-  private reportErrorToSlack(
+  private async reportErrorToSlack(
     path: string | undefined,
     error: { message: string; code: string; stack?: string },
     req: Request,
-  ): void {
+  ): Promise<void> {
     const procedure = path ?? 'unknown';
     this.slackErrorBuffer.record(procedure, error.message);
 
     const user = (req as Request & { user?: SessionUser }).user;
+    const branchId = user?.currentBranchId ?? undefined;
     const alert = apiErrorTemplate({
       path: procedure,
       code: error.code,
       message: error.message,
       page: this.pageFromReferer(req),
       userId: user?.id,
+      // Human name straight off the session — no lookup needed.
+      userName: user?.name,
       userRole: user?.role,
-      branchId: user?.currentBranchId ?? undefined,
+      branchId,
+      branchName: (await this.resolveBranchName(branchId)) ?? undefined,
       stack: error.stack,
     });
     this.slack
       .sendMessage(YANNIS_EOSE_CHANNEL, alert.message, alert.blocks, alert.attachments)
       .catch(() => {});
+  }
+
+  /**
+   * Resolves a branch id to its human name for the Slack alert, memoised so a
+   * given branch is queried at most once. Returns null on miss/error — the
+   * alert then shows the id alone rather than failing the fire-and-forget path.
+   */
+  private async resolveBranchName(branchId: string | undefined): Promise<string | null> {
+    if (!branchId) return null;
+    const cached = this.branchNameCache.get(branchId);
+    if (cached !== undefined) return cached;
+    let name: string | null = null;
+    try {
+      const [row] = await this.db
+        .select({ name: schema.branches.name })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, branchId))
+        .limit(1);
+      name = row?.name ?? null;
+    } catch {
+      name = null;
+    }
+    this.branchNameCache.set(branchId, name);
+    return name;
   }
 
   /**

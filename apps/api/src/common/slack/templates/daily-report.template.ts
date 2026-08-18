@@ -13,6 +13,14 @@ export interface DailyReportData {
   ordersCreated: number;
   ordersByStatus: Array<{ status: string; count: number }>;
   newUsers: number;
+  /** Approved + pending AD_SPEND category spend logged today, in naira. */
+  adSpendToday: number;
+  /** Orders delivered today (by delivered_at). */
+  ordersDelivered: number;
+  /** Blended CPA = ad spend / orders created today. null when no orders created. */
+  cpaCreated: number | null;
+  /** Blended CPA = ad spend / orders delivered today. null when nothing delivered. */
+  cpaDelivered: number | null;
   errorTotal: number;
   errorGroups: DailyReportErrorGroup[];
   dbHealthy: boolean;
@@ -39,6 +47,16 @@ export function dailyReportTemplate(data: DailyReportData): SlackTemplateResult 
   }
 
   extraBlocks.push(divider());
+  extraBlocks.push(summary(':moneybag: *Marketing today*'));
+  const marketingFields: SlackField[] = [
+    { label: 'Ad Spend', value: formatNaira(data.adSpendToday) },
+    { label: 'CPA (created)', value: data.cpaCreated !== null ? formatNaira(data.cpaCreated) : '—' },
+    { label: 'Delivered', value: String(data.ordersDelivered) },
+    { label: 'CPA (delivered)', value: data.cpaDelivered !== null ? formatNaira(data.cpaDelivered) : '—' },
+  ];
+  extraBlocks.push({ type: 'section', fields: marketingFields.map((f) => ({ type: 'mrkdwn', text: `*${f.label}*\n${f.value}` })) });
+
+  extraBlocks.push(divider());
   const dbLine = data.dbHealthy
     ? `:large_green_circle: Database healthy${data.dbLatencyMs !== null ? ` (${data.dbLatencyMs}ms)` : ''}`
     : ':red_circle: Database check FAILED';
@@ -61,9 +79,17 @@ export function dailyReportTemplate(data: DailyReportData): SlackTemplateResult 
     appName: SLACK_APP_NAME,
     appEmoji: SLACK_APP_EMOJI,
     title: `:calendar: Daily Report — ${data.reportDate}`,
-    summaryText: `*${data.ordersCreated}* orders created  ·  *${data.newUsers}* new users  ·  *${data.errorTotal}* API errors`,
+    summaryText:
+      `*${data.ordersCreated}* orders created  ·  *${data.ordersDelivered}* delivered  ·  ` +
+      `*${formatNaira(data.adSpendToday)}* ad spend  ·  *${data.cpaCreated !== null ? formatNaira(data.cpaCreated) : '—'}* CPA  ·  ` +
+      `*${data.newUsers}* new users  ·  *${data.errorTotal}* API errors`,
     extraBlocks,
   });
+}
+
+/** Naira with thousands separators, no decimals (e.g. ₦1,250,000). */
+function formatNaira(amount: number): string {
+  return `₦${Math.round(amount).toLocaleString('en-NG')}`;
 }
 
 function humanizeStatus(status: string): string {
