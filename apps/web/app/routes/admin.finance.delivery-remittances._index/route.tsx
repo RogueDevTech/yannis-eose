@@ -96,6 +96,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (deduction && ['deliveryFee', 'commitmentFee', 'posFee', 'failedDeliveryCost'].includes(deduction)) {
     listInput.deduction = deduction;
   }
+  // "Retracked" filter — narrow both lists to orders that were ever retracked.
+  // Applies to the row lists (Awaiting + Remitted); the stat tiles keep the true
+  // period totals (same convention as category/deduction).
+  const retracked = url.searchParams.get('retracked') === 'any' ? 'any' : undefined;
+  if (retracked) listInput.retracked = retracked;
   const sortBy = url.searchParams.get('sortBy') ?? undefined;
   const sortDir = url.searchParams.get('sortDir') ?? undefined;
   if (sortBy && ['sentAt', 'deliveredAt', 'totalAmount', 'deliveryFee', 'orderNumber'].includes(sortBy)) {
@@ -124,6 +129,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (endDate) eligibleListBase.endDate = endDate;
   if (currencyCode) eligibleListBase.currencyCode = currencyCode;
   eligibleListBase.dateScope = dateScope;
+  if (retracked) eligibleListBase.retracked = retracked;
 
   const eligibleListInput = JSON.stringify(eligibleListBase);
 

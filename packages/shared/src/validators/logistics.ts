@@ -219,6 +219,12 @@ export const listDeliveryRemittancesSchema = z.object({
   category: z.enum(['marketing', 'cart', 'follow-up', 'offline']).optional(),
   /** Filter orders by deduction type — only show orders with this deduction > 0. */
   deduction: z.enum(['deliveryFee', 'commitmentFee', 'posFee', 'failedDeliveryCost']).optional(),
+  /**
+   * When 'any', restrict to orders that have EVER been retracked (a durable
+   * ORDER_RETRACKED timeline event exists), including holds already resolved.
+   * Applies on both the Awaiting and Remitted tabs. Finance reconciliation filter.
+   */
+  retracked: z.enum(['any']).optional(),
   /** Sort field for the orders view. */
   sortBy: z.enum(['sentAt', 'deliveredAt', 'totalAmount', 'deliveryFee', 'orderNumber']).optional(),
   sortDir: z.enum(['asc', 'desc']).optional(),
@@ -254,6 +260,11 @@ export const listDeliveryRemittanceEligibleOrdersSchema = z.object({
   orderIds: z.array(z.string().uuid()).max(200).optional(),
   /** Scope the awaiting-remittance list to a single currency (never mix). */
   currencyCode: z.string().trim().toUpperCase().max(5).optional(),
+  /**
+   * When 'any', restrict to orders that have EVER been retracked (a durable
+   * ORDER_RETRACKED timeline event exists). Mirrors the Remitted tab filter.
+   */
+  retracked: z.enum(['any']).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(500).default(100),
 });

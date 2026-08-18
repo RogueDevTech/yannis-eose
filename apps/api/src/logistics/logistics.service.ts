@@ -2931,6 +2931,19 @@ export class LogisticsService implements OnModuleInit {
       }
     }
 
+    // "Retracked" filter — only orders that have EVER been retracked (durable
+    // ORDER_RETRACKED timeline event), including holds already resolved. Finance
+    // reconciliation: surfaces every order whose status was rolled back at any point.
+    if (input.retracked === 'any') {
+      conditions.push(
+        sql`EXISTS (
+          SELECT 1 FROM order_timeline_events te
+          WHERE te.order_id = ${schema.orders.id}
+            AND te.event_type = 'ORDER_RETRACKED'
+        )`,
+      );
+    }
+
     const loc = alias(schema.logisticsLocations, 'rem_ord_loc');
     const prov = alias(schema.logisticsProviders, 'rem_ord_prov');
     const csUser = alias(schema.users, 'rem_ord_cs');
@@ -3635,6 +3648,18 @@ export class LogisticsService implements OnModuleInit {
     conditions.push(
       sql`NOT EXISTS (SELECT 1 FROM ${schema.deliveryRemittanceOrders} WHERE ${schema.deliveryRemittanceOrders.orderId} = ${schema.orders.id})`,
     );
+
+    // "Retracked" filter — mirror the Remitted tab: only orders that have EVER
+    // been retracked (durable ORDER_RETRACKED timeline event), incl. resolved holds.
+    if (input.retracked === 'any') {
+      conditions.push(
+        sql`EXISTS (
+          SELECT 1 FROM order_timeline_events te
+          WHERE te.order_id = ${schema.orders.id}
+            AND te.event_type = 'ORDER_RETRACKED'
+        )`,
+      );
+    }
 
     const locAlias = alias(schema.logisticsLocations, 'eligible_loc');
     const provAlias = alias(schema.logisticsProviders, 'eligible_loc_provider');
