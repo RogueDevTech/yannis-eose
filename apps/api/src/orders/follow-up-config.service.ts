@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql, asc } from 'drizzle-orm';
+import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, notInArray, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared';
 import type {
@@ -1842,20 +1842,30 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       // in the same tx. graduateToOrders() no-ops when graduatedOrderId is set,
       // which previously left FU=DELIVERED while a retracked parent drifted.
       if (order.graduatedOrderId && newStatus !== 'DELETED') {
-        // Retrack hold: if Finance retracked the graduated parent (any category)
-        // and it hasn't been resolved, DO NOT let this mirror push it forward — that
-        // silently re-delivers a held order at the stale value (same bug class as
-        // the cart mirror). Skip while held; resumes once CS/HoCS resolves the retrack.
+        // CRITICAL GUARD: only mirror onto an order that GENUINELY graduated from
+        // THIS follow-up (source_follow_up_order_id = orderId). The dedup-skip
+        // path in graduateToOrders() also stores an *unrelated* live order's id in
+        // graduatedOrderId (to stop retries) — mirroring onto that foreign order
+        // would overwrite a real independent order's status. Scoping every mirror
+        // read/write by sourceFollowUpOrderId makes the dedup-skip case a safe
+        // no-op while real graduated copies still sync. (Cart/FU-row matches store
+        // a non-orders id, so they already no-op on eq(orders.id, ...).)
         const [parentBefore] = await tx
           .select({ valueHoldPending: schema.orders.valueHoldPending })
           .from(schema.orders)
           .where(
             and(
               eq(schema.orders.id, order.graduatedOrderId),
+              eq(schema.orders.sourceFollowUpOrderId, orderId),
               isNull(schema.orders.deletedAt),
             ),
           )
           .limit(1);
+        if (!parentBefore) {
+          // graduatedOrderId points at a dedup-matched foreign order (or a
+          // cart/FU-row id), not a real graduated child — nothing to mirror.
+          return;
+        }
 
         if (parentBefore?.valueHoldPending) {
           this.logger.warn(
@@ -2047,13 +2057,16 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       .from(schema.followUpOrderItems)
       .where(eq(schema.followUpOrderItems.followUpOrderId, followUpOrderId));
 
-    // Dedup guard: skip graduation if the same phone+product already has a
-    // DELIVERED or REMITTED order within 14 days (same guard as cart graduation).
+    // Dedup guard: skip graduation if the same phone+product already has a live
+    // order within 14 days (same guard as cart graduation). Broadened 2026-08-18
+    // from DELIVERED/REMITTED-only to ANY live status so an in-flight duplicate
+    // (e.g. edge-form order still at CS_ENGAGED) also blocks a graduating copy.
+    // Excludes this follow-up's own graduated copy (source_follow_up_order_id).
     if (fuOrder.customerPhoneHash && fuItems.length > 0) {
       const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
       const productIds = fuItems.map((i) => i.productId).filter(Boolean) as string[];
       if (productIds.length > 0) {
-        // Check all 3 tables for existing delivered orders with same phone+product.
+        // Check all 3 tables for existing live orders with same phone+product.
         // Previously only checked `orders` — a cart order and follow-up order for
         // the same customer could both graduate without triggering the guard.
         const [existingOrder] = await this.db
@@ -2063,9 +2076,11 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           .where(
             and(
               eq(schema.orders.customerPhoneHash, fuOrder.customerPhoneHash),
-              inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+              notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
               isNull(schema.orders.deletedAt),
-              gte(schema.orders.deliveredAt, fourteenDaysAgo),
+              // This follow-up's own graduated copy must never count as a dup.
+              sql`${schema.orders.sourceFollowUpOrderId} IS DISTINCT FROM ${followUpOrderId}`,
+              gte(schema.orders.createdAt, fourteenDaysAgo),
               inArray(schema.orderItems.productId, productIds),
             ),
           )
@@ -2081,7 +2096,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           return;
         }
 
-        // Also check cart_orders for same phone+product in DELIVERED/REMITTED
+        // Also check cart_orders for same phone+product in any live status
         const [existingCartOrder] = await this.db
           .select({ id: schema.cartOrders.id })
           .from(schema.cartOrders)
@@ -2089,7 +2104,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           .where(
             and(
               eq(schema.cartOrders.customerPhoneHash, fuOrder.customerPhoneHash),
-              inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
+              notInArray(schema.cartOrders.status, ['CANCELLED', 'DELETED']),
               isNull(schema.cartOrders.deletedAt),
               gte(schema.cartOrders.createdAt, fourteenDaysAgo),
               inArray(schema.cartOrderItems.productId, productIds),
@@ -2108,7 +2123,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           return;
         }
 
-        // Also check other follow_up_orders (exclude self) in DELIVERED/REMITTED
+        // Also check other follow_up_orders (exclude self) in any live status
         const [existingFuOrder] = await this.db
           .select({ id: schema.followUpOrders.id })
           .from(schema.followUpOrders)
@@ -2117,7 +2132,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
             and(
               ne(schema.followUpOrders.id, followUpOrderId),
               eq(schema.followUpOrders.customerPhoneHash, fuOrder.customerPhoneHash),
-              inArray(schema.followUpOrders.status, ['DELIVERED', 'REMITTED']),
+              notInArray(schema.followUpOrders.status, ['CANCELLED', 'DELETED']),
               isNull(schema.followUpOrders.deletedAt),
               gte(schema.followUpOrders.createdAt, fourteenDaysAgo),
               inArray(schema.followUpOrderItems.productId, productIds),
