@@ -25,7 +25,34 @@ import {
 } from '@yannis/shared';
 import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
-import { withActor, withActorAndBranch } from '../common/db/with-actor';
+import { withActor, withActorAndBranch, type Tx } from '../common/db/with-actor';
+
+/** A drizzle handle that is either the connection pool or an open transaction. */
+type DbOrTx = PostgresJsDatabase<typeof schema> | Tx;
+
+/** The winning (existing) order returned by the duplicate check. */
+type DedupWinner = {
+  id: string;
+  mediaBuyerId: string | null;
+  status: string;
+  createdAt: Date;
+  source: 'orders' | 'cart_orders' | 'follow_up_orders';
+  campaignId: string | null;
+  orderNumber: number | null;
+};
+
+/**
+ * Thrown from inside a manual-create transaction when the in-tx dedup finds an
+ * existing order. Carries the winner so the caller can record the cross-funnel
+ * attempt and surface a user-facing duplicate error OUTSIDE the rolled-back tx.
+ * Unwinding the tx rolls back any partial work. Never leaks to clients.
+ */
+class DedupBlock extends Error {
+  constructor(readonly winner: DedupWinner) {
+    super('DEDUP_BLOCK');
+    this.name = 'DedupBlock';
+  }
+}
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import { isAdminLevel } from '../common/authz';
 import { hasFinanceAccess, hasFinanceWriteAccess } from '../common/utils/strip-finance-fields';
@@ -2213,16 +2240,24 @@ export class OrdersService {
       // on failure, letting both concurrent requests race past the dedup SELECT.
       // Now we retry up to 5×200ms so the second request waits for the first
       // to INSERT, then the dedup SELECT catches it.
+      //
+      // NOTE (2026-08-18): this session-lock is inherently best-effort under
+      // postgres.js pooling — the lock lives on the pooled connection that ran
+      // the SELECT, and the finally-block unlock may target a different pooled
+      // connection. It is NOT the authoritative guard. The authoritative
+      // same-phone serialization for the edge path is the 2-minute same-form
+      // idempotency SELECT + the 14-day dedup SELECT below (both of which return
+      // idempotently / record-CFA rather than reject — the freeze-safe contract).
+      // A fully-atomic fix (pg_advisory_xact_lock co-located with the dedup
+      // SELECT + INSERT in one tx, as done for createOffline /
+      // createDeliveredFollowUp) is deferred as a separate, sign-off-gated change
+      // on this frozen path.
       const lockResult = await this.db.execute<{ acquired: boolean }>(
         sql`SELECT pg_try_advisory_lock(${advisoryLockKey1}, ${advisoryLockKey2}) AS acquired`,
       );
       const lockRows = Array.isArray(lockResult) ? lockResult : (lockResult as unknown as { rows: Array<{ acquired: boolean }> })?.rows ?? [];
       advisoryLockAcquired = lockRows[0]?.acquired === true;
       if (!advisoryLockAcquired) {
-        // Another request for the same phone is in-flight. Instead of
-        // proceeding immediately (which caused the YNS-12351/12352 race on
-        // 2026-05-29), wait for it to finish its INSERT so our dedup SELECT
-        // will see the row. Retry the lock up to 5 times with 200ms delays.
         for (let attempt = 0; attempt < 5 && !advisoryLockAcquired; attempt++) {
           await new Promise((resolve) => setTimeout(resolve, 200));
           const retryResult = await this.db.execute<{ acquired: boolean }>(
@@ -2232,9 +2267,6 @@ export class OrdersService {
           advisoryLockAcquired = retryRows[0]?.acquired === true;
         }
         if (!advisoryLockAcquired) {
-          // Still couldn't acquire after ~1s. The first request should have
-          // committed by now, so our dedup SELECT will likely catch it.
-          // Log for monitoring.
           this.logger.warn(
             { phoneHash: orderInput.customerPhoneHash.slice(0, 12) + '…' },
             'advisory lock contended after 5 retries — proceeding with dedup SELECT only',
@@ -2757,11 +2789,6 @@ export class OrdersService {
     const customerPhoneHash = this.hashPhone(input.customerPhone);
     const paymentMethod = input.paymentMethod ?? 'PAY_ON_DELIVERY';
 
-    // Advisory lock: serialize concurrent offline creations for the same phone
-    // to close the TOCTOU race between dedup SELECT and INSERT.
-    const lock = await this.acquirePhoneAdvisoryLock(customerPhoneHash);
-    try {
-
     if (paymentMethod === 'PAY_ONLINE' && (!input.customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customerEmail))) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -2770,35 +2797,15 @@ export class OrdersService {
     }
 
     // Universal 14-day dedup — same phone + overlapping product within 14 days
-    // blocks the offline order outright (CEO 2026-05-26). Previously only
-    // edge-form orders were blocked; offline relied on a 2h cron, which let
-    // duplicates slip through to logistics before being caught.
+    // blocks the offline order outright (CEO 2026-05-26). The dedup SELECT + the
+    // order INSERT now run inside ONE transaction guarded by a transaction-scoped
+    // advisory lock (see the withActor block below), so concurrent creates for
+    // the same phone are serialized and the check-then-insert race that let rapid
+    // CS re-submits duplicate can no longer occur. On a match the tx throws a
+    // DedupBlock (rolling the tx back before any INSERT); the catch below records
+    // the cross-funnel attempt and surfaces a user-facing duplicate error.
     const productIds = input.items.map((i) => i.productId);
-    const existingWinner = await this.findExistingOrderForDedup(customerPhoneHash, productIds);
-    if (existingWinner) {
-      await this.recordCrossFunnelAttempt({
-        customerPhoneHash,
-        customerPhone: input.customerPhone,
-        customerName: input.customerName,
-        productIds,
-        mediaBuyerId: input.mediaBuyerId ?? actorId,
-        campaignId: input.campaignId ?? null,
-        branchId: null,
-        winner: {
-          id: existingWinner.id,
-          mediaBuyerId: existingWinner.mediaBuyerId ?? actorId,
-          source: existingWinner.source,
-          campaignId: existingWinner.campaignId,
-          orderNumber: existingWinner.orderNumber,
-          status: existingWinner.status,
-        },
-      });
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message:
-          `Duplicate: an order for this customer and product already exists (${existingWinner.id.slice(0, 8)}…, status: ${existingWinner.status}). Please check existing orders before creating a new one.`,
-      });
-    }
+    try {
 
     // When recovering from a cart, pull attribution (MB + campaign) from the
     // cart row if the Sales rep didn't explicitly set it on the modal.
@@ -2837,6 +2844,20 @@ export class OrdersService {
     const servicingBranchId = closerRow[0]?.primaryBranchId ?? sessionBranchId ?? branchId;
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
+      // Serialize concurrent creates for this phone (blocks; auto-released on
+      // commit/rollback). Held on the SAME connection as the dedup SELECT below
+      // and the INSERT, so check-then-insert is atomic per customer.
+      await this.acquirePhoneXactLock(tx, customerPhoneHash);
+
+      // Dedup runs INSIDE the locked transaction so a concurrent create that
+      // committed while we waited on the lock is visible here.
+      const dup = await this.findExistingOrderForDedup(customerPhoneHash, productIds, { executor: tx });
+      if (dup) {
+        // Unwind the tx (nothing has been inserted yet) and let the caller record
+        // the cross-funnel attempt + surface the duplicate error outside the tx.
+        throw new DedupBlock(dup);
+      }
+
       const rows = await tx
         .insert(schema.orders)
         .values({
@@ -2947,8 +2968,36 @@ export class OrdersService {
 
     return { id: order.id };
 
-    } finally {
-      if (lock.acquired) await this.releasePhoneAdvisoryLock(lock.key1, lock.key2);
+    } catch (err) {
+      if (err instanceof DedupBlock) {
+        const w = err.winner;
+        // Record the blocked attempt so the runner-up MB still sees it in the
+        // cross-funnel view (mirrors the pre-lock behavior). Best-effort; the
+        // user-facing duplicate error is what matters.
+        await this.recordCrossFunnelAttempt({
+          customerPhoneHash,
+          customerPhone: input.customerPhone,
+          customerName: input.customerName,
+          productIds,
+          mediaBuyerId: input.mediaBuyerId ?? actorId,
+          campaignId: input.campaignId ?? null,
+          branchId: null,
+          winner: {
+            id: w.id,
+            mediaBuyerId: w.mediaBuyerId ?? actorId,
+            source: w.source,
+            campaignId: w.campaignId,
+            orderNumber: w.orderNumber,
+            status: w.status,
+          },
+        }).catch(() => {});
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message:
+            `Duplicate: an order for this customer and product already exists (${w.id.slice(0, 8)}…, status: ${w.status}). Please check existing orders before creating a new one.`,
+        });
+      }
+      throw err;
     }
   }
 
@@ -3152,10 +3201,6 @@ export class OrdersService {
     const customerPhoneHash = this.hashPhone(input.customerPhone);
     const paymentMethod = input.paymentMethod ?? 'PAY_ON_DELIVERY';
 
-    // Advisory lock: serialize concurrent delivered-follow-up creations for the same phone.
-    const lock = await this.acquirePhoneAdvisoryLock(customerPhoneHash);
-    try {
-
     if (paymentMethod === 'PAY_ONLINE' && (!input.customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.customerEmail))) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -3163,33 +3208,12 @@ export class OrdersService {
       });
     }
 
-    // 14-day dedup
+    // 14-day dedup — the SELECT + INSERT run inside ONE transaction guarded by a
+    // transaction-scoped advisory lock (see the withActor block below) so
+    // concurrent delivered-follow-up creates for the same phone are serialized
+    // and the check-then-insert race is closed.
     const productIds = input.items.map((i) => i.productId);
-    const existingWinner = await this.findExistingOrderForDedup(customerPhoneHash, productIds);
-    if (existingWinner) {
-      await this.recordCrossFunnelAttempt({
-        customerPhoneHash,
-        customerPhone: input.customerPhone,
-        customerName: input.customerName,
-        productIds,
-        mediaBuyerId: input.mediaBuyerId ?? actorId,
-        campaignId: input.campaignId ?? null,
-        branchId: null,
-        winner: {
-          id: existingWinner.id,
-          mediaBuyerId: existingWinner.mediaBuyerId ?? actorId,
-          source: existingWinner.source,
-          campaignId: existingWinner.campaignId,
-          orderNumber: existingWinner.orderNumber,
-          status: existingWinner.status,
-        },
-      });
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message:
-          `Duplicate: an order for this customer and product already exists (${existingWinner.id.slice(0, 8)}…, status: ${existingWinner.status}). Please check existing orders before creating a new one.`,
-      });
-    }
+    try {
 
     // Cart attribution pull (if recovering from cart)
     if (input.cartId && (!input.campaignId || !input.mediaBuyerId)) {
@@ -3221,6 +3245,15 @@ export class OrdersService {
     const servicingBranchId = sessionBranchId ?? branchId;
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
+      // Serialize concurrent creates for this phone; held on the same connection
+      // as the dedup SELECT + INSERT so check-then-insert is atomic.
+      await this.acquirePhoneXactLock(tx, customerPhoneHash);
+
+      const dup = await this.findExistingOrderForDedup(customerPhoneHash, productIds, { executor: tx });
+      if (dup) {
+        throw new DedupBlock(dup);
+      }
+
       const rows = await tx
         .insert(schema.orders)
         .values({
@@ -3327,8 +3360,33 @@ export class OrdersService {
 
     return { id: order.id };
 
-    } finally {
-      if (lock.acquired) await this.releasePhoneAdvisoryLock(lock.key1, lock.key2);
+    } catch (err) {
+      if (err instanceof DedupBlock) {
+        const w = err.winner;
+        await this.recordCrossFunnelAttempt({
+          customerPhoneHash,
+          customerPhone: input.customerPhone,
+          customerName: input.customerName,
+          productIds,
+          mediaBuyerId: input.mediaBuyerId ?? actorId,
+          campaignId: input.campaignId ?? null,
+          branchId: null,
+          winner: {
+            id: w.id,
+            mediaBuyerId: w.mediaBuyerId ?? actorId,
+            source: w.source,
+            campaignId: w.campaignId,
+            orderNumber: w.orderNumber,
+            status: w.status,
+          },
+        }).catch(() => {});
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message:
+            `Duplicate: an order for this customer and product already exists (${w.id.slice(0, 8)}…, status: ${w.status}). Please check existing orders before creating a new one.`,
+        });
+      }
+      throw err;
     }
   }
 
@@ -3628,41 +3686,30 @@ export class OrdersService {
   }
 
   /**
-   * Acquire a PostgreSQL advisory lock keyed on the phone hash to serialize
-   * concurrent order creation for the same customer. Spin-retries up to 5×200ms.
-   * Returns { acquired, key1, key2 } — caller MUST release in a finally block.
+   * Derive the two 32-bit advisory-lock keys from a phone hash. Shared by the
+   * inline session-lock (legacy edge path) and the transaction-scoped lock used
+   * by the manual create paths so both key off the same customer identity.
    */
-  private async acquirePhoneAdvisoryLock(phoneHash: string): Promise<{ acquired: boolean; key1: number; key2: number }> {
+  private phoneAdvisoryLockKeys(phoneHash: string): { key1: number; key2: number } {
     const hashHex = phoneHash.slice(0, 16);
-    const key1 = parseInt(hashHex.slice(0, 8), 16) | 0;
-    const key2 = parseInt(hashHex.slice(8, 16), 16) | 0;
-
-    const tryLock = async () => {
-      const result = await this.db.execute<{ acquired: boolean }>(
-        sql`SELECT pg_try_advisory_lock(${key1}, ${key2}) AS acquired`,
-      );
-      const rows = Array.isArray(result) ? result : (result as unknown as { rows: Array<{ acquired: boolean }> })?.rows ?? [];
-      return rows[0]?.acquired === true;
+    return {
+      key1: parseInt(hashHex.slice(0, 8), 16) | 0,
+      key2: parseInt(hashHex.slice(8, 16), 16) | 0,
     };
-
-    let acquired = await tryLock();
-    if (!acquired) {
-      for (let attempt = 0; attempt < 5 && !acquired; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
-        acquired = await tryLock();
-      }
-      if (!acquired) {
-        this.logger.warn(
-          { phoneHash: phoneHash.slice(0, 12) + '…' },
-          'advisory lock contended after 5 retries — proceeding with dedup SELECT only',
-        );
-      }
-    }
-    return { acquired, key1, key2 };
   }
 
-  private async releasePhoneAdvisoryLock(key1: number, key2: number): Promise<void> {
-    await this.db.execute(sql`SELECT pg_advisory_unlock(${key1}, ${key2})`).catch(() => {});
+  /**
+   * Acquire a TRANSACTION-scoped advisory lock on the given tx connection.
+   * Unlike the session-level `pg_try_advisory_lock` this replaced, it:
+   *   - BLOCKS until the lock is free (never fails open), and
+   *   - is held on the SAME connection as the dedup SELECT + INSERT, and
+   *   - is auto-released on commit/rollback (no manual unlock, no leak).
+   * This is what actually serializes concurrent creates for the same phone and
+   * closes the check-then-insert race that let rapid CS re-submits duplicate.
+   */
+  private async acquirePhoneXactLock(tx: Tx, phoneHash: string): Promise<void> {
+    const { key1, key2 } = this.phoneAdvisoryLockKeys(phoneHash);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${key1}, ${key2})`);
   }
 
   /**
@@ -10870,17 +10917,16 @@ export class OrdersService {
   private async findExistingOrderForDedup(
     phoneHash: string,
     productIds: string[],
-    opts?: { skipCartOrders?: boolean },
-  ): Promise<{
-    id: string;
-    mediaBuyerId: string | null;
-    status: string;
-    createdAt: Date;
-    source: 'orders' | 'cart_orders' | 'follow_up_orders';
-    campaignId: string | null;
-    orderNumber: number | null;
-  } | null> {
+    opts?: { skipCartOrders?: boolean; executor?: DbOrTx },
+  ): Promise<DedupWinner | null> {
     if (!phoneHash || productIds.length === 0) return null;
+
+    // Run every read on the caller-supplied executor when provided. Manual create
+    // paths pass their INSERT transaction so the dedup SELECT and the INSERT are
+    // serialized by the same transaction-scoped advisory lock (fixes the
+    // fail-open race that let rapid CS re-submits create duplicates). Defaults to
+    // the pool for the frozen edge-form path, whose behavior is unchanged.
+    const db = opts?.executor ?? this.db;
 
     // 14-day window: same phone + overlapping product within 14 days = duplicate.
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
@@ -10897,7 +10943,7 @@ export class OrdersService {
     };
 
     const [orderCandidates, cartCandidates, followUpCandidates] = await Promise.all([
-      this.db
+      db
         .select({
           id: schema.orders.id,
           mediaBuyerId: schema.orders.mediaBuyerId,
@@ -10919,7 +10965,7 @@ export class OrdersService {
         .limit(50),
       opts?.skipCartOrders
         ? Promise.resolve([])
-        : this.db
+        : db
             .select({
               id: schema.cartOrders.id,
               mediaBuyerId: schema.cartOrders.mediaBuyerId,
@@ -10939,7 +10985,7 @@ export class OrdersService {
             )
             .orderBy(desc(schema.cartOrders.createdAt))
             .limit(50),
-      this.db
+      db
         .select({
           id: schema.followUpOrders.id,
           mediaBuyerId: schema.followUpOrders.mediaBuyerId,
@@ -10977,19 +11023,19 @@ export class OrdersService {
 
     const itemQueries = await Promise.all([
       orderIds.length > 0
-        ? this.db
+        ? db
             .selectDistinct({ orderId: schema.orderItems.orderId })
             .from(schema.orderItems)
             .where(and(inArray(schema.orderItems.orderId, orderIds), inArray(schema.orderItems.productId, productIds)))
         : Promise.resolve([] as { orderId: string }[]),
       cartIds.length > 0
-        ? this.db
+        ? db
             .selectDistinct({ orderId: schema.cartOrderItems.cartOrderId })
             .from(schema.cartOrderItems)
             .where(and(inArray(schema.cartOrderItems.cartOrderId, cartIds), inArray(schema.cartOrderItems.productId, productIds)))
         : Promise.resolve([] as { orderId: string }[]),
       fuIds.length > 0
-        ? this.db
+        ? db
             .selectDistinct({ orderId: schema.followUpOrderItems.followUpOrderId })
             .from(schema.followUpOrderItems)
             .where(and(inArray(schema.followUpOrderItems.followUpOrderId, fuIds), inArray(schema.followUpOrderItems.productId, productIds)))

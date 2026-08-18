@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, ne, or, sql, asc } from 'drizzle-orm';
+import { and, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, ne, notInArray, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay, type OrderStatus } from '@yannis/shared';
 import type { ListCartOrdersInput, UpdateCartOrderInput, CreateCartOrderRoutingRuleInput, UpdateCartOrderRoutingRuleInput } from '@yannis/shared';
@@ -1242,9 +1242,14 @@ export class CartOrdersService {
       .from(schema.cartOrderItems)
       .where(eq(schema.cartOrderItems.cartOrderId, cartOrderId));
 
-    // Dedup guard: skip graduation only if the same phone+product+amount already has
-    // a DELIVERED or REMITTED order within 14 days. Different amounts or 14+ day
-    // gaps are legitimate separate purchases — don't block.
+    // Dedup guard: skip graduation if the same phone+product+amount already has a
+    // live order within 14 days. Broadened 2026-08-18 from DELIVERED/REMITTED-only
+    // to ANY live status so an in-flight duplicate (edge-form order still at
+    // CS_ENGAGED/CONFIRMED) also blocks a graduating copy — aligning graduation
+    // with create-time dedup. Still price-matched (different amount = different
+    // purchase) and still 14-day-windowed so legitimate re-orders graduate.
+    // Excludes any order that graduated FROM this same cart (source_cart_order_id)
+    // so a partial re-run can't mistake its own copy for a duplicate.
     if (co.customerPhoneHash && coItems.length > 0) {
       const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
       const productIds = coItems.map((i) => i.productId).filter(Boolean) as string[];
@@ -1257,9 +1262,12 @@ export class CartOrdersService {
           .where(
             and(
               eq(schema.orders.customerPhoneHash, co.customerPhoneHash),
-              inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
+              notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
               isNull(schema.orders.deletedAt),
-              gte(schema.orders.deliveredAt, fourteenDaysAgo),
+              // This cart's own graduated copy must never count as a duplicate.
+              // IS DISTINCT FROM so NULL (direct orders) still pass the filter.
+              sql`${schema.orders.sourceCartOrderId} IS DISTINCT FROM ${cartOrderId}`,
+              gte(schema.orders.createdAt, fourteenDaysAgo),
               inArray(schema.orderItems.productId, productIds),
               // Must match price — different amount = different purchase
               ...(itemPrices.length > 0
@@ -1280,7 +1288,7 @@ export class CartOrdersService {
           return;
         }
 
-        // Also check follow_up_orders for same phone+product in DELIVERED/REMITTED
+        // Also check follow_up_orders for same phone+product in any live status.
         const [existingFu] = await this.db
           .select({ id: schema.followUpOrders.id })
           .from(schema.followUpOrders)
@@ -1288,7 +1296,7 @@ export class CartOrdersService {
           .where(
             and(
               eq(schema.followUpOrders.customerPhoneHash, co.customerPhoneHash),
-              inArray(schema.followUpOrders.status, ['DELIVERED', 'REMITTED']),
+              notInArray(schema.followUpOrders.status, ['CANCELLED', 'DELETED']),
               isNull(schema.followUpOrders.deletedAt),
               gte(schema.followUpOrders.createdAt, fourteenDaysAgo),
               inArray(schema.followUpOrderItems.productId, productIds),
@@ -1306,7 +1314,8 @@ export class CartOrdersService {
           return;
         }
 
-        // Also check other cart_orders (exclude self) for same phone+product in DELIVERED/REMITTED
+        // Also check other cart_orders (exclude self) for same phone+product in
+        // any live status.
         const [existingCo] = await this.db
           .select({ id: schema.cartOrders.id })
           .from(schema.cartOrders)
@@ -1315,7 +1324,7 @@ export class CartOrdersService {
             and(
               ne(schema.cartOrders.id, cartOrderId),
               eq(schema.cartOrders.customerPhoneHash, co.customerPhoneHash),
-              inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
+              notInArray(schema.cartOrders.status, ['CANCELLED', 'DELETED']),
               isNull(schema.cartOrders.deletedAt),
               gte(schema.cartOrders.createdAt, fourteenDaysAgo),
               inArray(schema.cartOrderItems.productId, productIds),
