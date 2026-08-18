@@ -3796,3 +3796,42 @@ Out of scope for v1. Capture as a follow-up so we don't forget the trade-off.
 **Phase 22 build order:** 22.3 (indexes — additive, zero-risk, ship first) → 22.1 (per-request round-trips — every request) → 22.2 (cache hot reads — every page load) → 22.4 (N+1 loops) → 22.5 (parallelize + over-fetch) → 22.6 (audit count). 22.3 → 22.2 are the highest leverage and lowest risk; 22.4/22.5 touch core service logic so they need test coverage. Do not treat this as "make the pool bigger" — `db ≈ total` in the timing logs means the *query* is slow, not the pool (see `.claude/docs/server-caching-pool.md`).
 
 **Implementation outcome (2026-05-14):** 22.3 / 22.1 / 22.2 fully done (the high-leverage per-request paths). 22.4 / 22.5 partially done — the interactive-path wins (marketing N+1s, notify-approver + order-detail parallelization) shipped; the batch/admin-path N+1s (`distributeUnassignedOrders`, inventory allocation, payroll) and the cached-payload SELECT* trim were deferred with rationale: they're not per-request hot paths and rewriting them touches dispatch/stock/money math (Pillars 1/3/4) which needs dedicated test coverage. 22.6 not done — the COUNT was found already 30s-Redis-cached, so the premise was largely stale; a full `hasMore` migration is disproportionate cross-cutting UX work. API `tsc --noEmit` clean. The deferred items are tracked in each task's notes above and are the natural Phase 22.b follow-up once test scaffolding for dispatch/payroll exists.
+
+---
+
+## Backlog
+
+---
+
+### Task B.1 — Two-number duplicate detection (Mobile ↔ WhatsApp swap) 🟡
+`[!]` Status: On hold — CEO asked to hold; capture only, do not build yet
+**Dependencies:** None
+**Reported:** 2026-08-18 (CEO + closers, real edge-form dashboard duplicates)
+
+**The problem:** A customer places a first order using one number, then a second order using their other number (their WhatsApp number). The orders forwarded to the closer show two numbers (a "Mobile" and a "WhatsApp") that are the same person's two real numbers, sometimes swapped between the fields, sometimes the same number in different formats. Both orders reach the dashboard as separate sales and closers argue over the duplicate. The customer insists they ordered once.
+
+**Root cause (verified in code 2026-08-18):** The edge form has only ONE phone input, and an order stores only ONE hashed number (`orders.customer_phone_hash`, from `customer_phone`). Every dedup and flag path keys off that single hash plus product overlap (`findExistingOrderForDedup`, the 2-min guard, cross-funnel attempts, the `is_duplicate` flag matcher). Any second/WhatsApp number that reaches the system arrives as raw text in `custom_fields` JSONB or notes: it is NEVER normalized, hashed, or queryable. So when the customer uses a different physical number the second time, the two orders produce two different hashes and every check misses. A same-number-different-format case (e.g. `07038…` vs `+2347038…`) would also miss on the WhatsApp side because that side is never hashed.
+
+**Good news — a soft-flag surface already exists to reuse:** `orders.is_duplicate` (`FLAGGED` / `POSSIBLY_DUPLICATE` / `MERGED` / `DISMISSED`) + `orders.duplicate_of_id`, set by `flagDuplicate()`, with a closer-facing warning banner already rendered in `OrderDetailPage.tsx` (~1916-1930). Today it is populated only from the single-hash match. The fix adds a WhatsApp-number hash into that same matcher, not a new mechanism.
+
+**Real examples flagged:**
+- YNS-85098 (Mobile `+2348165355811`, WhatsApp `08123179761`) vs YNS-85107 (Mobile `+2348123179761`, WhatsApp `08165355811`) — same two numbers, swapped fields. Same customer, item, and closer.
+- YNS-78646 vs YNS-78641 (Ijelekhai Edith) — numbers crossed, plus a digit-order typo of the same number.
+- YNS-84178 vs YNS-84179 (silasdino Esin) — Mobile `7038107503` and WhatsApp `07038107503` are the same number in different formats. This one is a pure format-only duplicate that current dedup also misses.
+
+**Direction (decided with CEO 2026-08-18):** Treat these as duplicates and make dedup catch them. Because this is the **frozen edge path (rule #1, revenue insurance)**, dedup must **detect and FLAG the second order after it safely lands — never reject at intake.** A wrong rejection on the public path loses real orders (see the 2026-08-04 incident). No new validation on `orders.create` / `cart.save`.
+
+**Implementation Steps (to scope when unblocked):**
+1. Capture the WhatsApp number as a real, hashable value: either add a dedicated WhatsApp field to the edge form + a `customer_whatsapp_hash` column on `orders` (+ `_history` twin), or, minimally, hash whatever WhatsApp value already arrives in `custom_fields`/notes. Use the existing country-aware `normalizePhoneForHash` so `07…` and `+234…` collapse to one hash. (History-table sync rule + edge-freeze rule both apply — the edge change is additive, stamp-never-reject, and needs explicit sign-off + manual wrangler deploy.)
+2. Store BOTH hashes per order (primary + WhatsApp) so both are queryable.
+3. Extend the duplicate matcher (`findExistingOrderForDedup` / the `is_duplicate` flag matcher) to match when ANY of a new order's numbers matches ANY number on a recent order (same product, same window) — treat the numbers as a set, not a single key. Reuse the existing `flagDuplicate()` + `is_duplicate` flag, do NOT invent a new mechanism.
+4. Surface it via the EXISTING closer banner (`OrderDetailPage.tsx` `is_duplicate` banner) on both orders so the closer confirms and handles it. Post-insert flagging only — no intake rejection (edge-freeze rule #1).
+5. One-time backfill so existing swapped/format-variant orders already in the system get flagged too.
+
+**Acceptance Criteria:**
+- [ ] The WhatsApp/second number is normalized + hashed and stored queryably (new column or hashed custom field), `_history` synced.
+- [ ] Two orders from the same person using their two different numbers are flagged as possible duplicates (YNS-85098/85107, YNS-78646/78641 cases).
+- [ ] A same-number-different-format case is flagged on both the primary and WhatsApp sides (YNS-84178/84179 case).
+- [ ] The public intake path issues NO new rejection — orders always land; detection is post-insert flagging only (edge form frozen, rule #1).
+- [ ] Closers see the existing duplicate banner on both orders and can act on it (merge/dismiss).
+- [ ] Backfill flags pre-existing duplicates of this shape.
