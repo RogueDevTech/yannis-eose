@@ -1540,6 +1540,27 @@ export function DeliveryRemittancesPage({
                       width="sort"
                     />
                   )}
+                  {viewMode === 'orders' && (
+                    <InlineFilter
+                      type="select"
+                      value={new URLSearchParams(location.search).get('retracked') ?? ''}
+                      defaultValue=""
+                      onChange={(v) => {
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          if (v === 'any') next.set('retracked', 'any');
+                          else next.delete('retracked');
+                          next.set('page', '1');
+                          return next;
+                        });
+                      }}
+                      options={[
+                        { value: '', label: 'All orders' },
+                        { value: 'any', label: 'Retracked only' },
+                      ]}
+                      width="sort"
+                    />
+                  )}
                   <SortMenu
                     value={{
                       sortBy: new URLSearchParams(location.search).get('sortBy') ?? 'sentAt',
@@ -1886,23 +1907,44 @@ export function DeliveryRemittancesPage({
                 />
               }
               desktopInlineFilters={
-                <InlineFilter
-                  type="searchable"
-                  id="eligible-remittance-location"
-                  value={filters.location}
-                  defaultValue=""
-                  onChange={handleLocationChange}
-                  options={[
-                    { value: '', label: 'All locations' },
-                    ...locations.map((loc) => ({
-                      value: loc.id,
-                      label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
-                    })),
-                  ]}
-                  width="location"
-                  placeholder="All locations"
-                  searchPlaceholder="Search locations..."
-                />
+                <>
+                  <InlineFilter
+                    type="searchable"
+                    id="eligible-remittance-location"
+                    value={filters.location}
+                    defaultValue=""
+                    onChange={handleLocationChange}
+                    options={[
+                      { value: '', label: 'All locations' },
+                      ...locations.map((loc) => ({
+                        value: loc.id,
+                        label: loc.providerName ? `${loc.name} ● ${loc.providerName}` : loc.name,
+                      })),
+                    ]}
+                    width="location"
+                    placeholder="All locations"
+                    searchPlaceholder="Search locations..."
+                  />
+                  <InlineFilter
+                    type="select"
+                    value={new URLSearchParams(location.search).get('retracked') ?? ''}
+                    defaultValue=""
+                    onChange={(v) => {
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        if (v === 'any') next.set('retracked', 'any');
+                        else next.delete('retracked');
+                        next.set('eligiblePage', '1');
+                        return next;
+                      });
+                    }}
+                    options={[
+                      { value: '', label: 'All orders' },
+                      { value: 'any', label: 'Retracked only' },
+                    ]}
+                    width="sort"
+                  />
+                </>
               }
               sheetFilterBody={null}
             />
