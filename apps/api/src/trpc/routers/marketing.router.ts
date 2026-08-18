@@ -2075,7 +2075,28 @@ export const marketingRouter = router({
                   if (!restrictToUserIds.includes(ctx.user.id)) restrictToUserIds.push(ctx.user.id);
                 }
               }
-              return getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds }, ctx.effectiveBranchIds);
+              // Recipient balances table: Received/Spent columns reflect the date
+              // filter, but the Balance column must always be all-time (true running
+              // balance). When date-filtered, fetch both and merge below so only the
+              // Balance column stays all-time.
+              const hasBalancesDateFilter = !!(dateRange.startDate || dateRange.endDate);
+              const [dateScoped, allTime] = await Promise.all([
+                getMarketingService().listFundingBalances(
+                  ctx.user,
+                  branchId,
+                  { restrictToUserIds, ...dateRange },
+                  ctx.effectiveBranchIds,
+                ),
+                hasBalancesDateFilter
+                  ? getMarketingService().listFundingBalances(ctx.user, branchId, { restrictToUserIds }, ctx.effectiveBranchIds)
+                  : null,
+              ]);
+              if (!allTime) return dateScoped;
+              const allTimeById = new Map(allTime.map((b) => [b.userId, b]));
+              return dateScoped.map((b) => ({
+                ...b,
+                balance: allTimeById.get(b.userId)?.balance ?? b.balance,
+              }));
             })().catch(() => null)
           : Promise.resolve(null),
         showFundingBalance

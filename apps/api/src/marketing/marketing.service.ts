@@ -4427,7 +4427,9 @@ export class MarketingService {
    * (yesterday + today) are excluded — only older dates count as backlog.
    */
   async getMyAdSpendBacklog(userId: string): Promise<{ missingDates: string[]; isBlocked: boolean }> {
-    const GRACE_DAYS = 2;
+    // 24-hour rule: today is always excused (grace), but any past calendar day
+    // left unfilled is now >24h stale and blocks the MB. cutoff = today - 1.
+    const GRACE_DAYS = 1;
 
     // 1. Get user's creation date
     const [user] = await this.db
