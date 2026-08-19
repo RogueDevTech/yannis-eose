@@ -1275,6 +1275,12 @@ export function MarketingTeamPage({
               columns={teamColumns}
               rows={teamMembers}
               rowKey={(m) => m.userId}
+              // The wide (min-w-[960px]) table gets its own horizontal-scroll
+              // container so ONLY the table scrolls sideways — the overview stat
+              // strip above stays put. `scrollX` renders the overflow-x-auto
+              // wrapper only when stickyHeader is off (a sticky header needs the
+              // table in page flow), so we opt this table out of the pinned header.
+              stickyHeader={false}
               className="md:min-w-[960px]"
               renderMobileCard={(m) => {
                 const initials = m.name
