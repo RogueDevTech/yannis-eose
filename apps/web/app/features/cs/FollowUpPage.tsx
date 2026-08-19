@@ -174,10 +174,14 @@ export function FollowUpPage({
     setSelectAllMatchingError(null);
   }, [filters.statuses, filters.assignedCsId, filters.olderThanDays, filters.search, filters.startDate, filters.endDate, filters.page]);
 
-  const reopenFetcher = useFetcher<{ success?: boolean; error?: string; succeeded?: number; failed?: number }>();
+  const reopenFetcher = useFetcher<{ success?: boolean; error?: string; succeeded?: number; failed?: number; skipped?: number }>();
   useFetcherToast(reopenFetcher.data, {
     successMessage: isCartView
-      ? `${reopenFetcher.data?.succeeded ?? 0} cart(s) converted to orders`
+      ? `${reopenFetcher.data?.succeeded ?? 0} cart(s) converted to orders${
+          (reopenFetcher.data?.skipped ?? 0) > 0
+            ? `, ${reopenFetcher.data?.skipped} skipped (customer already has an order)`
+            : ''
+        }`
       : `${reopenFetcher.data?.succeeded ?? 0} order(s) reopened for follow-up`,
   });
   useCloseOnFetcherSuccess(reopenFetcher, () => {

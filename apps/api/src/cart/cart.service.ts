@@ -388,6 +388,18 @@ export class CartService {
     } catch (err) {
       console.error(`[Cart] Missing line-item repair failed:`, err instanceof Error ? err.stack : err);
     }
+
+    // Safety net for the edge-form ↔ cart double-order race: soft-delete any
+    // early-stage cart order whose customer already has a live real order for
+    // the same product. Catches cases the point-in-time supersede block missed.
+    try {
+      const reconciled = await this.cartOrdersService.reconcileDuplicateCartOrders();
+      if (reconciled > 0) {
+        console.log(`[Cart] Reconciled ${reconciled} duplicate cart order(s) against live orders`);
+      }
+    } catch (err) {
+      console.error(`[Cart] Duplicate cart order reconciliation failed:`, err instanceof Error ? err.stack : err);
+    }
   }
 
   /**
@@ -560,6 +572,14 @@ export class CartService {
     startDate?: string | null;
     /** ISO date string — only carts updated on or before this date. */
     endDate?: string | null;
+    /**
+     * When true, keep already-recovered carts in the result (marketing wants
+     * the full abandonment volume). When false/omitted, use the strict
+     * open-cart filter so a cart a CS agent already recovered into an order,
+     * follow-up, or cart order disappears from the work queue — otherwise a
+     * second CS agent re-works it on front call. Defaults to strict.
+     */
+    includeRecovered?: boolean;
   } = {}): Promise<{
     items: Array<{
       id: string;
@@ -606,13 +626,18 @@ export class CartService {
     const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
     let page = Math.max(1, Math.floor(opts.page ?? 1));
 
-    // All ABANDONED carts (including recovered) — marketers see the full
-    // abandonment volume so they can track recovery progress over time.
+    // Default: only genuinely-open carts (strict) so a cart already recovered
+    // into an order / follow-up / cart order drops off the CS work queue and a
+    // second agent can't re-work it on front call. Marketing surfaces opt into
+    // the full volume (including recovered) via `includeRecovered: true`.
     const trimmedSearch = opts.search?.trim();
     const searchClause = trimmedSearch
       ? ilike(schema.cartAbandonments.customerName, `%${trimmedSearch}%`)
       : undefined;
-    const abandonedWhere = and(...this.abandonedCartConditions(opts), searchClause);
+    const baseConditions = opts.includeRecovered
+      ? this.abandonedCartConditions(opts)
+      : this.openCartConditions(opts);
+    const abandonedWhere = and(...baseConditions, searchClause);
     const totalRows = await this.db
       .select({ count: count() })
       .from(schema.cartAbandonments)
@@ -649,8 +674,18 @@ export class CartService {
         paymentMethod: schema.cartAbandonments.paymentMethod,
         quantity: schema.cartAbandonments.quantity,
         customFieldValues: schema.cartAbandonments.customFieldValues,
-        // Whether this cart has been pulled into the Cart Orders pipeline.
-        recovered: sql<boolean>`EXISTS (SELECT 1 FROM cart_orders co WHERE co.source_cart_id = ${schema.cartAbandonments.id})`,
+        // Whether this cart has been recovered by ANY path: pulled into the
+        // Cart Orders pipeline, CS-recovered into an order (status CONVERTED /
+        // orders.cart_id), or turned into a follow-up order. Checking only
+        // cart_orders left CS-recovered carts (recoverFromCart → offline
+        // follow-up order, no cart_orders row) badged as still-open, so a
+        // second agent re-worked them on front call.
+        recovered: sql<boolean>`(
+          ${schema.cartAbandonments.status} = 'CONVERTED'
+          OR EXISTS (SELECT 1 FROM cart_orders co WHERE co.source_cart_id = ${schema.cartAbandonments.id})
+          OR EXISTS (SELECT 1 FROM orders o WHERE o.cart_id = ${schema.cartAbandonments.id})
+          OR EXISTS (SELECT 1 FROM follow_up_orders fu WHERE fu.cart_id = ${schema.cartAbandonments.id})
+        )`,
         skipReason: schema.cartAbandonments.skipReason,
         duplicateOfOrderId: schema.cartAbandonments.duplicateOfOrderId,
         duplicateOfCartOrderId: schema.cartAbandonments.duplicateOfCartOrderId,
