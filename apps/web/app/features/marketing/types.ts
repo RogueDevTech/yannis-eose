@@ -27,6 +27,12 @@ export interface FundingBalanceRow {
   totalReceived: string;
   totalDistributed: string;
   totalSpend: string;
+  /** Breakdown of `totalSpend`: approvedAdSpend + pendingAdSpend + otherExpenses = totalSpend. */
+  spendBreakdown?: {
+    approvedAdSpend: string;
+    pendingAdSpend: string;
+    otherExpenses: string;
+  };
   balance: string;
   /** This month's confirmation rate (0–100), when loaded from team page with leaderboard */
   confirmationRate?: number;

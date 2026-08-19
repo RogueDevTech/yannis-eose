@@ -1748,6 +1748,11 @@ export class MarketingService {
       totalReceived: string;
       totalDistributed: string;
       totalSpend: string;
+      spendBreakdown: {
+        approvedAdSpend: string;
+        pendingAdSpend: string;
+        otherExpenses: string;
+      };
       balance: string;
     }>
   > {
@@ -1878,9 +1883,15 @@ export class MarketingService {
       // the balance compared to the recipient's own view.
       // Spend: PENDING + APPROVED (same as getFundingBalance / computeMarketingDisbursableInTx).
       // Pending expenses deduct immediately; only REJECTED is excluded.
+      // Grouped by (isAdSpend, status) so we can hand the UI a breakdown of what
+      // makes up `totalSpend` — approved ad spend + pending ad spend + other
+      // (non-AD_SPEND) expenses. The three buckets sum back to `totalSpend`, which
+      // is why "Total Spent" on Team Analysis can exceed the "Ad Spend" column.
       this.db
         .select({
           mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
+          isAdSpend: sql<boolean>`${schema.adSpendLogs.category} = 'AD_SPEND'`,
+          status: schema.adSpendLogs.status,
           total: sum(schema.adSpendLogs.spendAmount),
         })
         .from(schema.adSpendLogs)
@@ -1891,7 +1902,11 @@ export class MarketingService {
             ...spendDateConds,
           ),
         )
-        .groupBy(schema.adSpendLogs.mediaBuyerId),
+        .groupBy(
+          schema.adSpendLogs.mediaBuyerId,
+          sql`${schema.adSpendLogs.category} = 'AD_SPEND'`,
+          schema.adSpendLogs.status,
+        ),
       this.db
         .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role, isTeamSupervisor: schema.users.isTeamSupervisor, status: schema.users.status })
         .from(schema.users)
@@ -1906,9 +1921,23 @@ export class MarketingService {
     for (const r of fundingBySender) {
       distributedMap.set(r.senderId, r.total ?? '0');
     }
-    const spendMap = new Map<string, string>();
+    // Total spend + its breakdown buckets, per media buyer.
+    const spendMap = new Map<string, number>();
+    const approvedAdSpendMap = new Map<string, number>();
+    const pendingAdSpendMap = new Map<string, number>();
+    const otherExpensesMap = new Map<string, number>();
     for (const s of spendByMediaBuyer) {
-      spendMap.set(s.mediaBuyerId, s.total ?? '0');
+      const amt = Number(s.total ?? '0');
+      spendMap.set(s.mediaBuyerId, (spendMap.get(s.mediaBuyerId) ?? 0) + amt);
+      if (s.isAdSpend) {
+        if (s.status === 'APPROVED') {
+          approvedAdSpendMap.set(s.mediaBuyerId, (approvedAdSpendMap.get(s.mediaBuyerId) ?? 0) + amt);
+        } else {
+          pendingAdSpendMap.set(s.mediaBuyerId, (pendingAdSpendMap.get(s.mediaBuyerId) ?? 0) + amt);
+        }
+      } else {
+        otherExpensesMap.set(s.mediaBuyerId, (otherExpensesMap.get(s.mediaBuyerId) ?? 0) + amt);
+      }
     }
 
     const result: Array<{
@@ -1919,12 +1948,18 @@ export class MarketingService {
       totalReceived: string;
       totalDistributed: string;
       totalSpend: string;
+      /** Breakdown of `totalSpend` (approved ad spend + pending ad spend + other = total). */
+      spendBreakdown: {
+        approvedAdSpend: string;
+        pendingAdSpend: string;
+        otherExpenses: string;
+      };
       balance: string;
     }> = [];
     for (const u of userRows) {
       const totalReceived = receivedMap.get(u.id) ?? '0';
       const totalDistributed = distributedMap.get(u.id) ?? '0';
-      const totalSpend = spendMap.get(u.id) ?? '0';
+      const totalSpend = String(spendMap.get(u.id) ?? 0);
       const balance = String(
         Number(totalReceived) - Number(totalDistributed) - Number(totalSpend),
       );
@@ -1943,6 +1978,11 @@ export class MarketingService {
         totalReceived,
         totalDistributed,
         totalSpend,
+        spendBreakdown: {
+          approvedAdSpend: String(approvedAdSpendMap.get(u.id) ?? 0),
+          pendingAdSpend: String(pendingAdSpendMap.get(u.id) ?? 0),
+          otherExpenses: String(otherExpensesMap.get(u.id) ?? 0),
+        },
         balance,
       });
     }
