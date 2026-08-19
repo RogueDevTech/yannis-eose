@@ -534,9 +534,10 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!bulkRes.ok) {
       return json({ error: extractApiErrorMessage(bulkRes.data, 'Failed to recover carts') }, { status: safeStatus(bulkRes.status) });
     }
-    const bulkData = (bulkRes.data as { result?: { data?: { succeeded: number; failed: number; orderIds: string[] } } })?.result?.data;
+    const bulkData = (bulkRes.data as { result?: { data?: { succeeded: number; failed: number; skipped?: number; orderIds: string[] } } })?.result?.data;
     const succeeded = bulkData?.succeeded ?? 0;
     const failed = bulkData?.failed ?? 0;
+    const skipped = bulkData?.skipped ?? 0;
     const createdOrderIds = bulkData?.orderIds ?? [];
 
     // Move created orders to the target CS branch if specified.
@@ -568,7 +569,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    return json({ success: true, succeeded, failed });
+    return json({ success: true, succeeded, failed, skipped });
   }
 
   // ── Group CRUD ──────────────────────────────────────────────

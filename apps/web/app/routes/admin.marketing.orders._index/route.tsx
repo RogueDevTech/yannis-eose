@@ -246,6 +246,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
           ...(apiStartDate ? { startDate: apiStartDate } : {}),
           ...(apiEndDate ? { endDate: apiEndDate } : {}),
           ...(mediaBuyerId ? { mediaBuyerId } : {}),
+          // Marketing tracks total abandonment volume, so keep recovered and
+          // duplicate carts visible (rendered with RECOVERED / DUPLICATE_CART
+          // badges). CS work queues stay strict and hide recovered carts.
+          includeRecovered: true,
         }),
       );
       const cartsRes = await apiRequest<unknown>(`/trpc/cart.listAbandoned?input=${cartsInput}`, {

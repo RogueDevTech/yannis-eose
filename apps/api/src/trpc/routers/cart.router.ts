@@ -68,6 +68,10 @@ export const cartRouter = router({
           search: z.string().trim().min(1).max(120).optional(),
           startDate: z.string().optional(),
           endDate: z.string().optional(),
+          // Marketing volume surfaces pass true to keep already-recovered
+          // carts in the list. CS work queues omit it → strict (open-only) so a
+          // cart already recovered into an order can't be re-worked on front call.
+          includeRecovered: z.boolean().optional(),
         })
         .optional(),
     )
@@ -101,6 +105,7 @@ export const cartRouter = router({
         search: input?.search,
         startDate: input?.startDate,
         endDate: input?.endDate,
+        includeRecovered: input?.includeRecovered ?? false,
       });
     }),
 

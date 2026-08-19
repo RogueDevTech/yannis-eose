@@ -175,6 +175,85 @@ export class CartOrdersService {
     return inserted;
   }
 
+  /**
+   * Reconcile stray duplicate cart orders — the background safety net for the
+   * edge-form ↔ cart double-order race.
+   *
+   * A cart order can be pulled by the abandonment cron at T0 (when no real order
+   * exists yet); if the customer's edge-form order lands at T0+Δ, the cron's
+   * pull guard has already passed and the only cleanup is the edge-form
+   * supersede block — which is best-effort and can miss (error, race, window
+   * edge). Nothing else re-checks, and the orders-table background cleanup does
+   * not scan cart_orders. This closes that gap: any EARLY-STAGE cart order whose
+   * customer+product already has a live row in the `orders` table is a duplicate
+   * of a real order and is soft-deleted here.
+   *
+   * Guardrails:
+   *  - Only UNPROCESSED / CS_ASSIGNED / CS_ENGAGED cart orders are touched.
+   *    A cart order that reached CONFIRMED or beyond (esp. DELIVERED/REMITTED)
+   *    carries financial + graduation state and is NEVER auto-deleted.
+   *  - Match is phone_hash + product within 14 days (mirrors the pull guard).
+   *  - Every delete runs through withActor() and writes an ORDER_DELETED
+   *    timeline event, so accountability is preserved (Pillar 4).
+   */
+  async reconcileDuplicateCartOrders(): Promise<number> {
+    // Step 1: find early-stage cart orders that duplicate a live real order.
+    const dupes = await this.db.execute<{ id: string; order_number: number | null; branch_id: string | null; dup_order_number: number | null }>(sql`
+      SELECT co.id, co.order_number, co.branch_id,
+             (SELECT o.order_number FROM orders o
+                JOIN order_items oi ON oi.order_id = o.id
+                JOIN cart_order_items coi2 ON coi2.cart_order_id = co.id
+               WHERE o.customer_phone_hash = co.customer_phone_hash
+                 AND oi.product_id = coi2.product_id
+                 AND o.deleted_at IS NULL
+                 AND o.status NOT IN ('DELETED','CANCELLED')
+                 AND o.created_at >= co.created_at - INTERVAL '14 days'
+               ORDER BY o.created_at ASC
+               LIMIT 1) AS dup_order_number
+      FROM cart_orders co
+      WHERE co.status IN ('UNPROCESSED','CS_ASSIGNED','CS_ENGAGED')
+        AND co.deleted_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM orders o
+            JOIN order_items oi ON oi.order_id = o.id
+            JOIN cart_order_items coi ON coi.cart_order_id = co.id
+           WHERE o.customer_phone_hash = co.customer_phone_hash
+             AND oi.product_id = coi.product_id
+             AND o.deleted_at IS NULL
+             AND o.status NOT IN ('DELETED','CANCELLED')
+             AND o.created_at >= co.created_at - INTERVAL '14 days'
+        )
+      LIMIT 500
+    `);
+    const rows = (dupes as unknown as Array<{ id: string; order_number: number | null; branch_id: string | null; dup_order_number: number | null }>);
+    if (rows.length === 0) return 0;
+
+    // Step 2: soft-delete + audit inside a single actor transaction.
+    const ids = rows.map((r) => r.id);
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      const now = new Date();
+      await tx
+        .update(schema.cartOrders)
+        .set({ status: 'DELETED', deletedAt: now, updatedAt: now })
+        .where(inArray(schema.cartOrders.id, ids));
+      await tx.insert(schema.cartOrderTimelineEvents).values(
+        rows.map((r) => ({
+          cartOrderId: r.id,
+          eventType: 'ORDER_DELETED',
+          actorId: null,
+          actorName: 'System',
+          description: r.dup_order_number
+            ? `Cart order deleted: customer already has a live order (YNS-${r.dup_order_number}) for the same product. Reconciled duplicate.`
+            : `Cart order deleted: customer already has a live order for the same product. Reconciled duplicate.`,
+          metadata: { reason: 'RECONCILED_DUPLICATE_OF_ORDER' },
+          branchId: r.branch_id ?? null,
+        })),
+      );
+    });
+    this.logger.log(`Reconciled ${rows.length} duplicate cart order(s) against live orders`);
+    return rows.length;
+  }
+
   // ── List Cart Orders ─────────────────────────────────────────────────
 
   async list(

@@ -554,6 +554,7 @@ export function MarketingTeamPage({
   const [showExportModal, setShowExportModal] = useState(false);
   const [previewMember, setPreviewMember] = useState<FundingBalanceRow | null>(null);
   const [breakdownModal, setBreakdownModal] = useState(false);
+  const [spendBreakdownMember, setSpendBreakdownMember] = useState<FundingBalanceRow | null>(null);
 
   const rawView = searchParams.get('view');
   const layoutView: MarketingTeamLayoutView =
@@ -780,7 +781,22 @@ export function MarketingTeamPage({
         header: 'Total Spent',
         align: 'right',
         nowrap: true,
-        render: (m) => <span className="text-app-fg-muted">{formatNaira(Number(m.totalSpend))}</span>,
+        render: (m) => {
+          const spent = Number(m.totalSpend);
+          if (spent === 0 || !m.spendBreakdown) {
+            return <span className="text-app-fg-muted">{formatNaira(spent)}</span>;
+          }
+          return (
+            <button
+              type="button"
+              onClick={() => setSpendBreakdownMember(m)}
+              className="text-app-fg-muted underline-offset-2 hover:underline tabular-nums"
+              title="View spend breakdown"
+            >
+              {formatNaira(spent)}
+            </button>
+          );
+        },
       },
       {
         key: 'distributed',
@@ -940,6 +956,8 @@ export function MarketingTeamPage({
       },
     ];
   }, [dateFilters, greenThreshold, profitabilityConfig.targetRoas]);
+  // setSpendBreakdownMember is a stable setState function; referenced in the
+  // Total Spent column render above but intentionally left out of deps.
 
   return (
     <div className="space-y-6">
@@ -1110,6 +1128,54 @@ export function MarketingTeamPage({
         </div>
       </Modal>
 
+      <Modal
+        open={spendBreakdownMember != null}
+        onClose={() => setSpendBreakdownMember(null)}
+        maxWidth="max-w-sm"
+        contentClassName="p-5"
+      >
+        {spendBreakdownMember && (() => {
+          const b = spendBreakdownMember.spendBreakdown;
+          const approvedAd = Number(b?.approvedAdSpend ?? 0);
+          const pendingAd = Number(b?.pendingAdSpend ?? 0);
+          const other = Number(b?.otherExpenses ?? 0);
+          const total = Number(spendBreakdownMember.totalSpend);
+          return (
+            <>
+              <h2 className="text-base font-semibold text-app-fg mb-0.5">Spend Breakdown</h2>
+              <p className="text-sm text-app-fg-muted mb-3">
+                {spendBreakdownMember.name} · how Total Spent is made up
+              </p>
+              <div className="space-y-0.5">
+                <div className="flex items-center justify-between gap-4 py-1.5">
+                  <span className="text-sm text-app-fg">Approved ad spend</span>
+                  <span className="text-sm tabular-nums text-app-fg">{formatNaira(approvedAd)}</span>
+                </div>
+                {pendingAd > 0 && (
+                  <div className="flex items-center justify-between gap-4 py-1.5">
+                    <span className="text-sm text-app-fg">Pending ad spend</span>
+                    <span className="text-sm tabular-nums text-app-fg">{formatNaira(pendingAd)}</span>
+                  </div>
+                )}
+                {other > 0 && (
+                  <div className="flex items-center justify-between gap-4 py-1.5">
+                    <span className="text-sm text-app-fg">Other expenses</span>
+                    <span className="text-sm tabular-nums text-app-fg">{formatNaira(other)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-4 py-1.5 font-semibold border-t border-app-border pt-2.5 mt-1">
+                  <span className="text-sm text-app-fg">Total Spent</span>
+                  <span className="text-sm tabular-nums text-app-fg">{formatNaira(total)}</span>
+                </div>
+              </div>
+              <p className="text-xs text-app-fg-muted mt-3">
+                Pending and non-ad expenses deduct from balance immediately, so Total Spent can exceed the Ad Spend column (approved ad spend only).
+              </p>
+            </>
+          );
+        })()}
+      </Modal>
+
       <div className="list-panel">
         <ToolbarFiltersCollapsible
           className="!border-0"
@@ -1275,6 +1341,12 @@ export function MarketingTeamPage({
               columns={teamColumns}
               rows={teamMembers}
               rowKey={(m) => m.userId}
+              // The wide (min-w-[960px]) table gets its own horizontal-scroll
+              // container so ONLY the table scrolls sideways — the overview stat
+              // strip above stays put. `scrollX` renders the overflow-x-auto
+              // wrapper only when stickyHeader is off (a sticky header needs the
+              // table in page flow), so we opt this table out of the pinned header.
+              stickyHeader={false}
               className="md:min-w-[960px]"
               renderMobileCard={(m) => {
                 const initials = m.name

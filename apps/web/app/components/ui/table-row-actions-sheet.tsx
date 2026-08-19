@@ -57,16 +57,21 @@ export interface TableRowActionsSheetProps {
   /** Title in the slide-up sheet. */
   sheetTitle?: string;
   actions: TableRowSheetAction[];
-  /** Max actions shown inline on desktop. Overflow goes into kebab menu. Default: 2. */
+  /**
+   * Max actions shown inline on desktop before overflowing into the kebab menu.
+   * Default: 0 — every action lives in the dropdown so the actions column stays
+   * narrow and there's a single, consistent entry point. Pass a positive number
+   * to surface that many actions inline on xl+ screens.
+   */
   maxInline?: number;
 }
 
 /**
- * Row-level actions: **desktop** shows up to `maxInline` (default 2) inline buttons;
- * overflow goes into a compact dropdown. **Mobile** (`< md`) collapses everything
- * into a slide-up sheet.
+ * Row-level actions: **desktop** shows up to `maxInline` (default 0) inline buttons;
+ * everything else goes into a compact kebab dropdown. **Mobile** (`< md`) collapses
+ * every action into a slide-up sheet.
  */
-export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', actions, maxInline = 2 }: TableRowActionsSheetProps) {
+export function TableRowActionsSheet({ ariaLabel, sheetTitle = 'Actions', actions, maxInline = 0 }: TableRowActionsSheetProps) {
   const visible = actions.filter((a) => a.show !== false);
   const [openSource, setOpenSource] = useState<'mobile' | 'desktop' | null>(null);
   const open = openSource !== null;

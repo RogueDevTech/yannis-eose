@@ -2696,7 +2696,11 @@ export class OrdersService {
       const primaryProductId = orderInput.items?.[0]?.productId;
       if (primaryProductId) {
         try {
-          const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+          // 14-day window to match the abandonment cron's pull guard
+          // (`findExistingOrderForDedup`, 14 days). A narrower window here left
+          // cart orders pulled 8-14 days before the form submit un-superseded,
+          // so one purchase ended up as both a live order and a live cart order.
+          const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
           const matchingCartOrders = await this.db
             .select({ id: schema.cartOrders.id })
             .from(schema.cartOrders)
@@ -2705,7 +2709,7 @@ export class OrdersService {
               and(
                 eq(schema.cartOrders.customerPhoneHash, orderInput.customerPhoneHash),
                 inArray(schema.cartOrderItems.productId, orderInput.items.map((i) => i.productId)),
-                gte(schema.cartOrders.createdAt, sevenDaysAgo),
+                gte(schema.cartOrders.createdAt, fourteenDaysAgo),
                 notInArray(schema.cartOrders.status, ['CANCELLED', 'DELETED']),
                 isNull(schema.cartOrders.deletedAt),
               ),
@@ -3455,6 +3459,30 @@ export class OrdersService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'At least one item is required' });
     }
 
+    // Dedup guard — the recovery path creates the order as `offline`, and every
+    // dedup branch in create() is gated to orderSource==='edge-form', so without
+    // this check CS recovery runs NO order-vs-order dedup. If the customer already
+    // submitted the edge form (or was recovered elsewhere) for this same
+    // phone+product, recovering again would create a second live order. Refuse and
+    // link the cart to the existing order so it leaves the abandonment queue.
+    // NOTE: do NOT skipCartOrders here — unlike the edge-form path, recovery must
+    // treat an existing cart order as a genuine duplicate, not something to beat.
+    const existing = await this.findExistingOrderForDedup(
+      phoneHash,
+      items.map((i) => i.productId),
+    );
+    if (existing) {
+      try {
+        await this.cartService.convert(cartId, existing.id, actorId);
+      } catch (err) {
+        this.logger.warn(`Failed to link cart ${cartId} to existing order ${existing.id}: ${err instanceof Error ? err.message : err}`);
+      }
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: `This customer already has a live order (YNS-${existing.orderNumber}) for this product. The cart was linked to it instead of creating a duplicate.`,
+      });
+    }
+
     const orderInput: CreateOrderInput & { cartId: string } = {
       cartId,
       campaignId: cart.campaignId ?? undefined,
@@ -3525,8 +3553,8 @@ export class OrdersService {
   async bulkRecoverCarts(
     cartIds: string[],
     actorId: string,
-  ): Promise<{ succeeded: number; failed: number; orderIds: string[] }> {
-    if (cartIds.length === 0) return { succeeded: 0, failed: 0, orderIds: [] };
+  ): Promise<{ succeeded: number; failed: number; skipped: number; orderIds: string[] }> {
+    if (cartIds.length === 0) return { succeeded: 0, failed: 0, skipped: 0, orderIds: [] };
 
     // ── 1. Batch-fetch carts ────────────────────────────────────
     const carts = await this.db
@@ -3586,7 +3614,38 @@ export class OrdersService {
       });
     }
 
-    if (prepared.length === 0) return { succeeded: 0, failed, orderIds: [] };
+    if (prepared.length === 0) return { succeeded: 0, failed, skipped: 0, orderIds: [] };
+
+    // ── 3b. Dedup guard — drop carts whose customer already has a live order ──
+    // Same hole as recoverFromCart: this path inserts orders directly and runs no
+    // create()-level dedup. Without this, bulk-recovering a cart whose customer
+    // already submitted the edge form (or was recovered elsewhere) for the same
+    // phone+product would create a second live order. Link those carts to the
+    // existing order and skip them instead of creating a duplicate.
+    let skipped = 0;
+    const dedupChecks = await Promise.all(
+      prepared.map((p) =>
+        this.findExistingOrderForDedup(
+          p.phoneHash,
+          p.items.map((i) => i.productId),
+        ).catch(() => null),
+      ),
+    );
+    const deduped: PreparedCart[] = [];
+    for (let i = 0; i < prepared.length; i++) {
+      const existing = dedupChecks[i];
+      if (existing) {
+        skipped++;
+        // Link the cart to the existing order so it leaves the abandonment queue.
+        void this.cartService.convert(prepared[i]!.cart.id, existing.id, actorId).catch(() => {});
+      } else {
+        deduped.push(prepared[i]!);
+      }
+    }
+    prepared.length = 0;
+    prepared.push(...deduped);
+
+    if (prepared.length === 0) return { succeeded: 0, failed, skipped, orderIds: [] };
 
     // ── 4. Single transaction: insert all orders + items + timeline ──
     const orderIds = await withActor(this.db, { id: actorId }, async (tx) => {
@@ -3668,7 +3727,7 @@ export class OrdersService {
       }
     }
 
-    return { succeeded: orderIds.length, failed, orderIds };
+    return { succeeded: orderIds.length, failed, skipped, orderIds };
   }
 
   /** SHA-256 hash of phone for offline order creation (server-side only). */
