@@ -1751,11 +1751,14 @@ export class MarketingService {
       balance: string;
     }>
   > {
-    // `activeOnly` drops DEACTIVATED / ARCHIVED accounts so the Team Analysis
-    // roster matches `getMediaBuyerLeaderboard` (ACTIVE-only). Without it a
-    // deactivated MB shows as a half-empty ghost row — funding ₦0 but dashes
-    // for every metric. Finance/report callers leave it off so a deactivated
-    // recipient with a real outstanding balance still surfaces.
+    // `activeOnly` drops DEACTIVATED / ARCHIVED *zero-balance* ghost rows so the
+    // Team Analysis roster matches `getMediaBuyerLeaderboard` (ACTIVE-only): a
+    // deactivated MB with funding ₦0 and dashes for every metric is just noise.
+    // A deactivated recipient still holding money (non-zero balance) is ALWAYS
+    // kept — regardless of `activeOnly` — so outstanding funds surface identically
+    // on every surface (fixes the Team-card vs Funding-strip total mismatch).
+    // Finance/report callers leave `activeOnly` off, so they additionally see
+    // zero-balance deactivated recipients too.
     const activeOnly = opts?.activeOnly === true;
     const restrictToUserIds = opts?.restrictToUserIds;
     const recipientUserIds: string[] = [];
@@ -1771,18 +1774,18 @@ export class MarketingService {
       callerPerms.includes(canonicalPermissionCode('finance.read')) ||
       callerPerms.includes(canonicalPermissionCode('marketing.scope.global'));
 
+    // NOTE: `activeOnly` is NOT applied here as a hard status filter. A DEACTIVATED
+    // recipient can still hold real unspent company money (non-zero balance) that
+    // must stay visible for recovery/reconciliation, and the two surfaces that pass
+    // `activeOnly` (Team Analysis card + Funding "MB Balance" strip) were showing
+    // different totals because one dropped such a recipient and the other kept them.
+    // Instead we fetch everyone and, when `activeOnly` is set, drop only the
+    // *zero-balance* deactivated "ghost" rows at the end (see result filter below).
     if (hasGlobalView) {
       const recipients = await this.db
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(
-          activeOnly
-            ? and(
-                inArray(schema.users.role, ['HEAD_OF_MARKETING', 'MEDIA_BUYER']),
-                eq(schema.users.status, 'ACTIVE'),
-              )
-            : inArray(schema.users.role, ['HEAD_OF_MARKETING', 'MEDIA_BUYER']),
-        );
+        .where(inArray(schema.users.role, ['HEAD_OF_MARKETING', 'MEDIA_BUYER']));
       recipientUserIds.push(...recipients.map((r) => r.id));
     } else {
       // Non-global viewer (e.g. HoM without scope.global, or branch-scoped marketing reader)
@@ -1791,11 +1794,7 @@ export class MarketingService {
       const mediaBuyers = await this.db
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(
-          activeOnly
-            ? and(eq(schema.users.role, 'MEDIA_BUYER'), eq(schema.users.status, 'ACTIVE'))
-            : eq(schema.users.role, 'MEDIA_BUYER'),
-        );
+        .where(eq(schema.users.role, 'MEDIA_BUYER'));
       for (const u of mediaBuyers) {
         if (u.id !== caller.id) recipientUserIds.push(u.id);
       }
@@ -1894,7 +1893,7 @@ export class MarketingService {
         )
         .groupBy(schema.adSpendLogs.mediaBuyerId),
       this.db
-        .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role, isTeamSupervisor: schema.users.isTeamSupervisor })
+        .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role, isTeamSupervisor: schema.users.isTeamSupervisor, status: schema.users.status })
         .from(schema.users)
         .where(inArray(schema.users.id, recipientUserIds)),
     ]);
@@ -1929,6 +1928,13 @@ export class MarketingService {
       const balance = String(
         Number(totalReceived) - Number(totalDistributed) - Number(totalSpend),
       );
+      // `activeOnly` drops DEACTIVATED / ARCHIVED "ghost" rows (funding ₦0, dashes
+      // for every metric) so the roster matches the ACTIVE-only leaderboard — BUT a
+      // deactivated recipient still holding money (non-zero balance) must remain
+      // visible so their outstanding funds surface consistently on every surface.
+      if (activeOnly && u.status !== 'ACTIVE' && Number(balance) === 0) {
+        continue;
+      }
       result.push({
         userId: u.id,
         name: u.name,
