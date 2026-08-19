@@ -6556,6 +6556,11 @@ export class OrdersService {
         description: `Order quantity updated from ${oldQty} to ${newQty} by ${actorName}`,
         branchId: updated.branchId ?? null,
       });
+      // Items changed → the cached order-detail payload is now stale. Invalidate it
+      // so subsequent getById() reads see the committed items. Without this, a
+      // follow-up getById (e.g. the price-change approval handler) returns the
+      // pre-edit items and can clobber the freshly-synced invoice (YNS-77587).
+      await this.cache.del(OrdersService.ORDER_DETAIL_CACHE_KEY(input.orderId)).catch(() => {});
       // Sync invoice line items + total after item adjustment
       try {
         const freshItems = await this.db

@@ -509,20 +509,24 @@ export class PermissionRequestsService {
           approver,
         );
       }
-      // Update invoice after item changes — best-effort.
-      // Re-fetch the order so we get product names for the invoice line descriptions.
-      try {
-        const { getFinanceService } = await import('../trpc/routers/finance.router');
-        if (orderType !== 'followUp') {
-          const freshOrder = orderType === 'cart'
-            ? await (await import('../trpc/routers/cart-orders.router')).getCartOrdersService().getById(orderId)
-            : await this.ordersService.getById(orderId);
-          if (freshOrder) {
-            const oi = (freshOrder as { orderItems?: Array<{ quantity: number; unitPrice: string; productName: string | null }> }).orderItems ?? [];
-            await getFinanceService().updateInvoiceLineItems({ orderId, orderItems: oi, actorId: approver.id });
-          }
-        }
-      } catch { /* invoice update is best-effort */ }
+      // Sync the invoice after item changes — best-effort.
+      // NOTE: for normal orders, `ordersService.update()` already re-syncs the
+      // invoice from the committed order_items (orders.service.ts). Do NOT re-sync
+      // here for normal orders — a second sync via the cached `getById` read the
+      // STALE pre-edit items and clobbered the correct invoice total back to the
+      // old value (see YNS-77587). Only `cart` needs an explicit sync, and we build
+      // its line items from the approved `items` in scope (never a cached read).
+      if (orderType === 'cart') {
+        try {
+          const { getFinanceService } = await import('../trpc/routers/finance.router');
+          const cartItems = items.map((it) => ({
+            quantity: it.quantity,
+            unitPrice: String(it.unitPrice),
+            productName: it.offerLabel ?? null,
+          }));
+          await getFinanceService().updateInvoiceLineItems({ orderId, orderItems: cartItems, actorId: approver.id });
+        } catch { /* invoice update is best-effort */ }
+      }
       // Surface the approval on the order timeline. For normal orders, the underlying
       // `update` call writes a `QUANTITY_UPDATED` event when items change, but that
       // doesn't tell the Sales rep (or auditor) that this was specifically an approval.
