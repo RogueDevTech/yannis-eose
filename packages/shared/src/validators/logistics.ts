@@ -9,6 +9,12 @@ export const createProviderSchema = z.object({
   contactInfo: z.string().trim().min(1).max(500),
   coverageArea: z.string().trim().min(1).max(500),
   rateCard: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  /**
+   * Multi-country: the currency/country this provider operates in. Mandatory at
+   * create (defaults to base NGN so single-currency installs need no UI change).
+   * A GHS order can only be assigned to a GHS provider.
+   */
+  currencyCode: z.string().trim().min(2).max(5).default('NGN'),
 });
 export type CreateProviderInput = z.infer<typeof createProviderSchema>;
 
@@ -19,6 +25,8 @@ export const updateProviderSchema = z.object({
   coverageArea: z.string().trim().min(1).max(500).optional(),
   rateCard: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+  /** Multi-country: reassign the provider's country/currency. */
+  currencyCode: z.string().trim().min(2).max(5).optional(),
 });
 export type UpdateProviderInput = z.infer<typeof updateProviderSchema>;
 
@@ -27,6 +35,12 @@ export const listProvidersSchema = z.object({
   search: z.string().optional(),
   /** Filter by kind. The Logistics Partners page passes `THIRD_PARTY` to hide Yannis warehouses. */
   kind: z.enum(['THIRD_PARTY', 'WAREHOUSE']).optional(),
+  /**
+   * Multi-country: restrict to providers in this currency/country. The CS
+   * assign-to-agent picker passes the order's currency so only same-country
+   * agents appear.
+   */
+  currencyCode: z.string().trim().min(2).max(5).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(1000).default(20),
 });

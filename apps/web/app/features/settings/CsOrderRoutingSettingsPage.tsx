@@ -12,11 +12,14 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { RadioGroup } from '~/components/ui/radio-group';
 import { SearchInput } from '~/components/ui/search-input';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
+import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 
 export interface CsRoutingRuleRow {
   id: string;
   ownerBranchId: string;
   productId: string | null;
+  /** Multi-country: the country/currency this rule targets. null = any country (catch-all). */
+  currencyCode?: string | null;
   priority: number;
   enabled: boolean;
   strategy: 'WEIGHTED' | 'EQUAL';
@@ -143,6 +146,12 @@ export function CsOrderRoutingSettingsPage({
   const [productSearch, setProductSearch] = useState('');
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(() => new Set());
   const [bulkServicingBranchId, setBulkServicingBranchId] = useState('');
+  // Multi-currency: optional country scope for the routing rule. Only shown when
+  // the company runs 2+ active currencies; '' = any country (null server-side).
+  const currencies = useCurrenciesCatalog();
+  const showCurrency = useHasMultipleCurrencies();
+  const activeCurrencies = currencies.filter((c) => c.active);
+  const [ruleCurrencyCode, setRuleCurrencyCode] = useState('');
 
   const branchNameById = useMemo(
     () => new Map(branches.map((b) => [b.id, b.code ? `${b.name} (${b.code})` : b.name])),
@@ -235,6 +244,8 @@ export function CsOrderRoutingSettingsPage({
         productIds: [...selectedProductIds],
         servicingBranchId: bulkServicingBranchId.trim(),
         teamId: null,
+        // Only send when the feature is active; '' → any country (null).
+        currencyCode: showCurrency ? (ruleCurrencyCode || null) : undefined,
       }),
     );
     fetcher.submit(fd, { method: 'post' });
@@ -353,6 +364,22 @@ export function CsOrderRoutingSettingsPage({
                   ]}
                 />
               </div>
+              {showCurrency && activeCurrencies.length > 0 ? (
+                <div className="min-w-[min(100%,12rem)] flex-1">
+                  <FormSelect
+                    label="Country (optional)"
+                    value={ruleCurrencyCode}
+                    onChange={(e) => setRuleCurrencyCode(e.target.value)}
+                    options={[
+                      { value: '', label: 'Any country' },
+                      ...activeCurrencies.map((c) => ({
+                        value: c.code,
+                        label: `${c.countryName || c.code} (${c.symbol} ${c.code})`,
+                      })),
+                    ]}
+                  />
+                </div>
+              ) : null}
               <Button
                 type="button"
                 variant="primary"

@@ -20,6 +20,13 @@ export const logisticsProviders = pgTable('logistics_providers', {
   kind: text('kind').default('THIRD_PARTY').notNull(),
   /** Company-group isolation. NULL = legacy/global (backfilled to default group). */
   groupId: uuid('group_id').references(() => branchGroups.id),
+  /**
+   * Multi-country (mig 0329): the currency/country this provider operates in.
+   * 1 country = 1 currency. Mandatory at create; a GHS order can only be
+   * assigned to a GHS provider (Phase 3 filters the CS assign-to-agent list).
+   * Default 'NGN' → existing providers behave as before.
+   */
+  currencyCode: text('currency_code').default('NGN').notNull(),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
   ...temporalColumns,
   ...timestampColumns,

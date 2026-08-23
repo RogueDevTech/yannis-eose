@@ -298,6 +298,8 @@ export class AuthService {
       // Captured here so the tRPC branch-scope guard can fall back to the
       // sole branch for single-branch org-wide heads instead of throwing.
       branchIds: memberships.map((m) => m.branchId as string),
+      // Multi-country data-scope — resolved into effectiveCurrencyCodes on ctx.
+      currencyCodes: await this.getUserCurrencyCodes(user.id),
       appTheme: user.appTheme ?? null,
       fontScale: user.fontScale ?? null,
     };
@@ -543,6 +545,8 @@ export class AuthService {
       activeGroupId: mirrorActiveGroupId,
       selectedBranchIds: mirrorSelectedBranchIds,
       branchIds: targetMemberships.map((m) => m.branchId as string),
+      // Mirror sees exactly the target's country scope (read-only walkthrough).
+      currencyCodes: await this.getUserCurrencyCodes(target.id),
       // Surface the target's appearance so the admin sees the app exactly as the
       // user would. The green border makes Mirror Mode obvious; the theme is part
       // of the read-only "live walkthrough".
@@ -668,6 +672,8 @@ export class AuthService {
       logisticsLocationId: actor.logisticsLocationId,
       currentBranchId,
       branchIds: memberships.map((m) => m.branchId as string),
+      // Restore the actor's own country scope on mirror-stop.
+      currencyCodes: await this.getUserCurrencyCodes(actor.id),
       appTheme: actor.appTheme ?? null,
       fontScale: actor.fontScale ?? null,
       mirroredBy: null,
@@ -1013,6 +1019,20 @@ export class AuthService {
       .from(schema.branches)
       .where(eq(schema.branches.groupId, groupId));
     return rows.map((r) => r.id);
+  }
+
+  /**
+   * Multi-country: the currency codes a user is assigned in `user_countries`.
+   * Captured into the session so `effectiveCurrencyCodes` can be resolved on the
+   * tRPC context. Empty for a user with no assignment (context then falls back to
+   * base country NGN for non-view_all users). Ignored for MB/admin/view_all.
+   */
+  async getUserCurrencyCodes(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ currencyCode: schema.userCountries.currencyCode })
+      .from(schema.userCountries)
+      .where(eq(schema.userCountries.userId, userId));
+    return rows.map((r) => r.currencyCode);
   }
 
   /**

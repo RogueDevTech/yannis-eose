@@ -82,4 +82,13 @@ export const currenciesRouter = router({
     .mutation(async ({ input, ctx }) => {
       return getCurrenciesService().setDefault(input, { id: ctx.user.id }, ctx.activeGroupId ?? null);
     }),
+
+  /**
+   * Go-dark safeguard (multi-country): active non-default currencies that have
+   * order data but no assigned Finance / Stock Manager / HoL user. Drives the
+   * admin dashboard banner. Gated on currency management so only admins see it.
+   */
+  unassignedCountryAlarms: permissionProcedure('countries.manage').query(async ({ ctx }) => {
+    return getCurrenciesService().getUnassignedCountryAlarms(ctx.activeGroupId ?? null);
+  }),
 });

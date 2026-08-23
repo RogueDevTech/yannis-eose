@@ -154,7 +154,7 @@ export const inventoryRouter = router({
     .input(z.object({ providerId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
       denyTpl(ctx.user);
-      return getInventoryService().getProviderShipments(input.providerId, ctx.activeGroupId);
+      return getInventoryService().getProviderShipments(input.providerId, ctx.activeGroupId, ctx.effectiveCurrencyCodes);
     }),
 
   providerLocationBreakdown: permissionProcedure('inventory.read')
@@ -595,6 +595,7 @@ export const inventoryRouter = router({
             ctx.currentBranchId ?? null,
             ctx.effectiveBranchIds,
             ctx.activeGroupId,
+            ctx.effectiveCurrencyCodes,
           )
           .catch(() => null),
         getLogisticsServiceForInventory()
@@ -632,7 +633,7 @@ export const inventoryRouter = router({
     list: permissionProcedure('inventory.shipments.read')
       .input(listShipmentsSchema)
       .query(async ({ input, ctx }) => {
-        return getShipmentsService().listShipments(input, ctx.user, ctx.currentBranchId ?? null, ctx.effectiveBranchIds, ctx.activeGroupId);
+        return getShipmentsService().listShipments(input, ctx.user, ctx.currentBranchId ?? null, ctx.effectiveBranchIds, ctx.activeGroupId, ctx.effectiveCurrencyCodes);
       }),
 
     get: permissionProcedure('inventory.shipments.read')

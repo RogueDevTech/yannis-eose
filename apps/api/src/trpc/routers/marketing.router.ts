@@ -1218,6 +1218,7 @@ export const marketingRouter = router({
             supervisorScope: ordersScope.supervisorScope,
             branchScope: 'marketing',
             effectiveBranchIds: ctx.effectiveBranchIds,
+            effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
             orderSource: mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import',
             excludeFollowUps: true,
             excludeCartGraduated: true,
@@ -1237,6 +1238,7 @@ export const marketingRouter = router({
           'marketing',
           supervisorBuyerIds,
           currencyCode,
+          ctx.effectiveCurrencyCodes,
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
@@ -1261,6 +1263,7 @@ export const marketingRouter = router({
           // Marketing Orders page — scope the trend by the marketing branch.
           'marketing',
           ctx.effectiveBranchIds,
+          ctx.effectiveCurrencyCodes,
         ),
         canSeeBuyerPicklist
           ? supervisorBuyerIds && supervisorBuyerIds.length > 0
@@ -1344,6 +1347,7 @@ export const marketingRouter = router({
           supervisorScope: ordersScope.supervisorScope,
           branchScope: 'marketing',
           effectiveBranchIds: ctx.effectiveBranchIds,
+          effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
           orderSource: mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import',
           excludeFollowUps: true,
           excludeCartGraduated: true,
@@ -1360,6 +1364,7 @@ export const marketingRouter = router({
           'marketing',
           supervisorBuyerIds,
           currencyCode,
+          ctx.effectiveCurrencyCodes,
         ),
       ]);
 

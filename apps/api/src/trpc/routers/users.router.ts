@@ -286,6 +286,14 @@ export const usersRouter = router({
       const { branchId: _branchId, ...updateInput } = input;
       const res = await getUsersService().update(updateInput, ctx.user);
       await invalidatePermissionsUserMatrixCache();
+      // Multi-country: if country scope changed, re-sync the target's active
+      // sessions so the grant/revoke takes effect on their next request (not
+      // only next login). Mirrors the branch-membership refresh.
+      if (updateInput.currencyCodes !== undefined) {
+        await getSessionStore()
+          .refreshUserCountryMemberships(updateInput.userId)
+          .catch(() => {});
+      }
       return res;
     }),
 

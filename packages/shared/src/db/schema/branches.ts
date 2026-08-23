@@ -45,3 +45,34 @@ export const userBranches = pgTable(
     uniq: uniqueIndex('user_branches_user_branch_uniq').on(t.userId, t.branchId),
   }),
 );
+
+/**
+ * user_countries — per-user country/currency data-scope (multi-country, mig 0330).
+ *
+ * Country is a hard data-scope: a user only sees orders/shipments/stock/logistics
+ * for currencies they are assigned. 1 country = 1 currency, so the assignment is
+ * keyed on currency_code.
+ *
+ * Semantics (resolved in trpc/context.ts → effectiveCurrencyCodes):
+ *  - MEDIA_BUYER role + anyone with `countries.view_all` → ALL currencies (no filter).
+ *  - Assigned non-view_all user → exactly their assigned currency_codes.
+ *  - UNassigned non-view_all user → falls back to the base country ('NGN') only,
+ *    so a freshly-created user never sees a fully empty app; foreign countries
+ *    stay hidden until explicitly granted.
+ *
+ * Mirrors user_branches. No temporal columns (assignment membership, like
+ * user_branches, is not system-versioned).
+ */
+export const userCountries = pgTable(
+  'user_countries',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    /** ISO-ish currency code matching currencies.code (e.g. 'NGN', 'GHS'). */
+    currencyCode: text('currency_code').notNull(),
+  },
+  (t) => ({
+    uniq: uniqueIndex('user_countries_user_currency_uniq').on(t.userId, t.currencyCode),
+  }),
+);

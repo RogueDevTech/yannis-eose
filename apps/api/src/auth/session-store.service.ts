@@ -207,6 +207,46 @@ export class SessionStoreService {
     return updated;
   }
 
+  /**
+   * Multi-country: re-sync `currencyCodes` on every active session of a user
+   * after their country assignments changed — WITHOUT logging them out. Mirrors
+   * refreshUserBranchMemberships. So a country grant/revoke takes effect on the
+   * user's next request, not only their next login. Returns sessions updated.
+   */
+  async refreshUserCountryMemberships(userId: string): Promise<number> {
+    const rows = await this.db
+      .select({
+        token: schema.authSessions.token,
+        sessionData: schema.authSessions.sessionData,
+        expiresAt: schema.authSessions.expiresAt,
+      })
+      .from(schema.authSessions)
+      .where(
+        and(
+          eq(schema.authSessions.userId, userId),
+          isNull(schema.authSessions.revokedAt),
+          gt(schema.authSessions.expiresAt, new Date()),
+        ),
+      );
+    if (rows.length === 0) return 0;
+
+    const countryRows = await this.db
+      .select({ currencyCode: schema.userCountries.currencyCode })
+      .from(schema.userCountries)
+      .where(eq(schema.userCountries.userId, userId));
+    const currencyCodes = countryRows.map((r) => r.currencyCode);
+
+    let updated = 0;
+    for (const row of rows) {
+      const session = row.sessionData as unknown as SessionUser;
+      const nextSession: SessionUser = { ...session, currencyCodes };
+      const ttlSeconds = await this.remainingTtlSeconds(row.token, row.expiresAt);
+      await this.updateSession(row.token, nextSession, ttlSeconds);
+      updated += 1;
+    }
+    return updated;
+  }
+
   /** Remaining session TTL — Redis is authoritative (touchSession extends it there only). */
   private async remainingTtlSeconds(token: string, dbExpiresAt: Date): Promise<number> {
     if (this.redisHealth.isHealthy()) {

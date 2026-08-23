@@ -174,6 +174,8 @@ export type CsOrderRoutingMutationPayload =
       productIds: string[];
       servicingBranchId: string;
       teamId?: string | null;
+      /** Country scope for the rule. null/undefined = any country. */
+      currencyCode?: string | null;
     }
   | {
       intent: 'deleteProductRouting';
@@ -251,6 +253,10 @@ export async function handleCsOrderRoutingFormJson(request: Request, formData: F
       return json({ error: 'Select at least one product' }, { status: 400 });
     }
     const targetTeamId = payload.teamId?.trim() ? payload.teamId.trim() : null;
+    // Country scope — only present when the company runs 2+ active currencies.
+    // undefined leaves the server default; null means "any country".
+    const ruleCurrencyCode =
+      payload.currencyCode === undefined ? undefined : payload.currencyCode || null;
 
     // Load existing rules per branch in parallel so we can decide create vs update.
     const rulesByBranch = await Promise.all(
@@ -258,13 +264,24 @@ export async function handleCsOrderRoutingFormJson(request: Request, formData: F
     );
 
     const ops: Array<Promise<{ ok: boolean; status: number; data: unknown }>> = [];
+    // Multi-country: key existing rules on (productId, currencyCode) so a
+    // country-specific save creates a NEW rule ALONGSIDE any any-country
+    // catch-all instead of mutating (destroying) it. Keying on productId alone
+    // silently overwrote the catch-all's country. NULL currency normalises to
+    // '' so the catch-all has a stable, distinct key.
+    const ruleKey = (productId: string, currency: string | null | undefined) =>
+      `${productId}::${currency ?? ''}`;
     for (const { branchId: bid, rules: branchRules } of rulesByBranch) {
-      const existingByProduct = new Map<string, CsRoutingRuleRow>();
+      const existingByKey = new Map<string, CsRoutingRuleRow>();
       for (const r of branchRules) {
-        if (r.productId) existingByProduct.set(r.productId, r);
+        if (r.productId) existingByKey.set(ruleKey(r.productId, r.currencyCode ?? null), r);
       }
       for (const productId of uniqueProducts) {
-        const existing = existingByProduct.get(productId);
+        // Match an existing rule with the SAME product AND the same country
+        // (ruleCurrencyCode undefined = no country dimension in play → catch-all key '').
+        const existing = existingByKey.get(
+          ruleKey(productId, ruleCurrencyCode === undefined ? null : ruleCurrencyCode),
+        );
         const targets = [{ servicingBranchId, teamId: targetTeamId, weight: 1 }];
         if (existing) {
           ops.push(
@@ -278,6 +295,7 @@ export async function handleCsOrderRoutingFormJson(request: Request, formData: F
                 enabled: true,
                 strategy: 'EQUAL',
                 targets,
+                ...(ruleCurrencyCode !== undefined ? { currencyCode: ruleCurrencyCode } : {}),
               },
             }),
           );
@@ -293,6 +311,7 @@ export async function handleCsOrderRoutingFormJson(request: Request, formData: F
                 enabled: true,
                 strategy: 'EQUAL',
                 targets,
+                ...(ruleCurrencyCode !== undefined ? { currencyCode: ruleCurrencyCode } : {}),
               },
             }),
           );

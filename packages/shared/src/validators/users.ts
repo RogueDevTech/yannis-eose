@@ -140,6 +140,10 @@ export const createStaffSchema = z.object({
   // Branch assignment
   branchIds: z.array(z.string().uuid()).optional(),
   primaryBranchId: z.string().uuid().optional(),
+  // Multi-country: which countries/currencies this user may see. Ignored for
+  // MB / admin / countries.view_all holders (they see all). Empty/omitted for a
+  // scoped user → base country (NGN) only. See user_countries.
+  currencyCodes: z.array(z.string().trim().min(2).max(5)).optional(),
   // Per-company primary: { groupId → branchId }. When a user spans multiple
   // company groups, each group gets its own primary branch. Falls back to
   // the single `primaryBranchId` when absent.
@@ -222,6 +226,8 @@ export const updateStaffSchema = z.object({
   restrictProductAccess: z.boolean().optional(),
   productIds: z.array(z.string().uuid()).optional(),
   branchIds: z.array(z.string().uuid()).optional(),
+  // Multi-country: reassign which countries/currencies this user may see. See user_countries.
+  currencyCodes: z.array(z.string().trim().min(2).max(5)).optional(),
   // Nullable so an org-wide user's reporting office can be cleared (set to null),
   // not just changed. Branch-eligible roles still require a non-null primary,
   // enforced in the service layer.

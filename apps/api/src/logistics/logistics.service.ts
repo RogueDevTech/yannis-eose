@@ -52,6 +52,7 @@ import { CacheService } from '../common/cache/cache.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { isAdminLevel } from '../common/authz';
 import { OrdersService } from '../orders/orders.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
@@ -342,6 +343,8 @@ export class LogisticsService implements OnModuleInit {
           coverageArea: input.coverageArea,
           rateCard: input.rateCard ?? null,
           groupId: groupId ?? null,
+          // Multi-country: country/currency the provider operates in (default NGN).
+          currencyCode: (input.currencyCode ?? 'NGN').toUpperCase(),
         })
         .returning();
 
@@ -361,6 +364,7 @@ export class LogisticsService implements OnModuleInit {
       if (input.coverageArea !== undefined) updateFields['coverageArea'] = input.coverageArea;
       if (input.rateCard !== undefined) updateFields['rateCard'] = input.rateCard;
       if (input.status !== undefined) updateFields['status'] = input.status;
+      if (input.currencyCode !== undefined) updateFields['currencyCode'] = input.currencyCode.toUpperCase();
 
       const rows = await tx
         .update(schema.logisticsProviders)
@@ -399,7 +403,11 @@ export class LogisticsService implements OnModuleInit {
     return { ...rows[0], locationCount: locationRows[0]?.count ?? 0 };
   }
 
-  async listProviders(input: ListProvidersInput, groupId?: string | null) {
+  async listProviders(
+    input: ListProvidersInput,
+    groupId?: string | null,
+    effectiveCurrencyCodes?: string[] | null,
+  ) {
     const conditions = [];
     if (input.status) {
       conditions.push(eq(schema.logisticsProviders.status, input.status));
@@ -409,6 +417,18 @@ export class LogisticsService implements OnModuleInit {
     }
     if (input.kind) {
       conditions.push(eq(schema.logisticsProviders.kind, input.kind));
+    }
+    if (input.currencyCode) {
+      // Multi-country: the CS assign-to-agent picker passes the order's currency
+      // so only same-country providers/agents appear.
+      conditions.push(eq(schema.logisticsProviders.currencyCode, input.currencyCode));
+    }
+    // Multi-country DATA SCOPE: a country-scoped user only sees providers in their
+    // assigned countries. Stacks on the explicit picker filter above and on group
+    // scope. No-op for MB / admin / view_all (effectiveCurrencyCodes == null).
+    {
+      const cCond = countryScopeCondition(schema.logisticsProviders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
     }
     if (groupId) {
       conditions.push(or(eq(schema.logisticsProviders.groupId, groupId), isNull(schema.logisticsProviders.groupId))!);
@@ -428,6 +448,7 @@ export class LogisticsService implements OnModuleInit {
           contactInfo: schema.logisticsProviders.contactInfo,
           coverageArea: schema.logisticsProviders.coverageArea,
           kind: schema.logisticsProviders.kind,
+          currencyCode: schema.logisticsProviders.currencyCode,
           status: schema.logisticsProviders.status,
           createdAt: schema.logisticsProviders.createdAt,
           updatedAt: schema.logisticsProviders.updatedAt,

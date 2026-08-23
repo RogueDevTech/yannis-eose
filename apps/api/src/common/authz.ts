@@ -84,6 +84,30 @@ export function canViewAllBranches(user: {
   );
 }
 
+/**
+ * Multi-country: true when the user sees EVERY country's data (no country-scope
+ * filter). The country analogue of `canViewAllBranches`, but deliberately
+ * NARROWER — country is a hard data-scope, so most org-wide-branch roles are
+ * still country-scoped.
+ *
+ * All-countries holders:
+ *   - MEDIA_BUYER — implicit all-countries by product decision (an MB sees every
+ *     currency for their own attributed orders).
+ *   - Admin-class (SUPER_ADMIN / ADMIN / SUPPORT) — full visibility.
+ *   - Anyone explicitly granted `countries.view_all`.
+ *
+ * NOTE: Finance / Stock Manager / HoL are intentionally NOT here — they are
+ * country-scoped via `user_countries` unless individually granted view_all.
+ */
+export function canViewAllCountries(user: {
+  role: string;
+  permissions?: string[];
+}): boolean {
+  if (user.role === 'MEDIA_BUYER') return true;
+  if (isAdminLevel(user)) return true;
+  return new Set(user.permissions ?? []).has('countries.view_all');
+}
+
 /** Session fields needed for global audit log / mirror-session audit access. */
 export type GlobalAuditAccessUser = {
   role: string;

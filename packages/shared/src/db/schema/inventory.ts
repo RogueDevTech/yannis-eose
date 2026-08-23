@@ -25,11 +25,20 @@ export const stockBatches = pgTable('stock_batches', {
   quantity: integer('quantity').notNull(),
   remainingQuantity: integer('remaining_quantity').notNull(),
   receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow().notNull(),
+  // Multi-country (mig 0329): the currency/country this FIFO layer belongs to.
+  // A GHS order draws only GHS batches. Default 'NGN' → single-currency installs
+  // keep one global-per-product pool as before. Stamped on INTAKE from the
+  // shipment's currency. See CLAUDE.md → per-country FIFO.
+  currencyCode: text('currency_code').default('NGN').notNull(),
   ...temporalColumns,
   ...timestampColumns,
 });
 
-// Table 6: inventory_levels — stock tracked by location
+// Table 6: inventory_levels — stock tracked by location.
+// NOTE: no currency_code column here by design — a location belongs to one
+// place, so its country is DERIVED (location → its batches / provider), keeping
+// the (product_id, location_id) unique index + ON CONFLICT target unchanged
+// (avoids the 0276/0327 partial-index trap).
 export const inventoryLevels = pgTable('inventory_levels', {
   id: uuidv7Pk(),
   productId: uuid('product_id')

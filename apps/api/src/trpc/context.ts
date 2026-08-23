@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { canViewAllBranches } from '../common/authz';
+import { canViewAllBranches, canViewAllCountries } from '../common/authz';
 
 /**
  * tRPC context — created for every request.
@@ -36,6 +36,21 @@ export interface TrpcContext {
   effectiveBranchIds: string[] | null;
   /** The active branch-group (company) ID from the session. */
   activeGroupId: string | null;
+  /**
+   * Multi-country data-scope — the concrete set of currency codes this request
+   * is allowed to see. The country analogue of `effectiveBranchIds`, STACKS
+   * with it (services push both a branch and a country condition).
+   *
+   *  - `null` → no country filter. MEDIA_BUYER, anyone with `countries.view_all`,
+   *    and admin-level users see every country.
+   *  - `['NGN']` → an unassigned non-view_all user: base country only
+   *    (rollout-safe, never a fully empty app).
+   *  - `[codes…]` → the user's explicitly assigned currencies.
+   *
+   * Built from the session's `currencyCodes` (from `user_countries`) at login.
+   * See `countryScopeCondition`.
+   */
+  effectiveCurrencyCodes: string[] | null;
 }
 
 export function createContext(req: Request, res: Response): TrpcContext {
@@ -98,5 +113,31 @@ export function createContext(req: Request, res: Response): TrpcContext {
     // else: global user without company selection AND no activeGroupId → null (org-wide).
   }
 
-  return { user, req, res, sessionToken, currentBranchId, effectiveBranchIds, activeGroupId };
+  // Resolve effectiveCurrencyCodes — the country-scope analogue of
+  // effectiveBranchIds. Priority:
+  //  1. No user → null (public/unauthed; procedures gate separately).
+  //  2. canViewAllCountries (MB, admin-class, countries.view_all) → null (see all).
+  //  3. Assigned currencyCodes present → exactly those.
+  //  4. Non-view_all user with NO assignment → ['NGN'] (base country only,
+  //     rollout-safe: never a fully empty app, foreign countries stay hidden).
+  let effectiveCurrencyCodes: string[] | null = null;
+  if (user) {
+    if (canViewAllCountries(user)) {
+      effectiveCurrencyCodes = null;
+    } else {
+      const assigned = user.currencyCodes ?? [];
+      effectiveCurrencyCodes = assigned.length > 0 ? assigned : ['NGN'];
+    }
+  }
+
+  return {
+    user,
+    req,
+    res,
+    sessionToken,
+    currentBranchId,
+    effectiveBranchIds,
+    activeGroupId,
+    effectiveCurrencyCodes,
+  };
 }

@@ -190,6 +190,8 @@ export interface UserDetail {
   crmLinked?: boolean | null;
   primaryBranchId: string | null;
   roleTemplateId?: string | null;
+  /** Currency (country) codes this user is scoped to. Empty = base country only. */
+  assignedCurrencyCodes?: string[];
   scopeGlobal?: boolean;
   scopeOrgWideHead?: boolean;
   scopeTeamSupervisor?: boolean;

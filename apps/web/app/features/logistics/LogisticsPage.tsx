@@ -36,6 +36,7 @@ import { TableRowActionsSheet, type TableRowSheetAction } from '~/components/ui/
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
+import { useCurrenciesCatalog, useHasMultipleCurrencies, useBaseCurrency } from '~/contexts/currencies-catalog-context';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type {
@@ -67,6 +68,13 @@ function AddProviderForm({
   submissionError?: string | null;
 }) {
   const [rows, setRows] = useState<ProviderRow[]>([{ name: '', contactInfo: '', coverageArea: '' }]);
+  // Multi-currency: single currency select, only when the company runs 2+ active
+  // currencies. Single-currency installs default to base (NGN) server-side.
+  const currencies = useCurrenciesCatalog();
+  const showCurrency = useHasMultipleCurrencies();
+  const baseCurrency = useBaseCurrency();
+  const activeCurrencies = currencies.filter((c) => c.active);
+  const [currencyCode, setCurrencyCode] = useState<string>(() => baseCurrency.code);
 
   function addRow() {
     setRows((prev) => [...prev, { name: '', contactInfo: '', coverageArea: '' }]);
@@ -151,6 +159,20 @@ function AddProviderForm({
           );
         })}
       </div>
+      {showCurrency && activeCurrencies.length > 0 ? (
+        <div className="sm:w-1/2">
+          <FormSelect
+            name="currencyCode"
+            label="Country / currency this provider operates in"
+            value={currencyCode}
+            onChange={(e) => setCurrencyCode(e.target.value)}
+            options={activeCurrencies.map((c) => ({
+              value: c.code,
+              label: `${c.countryName || c.code} (${c.symbol} ${c.code})`,
+            }))}
+          />
+        </div>
+      ) : null}
       <div className="flex gap-2">
         <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
           {filledCount > 1 ? `Create ${filledCount} logistics companies` : 'Create logistics company'}
@@ -204,6 +226,12 @@ function detectState(loc: Location, providerCoverage?: string | null): string | 
 
 export function LogisticsPage({ providers, totalProviders, locations, totalLocations, globalLowStockThreshold }: LogisticsPageProps) {
   const fetcher = useFetcher();
+  // Multi-currency: single currency select on the edit-provider form, only when
+  // the company runs 2+ active currencies.
+  const currencies = useCurrenciesCatalog();
+  const showProviderCurrency = useHasMultipleCurrencies();
+  const baseCurrency = useBaseCurrency();
+  const activeCurrencies = currencies.filter((c) => c.active);
   const [activeTab, setActiveTab] = useState<'providers' | 'locations'>('locations');
   const [search, setSearch] = useState('');
   const [filterProviderId, setFilterProviderId] = useState('');
@@ -963,6 +991,17 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 placeholder="e.g. Lagos, Abuja"
                 required
               />
+              {showProviderCurrency && activeCurrencies.length > 0 ? (
+                <FormSelect
+                  name="currencyCode"
+                  label="Country / currency this provider operates in"
+                  defaultValue={editingProvider.currencyCode ?? baseCurrency.code}
+                  options={activeCurrencies.map((c) => ({
+                    value: c.code,
+                    label: `${c.countryName || c.code} (${c.symbol} ${c.code})`,
+                  }))}
+                />
+              ) : null}
               <FormSelect
                 name="status"
                 label="Status"

@@ -137,6 +137,8 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'cart.read', resource: 'cart', action: 'read', description: 'View cart abandonment data (Sales dashboard)' },
   { code: 'branches.manage', resource: 'branches', action: 'manage', description: 'Create, update, and assign users to branches (SuperAdmin / Admin / HR Manager)' },
   { code: 'branches.view_all', resource: 'branches', action: 'view_all', description: 'View data across all branches (global visibility bypass) — grant sparingly' },
+  { code: 'countries.view_all', resource: 'countries', action: 'view_all', description: 'View data across all countries/currencies (country-scope bypass). MB + admin-class have this implicitly; grant sparingly to org roles' },
+  { code: 'countries.manage', resource: 'countries', action: 'manage', description: 'Assign which countries/currencies a user can see (SuperAdmin / Admin / HR Manager)' },
   { code: 'branches.teams.cs', resource: 'branches.teams', action: 'cs', description: 'Manage Sales supervisor teams within a branch (Head of CS)' },
   { code: 'branches.teams.marketing', resource: 'branches.teams', action: 'marketing', description: 'Manage Marketing supervisor teams within a branch (Head of Marketing)' },
   { code: 'cs.scope.global', resource: 'cs.scope', action: 'global', description: 'Allow Sales workflows across all branches' },
@@ -329,6 +331,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     // HEAD_OF_MARKETING above. The product picker on the ad-spend modal
     // still works (authedProcedure on `products.list` / `products.options`).
     'marketing.funding.request',
+    // Multi-country: MB sees every country's data for their own attributed
+    // orders. Also enforced in code via canViewAllCountries(role==='MEDIA_BUYER');
+    // listed here so the session permission array stays honest.
+    'countries.view_all',
   ],
   HEAD_OF_CS: [
     'orders.read',
@@ -566,6 +572,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     // for branch-membership writes.
     'branches.manage',
     'branches.manage_users',
+    // Multi-country: HR assigns which countries/currencies a user can see,
+    // alongside branch assignment on the same staff-management form.
+    'countries.manage',
     'notifications.broadcast',
     'audit.read',
     'hr.onboarding.read',

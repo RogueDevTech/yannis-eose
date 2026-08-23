@@ -145,6 +145,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       primaryBranchId: user.primaryBranchId ?? null,
       primaryBranchByGroup: Object.keys(primaryBranchByGroup).length > 0 ? primaryBranchByGroup : undefined,
       branchIds: (user.branchMemberships ?? []).map((m) => m.branchId),
+      currencyCodes: user.assignedCurrencyCodes ?? [],
       roleTemplateId: user.roleTemplateId ?? null,
       permissionOverrides,
       payRoleId: user.payRoleId ?? null,
@@ -546,6 +547,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
       } catch {
         // ignore malformed overrides payload
       }
+    }
+  }
+
+  // Multi-currency scope — only present when the company runs 2+ active
+  // currencies (the picker is hidden otherwise, so we never clobber the
+  // existing assignment on single-currency installs).
+  if (formData.has('currencyCodes')) {
+    const raw = formData.get('currencyCodes')?.toString() ?? '';
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed) && parsed.every((c): c is string => typeof c === 'string')) {
+        body.currencyCodes = parsed;
+      }
+    } catch {
+      // ignore malformed currencyCodes payload
     }
   }
 

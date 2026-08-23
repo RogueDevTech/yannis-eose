@@ -37,6 +37,7 @@ import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevel } from '../common/authz';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { isMissingRelationError } from '../common/db/missing-relation';
+import { countryScopeCondition } from '../common/db/country-scope-condition';
 
 /** Virtual buffer: show 10% less stock to prevent overselling during bursts */
 const VIRTUAL_BUFFER_RATIO = 0.10;
@@ -205,14 +206,66 @@ export class InventoryService {
   private async fifoActiveBatchPage(
     tx: InventoryDbTx,
     productId: string,
+    /**
+     * Multi-country: when set, draw ONLY from this currency/country's FIFO pool
+     * so a GHS order never consumes NGN batches (COGS stays country-coherent).
+     * When undefined, draws from every pool (legacy single-currency behaviour).
+     */
+    currencyCode?: string | null,
   ): Promise<Array<typeof schema.stockBatches.$inferSelect>> {
     return tx
       .select()
       .from(schema.stockBatches)
-      .where(and(eq(schema.stockBatches.productId, productId), gt(schema.stockBatches.remainingQuantity, 0)))
+      .where(
+        and(
+          eq(schema.stockBatches.productId, productId),
+          gt(schema.stockBatches.remainingQuantity, 0),
+          currencyCode ? eq(schema.stockBatches.currencyCode, currencyCode) : undefined,
+        ),
+      )
       .orderBy(asc(schema.stockBatches.receivedAt), asc(schema.stockBatches.id))
       .limit(InventoryService.FIFO_BATCH_PAGE_SIZE)
       .for('update');
+  }
+
+  /**
+   * Multi-country: resolve an orders-table order's currency (country) so FIFO
+   * consumption/availability can be scoped to that country's pool. Defaults to
+   * base NGN when the order is missing or unstamped, so single-currency
+   * behaviour is unchanged. All delivery paths (funnel / cart / follow-up
+   * graduation) resolve to an orders-table row, so reading `orders` is correct.
+   */
+  private async resolveOrderCurrency(
+    orderId: string,
+    ex: InventoryDbTx | PostgresJsDatabase<typeof schema> = this.db,
+  ): Promise<string> {
+    const [row] = await ex
+      .select({ currencyCode: schema.orders.currencyCode })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    return (row?.currencyCode ?? 'NGN').toUpperCase();
+  }
+
+  /**
+   * Multi-country: resolve the currency/country of a logistics location via its
+   * provider (providers carry currency since mig 0329). Used to stamp the right
+   * country onto stock batches at intake. Defaults to NGN.
+   */
+  private async resolveLocationCurrency(
+    locationId: string,
+    ex: InventoryDbTx | PostgresJsDatabase<typeof schema> = this.db,
+  ): Promise<string> {
+    const [row] = await ex
+      .select({ currencyCode: schema.logisticsProviders.currencyCode })
+      .from(schema.logisticsLocations)
+      .leftJoin(
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+      )
+      .where(eq(schema.logisticsLocations.id, locationId))
+      .limit(1);
+    return (row?.currencyCode ?? 'NGN').toUpperCase();
   }
 
   /**
@@ -223,6 +276,8 @@ export class InventoryService {
     tx: InventoryDbTx,
     productId: string,
     quantityNeeded: number,
+    /** Multi-country: cost only from this currency's pool. See fifoActiveBatchPage. */
+    currencyCode?: string | null,
   ): Promise<number> {
     if (quantityNeeded <= 0) return 0;
     let costTotal = 0;
@@ -242,6 +297,7 @@ export class InventoryService {
           and(
             eq(schema.stockBatches.productId, productId),
             gt(schema.stockBatches.remainingQuantity, 0),
+            currencyCode ? eq(schema.stockBatches.currencyCode, currencyCode) : undefined,
             cursor
               ? sql`(${schema.stockBatches.receivedAt}, ${schema.stockBatches.id}) > (${cursor.receivedAt}, ${cursor.id})`
               : undefined,
@@ -288,13 +344,15 @@ export class InventoryService {
     productId: string,
     quantityNeeded: number,
     errorInsufficientMessage: string,
+    /** Multi-country: consume only from this currency's pool. See fifoActiveBatchPage. */
+    currencyCode?: string | null,
   ): Promise<number> {
     if (quantityNeeded <= 0) return 0;
     let remaining = quantityNeeded;
     let consumedCost = 0;
 
     while (remaining > 0) {
-      const page = await this.fifoActiveBatchPage(tx, productId);
+      const page = await this.fifoActiveBatchPage(tx, productId, currencyCode);
       if (page.length === 0) break;
 
       for (const batch of page) {
@@ -317,6 +375,75 @@ export class InventoryService {
     return consumedCost;
   }
 
+  /**
+   * Multi-country FX: convert a landed cost from one currency to another via the
+   * base-anchored `currencies.fx_rate_to_base` (1 unit of X = rate base units).
+   * costInBase = costFrom × rateFrom; costTo = costInBase / rateTo. The base
+   * (default) currency has a NULL rate, treated as 1. Point-in-time conversion —
+   * the destination batch freezes this value (documented in the plan).
+   */
+  private async convertCurrencyCost(
+    tx: InventoryDbTx,
+    amount: number,
+    fromCurrency: string,
+    toCurrency: string,
+  ): Promise<number> {
+    if (amount === 0 || fromCurrency === toCurrency) return amount;
+    const rows = await tx
+      .select({ code: schema.currencies.code, fxRateToBase: schema.currencies.fxRateToBase, isDefault: schema.currencies.isDefault })
+      .from(schema.currencies)
+      .where(inArray(schema.currencies.code, [fromCurrency, toCurrency]));
+    const rateOf = (code: string): number => {
+      const row = rows.find((r) => r.code === code);
+      // Base/default currency (or missing rate) = 1.0 anchor.
+      if (!row || row.isDefault || row.fxRateToBase == null) return 1;
+      const parsed = parseFloat(String(row.fxRateToBase));
+      return parsed > 0 ? parsed : 1;
+    };
+    const costInBase = amount * rateOf(fromCurrency);
+    return costInBase / rateOf(toCurrency);
+  }
+
+  /**
+   * Multi-country cross-country transfer FIFO handoff. Consumes `quantity` units
+   * from the SOURCE country's FIFO pool (real remaining_quantity decrement, so
+   * the source country's valuation drops), then creates a single NEW batch in
+   * the DESTINATION country whose per-unit landed cost is the source cost
+   * FX-converted into the destination currency. Keeps each country's COGS
+   * coherent across a cross-border move. Same-country transfers never call this.
+   */
+  private async moveFifoLayersAcrossCountryInTx(
+    tx: InventoryDbTx,
+    productId: string,
+    quantity: number,
+    fromCurrency: string,
+    toCurrency: string,
+  ): Promise<void> {
+    if (quantity <= 0) return;
+    // Deduct the source-country FIFO layers, capturing their real landed cost.
+    const sourceLandedTotal = await this.consumeFifoRemainingInTx(
+      tx,
+      productId,
+      quantity,
+      `Cross-country transfer: insufficient ${fromCurrency} FIFO batch remaining for this product.`,
+      fromCurrency,
+    );
+    // FX-revalue into the destination currency and create the destination batch.
+    const destTotal = await this.convertCurrencyCost(tx, sourceLandedTotal, fromCurrency, toCurrency);
+    const perUnit = quantity > 0 ? destTotal / quantity : 0;
+    await tx.insert(schema.stockBatches).values({
+      productId,
+      // factory vs landing split is not meaningful post-transfer; record the
+      // full revalued cost as landing so total_landed_cost is exact.
+      factoryCost: sql`0::numeric`,
+      landingCost: sql`${perUnit}::numeric`,
+      totalLandedCost: sql`${perUnit}::numeric`,
+      quantity,
+      remainingQuantity: quantity,
+      currencyCode: toCurrency,
+    });
+  }
+
   // ============================================
   // Stock Intake — FIFO Batch Creation
   // ============================================
@@ -328,6 +455,11 @@ export class InventoryService {
   async intake(input: StockIntakeInput, actor: SessionUser) {
     const totalLandedCost = input.factoryCost + input.landingCost;
     const reasonUnitCost = totalLandedCost.toFixed(2);
+
+    // Multi-country: a batch belongs to the country of the location it lands at.
+    // Derive from the location's provider currency (providers carry currency
+    // since mig 0329). Defaults to NGN for single-currency installs.
+    const intakeCurrency = await this.resolveLocationCurrency(input.locationId);
 
     try {
       // Branch context is set alongside the actor because `inventory_levels` is
@@ -346,6 +478,7 @@ export class InventoryService {
             totalLandedCost: sql`${totalLandedCost}::numeric`,
             quantity: input.quantity,
             remainingQuantity: input.quantity,
+            currencyCode: intakeCurrency,
           })
           .returning();
 
@@ -629,10 +762,20 @@ export class InventoryService {
       });
     }
 
+    // Multi-country: resolve the source + destination country. A cross-country
+    // transfer must actually MOVE FIFO layers (deduct source-country batches,
+    // create a destination-country batch with FX-revalued cost) so each country's
+    // COGS stays coherent. Same-country transfers stay shelf-only (unchanged).
+    const fromCurrency = await this.resolveLocationCurrency(fromLocationId, tx);
+    const toCurrency = await this.resolveLocationCurrency(toLocationId, tx);
+    const isCrossCountry = fromCurrency !== toCurrency;
+
+    // Cost the moved units against the SOURCE country's FIFO pool.
     const transferCostTotal = await this.computeFifoLandedCostForQuantityInTx(
       tx,
       line.productId,
       line.quantity,
+      fromCurrency,
     );
 
     const transferRows = await tx
@@ -683,6 +826,18 @@ export class InventoryService {
       // Add stock to destination — atomic upsert on (product_id, location_id)
       await this.creditShelfStockInTx(tx, line.productId, toLocationId, line.quantity);
 
+      // Multi-country FIFO handoff (fast-path). Cross-country only: move the FIFO
+      // cost layer, not just the shelf count.
+      if (isCrossCountry) {
+        await this.moveFifoLayersAcrossCountryInTx(
+          tx,
+          line.productId,
+          line.quantity,
+          fromCurrency,
+          toCurrency,
+        );
+      }
+
       // Log TRANSFER_IN movement
       await tx.insert(schema.stockMovements).values({
         productId: line.productId,
@@ -692,6 +847,7 @@ export class InventoryService {
         toLocationId,
         referenceId: newTransfer.id,
         actorId: actor.id,
+        reason: isCrossCountry ? `Cross-country transfer ${fromCurrency}→${toCurrency}` : undefined,
       });
 
       // Write settlement outcome row
@@ -859,6 +1015,20 @@ export class InventoryService {
       // Add stock to destination — atomic upsert on (product_id, location_id)
       await this.creditShelfStockInTx(tx, transfer.productId, transfer.toLocationId, transfer.quantitySent);
 
+      // Multi-country FIFO handoff (approval path). Cross-country only.
+      const approveFromCurrency = await this.resolveLocationCurrency(transfer.fromLocationId, tx);
+      const approveToCurrency = await this.resolveLocationCurrency(transfer.toLocationId, tx);
+      const approveCrossCountry = approveFromCurrency !== approveToCurrency;
+      if (approveCrossCountry) {
+        await this.moveFifoLayersAcrossCountryInTx(
+          tx,
+          transfer.productId,
+          transfer.quantitySent,
+          approveFromCurrency,
+          approveToCurrency,
+        );
+      }
+
       // TRANSFER_IN movement
       await tx.insert(schema.stockMovements).values({
         productId: transfer.productId,
@@ -868,6 +1038,9 @@ export class InventoryService {
         toLocationId: transfer.toLocationId,
         referenceId: transfer.id,
         actorId: actor.id,
+        reason: approveCrossCountry
+          ? `Cross-country transfer ${approveFromCurrency}→${approveToCurrency}`
+          : undefined,
       });
 
       // Settlement outcome
@@ -2043,7 +2216,11 @@ export class InventoryService {
    * List shipments that were received at this provider's locations.
    * Powers the shipment filter dropdown on the provider detail page.
    */
-  async getProviderShipments(providerId: string, groupId?: string | null) {
+  async getProviderShipments(
+    providerId: string,
+    groupId?: string | null,
+    effectiveCurrencyCodes?: string[] | null,
+  ) {
     const locConditions: SQL[] = [eq(schema.logisticsLocations.providerId, providerId)];
     if (groupId) {
       locConditions.push(
@@ -2073,6 +2250,9 @@ export class InventoryService {
         and(
           inArray(schema.shipments.destinationLocationId, locRows.map((r) => r.id)),
           eq(schema.shipments.status, 'VERIFIED'),
+          // Multi-country data scope: a country-scoped user only sees shipments
+          // in their assigned countries. No-op for view_all.
+          countryScopeCondition(schema.shipments.currencyCode, effectiveCurrencyCodes) ?? undefined,
         ),
       )
       .orderBy(desc(schema.shipments.verifiedAt));
@@ -3613,6 +3793,13 @@ export class InventoryService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items to confirm against inventory.' });
     }
 
+    // Multi-country LOCKSTEP with FIFO consumption: the FIFO batch check below
+    // MUST count only the order's country pool, exactly as consumeFifoRemaining
+    // draws only that pool. Without this, a GHS order could pass the confirm gate
+    // on NGN batches and then fail at delivery — a split-brain "confirmed but
+    // unfulfillable" bug. Defaults to NGN (single-currency unchanged).
+    const orderCurrency = await this.resolveOrderCurrency(orderId);
+
     // Previously this iterated `byProduct` and ran two queries PER product
     // (`inventoryLevels` + `stockBatches`) sequentially — N×2 round-trips
     // dominate the CONFIRM latency on a remote DB. Two batched aggregate
@@ -3622,13 +3809,31 @@ export class InventoryService {
     // / batches each one has.
     const productIds = [...byProduct.keys()];
     const [shelfRows, batchRows] = await Promise.all([
+      // Multi-country: scope the shelf aggregate to the order's country too, so
+      // the shelf gate and the FIFO gate describe the SAME country pool. Country
+      // is derived location → provider (inventory_levels carries no currency by
+      // design). Without this the shelf sum would count NGN-warehouse stock for
+      // a GHS order (gate looser than fulfillment).
       this.db
         .select({
           productId: schema.inventoryLevels.productId,
           available: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}), 0)::int`,
         })
         .from(schema.inventoryLevels)
-        .where(inArray(schema.inventoryLevels.productId, productIds))
+        .innerJoin(
+          schema.logisticsLocations,
+          eq(schema.logisticsLocations.id, schema.inventoryLevels.locationId),
+        )
+        .innerJoin(
+          schema.logisticsProviders,
+          eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+        )
+        .where(
+          and(
+            inArray(schema.inventoryLevels.productId, productIds),
+            eq(schema.logisticsProviders.currencyCode, orderCurrency),
+          ),
+        )
         .groupBy(schema.inventoryLevels.productId),
       this.db
         .select({
@@ -3636,7 +3841,13 @@ export class InventoryService {
           remaining: sql<number>`COALESCE(SUM(${schema.stockBatches.remainingQuantity}), 0)::int`,
         })
         .from(schema.stockBatches)
-        .where(inArray(schema.stockBatches.productId, productIds))
+        .where(
+          and(
+            inArray(schema.stockBatches.productId, productIds),
+            // Lockstep with FIFO consumption — same country pool only.
+            eq(schema.stockBatches.currencyCode, orderCurrency),
+          ),
+        )
         .groupBy(schema.stockBatches.productId),
     ]);
 
@@ -3905,6 +4116,10 @@ export class InventoryService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items for delivery.' });
     }
 
+    // Multi-country: consume FIFO only from the order's country pool so a GHS
+    // delivery draws GHS batches and COGS stays country-coherent.
+    const orderCurrency = await this.resolveOrderCurrency(orderId);
+
     let landedCost = 0;
     await withActor(this.db, actor, async (tx) => {
       landedCost = 0; // reset on tx retry
@@ -3914,6 +4129,7 @@ export class InventoryService {
           productId,
           lineQty,
           'Cannot record delivery: insufficient FIFO batch remaining for a product on this order.',
+          orderCurrency,
         );
 
         await tx.insert(schema.stockMovements).values({
@@ -4106,6 +4322,11 @@ export class InventoryService {
     const deliveredByProduct = await this.expandLineQuantities(deliveredLines);
     const fullByProduct = await this.expandLineQuantities(lines);
 
+    // Multi-country: consume FIFO only from the order's country pool, exactly as
+    // the full-delivery path does. Without this a foreign-currency partial
+    // delivery would draw (and mis-cost) another country's batches.
+    const orderCurrency = await this.resolveOrderCurrency(orderId);
+
     let landedCost = 0;
     await withActor(this.db, actor, async (tx) => {
       landedCost = 0; // reset on tx retry
@@ -4115,6 +4336,7 @@ export class InventoryService {
           productId,
           qty,
           'Cannot record partial delivery: insufficient FIFO batch remaining for a product on this order.',
+          orderCurrency,
         );
 
         await tx.insert(schema.stockMovements).values({
@@ -4163,6 +4385,9 @@ export class InventoryService {
     const byProduct = await this.loadAggregatedOrderLineQuantities(orderId);
     if (byProduct.size === 0) return;
 
+    // Multi-country: write off from the order's own country pool only.
+    const orderCurrency = await this.resolveOrderCurrency(orderId);
+
     await withActor(this.db, actor, async (tx) => {
       for (const [productId, lineQty] of byProduct) {
         await this.consumeFifoRemainingInTx(
@@ -4170,6 +4395,7 @@ export class InventoryService {
           productId,
           lineQty,
           'Cannot write off: insufficient FIFO batch remaining for a product on this order.',
+          orderCurrency,
         );
 
         await tx.insert(schema.stockMovements).values({

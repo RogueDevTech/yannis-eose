@@ -15,6 +15,7 @@ import type {
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { withActorAndBranch } from '../common/db/with-actor';
+import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevel } from '../common/authz';
@@ -56,6 +57,24 @@ export class ShipmentsService {
     if (isAdminLevel(actor)) return true;
     const want = canonicalPermissionCode('inventory.intake');
     return (actor.permissions ?? []).map((c) => canonicalPermissionCode(c)).includes(want);
+  }
+
+  /**
+   * Multi-country: resolve a destination warehouse's currency/country via its
+   * provider (providers carry currency since mig 0329). Stamped on the shipment
+   * so its costs + produced FIFO batches land in the right country. Default NGN.
+   */
+  private async resolveDestinationCurrency(locationId: string): Promise<string> {
+    const [row] = await this.db
+      .select({ currencyCode: schema.logisticsProviders.currencyCode })
+      .from(schema.logisticsLocations)
+      .leftJoin(
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+      )
+      .where(eq(schema.logisticsLocations.id, locationId))
+      .limit(1);
+    return (row?.currencyCode ?? 'NGN').toUpperCase();
   }
 
   private hasVerifyPermission(actor: SessionUser): boolean {
@@ -223,8 +242,16 @@ export class ShipmentsService {
     currentBranchId: string | null,
     effectiveBranchIds?: string[] | null,
     groupId?: string | null,
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     const baseConditions = [];
+    // Multi-country data-scope — a country-scoped viewer only sees shipments in
+    // their assigned currencies. No-op for admin / view_all (null). Applied to
+    // baseConditions so both the list and the status-summary agree.
+    {
+      const cCond = countryScopeCondition(schema.shipments.currencyCode, effectiveCurrencyCodes);
+      if (cCond) baseConditions.push(cCond);
+    }
     if (input.destinationLocationId)
       baseConditions.push(eq(schema.shipments.destinationLocationId, input.destinationLocationId));
     if (input.search) {
@@ -640,12 +667,18 @@ export class ShipmentsService {
     const arrivedNow = input.arrivedNow === true;
     const status: ShipmentStatus = arrivedNow ? 'ARRIVED' : 'CREATED';
 
+    // Multi-country: a shipment belongs to the country of its destination
+    // warehouse (derived from the location's provider currency, mig 0329). All
+    // shipment costs + the batches it produces on VERIFY are denominated here.
+    const shipmentCurrency = await this.resolveDestinationCurrency(input.destinationLocationId);
+
     const created = await withActorAndBranch(this.db, actor, async (tx) => {
       const [parent] = await tx
         .insert(schema.shipments)
         .values({
           status,
           destinationLocationId: input.destinationLocationId,
+          currencyCode: shipmentCurrency,
           label: input.label?.trim() ? input.label.trim() : null,
           supplierName: input.supplierName?.trim() ? input.supplierName.trim() : null,
           supplierReference: input.supplierReference?.trim()
@@ -953,7 +986,8 @@ export class ShipmentsService {
           line.receivedQuantity > 0 ? lineLanding / line.receivedQuantity : 0;
         const totalLandedCostPerUnit = factoryCostNum + perUnitLanding;
 
-        // 1) Create FIFO batch
+        // 1) Create FIFO batch — stamped with the shipment's country so the
+        //    layer lands in the right country pool (multi-country FIFO, mig 0329).
         const [batch] = await tx
           .insert(schema.stockBatches)
           .values({
@@ -963,6 +997,7 @@ export class ShipmentsService {
             totalLandedCost: sql`${totalLandedCostPerUnit}::numeric`,
             quantity: line.receivedQuantity,
             remainingQuantity: line.receivedQuantity,
+            currencyCode: (existing.currencyCode ?? 'NGN').toUpperCase(),
           })
           .returning();
         if (!batch) {
