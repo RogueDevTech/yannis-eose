@@ -1246,7 +1246,6 @@ export function UserCreatePage({
                           onChange={() => toggleCurrencyCode(c.code)}
                         />
                         <span className="text-sm text-app-fg">{c.countryName || c.code}</span>
-                        <span className="text-xs text-app-fg-muted ml-auto">{c.symbol} {c.code}</span>
                       </label>
                     ))}
                   </div>

@@ -593,7 +593,12 @@ export class LogisticsService implements OnModuleInit {
     });
   }
 
-  async listLocations(input: ListLocationsInput, groupId?: string | null, effectiveBranchIds?: string[] | null) {
+  async listLocations(
+    input: ListLocationsInput,
+    groupId?: string | null,
+    effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
+  ) {
     const conditions = [];
     if (input.providerId) {
       conditions.push(eq(schema.logisticsLocations.providerId, input.providerId));
@@ -606,6 +611,18 @@ export class LogisticsService implements OnModuleInit {
     }
     if (groupId) {
       conditions.push(or(eq(schema.logisticsProviders.groupId, groupId), isNull(schema.logisticsProviders.groupId))!);
+    }
+    // Multi-country: a location belongs to the country of its provider. Scope by
+    // the active country (global switcher / data scope) via the provider join, so
+    // locations stay consistent with the country-scoped providers list. No-op for
+    // view_all (effectiveCurrencyCodes null).
+    let countryScoped = false;
+    {
+      const cCond = countryScopeCondition(schema.logisticsProviders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) {
+        conditions.push(cCond);
+        countryScoped = true;
+      }
     }
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       conditions.push(
@@ -646,7 +663,7 @@ export class LogisticsService implements OnModuleInit {
         .orderBy(desc(schema.logisticsLocations.createdAt))
         .limit(input.limit)
         .offset(offset),
-      (input.providerKind || groupId)
+      (input.providerKind || groupId || countryScoped)
         ? this.db
             .select({ count: count() })
             .from(schema.logisticsLocations)

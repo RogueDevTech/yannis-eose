@@ -149,7 +149,7 @@ export const logisticsRouter = router({
   listLocations: authedProcedure
     .input(listLocationsSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listLocations(input, ctx.activeGroupId, ctx.effectiveBranchIds);
+      return getLogisticsService().listLocations(input, ctx.activeGroupId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
     }),
 
   /**

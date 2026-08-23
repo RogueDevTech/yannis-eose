@@ -6,7 +6,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { canMirror, canViewAllBranches, isAdminLevel } from '../common/authz';
+import { canMirror, canViewAllBranches, canViewAllCountries, isAdminLevel } from '../common/authz';
 import { and, eq, inArray, isNull, sql, desc, asc } from 'drizzle-orm';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
@@ -847,6 +847,59 @@ export class AuthService {
    * Updates Redis session and returns the full updated SessionUser so the
    * controller can re-issue the bundle cookie in the same response.
    */
+  /**
+   * Multi-country VIEW switcher — set the country the user is currently viewing
+   * (top-bar switcher), analogous to switchBranch. `code = null` clears it (view
+   * all allowed countries). Validates the code is (a) an ACTIVE currency in the
+   * user's active company and (b) within the user's allowed countries unless they
+   * hold all-countries access. Never widens the user's data-scope permission.
+   */
+  async switchCurrency(sessionToken: string, code: string | null): Promise<SessionUser> {
+    const sessionData = await this.sessionStore.getSession(sessionToken);
+    if (!sessionData) {
+      throw new UnauthorizedException('Session not found');
+    }
+    const user: SessionUser = sessionData;
+
+    // Clearing the view is always allowed.
+    if (!code) {
+      const cleared: SessionUser = { ...user, currentCurrencyCode: null };
+      await this.sessionStore.updateSession(sessionToken, cleared, this.sessionTtl);
+      return cleared;
+    }
+
+    const wanted = code.toUpperCase();
+
+    // (a) must be an ACTIVE currency in the user's active company.
+    const activeCurrencies = await this.db
+      .select({ code: schema.currencies.code })
+      .from(schema.currencies)
+      .where(
+        and(
+          user.activeGroupId
+            ? eq(schema.currencies.groupId, user.activeGroupId)
+            : isNull(schema.currencies.groupId),
+          eq(schema.currencies.active, true),
+        ),
+      );
+    const activeSet = new Set(activeCurrencies.map((c) => c.code.toUpperCase()));
+    if (!activeSet.has(wanted)) {
+      throw new ForbiddenException('That country is not available for your company.');
+    }
+
+    // (b) must be within the user's allowed countries (unless all-countries).
+    if (!canViewAllCountries(user)) {
+      const allowed = new Set((user.currencyCodes ?? ['NGN']).map((c) => c.toUpperCase()));
+      if (!allowed.has(wanted)) {
+        throw new ForbiddenException('You do not have access to that country.');
+      }
+    }
+
+    const updated: SessionUser = { ...user, currentCurrencyCode: wanted };
+    await this.sessionStore.updateSession(sessionToken, updated, this.sessionTtl);
+    return updated;
+  }
+
   async switchBranch(sessionToken: string, branchId: string | null, selectedBranchIds?: string[] | null): Promise<SessionUser> {
     const sessionData = await this.sessionStore.getSession(sessionToken);
     if (!sessionData) {

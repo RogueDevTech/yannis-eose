@@ -44,6 +44,8 @@ interface RawSessionBundlePayload {
   selectedBranchIds?: string[] | null;
   activeGroupId?: string | null;
   branchIds: string[];
+  /** Multi-country VIEW switcher — the country the user is currently viewing. */
+  currentCurrencyCode?: string | null;
   appTheme: string | null;
   fontScale: string | null;
   mirroredBy: { id: string; name: string; role: string } | null;

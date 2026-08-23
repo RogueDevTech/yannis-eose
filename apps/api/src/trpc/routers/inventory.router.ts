@@ -103,7 +103,7 @@ export const inventoryRouter = router({
     .query(async ({ input, ctx }) => {
       const tplLoc = tplLocationScope(ctx.user);
       const scopedInput = tplLoc ? { ...input, locationId: tplLoc } : input;
-      return getInventoryService().listLevels(scopedInput, ctx.activeGroupId, ctx.effectiveBranchIds);
+      return getInventoryService().listLevels(scopedInput, ctx.activeGroupId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
     }),
 
   /** Aggregated stock per (product, location) — no batch rows, no pagination. */
@@ -460,7 +460,7 @@ export const inventoryRouter = router({
         returnedOrders,
         reconciliations,
       ] = await Promise.all([
-        getInventoryService().listLevels(levelsInput, ctx.activeGroupId, ctx.effectiveBranchIds),
+        getInventoryService().listLevels(levelsInput, ctx.activeGroupId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes),
         getInventoryService().listMovements(
           movementsInput,
           ctx.user,
@@ -561,7 +561,7 @@ export const inventoryRouter = router({
         shipments,
         warehouses,
       ] = await Promise.all([
-        getInventoryService().listLevels(levelsInput, ctx.activeGroupId, ctx.effectiveBranchIds),
+        getInventoryService().listLevels(levelsInput, ctx.activeGroupId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes),
         getInventoryService().listMovements(
           movementsInput,
           ctx.user,

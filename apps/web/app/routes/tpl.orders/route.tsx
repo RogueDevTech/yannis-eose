@@ -43,8 +43,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const status = url.searchParams.get('status') || 'CONFIRMED';
   const search = url.searchParams.get('search') || undefined;
-  // Multi-currency filter (dormant unless the company added a 2nd currency).
-  const currencyCode = url.searchParams.get('currency')?.toUpperCase() || undefined;
+  // Currency scope is now driven session-wide by the global country switcher
+  // (ctx.effectiveCurrencyCodes), so no per-page `?currency=` filter arg here.
   const scopedStatuses = status === 'ALL' ? [...LOGISTICS_STATUS_SCOPE] : undefined;
 
   let startDate = url.searchParams.get('startDate') ?? undefined;
@@ -86,7 +86,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ...(startDate && { startDate }),
         ...(endDate && { endDate }),
         ...(useLocationFilter && { logisticsLocationId: effectiveLogisticsLocationId }),
-        ...(currencyCode && { currencyCode }),
       }),
     );
     const bundleRes = await apiRequest<unknown>(

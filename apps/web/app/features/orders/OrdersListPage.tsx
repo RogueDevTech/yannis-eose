@@ -23,7 +23,6 @@ import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-colla
 import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
-import { CurrencyFilterSelect } from '~/components/ui/currency-filter-select';
 import { MoneyAmount } from '~/components/ui/money-amount';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Pagination } from '~/components/ui/pagination';
@@ -1582,7 +1581,6 @@ function OrdersListPageImpl({
     if (categoryFilter) n += 1;
     if (frozenFilterProp) n += 1;
     if (searchParams.get('teamId')) n += 1;
-    if (searchParams.get('currency')) n += 1;
     return n;
   }, [
     selectedStatus,
@@ -1714,10 +1712,6 @@ function OrdersListPageImpl({
               filters={
                 <>
                   {renderScheduleFilter(true)}
-                  {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
-                  <div className={mobileFilterBoxClass}>
-                    <CurrencyFilterSelect className={mobileSelectTransparent} />
-                  </div>
                   <div className={mobileFilterBoxClass}>
                     {selectedStatus !== 'ALL' && (
                       <FilterDismiss
@@ -2432,10 +2426,6 @@ function OrdersListPageImpl({
           }
           desktopInlineFilters={
             <>
-                {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
-                <div className="relative" data-toolbar-filter>
-                  <CurrencyFilterSelect className="w-full min-w-0 sm:w-40" />
-                </div>
                 <div className="relative" data-toolbar-filter>
                   {selectedStatus !== 'ALL' && (
                     <FilterDismiss

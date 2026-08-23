@@ -129,8 +129,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const orderSourceParam = url.searchParams.get('orderSource') as 'offline' | 'edge-form' | null;
   const orderSource = orderSourceParam === 'offline' || orderSourceParam === 'edge-form' ? orderSourceParam : undefined;
 
-  // Multi-currency filter (dormant unless the company added a 2nd currency).
-  const currencyCode = url.searchParams.get('currency')?.toUpperCase() || undefined;
+  // Currency scope is now driven session-wide by the global country switcher
+  // (ctx.effectiveCurrencyCodes), so no per-page `?currency=` filter arg here.
 
   const listInput = {
     page,
@@ -138,7 +138,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(expandedStatuses
       ? { statuses: expandedStatuses }
       : { status: status || undefined }),
-    ...(currencyCode ? { currencyCode } : {}),
     search: search || undefined,
     sortBy,
     sortOrder,
@@ -179,14 +178,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     startDate?: string;
     endDate?: string;
     includeMarketingExportPicklists: boolean;
-    currencyCode?: string;
   } = { includeMarketingExportPicklists: loadMarketingExportPicklists };
   if (teamBundleMedioBuyerId) bundleInput.mediaBuyerId = teamBundleMedioBuyerId;
   if (status) bundleInput.status = status;
   if (apiStartDate) bundleInput.startDate = apiStartDate;
   if (apiEndDate) bundleInput.endDate = apiEndDate;
-  // Currency filter mirrors the list so the stat strip matches the table.
-  if (currencyCode) bundleInput.currencyCode = currencyCode;
   const bundleInputStr = encodeURIComponent(JSON.stringify(bundleInput));
 
   // Supervisors + HoM get both team stats AND personal stats pre-fetched so
@@ -199,7 +195,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ...(status ? { status } : {}),
         ...(apiStartDate ? { startDate: apiStartDate } : {}),
         ...(apiEndDate ? { endDate: apiEndDate } : {}),
-        ...(currencyCode ? { currencyCode } : {}),
       }
     : null;
   const personalBundleInputStr = personalBundleInput

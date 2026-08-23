@@ -51,6 +51,14 @@ export interface TrpcContext {
    * See `countryScopeCondition`.
    */
   effectiveCurrencyCodes: string[] | null;
+  /**
+   * Multi-country VIEW — the single country the user has selected in the top-bar
+   * switcher, or null for "all countries I can see". This narrows the effective
+   * view WITHIN `effectiveCurrencyCodes` (the permission). Like `currentBranchId`
+   * relative to `effectiveBranchIds`. Services can read this to show one country
+   * at a time; `effectiveCurrencyCodes` already folds it in (see below).
+   */
+  currentCurrencyCode: string | null;
 }
 
 export function createContext(req: Request, res: Response): TrpcContext {
@@ -130,6 +138,24 @@ export function createContext(req: Request, res: Response): TrpcContext {
     }
   }
 
+  // Multi-country VIEW switcher: when the user has picked a single country in the
+  // top-bar, narrow the effective view to it — but ONLY to a country they are
+  // allowed to see (never widens the permission). This is the country analogue of
+  // currentBranchId narrowing within effectiveBranchIds.
+  const currentCurrencyCode = user?.currentCurrencyCode
+    ? user.currentCurrencyCode.toUpperCase()
+    : null;
+  if (currentCurrencyCode) {
+    const allowed =
+      effectiveCurrencyCodes == null || effectiveCurrencyCodes.includes(currentCurrencyCode);
+    if (allowed) {
+      // Narrow to the single selected country (within permission).
+      effectiveCurrencyCodes = [currentCurrencyCode];
+    }
+    // If not allowed (stale selection after a revoke), ignore it and keep the
+    // permission-scoped set — never expose a country the user can't see.
+  }
+
   return {
     user,
     req,
@@ -139,5 +165,6 @@ export function createContext(req: Request, res: Response): TrpcContext {
     effectiveBranchIds,
     activeGroupId,
     effectiveCurrencyCodes,
+    currentCurrencyCode,
   };
 }

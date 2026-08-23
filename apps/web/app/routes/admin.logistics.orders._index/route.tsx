@@ -76,8 +76,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const canViewBranchColumn = canViewAllBranches(user);
   const branchFilter = url.searchParams.get('branch') || undefined;
   const userLocationFilter = url.searchParams.get('location') || undefined;
-  // Multi-currency filter (dormant unless the company added a 2nd currency).
-  const currencyCode = url.searchParams.get('currency')?.toUpperCase() || undefined;
+  // Currency scope is now driven session-wide by the global country switcher
+  // (ctx.effectiveCurrencyCodes), so no per-page `?currency=` filter arg here.
   const effectiveLogisticsLocationId =
     isTplManager && user.logisticsLocationId
       ? user.logisticsLocationId
@@ -118,7 +118,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
     ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
     ...(branchFilter && { servicingBranchId: branchFilter }),
-    ...(currencyCode && { currencyCode }),
   };
   const bundleInputEnc = encodeURIComponent(JSON.stringify(bundleInput));
 
@@ -156,7 +155,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...(startDate && { startDate }),
       ...(endDate && { endDate }),
       ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
-      ...(currencyCode && { currencyCode }),
     };
     const [bundleRes, overdueRes] = await Promise.all([
       apiRequest<unknown>(

@@ -1,11 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Link, useLocation, useSearchParams } from '@remix-run/react';
-import { useFilterPreferences } from '~/hooks/useFilterPreferences';
-import { useBaseCurrency, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
+import { useState } from 'react';
+import { Link, useSearchParams } from '@remix-run/react';
+import { useBaseCurrency } from '~/contexts/currencies-catalog-context';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { Modal } from '~/components/ui/modal';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { CurrencyFilterSelect } from '~/components/ui/currency-filter-select';
 import { formatNaira } from '~/lib/format-amount';
 import { RemittanceInfoIcon as InfoIcon, FormulaBreakdownModal } from './remittance-info-modals';
 import type {
@@ -50,30 +48,7 @@ export function FinanceCashRemittanceSection({
   const [infoModal, setInfoModal] = useState<string | null>(null);
   const [dateScopeModalOpen, setDateScopeModalOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
-  const location = useLocation();
-
-  // Cash remittance is single-currency. When the company has 2+ currencies and
-  // no currency is chosen yet, default the URL to the base currency so the
-  // figures are never a mixed-currency ₦+GH₵ sum. BUT if the user saved a
-  // currency filter for this page, defer to the saved-prefs restore instead of
-  // clobbering it with base. Single-currency companies are untouched.
-  const hasMultipleCurrencies = useHasMultipleCurrencies();
   const baseCurrency = useBaseCurrency();
-  const overviewFilterKey = location.pathname.replace(/^\//, '').replace(/\//g, '.');
-  const { savedFilters } = useFilterPreferences(overviewFilterKey);
-  const savedCurrency = savedFilters?.currency;
-  useEffect(() => {
-    if (hasMultipleCurrencies && !searchParams.get('currency') && !savedCurrency) {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          next.set('currency', baseCurrency.code);
-          return next;
-        },
-        { replace: true, preventScrollReset: true },
-      );
-    }
-  }, [hasMultipleCurrencies, baseCurrency.code, searchParams, setSearchParams, savedCurrency]);
 
   // Label the "this period" figures with the actual month when the selected
   // range is a single calendar month (e.g. "July 2026"); fall back to "This
@@ -83,9 +58,10 @@ export function FinanceCashRemittanceSection({
     searchParams.get('endDate'),
   );
 
-  // The currency all Cash-remittance figures are scoped to (URL param or base),
-  // so tiles show the right symbol (e.g. GH₵) instead of always ₦.
-  const activeCurrencyCode = searchParams.get('currency') || baseCurrency.code;
+  // The currency all Cash-remittance figures display in. The active country is
+  // scoped session-wide by the global switcher, so tiles show the base currency
+  // symbol (e.g. GH₵) instead of always ₦.
+  const activeCurrencyCode = baseCurrency.code;
 
   // Use gross delivered amount to match the Cash Remittances page
   const totalDelivered = pulse.deliveredAmount ?? pulse.deliveredNetAmount ?? (pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount);
@@ -99,9 +75,6 @@ export function FinanceCashRemittanceSection({
         description="Delivered orders and remittance status."
         actions={
           <div className="flex items-center gap-2">
-            {/* Currency filter — self-hides for single-currency companies. Placed
-                beside the date-scope pill; Cash remittance is single-currency. */}
-            <CurrencyFilterSelect className="!h-auto !rounded-md !px-2.5 !py-1.5 !text-xs !font-medium !text-app-fg-muted !bg-app-elevated" />
             <button
               type="button"
               onClick={() => setDateScopeModalOpen(true)}

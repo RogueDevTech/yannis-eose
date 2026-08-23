@@ -30,7 +30,6 @@ import { OrdersChartViewShellSkeleton, StatValuePulse } from '~/components/ui/de
 import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
-import { CurrencyFilterSelect } from '~/components/ui/currency-filter-select';
 import { useCurrencySymbol } from '~/contexts/currencies-catalog-context';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Spinner } from '~/components/ui/spinner';
@@ -418,9 +417,8 @@ function LogisticsOrdersPageImpl({
     () =>
       (selectedStatus !== 'ALL' ? 1 : 0) +
       (selectedLocation ? 1 : 0) +
-      (selectedBranch ? 1 : 0) +
-      (searchParams.get('currency') ? 1 : 0),
-    [selectedStatus, selectedLocation, selectedBranch, searchParams],
+      (selectedBranch ? 1 : 0),
+    [selectedStatus, selectedLocation, selectedBranch],
   );
 
   const confirmedOrders = displayOrders.filter((o) => o.status === 'CONFIRMED');
@@ -716,12 +714,6 @@ function LogisticsOrdersPageImpl({
               }
               filters={
                 <>
-                  {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
-                  <div className="relative w-full">
-                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
-                      <CurrencyFilterSelect className="!bg-transparent !border-transparent !text-center w-full" />
-                    </div>
-                  </div>
                   <div className="relative w-full">
                     {selectedStatus !== 'ALL' && (
                       <FilterDismiss onClear={() => handleStatusChange('ALL')} />
@@ -999,10 +991,6 @@ function LogisticsOrdersPageImpl({
           }
           desktopInlineFilters={
             <>
-                {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
-                <div className="relative" data-toolbar-filter>
-                  <CurrencyFilterSelect className="w-full min-w-0 sm:w-40" />
-                </div>
                 <div className="relative" data-toolbar-filter>
                   {selectedStatus !== 'ALL' && (
                     <FilterDismiss onClear={() => handleStatusChange('ALL')} />

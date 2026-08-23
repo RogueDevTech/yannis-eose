@@ -42,8 +42,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
   const branchId = url.searchParams.get('branchId') || undefined;
-  // Multi-currency filter (dormant unless the company added a 2nd currency).
-  const currencyCode = url.searchParams.get('currency')?.toUpperCase() || undefined;
+  // Currency scope is now driven session-wide by the global country switcher
+  // (ctx.effectiveCurrencyCodes), so no per-page `?currency=` filter arg here.
 
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
@@ -81,7 +81,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (startDate) listInput.startDate = startDate;
   if (endDate) listInput.endDate = endDate;
   if (branchId) listInput.branchId = branchId;
-  if (currencyCode) listInput.currencyCode = currencyCode;
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
@@ -117,7 +116,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
             ...(assignedCsId ? { assignedCsId } : {}),
             ...(startDate ? { startDate } : {}),
             ...(endDate ? { endDate } : {}),
-            ...(currencyCode ? { currencyCode } : {}),
           }))}`,
           deferredOpt,
         ).catch(() => ({ ok: false as const, status: 500, data: null })),

@@ -163,12 +163,12 @@ function AddProviderForm({
         <div className="sm:w-1/2">
           <FormSelect
             name="currencyCode"
-            label="Country / currency this provider operates in"
+            label="Country this provider operates in"
             value={currencyCode}
             onChange={(e) => setCurrencyCode(e.target.value)}
             options={activeCurrencies.map((c) => ({
               value: c.code,
-              label: `${c.countryName || c.code} (${c.symbol} ${c.code})`,
+              label: c.countryName || c.code,
             }))}
           />
         </div>
@@ -232,6 +232,10 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const showProviderCurrency = useHasMultipleCurrencies();
   const baseCurrency = useBaseCurrency();
   const activeCurrencies = currencies.filter((c) => c.active);
+  // Multi-country: country filtering is now driven by the GLOBAL top-bar country
+  // switcher, which narrows the server-side data scope. So the providers/locations
+  // the loader returns (and their totals) are already country-correct — no
+  // client-side country filter or per-page toggle needed here.
   const [activeTab, setActiveTab] = useState<'providers' | 'locations'>('locations');
   const [search, setSearch] = useState('');
   const [filterProviderId, setFilterProviderId] = useState('');
@@ -414,6 +418,9 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     () => [...optimisticLocations, ...applyOptimisticPatches(locations, locationPatches)],
     [locations, optimisticLocations, locationPatches],
   );
+  // Totals come from the loader's pagination.total, which the server already
+  // scopes to the active country (global switcher → effectiveCurrencyCodes), so
+  // these are country-correct — including 0 for a country with no data.
   const displayTotalProviders = totalProviders + optimisticProviders.length;
   const displayTotalLocations = totalLocations + optimisticLocations.length;
 
@@ -765,10 +772,10 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             sheet={
               <>
                 <Button variant="secondary" className="h-12 w-full justify-center" onClick={() => setShowAddProvider(true)}>
-                  Company
+                  Create Company
                 </Button>
                 <Button variant="secondary" className="h-12 w-full justify-center" onClick={() => { setAddLocationProviderId(''); setShowAddLocation(true); }}>
-                  Location
+                  Create Location
                 </Button>
                 <Link to="/admin/logistics/partners/import-combined" prefetch="intent" className="btn-secondary h-12 w-full justify-center text-center">
                   Import from Excel
@@ -994,11 +1001,11 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               {showProviderCurrency && activeCurrencies.length > 0 ? (
                 <FormSelect
                   name="currencyCode"
-                  label="Country / currency this provider operates in"
+                  label="Country this provider operates in"
                   defaultValue={editingProvider.currencyCode ?? baseCurrency.code}
                   options={activeCurrencies.map((c) => ({
                     value: c.code,
-                    label: `${c.countryName || c.code} (${c.symbol} ${c.code})`,
+                    label: c.countryName || c.code,
                   }))}
                 />
               ) : null}

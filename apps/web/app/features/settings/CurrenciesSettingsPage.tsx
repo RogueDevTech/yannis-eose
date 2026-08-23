@@ -4,12 +4,12 @@ import { PageHeader } from '~/components/ui/page-header';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { TextInput } from '~/components/ui/text-input';
-import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { CompactTable } from '~/components/ui/compact-table';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { useFetcherToast } from '~/components/ui/toast';
-import { AFRICAN_COUNTRY_CURRENCIES, AFRICAN_CURRENCY_CODES, currencyForCountry } from '@yannis/shared';
+import { SearchableSelect } from '~/components/ui/searchable-select';
+import { AFRICAN_COUNTRY_CURRENCIES, AFRICAN_CURRENCY_CODES, currencyForCountry, flagForCountry } from '@yannis/shared';
 import type { CurrencyRow } from '~/lib/currencies.server';
 
 interface Props {
@@ -64,7 +64,7 @@ export function CurrenciesSettingsPage({ currencies }: Props) {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Country & Currency"
+        title="Multi Country"
         backTo="/admin/settings"
         mobileInlineActions
         actions={<Button onClick={() => setAddOpen(true)}>Add currency</Button>}
@@ -100,7 +100,15 @@ export function CurrenciesSettingsPage({ currencies }: Props) {
           {
             key: 'country',
             header: 'Country',
-            render: (c) => <span className="text-app-muted-fg">{c.countryName}</span>,
+            render: (c) => {
+              const flag = flagForCountry(c.countryName);
+              return (
+                <span className="text-app-muted-fg">
+                  {flag && <span className="mr-1.5" aria-hidden>{flag}</span>}
+                  {c.countryName}
+                </span>
+              );
+            },
           },
           {
             key: 'fx',
@@ -271,11 +279,6 @@ function CurrencyForm({
     setCode(cur?.code ?? '');
     setSymbol(cur?.symbol ?? '');
   };
-  const onCodeChange = (value: string) => {
-    setCode(value);
-    const match = AFRICAN_CURRENCY_CODES.find((c) => c.code === value);
-    if (match) setSymbol(match.symbol);
-  };
 
   const fxNum = Number(fxRate);
   const fxValid = String(fxRate).trim() !== '' && Number.isFinite(fxNum) && fxNum > 0;
@@ -297,60 +300,40 @@ function CurrencyForm({
       <input type="hidden" name="countryName" value={country} />
       <h2 className="text-lg font-semibold text-app-fg">{isEdit ? `Edit ${editing.code}` : 'Add currency'}</h2>
 
-      {/* 1. Country (first selection — drives the rest) */}
+      {/* Code + Symbol are derived from the country, so they submit as hidden inputs. */}
+      <input type="hidden" name="code" value={code} />
+      <input type="hidden" name="symbol" value={symbol} />
+
+      {/* 1. Country (first selection — drives the rest). Searchable, flag-prefixed. */}
       <label className="block text-sm">
         <span className="mb-1 block font-medium text-app-fg">Country</span>
-        <FormSelect
+        <SearchableSelect
           value={country}
-          onChange={(e) => onCountryChange(e.target.value)}
+          onChange={onCountryChange}
           disabled={isEdit}
+          placeholder="Select a country"
+          searchPlaceholder="Search countries..."
+          emptyText="No matching country"
           options={[
-            { value: '', label: 'Select a country' },
             ...AFRICAN_COUNTRY_CURRENCIES.map((c) => ({
               value: c.country,
-              label: !isEdit && existing.has(c.code.toUpperCase()) ? `${c.country} (${c.code}, added)` : `${c.country} (${c.code})`,
+              label:
+                !isEdit && existing.has(c.code.toUpperCase())
+                  ? `${c.country} (${c.code}, added)`
+                  : `${c.country} (${c.code})`,
+              leading: <span aria-hidden>{c.flag}</span>,
               disabled: !isEdit && existing.has(c.code.toUpperCase()),
             })),
             // Ensure the edited currency's country is always selectable even if not in the catalog.
             ...(isEdit && !AFRICAN_COUNTRY_CURRENCIES.some((c) => c.country === country) && country
-              ? [{ value: country, label: country }]
+              ? [{ value: country, label: country, leading: <span aria-hidden>{flagForCountry(country)}</span> }]
               : []),
           ]}
         />
       </label>
 
-      {/* 2. Code + Symbol (auto-filled from country, still dropdowns) */}
-      <div className="grid grid-cols-2 gap-3">
-        <label className="text-sm">
-          <span className="mb-1 block font-medium text-app-fg">Currency code</span>
-          <FormSelect
-            name="code"
-            value={code}
-            onChange={(e) => onCodeChange(e.target.value)}
-            disabled={isEdit || !country}
-            options={[
-              { value: '', label: 'Select' },
-              ...AFRICAN_CURRENCY_CODES.map((c) => ({ value: c.code, label: c.code })),
-              ...(code && !AFRICAN_CURRENCY_CODES.some((c) => c.code === code) ? [{ value: code, label: code }] : []),
-            ]}
-          />
-        </label>
-        <label className="text-sm">
-          <span className="mb-1 block font-medium text-app-fg">Symbol</span>
-          <FormSelect
-            name="symbol"
-            value={symbol}
-            onChange={(e) => setSymbol(e.target.value)}
-            disabled={!code}
-            options={[
-              ...(symbol && !AFRICAN_CURRENCY_CODES.some((c) => c.symbol === symbol)
-                ? [{ value: symbol, label: symbol }]
-                : []),
-              ...AFRICAN_CURRENCY_CODES.map((c) => ({ value: c.symbol, label: `${c.symbol}  (${c.code})` })),
-            ]}
-          />
-        </label>
-      </div>
+      {/* Code + Symbol are derived from the country selection, so they are not
+          shown as fields here — only submitted via the hidden inputs above. */}
 
       {/* 3. FX rate — REQUIRED on add (needed for merged/FX aggregates). On edit
           it is managed via the row's "FX rate" action, so it stays optional here. */}

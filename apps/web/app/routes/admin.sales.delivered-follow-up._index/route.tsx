@@ -149,8 +149,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const frozenParam = url.searchParams.get('frozen') || undefined;
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
-  // Multi-currency filter (dormant unless the company added a 2nd currency).
-  const currencyCode = url.searchParams.get('currency')?.toUpperCase() || undefined;
+  // Multi-country: filtering is driven by the GLOBAL top-bar country switcher
+  // (server-side effectiveCurrencyCodes scope), not a per-page ?currency param.
 
   const expandConfirmedFilter = status === 'CONFIRMED';
   const expandDeliveredFilter = status === 'DELIVERED';
@@ -176,7 +176,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(frozenParam === 'frozen' || frozenParam === 'active' ? { frozenFilter: frozenParam } : {}),
     orderSource,
     ...(teamIdParam && { teamId: teamIdParam }),
-    ...(currencyCode && { currencyCode }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
     ...(!hasScheduleListFilter && apiEndDate && { endDate: apiEndDate }),
   };
@@ -265,8 +264,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       canCreateOffline,
       orderSource: 'delivered_follow_up',
       ...(teamIdParam && { teamId: teamIdParam }),
-      ...(currencyCode && { currencyCode }),
-    }),
+      }),
   );
   const [listRes, bundleRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie }),

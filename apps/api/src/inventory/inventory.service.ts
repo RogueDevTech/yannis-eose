@@ -1677,8 +1677,31 @@ export class InventoryService {
     });
   }
 
-  async listLevels(input: ListInventoryInput, groupId?: string | null, effectiveBranchIds?: string[] | null) {
+  async listLevels(
+    input: ListInventoryInput,
+    groupId?: string | null,
+    effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
+  ) {
     const conditions = [];
+
+    // Multi-country: inventory_levels has no currency column (derived via
+    // location → provider). Scope to the active country by restricting to
+    // locations whose provider is in one of the allowed currencies. No-op for
+    // view_all (effectiveCurrencyCodes null / empty).
+    if (effectiveCurrencyCodes && effectiveCurrencyCodes.length > 0) {
+      const curClause = sql.join(
+        effectiveCurrencyCodes.map((c) => sql`${c.toUpperCase()}`),
+        sql`, `,
+      );
+      conditions.push(
+        sql`${schema.inventoryLevels.locationId} IN (
+          SELECT ll.id FROM logistics_locations ll
+          JOIN logistics_providers lp ON lp.id = ll.provider_id
+          WHERE UPPER(lp.currency_code) IN (${curClause})
+        )`,
+      );
+    }
 
     if (input.productId) {
       conditions.push(eq(schema.inventoryLevels.productId, input.productId));

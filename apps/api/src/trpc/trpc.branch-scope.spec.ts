@@ -34,6 +34,7 @@ function buildCtx(overrides?: Partial<TrpcContext>): TrpcContext {
     effectiveBranchIds: null,
     activeGroupId: null,
     effectiveCurrencyCodes: null,
+    currentCurrencyCode: null,
     ...overrides,
   };
 }

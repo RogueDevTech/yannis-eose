@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Form, Link, useNavigate, useSubmit, useNavigation, useLocation } from '@remix-run/react';
+import { Form, Link, useNavigate, useSubmit, useNavigation, useLocation, useFetcher } from '@remix-run/react';
+import { flagForCurrencyCode } from '@yannis/shared';
 import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Modal } from '~/components/ui/modal';
@@ -57,6 +58,14 @@ interface HeaderProps {
   /** False while admin layout streams branch list — desktop switcher shows a skeleton. */
   branchesHydrationReady?: boolean;
   currentBranchId?: string | null;
+  /** Multi-country VIEW switcher — the country the user is currently viewing. */
+  currentCurrencyCode?: string | null;
+  /**
+   * Active currency catalog (with countryName). Passed explicitly because the
+   * Header renders OUTSIDE the CurrenciesCatalogProvider, so the context hook
+   * would return the [NGN] default and hide the switcher.
+   */
+  currencies?: Array<{ code: string; countryName: string; isDefault: boolean; active: boolean }>;
   /** Multi-branch selection from session — CEO directive 2026-06-10. */
   selectedBranchIds?: string[] | null;
   /** Branch groups for SuperAdmin header group switcher. */
@@ -130,6 +139,8 @@ export function Header({
   branches,
   branchesHydrationReady = true,
   currentBranchId,
+  currentCurrencyCode,
+  currencies: currenciesProp,
   selectedBranchIds,
   branchGroups,
   mirroredBy,
@@ -161,6 +172,34 @@ export function Header({
   const mobileCurrentBranch = branches?.find((b) => b.id === (currentBranchId ?? null)) ?? null;
   const mobileCanSwitchBranches = !!branches && shouldShowHeaderBranchSwitcher(branches.length, user?.role ?? '');
   const isMobileAllBranches = canSeeAllBranches && currentBranchId == null;
+
+  // Mobile multi-country VIEW switcher — mirrors the desktop HeaderCountrySwitcher
+  // (which is `hidden lg:flex`, so mobile otherwise has no way to switch country).
+  // Self-hides for single-country users/companies via `mobileCanSwitchCountry`.
+  const mobileCountryFetcher = useFetcher();
+  const mobileActiveCurrencies = useMemo(
+    () => (currenciesProp ?? []).filter((c) => c.active),
+    [currenciesProp],
+  );
+  const mobileCountryOptions = useMemo(
+    () => mobileActiveCurrencies.map((c) => ({ code: c.code, name: c.countryName || c.code })),
+    [mobileActiveCurrencies],
+  );
+  const mobileBaseCurrencyCode = (mobileActiveCurrencies.find((c) => c.isDefault)?.code ?? 'NGN').toUpperCase();
+  const mobileCurrentCountryCode = (currentCurrencyCode || mobileBaseCurrencyCode).toUpperCase();
+  const mobileCanSwitchCountry = mobileCountryOptions.length > 1;
+  const isMobileCountrySwitching =
+    mobileCountryFetcher.state !== 'idle' &&
+    mobileCountryFetcher.formAction === '/admin/currency/switch';
+  const handleMobileCountrySelect = useCallback(
+    (code: string) => {
+      if (code.toUpperCase() === mobileCurrentCountryCode) return;
+      const fd = new FormData();
+      fd.set('code', code);
+      mobileCountryFetcher.submit(fd, { method: 'post', action: '/admin/currency/switch' });
+    },
+    [mobileCountryFetcher, mobileCurrentCountryCode],
+  );
 
   // Close menus on outside click
   useEffect(() => {
@@ -270,6 +309,16 @@ export function Header({
     if (mobileUserMenuOpen) setMobileExpandedGroups(new Set());
   }, [mobileUserMenuOpen]);
 
+  // Close the mobile account menu once a country switch resolves, so the user
+  // returns to the freshly re-scoped page instead of a stale open sheet.
+  const prevCountrySwitching = useRef(false);
+  useEffect(() => {
+    if (prevCountrySwitching.current && !isMobileCountrySwitching) {
+      setMobileUserMenuOpen(false);
+    }
+    prevCountrySwitching.current = isMobileCountrySwitching;
+  }, [isMobileCountrySwitching]);
+
   const mobileAllChecked = mobileChecked.size === allMobileBranchIds.length && allMobileBranchIds.every((id) => mobileChecked.has(id));
   const mobileNoneChecked = mobileChecked.size === 0;
 
@@ -376,6 +425,15 @@ export function Header({
             aria-hidden
           />
         )}
+        {/* Multi-country VIEW switcher — placed BEFORE the branch switcher.
+            Self-hides unless the company has 2+ active currencies AND the user
+            can see more than one country. */}
+        <div className="hidden lg:flex items-center shrink-0">
+          <HeaderCountrySwitcher
+            currentCurrencyCode={currentCurrencyCode ?? null}
+            currencies={currenciesProp}
+          />
+        </div>
         {branchesHydrationReady &&
           branches &&
           shouldShowHeaderBranchSwitcher(branches.length, user?.role ?? '') && (
@@ -777,6 +835,42 @@ export function Header({
                 <p className="text-xs text-app-fg-muted">{user.email}</p>
                 <p className="text-2xs text-app-fg-muted mt-0.5">{formatRole(user.role)}</p>
               </div>
+
+              {mobileCanSwitchCountry && (
+                <div className="border-b border-app-border py-2">
+                  <div className="px-5 pt-1 pb-1">
+                    <p className="text-micro uppercase tracking-wider font-semibold text-app-fg-muted">
+                      Country
+                    </p>
+                  </div>
+                  <div className="px-5 pb-1 pt-1 space-y-1">
+                    {mobileCountryOptions.map((o) => {
+                      const isActive = o.code.toUpperCase() === mobileCurrentCountryCode;
+                      return (
+                        <button
+                          key={o.code}
+                          type="button"
+                          disabled={isMobileCountrySwitching}
+                          onClick={() => handleMobileCountrySelect(o.code)}
+                          className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                            isActive
+                              ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300'
+                              : 'text-app-fg hover:bg-app-hover'
+                          }`}
+                        >
+                          <span aria-hidden>{flagForCurrencyCode(o.code)}</span>
+                          <span className="truncate font-medium">{o.name}</span>
+                          {isActive && (
+                            <svg className="ml-auto h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {branches && branches.length > 0 && (
                 <div className="border-b border-app-border py-2">
@@ -1558,6 +1652,99 @@ function HeaderBranchSwitcher({
               {isSubmitting ? 'Applying...' : noneChecked ? 'Select at least one' : 'Apply'}
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Multi-country VIEW switcher for the top bar (beside the branch switcher).
+ *
+ * Sets the country the user is currently viewing session-wide (posts to
+ * `/admin/currency/switch`), so every country-aware page reflects it. A view
+ * selector WITHIN the user's allowed countries — not a permission grant.
+ *
+ * Self-hides unless the company has 2+ active currencies AND the user can see
+ * more than one country (a single-country-scoped user has nothing to switch),
+ * keeping single-country installs byte-for-byte unchanged.
+ */
+function HeaderCountrySwitcher({
+  currentCurrencyCode,
+  currencies,
+}: {
+  currentCurrencyCode: string | null;
+  currencies?: Array<{ code: string; countryName: string; isDefault: boolean; active: boolean }>;
+}) {
+  const fetcher = useFetcher();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const active = useMemo(() => (currencies ?? []).filter((c) => c.active), [currencies]);
+  const options = useMemo(
+    () => active.map((c) => ({ code: c.code, name: c.countryName || c.code })),
+    [active],
+  );
+  const baseCode = (active.find((c) => c.isDefault)?.code ?? 'NGN').toUpperCase();
+  const baseName = active.find((c) => c.isDefault)?.countryName ?? 'Nigeria';
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  // Nothing to switch: single-currency company, or the user can only see one
+  // country (options come pre-scoped to the user's allowed countries server-side).
+  if (options.length <= 1) return null;
+
+  const currentCode = (currentCurrencyCode || baseCode).toUpperCase();
+  const currentName = options.find((o) => o.code.toUpperCase() === currentCode)?.name ?? baseName;
+
+  const select = (code: string) => {
+    setOpen(false);
+    if (code.toUpperCase() === currentCode) return;
+    const fd = new FormData();
+    fd.set('code', code);
+    fetcher.submit(fd, { method: 'post', action: '/admin/currency/switch' });
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Country"
+        title="Country"
+        className="inline-flex h-9 items-center gap-1.5 rounded-md border border-app-border bg-app-hover px-3 text-sm font-medium text-app-fg transition-colors hover:opacity-90"
+      >
+        <span aria-hidden>{flagForCurrencyCode(currentCode)}</span>
+        <span className="truncate max-w-[8rem]">{currentName}</span>
+        <svg className="h-4 w-4 shrink-0 opacity-70" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-50 mt-1 w-52 rounded-lg border border-app-border bg-app-elevated p-1.5 shadow-lg">
+          {options.map((o) => {
+            const isActive = o.code.toUpperCase() === currentCode;
+            return (
+              <button
+                key={o.code}
+                type="button"
+                onClick={() => select(o.code)}
+                className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                  isActive ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300' : 'text-app-fg hover:bg-app-hover'
+                }`}
+              >
+                <span aria-hidden>{flagForCurrencyCode(o.code)}</span>
+                <span className="truncate">{o.name}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

@@ -374,7 +374,7 @@ export function CsOrderRoutingSettingsPage({
                       { value: '', label: 'Any country' },
                       ...activeCurrencies.map((c) => ({
                         value: c.code,
-                        label: `${c.countryName || c.code} (${c.symbol} ${c.code})`,
+                        label: c.countryName || c.code,
                       })),
                     ]}
                   />
