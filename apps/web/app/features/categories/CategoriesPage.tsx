@@ -344,7 +344,9 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
             ) : null}
             {cat.brandWhatsapp ? <div>WhatsApp: {cat.brandWhatsapp}</div> : null}
             {cat.smsSenderId ? <div>Sender ID: {cat.smsSenderId}</div> : null}
-            {!cat.brandPhone && !cat.brandEmail && !cat.brandWhatsapp && !cat.smsSenderId ? <span>—</span> : null}
+            {!cat.brandPhone && !cat.brandEmail && !cat.brandWhatsapp && !cat.smsSenderId ? (
+              <span>Not set</span>
+            ) : null}
           </div>
         ),
         minWidth: 'min-w-[140px]',
@@ -444,8 +446,11 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
       />
 
       {/* Card chrome is desktop-only — on mobile each row renders as its own
-          elevated card, so an outer card would double the chrome and waste width. */}
-      <div className="md:bg-app-elevated md:rounded-xl md:border md:border-app-border md:shadow-card dark:md:shadow-none md:overflow-hidden">
+          elevated card, so an outer card would double the chrome and waste width.
+          Use `.list-panel` (no overflow-hidden) so the sticky <thead> pins to the
+          page instead of this wrapper — a clipping wrapper floats the header down
+          over the first row and clips the row actions. */}
+      <div className="list-panel">
         <CompactTable<Category>
           columnVisibilityKey="admin.catalog.categories"
           caption="Product categories"

@@ -76,8 +76,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const canViewBranchColumn = canViewAllBranches(user);
   const branchFilter = url.searchParams.get('branch') || undefined;
   const userLocationFilter = url.searchParams.get('location') || undefined;
-  // Currency scope is now driven session-wide by the global country switcher
-  // (ctx.effectiveCurrencyCodes), so no per-page `?currency=` filter arg here.
+  // Session-wide currency scope still applies via the global country switcher
+  // (ctx.effectiveCurrencyCodes). This per-page `?currency=` filter narrows WITHIN
+  // that scope, so a multi-country logistics head can see all their countries and
+  // switch to one currency at a time (mirrors the Marketing Orders currency filter).
+  const currencyFilter = url.searchParams.get('currency') || undefined;
   const effectiveLogisticsLocationId =
     isTplManager && user.logisticsLocationId
       ? user.logisticsLocationId
@@ -118,6 +121,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
     ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
     ...(branchFilter && { servicingBranchId: branchFilter }),
+    ...(currencyFilter && { currencyCode: currencyFilter }),
   };
   const bundleInputEnc = encodeURIComponent(JSON.stringify(bundleInput));
 
@@ -133,6 +137,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     searchFilter: search ?? '',
     locationFilter: userLocationFilter ?? '',
     branchFilter: branchFilter ?? '',
+    currencyFilter: currencyFilter ?? '',
     isTplManagerScoped: isTplManager && !!user.logisticsLocationId,
     canViewBranchColumn,
     canEditDeliveryDate: false,
@@ -155,6 +160,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...(startDate && { startDate }),
       ...(endDate && { endDate }),
       ...(effectiveLogisticsLocationId && { logisticsLocationId: effectiveLogisticsLocationId }),
+      ...(currencyFilter && { currencyCode: currencyFilter }),
     };
     const [bundleRes, overdueRes] = await Promise.all([
       apiRequest<unknown>(
@@ -214,6 +220,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       searchFilter: logisticsOrdersShell.searchFilter,
       locationFilter: logisticsOrdersShell.locationFilter,
       branchFilter: logisticsOrdersShell.branchFilter,
+      currencyFilter: logisticsOrdersShell.currencyFilter,
       listErrorMessage,
       statusCounts,
       locations,

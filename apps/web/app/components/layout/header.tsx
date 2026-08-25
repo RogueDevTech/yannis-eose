@@ -176,30 +176,49 @@ export function Header({
   // Mobile multi-country VIEW switcher — mirrors the desktop HeaderCountrySwitcher
   // (which is `hidden lg:flex`, so mobile otherwise has no way to switch country).
   // Self-hides for single-country users/companies via `mobileCanSwitchCountry`.
-  const mobileCountryFetcher = useFetcher();
   const mobileActiveCurrencies = useMemo(
     () => (currenciesProp ?? []).filter((c) => c.active),
     [currenciesProp],
   );
-  const mobileCountryOptions = useMemo(
-    () => mobileActiveCurrencies.map((c) => ({ code: c.code, name: c.countryName || c.code })),
-    [mobileActiveCurrencies],
-  );
+  // Dedupe by uppercased code — currencies are group-scoped so the same code
+  // repeats once per company (see HeaderCountrySwitcher). Without this the sheet
+  // lists a country multiple times AND `mobileCanSwitchCountry` (length > 1)
+  // wrongly shows the switcher for single-country installs with dup rows.
+  const mobileCountryOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Array<{ code: string; name: string }> = [];
+    for (const c of mobileActiveCurrencies) {
+      const code = c.code.toUpperCase();
+      if (seen.has(code)) continue;
+      seen.add(code);
+      out.push({ code, name: c.countryName || c.code });
+    }
+    return out;
+  }, [mobileActiveCurrencies]);
   const mobileBaseCurrencyCode = (mobileActiveCurrencies.find((c) => c.isDefault)?.code ?? 'NGN').toUpperCase();
   const mobileCurrentCountryCode = (currentCurrencyCode || mobileBaseCurrencyCode).toUpperCase();
   const mobileCanSwitchCountry = mobileCountryOptions.length > 1;
-  const isMobileCountrySwitching =
-    mobileCountryFetcher.state !== 'idle' &&
-    mobileCountryFetcher.formAction === '/admin/currency/switch';
-  const handleMobileCountrySelect = useCallback(
-    (code: string) => {
-      if (code.toUpperCase() === mobileCurrentCountryCode) return;
-      const fd = new FormData();
-      fd.set('code', code);
-      mobileCountryFetcher.submit(fd, { method: 'post', action: '/admin/currency/switch' });
-    },
-    [mobileCountryFetcher, mobileCurrentCountryCode],
-  );
+  // Pending (unapplied) mobile country selection — committed on "Apply", mirroring
+  // the branch switcher + desktop country switcher.
+  const [mobilePendingCountry, setMobilePendingCountry] = useState(mobileCurrentCountryCode);
+  const [mobileApplying, setMobileApplying] = useState(false);
+  useEffect(() => { setMobilePendingCountry(mobileCurrentCountryCode); }, [mobileCurrentCountryCode]);
+  const mobileCountryDirty = mobilePendingCountry.toUpperCase() !== mobileCurrentCountryCode;
+  const applyMobileCountry = useCallback(async () => {
+    if (!mobileCountryDirty || mobileApplying) return;
+    setMobileApplying(true);
+    // Full reload after the switch (same as desktop + branch switcher) so every
+    // loader re-runs against the new session country and no stale country-scoped
+    // data lingers.
+    const fd = new FormData();
+    fd.set('code', mobilePendingCountry);
+    try {
+      await fetch('/admin/currency/switch', { method: 'POST', body: fd });
+    } catch {
+      // ignore — reload re-syncs from the session either way
+    }
+    window.location.reload();
+  }, [mobileCountryDirty, mobileApplying, mobilePendingCountry]);
 
   // Close menus on outside click
   useEffect(() => {
@@ -313,11 +332,11 @@ export function Header({
   // returns to the freshly re-scoped page instead of a stale open sheet.
   const prevCountrySwitching = useRef(false);
   useEffect(() => {
-    if (prevCountrySwitching.current && !isMobileCountrySwitching) {
+    if (prevCountrySwitching.current && !mobileApplying) {
       setMobileUserMenuOpen(false);
     }
-    prevCountrySwitching.current = isMobileCountrySwitching;
-  }, [isMobileCountrySwitching]);
+    prevCountrySwitching.current = mobileApplying;
+  }, [mobileApplying]);
 
   const mobileAllChecked = mobileChecked.size === allMobileBranchIds.length && allMobileBranchIds.every((id) => mobileChecked.has(id));
   const mobileNoneChecked = mobileChecked.size === 0;
@@ -845,22 +864,22 @@ export function Header({
                   </div>
                   <div className="px-5 pb-1 pt-1 space-y-1">
                     {mobileCountryOptions.map((o) => {
-                      const isActive = o.code.toUpperCase() === mobileCurrentCountryCode;
+                      const isSelected = o.code.toUpperCase() === mobilePendingCountry.toUpperCase();
                       return (
                         <button
                           key={o.code}
                           type="button"
-                          disabled={isMobileCountrySwitching}
-                          onClick={() => handleMobileCountrySelect(o.code)}
+                          disabled={mobileApplying}
+                          onClick={() => setMobilePendingCountry(o.code.toUpperCase())}
                           className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                            isActive
+                            isSelected
                               ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300'
                               : 'text-app-fg hover:bg-app-hover'
                           }`}
                         >
                           <span aria-hidden>{flagForCurrencyCode(o.code)}</span>
                           <span className="truncate font-medium">{o.name}</span>
-                          {isActive && (
+                          {isSelected && (
                             <svg className="ml-auto h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                             </svg>
@@ -868,6 +887,26 @@ export function Header({
                         </button>
                       );
                     })}
+                  </div>
+                  <div className="px-5 pt-2">
+                    <button
+                      type="button"
+                      onClick={applyMobileCountry}
+                      disabled={!mobileCountryDirty || mobileApplying}
+                      className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-brand-600 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {mobileApplying ? (
+                        <>
+                          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+                          </svg>
+                          Applying...
+                        </>
+                      ) : (
+                        'Apply'
+                      )}
+                    </button>
                   </div>
                 </div>
               )}
@@ -1676,17 +1715,34 @@ function HeaderCountrySwitcher({
   currentCurrencyCode: string | null;
   currencies?: Array<{ code: string; countryName: string; isDefault: boolean; active: boolean }>;
 }) {
-  const fetcher = useFetcher();
   const [open, setOpen] = useState(false);
+  const [applying, setApplying] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const active = useMemo(() => (currencies ?? []).filter((c) => c.active), [currencies]);
-  const options = useMemo(
-    () => active.map((c) => ({ code: c.code, name: c.countryName || c.code })),
-    [active],
-  );
+  // Currencies are group-scoped, so the same code can appear once per company
+  // (dev has 12 NGN + 2 GHS rows). Dedupe by uppercased code so the switcher
+  // lists each country once — otherwise it renders "Nigeria" N times AND the
+  // `options.length <= 1` self-hide breaks for single-country installs.
+  const options = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Array<{ code: string; name: string }> = [];
+    for (const c of active) {
+      const code = c.code.toUpperCase();
+      if (seen.has(code)) continue;
+      seen.add(code);
+      out.push({ code, name: c.countryName || c.code });
+    }
+    return out;
+  }, [active]);
   const baseCode = (active.find((c) => c.isDefault)?.code ?? 'NGN').toUpperCase();
   const baseName = active.find((c) => c.isDefault)?.countryName ?? 'Nigeria';
+  const currentCode = (currentCurrencyCode || baseCode).toUpperCase();
+
+  // Pending (unapplied) selection — committed only on "Apply", mirroring the
+  // branch switcher's select-then-apply pattern.
+  const [pending, setPending] = useState(currentCode);
+  useEffect(() => { setPending(currentCode); }, [currentCode]);
 
   useEffect(() => {
     if (!open) return;
@@ -1701,15 +1757,23 @@ function HeaderCountrySwitcher({
   // country (options come pre-scoped to the user's allowed countries server-side).
   if (options.length <= 1) return null;
 
-  const currentCode = (currentCurrencyCode || baseCode).toUpperCase();
   const currentName = options.find((o) => o.code.toUpperCase() === currentCode)?.name ?? baseName;
+  const dirty = pending.toUpperCase() !== currentCode;
 
-  const select = (code: string) => {
-    setOpen(false);
-    if (code.toUpperCase() === currentCode) return;
-    const fd = new FormData();
-    fd.set('code', code);
-    fetcher.submit(fd, { method: 'post', action: '/admin/currency/switch' });
+  const apply = async () => {
+    if (!dirty || applying) return;
+    setApplying(true);
+    // Full reload after the switch — same as the branch switcher. A soft
+    // fetcher revalidation leaves streamed/cached page data scoped to the old
+    // country; a hard reload re-runs every loader against the new session.
+    const body = new FormData();
+    body.set('code', pending);
+    try {
+      await fetch('/admin/currency/switch', { method: 'POST', body });
+    } catch {
+      // ignore — reload re-syncs from the session either way
+    }
+    window.location.reload();
   };
 
   return (
@@ -1728,23 +1792,50 @@ function HeaderCountrySwitcher({
         </svg>
       </button>
       {open && (
-        <div className="absolute right-0 z-50 mt-1 w-52 rounded-lg border border-app-border bg-app-elevated p-1.5 shadow-lg">
+        <div className="absolute right-0 z-50 mt-1 w-56 rounded-lg border border-app-border bg-app-elevated p-1.5 shadow-lg">
+          <div className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Country</div>
           {options.map((o) => {
-            const isActive = o.code.toUpperCase() === currentCode;
+            const isSelected = o.code.toUpperCase() === pending.toUpperCase();
             return (
               <button
                 key={o.code}
                 type="button"
-                onClick={() => select(o.code)}
-                className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                  isActive ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300' : 'text-app-fg hover:bg-app-hover'
+                onClick={() => setPending(o.code.toUpperCase())}
+                disabled={applying}
+                className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors disabled:opacity-60 ${
+                  isSelected ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300' : 'text-app-fg hover:bg-app-hover'
                 }`}
               >
                 <span aria-hidden>{flagForCurrencyCode(o.code)}</span>
-                <span className="truncate">{o.name}</span>
+                <span className="truncate flex-1">{o.name}</span>
+                {isSelected && (
+                  <svg className="h-4 w-4 shrink-0 text-brand-600" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                    <path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 011.4-1.4l2.8 2.8 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd" />
+                  </svg>
+                )}
               </button>
             );
           })}
+          <div className="mt-1.5 border-t border-app-border pt-1.5">
+            <button
+              type="button"
+              onClick={apply}
+              disabled={!dirty || applying}
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-600 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {applying ? (
+                <>
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+                  </svg>
+                  Applying...
+                </>
+              ) : (
+                'Apply'
+              )}
+            </button>
+          </div>
         </div>
       )}
     </div>

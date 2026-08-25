@@ -129,8 +129,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const orderSourceParam = url.searchParams.get('orderSource') as 'offline' | 'edge-form' | null;
   const orderSource = orderSourceParam === 'offline' || orderSourceParam === 'edge-form' ? orderSourceParam : undefined;
 
-  // Currency scope is now driven session-wide by the global country switcher
-  // (ctx.effectiveCurrencyCodes), so no per-page `?currency=` filter arg here.
+  // Multi-country: the Marketing Orders page has its OWN currency filter
+  // (default "all currencies"), independent of the global country switcher — so
+  // MB (and marketing viewers) see all orders across countries by default and
+  // can slice by currency here. Read for everyone on this page. The marketing
+  // bundle ignores the global country scope for this surface (see
+  // `ordersPageBundle` → marketingCurrencyScope).
+  const pageCurrencyFilter = url.searchParams.get('currency')?.toUpperCase() || undefined;
 
   const listInput = {
     page,
@@ -158,6 +163,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // mediaBuyerId belong in the Marketing funnel. System (unattributed) view
     // drops the source filter entirely to catch all null-MB orders.
     orderSource: orderSource ?? (mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import'),
+    // MB-only per-page currency filter (default all currencies).
+    ...(pageCurrencyFilter && { currencyCode: pageCurrencyFilter }),
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 
@@ -177,12 +184,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     status?: string;
     startDate?: string;
     endDate?: string;
+    currencyCode?: string;
     includeMarketingExportPicklists: boolean;
   } = { includeMarketingExportPicklists: loadMarketingExportPicklists };
   if (teamBundleMedioBuyerId) bundleInput.mediaBuyerId = teamBundleMedioBuyerId;
   if (status) bundleInput.status = status;
   if (apiStartDate) bundleInput.startDate = apiStartDate;
   if (apiEndDate) bundleInput.endDate = apiEndDate;
+  // Keep the stat strip in lockstep with the MB currency-filtered table.
+  if (pageCurrencyFilter) bundleInput.currencyCode = pageCurrencyFilter;
   const bundleInputStr = encodeURIComponent(JSON.stringify(bundleInput));
 
   // Supervisors + HoM get both team stats AND personal stats pre-fetched so

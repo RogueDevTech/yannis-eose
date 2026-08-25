@@ -406,8 +406,9 @@ export function LogisticsTeamPage({
     if (sortByFromLoader !== 'assigned') n += 1;
     if (sortDirFromLoader !== 'desc') n += 1;
     if (activeProductId) n += 1;
+    if (viewType !== 'company') n += 1;
     return n;
-  }, [sortByFromLoader, sortDirFromLoader, activeProductId]);
+  }, [sortByFromLoader, sortDirFromLoader, activeProductId, viewType]);
 
   const showSearchEmpty = unfilteredCount > 0 && providers.length === 0;
 
@@ -696,15 +697,25 @@ export function LogisticsTeamPage({
             saveFilterKey
             filtersBadgeCount={logisticsTeamToolbarFilterBadge}
             filters={
-              <SortMenu
-                value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
-                onChange={(next) =>
-                  mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
-                }
-                defaultValue={{ sortBy: 'assigned', sortDir: 'desc' }}
-                options={SORT_MENU_OPTIONS}
-                className="w-full justify-center"
-              />
+              <div className="space-y-3">
+                <FormSelect
+                  value={viewType}
+                  onChange={(e) => setViewType(e.target.value as 'company' | 'location')}
+                  className="w-full"
+                >
+                  <option value="company">By Logistics company</option>
+                  <option value="location">By Logistics location</option>
+                </FormSelect>
+                <SortMenu
+                  value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+                  onChange={(next) =>
+                    mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+                  }
+                  defaultValue={{ sortBy: 'assigned', sortDir: 'desc' }}
+                  options={SORT_MENU_OPTIONS}
+                  className="w-full justify-center"
+                />
+              </div>
             }
             desktopActions
             desktop={
@@ -808,18 +819,23 @@ export function LogisticsTeamPage({
                 title={viewType === 'company' ? 'Search companies' : 'Search locations'}
                 onApply={(query) => mergeListParams({ q: query, page: 1 })}
               />
-              <FormSelect
-                value={viewType}
-                onChange={(e) => setViewType(e.target.value as 'company' | 'location')}
-                className="w-auto shrink-0"
-              >
-                <option value="company">By Logistics company</option>
-                <option value="location">By Logistics location</option>
-              </FormSelect>
             </div>
           }
           desktopInlineFilters={
             <>
+              <div className="relative" data-toolbar-filter>
+                {viewType !== 'company' && (
+                  <FilterDismiss onClear={() => setViewType('company')} />
+                )}
+                <FormSelect
+                  value={viewType}
+                  onChange={(e) => setViewType(e.target.value as 'company' | 'location')}
+                  className="w-auto"
+                >
+                  <option value="company">By Logistics company</option>
+                  <option value="location">By Logistics location</option>
+                </FormSelect>
+              </div>
               {productOptions.length > 0 && (
                 <div className="relative" data-toolbar-filter>
                   {activeProductId && (

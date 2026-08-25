@@ -142,10 +142,17 @@ export function createContext(req: Request, res: Response): TrpcContext {
   // top-bar, narrow the effective view to it — but ONLY to a country they are
   // allowed to see (never widens the permission). This is the country analogue of
   // currentBranchId narrowing within effectiveBranchIds.
+  //
+  // EXCEPTION — all-countries users (Media Buyers, admin-class, countries.view_all)
+  // are NEVER scoped by the switcher. An MB runs campaigns across countries and
+  // wants to see ALL their orders at once (each row already tagged by its own
+  // currency). The switcher stays a display preference for them; it does not
+  // restrict their data. So we only narrow for country-SCOPED users.
   const currentCurrencyCode = user?.currentCurrencyCode
     ? user.currentCurrencyCode.toUpperCase()
     : null;
-  if (currentCurrencyCode) {
+  const isAllCountries = user ? canViewAllCountries(user) : true;
+  if (currentCurrencyCode && !isAllCountries) {
     const allowed =
       effectiveCurrencyCodes == null || effectiveCurrencyCodes.includes(currentCurrencyCode);
     if (allowed) {
