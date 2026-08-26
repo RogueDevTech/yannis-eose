@@ -30,8 +30,7 @@ import { OrdersChartViewShellSkeleton, StatValuePulse } from '~/components/ui/de
 import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
 import { PageSearchControl } from '~/components/ui/page-search-control';
 import { FormSelect } from '~/components/ui/form-select';
-import { CurrencyFilterSelect } from '~/components/ui/currency-filter-select';
-import { useCurrencySymbol } from '~/contexts/currencies-catalog-context';
+import { useCurrencySymbol, useCurrencyFilterOptions } from '~/contexts/currencies-catalog-context';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Spinner } from '~/components/ui/spinner';
 import {
@@ -93,6 +92,7 @@ interface LogisticsOrdersPageProps {
   searchFilter?: string;
   locationFilter?: string;
   branchFilter?: string;
+  currencyFilter?: string;
   listErrorMessage?: string;
   /** Omitted when `deferredSecondary` is used. */
   locations?: Location[];
@@ -205,6 +205,7 @@ function LogisticsOrdersPageImpl({
   searchFilter,
   locationFilter: locationFilterProp,
   branchFilter: branchFilterProp,
+  currencyFilter: currencyFilterProp,
   listErrorMessage,
   locations: locationsProp,
   branches: branchesProp,
@@ -262,6 +263,20 @@ function LogisticsOrdersPageImpl({
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [selectedLocation, setSelectedLocation] = useState(locationFilterProp || '');
   const [selectedBranch, setSelectedBranch] = useState(branchFilterProp || '');
+  const [selectedCurrency, setSelectedCurrency] = useState(currencyFilterProp || 'ALL');
+  // Multi-currency filter options — null (dormant) until the company has 2+ currencies.
+  const currencyFilterOptions = useCurrencyFilterOptions();
+
+  const handleCurrencyChange = (currency: string) => {
+    setSelectedCurrency(currency);
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('page', '1');
+      if (currency && currency !== 'ALL') next.set('currency', currency);
+      else next.delete('currency');
+      return next;
+    });
+  };
 
   const handleLocationChange = (locationId: string) => {
     setSelectedLocation(locationId);
@@ -419,8 +434,8 @@ function LogisticsOrdersPageImpl({
       (selectedStatus !== 'ALL' ? 1 : 0) +
       (selectedLocation ? 1 : 0) +
       (selectedBranch ? 1 : 0) +
-      (searchParams.get('currency') ? 1 : 0),
-    [selectedStatus, selectedLocation, selectedBranch, searchParams],
+      (selectedCurrency !== 'ALL' ? 1 : 0),
+    [selectedStatus, selectedLocation, selectedBranch, selectedCurrency],
   );
 
   const confirmedOrders = displayOrders.filter((o) => o.status === 'CONFIRMED');
@@ -716,12 +731,24 @@ function LogisticsOrdersPageImpl({
               }
               filters={
                 <>
-                  {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
-                  <div className="relative w-full">
-                    <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
-                      <CurrencyFilterSelect className="!bg-transparent !border-transparent !text-center w-full" />
+                  {currencyFilterOptions ? (
+                    <div className="relative w-full">
+                      {selectedCurrency !== 'ALL' && (
+                        <FilterDismiss onClear={() => handleCurrencyChange('ALL')} />
+                      )}
+                      <div className="relative flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                        <FormSelect
+                          value={selectedCurrency}
+                          onChange={(e) => handleCurrencyChange(e.target.value)}
+                          options={currencyFilterOptions}
+                          controlSize="sm"
+                          openAs="modal"
+                          className="!bg-transparent !border-transparent !text-center" inlineChevron
+                          wrapperClassName="w-full"
+                        />
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
                   <div className="relative w-full">
                     {selectedStatus !== 'ALL' && (
                       <FilterDismiss onClear={() => handleStatusChange('ALL')} />
@@ -999,10 +1026,19 @@ function LogisticsOrdersPageImpl({
           }
           desktopInlineFilters={
             <>
-                {/* Currency filter — self-hides unless the company has 2+ active currencies. */}
-                <div className="relative" data-toolbar-filter>
-                  <CurrencyFilterSelect className="w-full min-w-0 sm:w-40" />
-                </div>
+                {currencyFilterOptions ? (
+                  <div className="relative" data-toolbar-filter>
+                    {selectedCurrency !== 'ALL' && (
+                      <FilterDismiss onClear={() => handleCurrencyChange('ALL')} />
+                    )}
+                    <FormSelect
+                      value={selectedCurrency}
+                      onChange={(e) => handleCurrencyChange(e.target.value)}
+                      options={currencyFilterOptions}
+                      wrapperClassName="w-full min-w-0 sm:w-48"
+                    />
+                  </div>
+                ) : null}
                 <div className="relative" data-toolbar-filter>
                   {selectedStatus !== 'ALL' && (
                     <FilterDismiss onClear={() => handleStatusChange('ALL')} />

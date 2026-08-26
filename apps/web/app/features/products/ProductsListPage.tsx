@@ -223,6 +223,19 @@ export function ProductsListPage({
         ),
       },
       {
+        key: 'code',
+        header: 'Code',
+        nowrap: true,
+        render: (product) =>
+          product.productNumber != null ? (
+            <span className="font-mono text-xs text-app-fg-muted tabular-nums">
+              PDT-{product.productNumber}
+            </span>
+          ) : (
+            <span className="text-app-fg-muted">—</span>
+          ),
+      },
+      {
         key: 'category',
         header: 'Category',
         render: (product) => <span className="text-sm text-app-fg-muted">{getDisplayCategory(product)}</span>,
@@ -386,6 +399,9 @@ export function ProductsListPage({
             </div>
             <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
               <span className="truncate">{getDisplayCategory(product)}</span>
+              {product.productNumber != null && (
+                <span className="shrink-0 font-mono tabular-nums">PDT-{product.productNumber}</span>
+              )}
             </div>
             <div className="flex items-center gap-3 text-xs text-app-fg-muted">
               <span className={`tabular-nums ${(product.totalStock ?? 0) <= 0 ? 'text-danger-600 dark:text-danger-400' : ''}`}>

@@ -115,6 +115,8 @@ import { AutomationService } from '../automation/automation.service';
 import { TargetGroupService } from '../automation/target-group.service';
 import { setAutomationService, setTargetGroupService } from './routers/automation.router';
 import { setAutomationHookService } from '../automation/automation-hooks';
+import { BulkImportService } from '../orders/bulk-import.service';
+import { setBulkImportService } from './routers/bulk-import.router';
 
 @Module({
   imports: [
@@ -178,6 +180,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly aiAssistantService: AiAssistantService,
     private readonly automationService: AutomationService,
     private readonly targetGroupService: TargetGroupService,
+    private readonly bulkImportService: BulkImportService,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
   ) {}
 
@@ -215,6 +218,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setNotificationsService(this.notificationsService);
     setAutomationService(this.automationService);
     setTargetGroupService(this.targetGroupService);
+    setBulkImportService(this.bulkImportService);
     setAutomationHookService(this.automationService);
     setPushSchedulerService(this.pushSchedulerService);
     setAuditService(this.auditService);

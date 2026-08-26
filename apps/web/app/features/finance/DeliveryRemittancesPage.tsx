@@ -5,7 +5,6 @@ import { Modal } from '~/components/ui/modal';
 import type { OrderInvoice } from '~/features/orders/types';
 import { formatOrderNumber } from '@yannis/shared';
 import { Link, useFetcher, useLocation, useNavigation, useSearchParams } from '@remix-run/react';
-import { useFilterPreferences } from '~/hooks/useFilterPreferences';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -23,8 +22,7 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { CompareButton } from '~/features/compare/CompareButton';
 import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { InlineFilter } from '~/components/ui/inline-filter';
-import { CurrencyFilterSelect } from '~/components/ui/currency-filter-select';
-import { useBaseCurrency, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
+import { useBaseCurrency } from '~/contexts/currencies-catalog-context';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -237,31 +235,12 @@ export function DeliveryRemittancesPage({
   remittanceOrdersPagination,
 }: DeliveryRemittancesPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const hasMultipleCurrencies = useHasMultipleCurrencies();
   const baseCurrency = useBaseCurrency();
-  // The currency all stat totals + summary amounts are scoped to (the URL param,
-  // or the base currency). Passed to <NairaPrice> so the strip shows the right
-  // symbol (e.g. GH₵) instead of always ₦ when a foreign currency is selected.
-  const activeCurrencyCode = searchParams.get('currency') || baseCurrency.code;
+  // The currency all stat totals + summary amounts display in. The active
+  // country is scoped session-wide by the global switcher, so we simply show
+  // the base currency symbol here (e.g. GH₵ instead of always ₦).
+  const activeCurrencyCode = baseCurrency.code;
   const location = useLocation();
-  // Saved filter prefs for this page (same pageKey PageHeaderMobileTools derives
-  // from the pathname). Lets the base-default effect defer to a SAVED currency so
-  // "save filter" carrying a currency isn't clobbered by the default on mount.
-  const pageFilterKey = location.pathname.replace(/^\//, '').replace(/\//g, '.');
-  const { savedFilters } = useFilterPreferences(pageFilterKey);
-  const savedCurrency = savedFilters?.currency;
-  // Never show a mixed-currency view: when the company has 2+ currencies and no
-  // currency is chosen, default the URL to the base currency so every total and
-  // list on this financial page is single-currency from first paint. BUT if the
-  // user saved a currency filter, let the saved-prefs restore apply it instead of
-  // overwriting with base. Single-currency companies are untouched.
-  useEffect(() => {
-    if (hasMultipleCurrencies && !searchParams.get('currency') && !savedCurrency) {
-      const next = new URLSearchParams(searchParams);
-      next.set('currency', baseCurrency.code);
-      setSearchParams(next, { replace: true, preventScrollReset: true });
-    }
-  }, [hasMultipleCurrencies, baseCurrency.code, searchParams, setSearchParams, savedCurrency]);
   const navigation = useNavigation();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   // Also treat same-page navigation as loading so skeleton stays visible
@@ -857,10 +836,8 @@ export function DeliveryRemittancesPage({
             desktopActions
             desktop={
               <>
-                {/* Currency scope — placed before Refresh so the single-currency
-                    guarantee is the first control on the header. Self-hides for
-                    single-currency companies. */}
-                <CurrencyFilterSelect className="w-36" />
+                {/* Country scope now lives as the FIRST item in the Actions
+                    sheet below (not a standalone header pill). */}
                 <PageRefreshButton />
                 <Button
                   variant="secondary"

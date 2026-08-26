@@ -14,7 +14,6 @@ import { FilterPills } from '~/components/ui/filter-pills';
 import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
 import { formatNaira } from '~/lib/format-amount';
-import { CurrencyLens } from '~/components/ui/currency-lens';
 import { LensedMoney } from '~/components/ui/lensed-money';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
@@ -80,7 +79,6 @@ export function DashboardPage({
             desktop={
               <>
                 <PageRefreshButton />
-                <CurrencyLens />
                 <DateFilterBar
                   startDate={dateFilters.startDate}
                   endDate={dateFilters.endDate}
@@ -109,7 +107,6 @@ export function DashboardPage({
             }
             sheet={
               <div className="flex flex-col gap-2.5">
-                <CurrencyLens className="w-full" />
                 {hasTeamFilter ? (
                   <FormSelect
                     label="Team"

@@ -1441,7 +1441,7 @@ export function SettingsPage({
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-app-fg">Country &amp; currency</h3>
+                    <h3 className="text-lg font-semibold text-app-fg">Multi Country</h3>
                     <p className="text-sm text-app-fg-muted">
                       Add currencies and set FX rates for multi-currency operations.
                     </p>

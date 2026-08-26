@@ -14,34 +14,66 @@ export interface CountryCurrency {
   symbol: string;
   /** Minor-unit decimal places. */
   precision: number;
+  /** Emoji flag (regional-indicator pair) for the country. */
+  flag: string;
 }
 
 export const AFRICAN_COUNTRY_CURRENCIES: ReadonlyArray<CountryCurrency> = [
-  { country: 'Nigeria', code: 'NGN', symbol: '₦', precision: 2 },
-  { country: 'Ghana', code: 'GHS', symbol: 'GH₵', precision: 2 },
-  { country: 'Kenya', code: 'KES', symbol: 'KSh', precision: 2 },
-  { country: 'Tanzania', code: 'TZS', symbol: 'TSh', precision: 2 },
-  { country: 'Uganda', code: 'UGX', symbol: 'USh', precision: 0 },
-  { country: 'South Africa', code: 'ZAR', symbol: 'R', precision: 2 },
-  { country: 'Egypt', code: 'EGP', symbol: 'E£', precision: 2 },
-  { country: 'Morocco', code: 'MAD', symbol: 'DH', precision: 2 },
-  { country: 'Rwanda', code: 'RWF', symbol: 'FRw', precision: 0 },
-  { country: 'Ethiopia', code: 'ETB', symbol: 'Br', precision: 2 },
-  { country: 'Zambia', code: 'ZMW', symbol: 'ZK', precision: 2 },
-  { country: 'Zimbabwe', code: 'ZWL', symbol: 'Z$', precision: 2 },
-  { country: 'Botswana', code: 'BWP', symbol: 'P', precision: 2 },
-  { country: 'Namibia', code: 'NAD', symbol: 'N$', precision: 2 },
-  { country: 'Mozambique', code: 'MZN', symbol: 'MT', precision: 2 },
-  { country: 'Angola', code: 'AOA', symbol: 'Kz', precision: 2 },
-  { country: 'Malawi', code: 'MWK', symbol: 'MK', precision: 2 },
-  { country: 'Sierra Leone', code: 'SLE', symbol: 'Le', precision: 2 },
-  { country: 'Liberia', code: 'LRD', symbol: 'L$', precision: 2 },
-  { country: 'Gambia', code: 'GMD', symbol: 'D', precision: 2 },
-  { country: 'Tunisia', code: 'TND', symbol: 'DT', precision: 3 },
-  { country: 'Algeria', code: 'DZD', symbol: 'DA', precision: 2 },
-  { country: "Côte d'Ivoire (West Africa CFA)", code: 'XOF', symbol: 'CFA', precision: 0 },
-  { country: 'Senegal (West Africa CFA)', code: 'XOF', symbol: 'CFA', precision: 0 },
-  { country: 'Cameroon (Central Africa CFA)', code: 'XAF', symbol: 'FCFA', precision: 0 },
+  // Frequently-used first (Nigeria, Ghana, then the rest of the continent A→Z).
+  { country: 'Nigeria', code: 'NGN', symbol: '₦', precision: 2, flag: '🇳🇬' },
+  { country: 'Ghana', code: 'GHS', symbol: 'GH₵', precision: 2, flag: '🇬🇭' },
+  { country: 'Algeria', code: 'DZD', symbol: 'DA', precision: 2, flag: '🇩🇿' },
+  { country: 'Angola', code: 'AOA', symbol: 'Kz', precision: 2, flag: '🇦🇴' },
+  { country: 'Benin', code: 'XOF', symbol: 'CFA', precision: 0, flag: '🇧🇯' },
+  { country: 'Botswana', code: 'BWP', symbol: 'P', precision: 2, flag: '🇧🇼' },
+  { country: 'Burkina Faso', code: 'XOF', symbol: 'CFA', precision: 0, flag: '🇧🇫' },
+  { country: 'Burundi', code: 'BIF', symbol: 'FBu', precision: 0, flag: '🇧🇮' },
+  { country: 'Cabo Verde', code: 'CVE', symbol: '$', precision: 2, flag: '🇨🇻' },
+  { country: 'Cameroon', code: 'XAF', symbol: 'FCFA', precision: 0, flag: '🇨🇲' },
+  { country: 'Central African Republic', code: 'XAF', symbol: 'FCFA', precision: 0, flag: '🇨🇫' },
+  { country: 'Chad', code: 'XAF', symbol: 'FCFA', precision: 0, flag: '🇹🇩' },
+  { country: 'Comoros', code: 'KMF', symbol: 'CF', precision: 0, flag: '🇰🇲' },
+  { country: 'Congo (Brazzaville)', code: 'XAF', symbol: 'FCFA', precision: 0, flag: '🇨🇬' },
+  { country: 'Congo (Kinshasa)', code: 'CDF', symbol: 'FC', precision: 2, flag: '🇨🇩' },
+  { country: "Côte d'Ivoire", code: 'XOF', symbol: 'CFA', precision: 0, flag: '🇨🇮' },
+  { country: 'Djibouti', code: 'DJF', symbol: 'Fdj', precision: 0, flag: '🇩🇯' },
+  { country: 'Egypt', code: 'EGP', symbol: 'E£', precision: 2, flag: '🇪🇬' },
+  { country: 'Equatorial Guinea', code: 'XAF', symbol: 'FCFA', precision: 0, flag: '🇬🇶' },
+  { country: 'Eritrea', code: 'ERN', symbol: 'Nfk', precision: 2, flag: '🇪🇷' },
+  { country: 'Eswatini', code: 'SZL', symbol: 'E', precision: 2, flag: '🇸🇿' },
+  { country: 'Ethiopia', code: 'ETB', symbol: 'Br', precision: 2, flag: '🇪🇹' },
+  { country: 'Gabon', code: 'XAF', symbol: 'FCFA', precision: 0, flag: '🇬🇦' },
+  { country: 'Gambia', code: 'GMD', symbol: 'D', precision: 2, flag: '🇬🇲' },
+  { country: 'Guinea', code: 'GNF', symbol: 'FG', precision: 0, flag: '🇬🇳' },
+  { country: 'Guinea-Bissau', code: 'XOF', symbol: 'CFA', precision: 0, flag: '🇬🇼' },
+  { country: 'Kenya', code: 'KES', symbol: 'KSh', precision: 2, flag: '🇰🇪' },
+  { country: 'Lesotho', code: 'LSL', symbol: 'L', precision: 2, flag: '🇱🇸' },
+  { country: 'Liberia', code: 'LRD', symbol: 'L$', precision: 2, flag: '🇱🇷' },
+  { country: 'Libya', code: 'LYD', symbol: 'LD', precision: 3, flag: '🇱🇾' },
+  { country: 'Madagascar', code: 'MGA', symbol: 'Ar', precision: 2, flag: '🇲🇬' },
+  { country: 'Malawi', code: 'MWK', symbol: 'MK', precision: 2, flag: '🇲🇼' },
+  { country: 'Mali', code: 'XOF', symbol: 'CFA', precision: 0, flag: '🇲🇱' },
+  { country: 'Mauritania', code: 'MRU', symbol: 'UM', precision: 2, flag: '🇲🇷' },
+  { country: 'Mauritius', code: 'MUR', symbol: '₨', precision: 2, flag: '🇲🇺' },
+  { country: 'Morocco', code: 'MAD', symbol: 'DH', precision: 2, flag: '🇲🇦' },
+  { country: 'Mozambique', code: 'MZN', symbol: 'MT', precision: 2, flag: '🇲🇿' },
+  { country: 'Namibia', code: 'NAD', symbol: 'N$', precision: 2, flag: '🇳🇦' },
+  { country: 'Niger', code: 'XOF', symbol: 'CFA', precision: 0, flag: '🇳🇪' },
+  { country: 'Rwanda', code: 'RWF', symbol: 'FRw', precision: 0, flag: '🇷🇼' },
+  { country: 'São Tomé and Príncipe', code: 'STN', symbol: 'Db', precision: 2, flag: '🇸🇹' },
+  { country: 'Senegal', code: 'XOF', symbol: 'CFA', precision: 0, flag: '🇸🇳' },
+  { country: 'Seychelles', code: 'SCR', symbol: '₨', precision: 2, flag: '🇸🇨' },
+  { country: 'Sierra Leone', code: 'SLE', symbol: 'Le', precision: 2, flag: '🇸🇱' },
+  { country: 'Somalia', code: 'SOS', symbol: 'Sh', precision: 2, flag: '🇸🇴' },
+  { country: 'South Africa', code: 'ZAR', symbol: 'R', precision: 2, flag: '🇿🇦' },
+  { country: 'South Sudan', code: 'SSP', symbol: '£', precision: 2, flag: '🇸🇸' },
+  { country: 'Sudan', code: 'SDG', symbol: 'ج.س', precision: 2, flag: '🇸🇩' },
+  { country: 'Tanzania', code: 'TZS', symbol: 'TSh', precision: 2, flag: '🇹🇿' },
+  { country: 'Togo', code: 'XOF', symbol: 'CFA', precision: 0, flag: '🇹🇬' },
+  { country: 'Tunisia', code: 'TND', symbol: 'DT', precision: 3, flag: '🇹🇳' },
+  { country: 'Uganda', code: 'UGX', symbol: 'USh', precision: 0, flag: '🇺🇬' },
+  { country: 'Zambia', code: 'ZMW', symbol: 'ZK', precision: 2, flag: '🇿🇲' },
+  { country: 'Zimbabwe', code: 'ZWL', symbol: 'Z$', precision: 2, flag: '🇿🇼' },
 ];
 
 /** Distinct currency codes across the catalog (deduped, for a currency dropdown). */
@@ -62,6 +94,12 @@ export function currencyForCountry(country: string): CountryCurrency | undefined
 export function countryForCurrency(code: string): CountryCurrency | undefined {
   const up = code.toUpperCase();
   return AFRICAN_COUNTRY_CURRENCIES.find((c) => c.code.toUpperCase() === up);
+}
+
+/** Emoji flag for a country name, or an empty string when unknown. */
+export function flagForCountry(country: string | null | undefined): string {
+  if (!country) return '';
+  return AFRICAN_COUNTRY_CURRENCIES.find((c) => c.country === country)?.flag ?? '';
 }
 
 /**

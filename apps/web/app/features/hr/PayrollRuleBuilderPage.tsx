@@ -222,6 +222,137 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
           </div>
         ) : null}
       </fetcher.Form>
+
+      {/* ── Attendance base-salary deduction (separate save) ─────────── */}
+      {payRole && canWrite ? (
+        <AttendanceDeductionCard payRoleId={payRole.id} config={payRole.attendanceConfig ?? null} />
+      ) : null}
     </div>
+  );
+}
+
+type AttendanceBand = { minAbsences: number; deductionPercent: number };
+
+/**
+ * Per-role attendance base-salary deduction editor. Saves independently of the
+ * formula via the `saveAttendanceBands` intent → `attendance.savePayRoleConfig`.
+ * When enabled, an over-limit absence count cuts the base by the matched band's
+ * percent (e.g. Remote MB: 5 absences → 100% cut). PAYE follows the reduced base.
+ */
+function AttendanceDeductionCard({
+  payRoleId,
+  config,
+}: {
+  payRoleId: string;
+  config: { enabled: boolean; bands: AttendanceBand[] } | null;
+}) {
+  const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const surface = useFetcherActionSurface(fetcher);
+  const [enabled, setEnabled] = useState(config?.enabled ?? false);
+  const [bands, setBands] = useState<AttendanceBand[]>(
+    config?.bands?.length ? config.bands : [{ minAbsences: 5, deductionPercent: 100 }],
+  );
+
+  useFetcherToast(fetcher.data, { successMessage: 'Attendance deduction saved' });
+
+  const setBand = useCallback((i: number, patch: Partial<AttendanceBand>) => {
+    setBands((prev) => prev.map((b, idx) => (idx === i ? { ...b, ...patch } : b)));
+  }, []);
+  const addBand = useCallback(() => {
+    setBands((prev) => [...prev, { minAbsences: 0, deductionPercent: 0 }]);
+  }, []);
+  const removeBand = useCallback((i: number) => {
+    setBands((prev) => prev.filter((_, idx) => idx !== i));
+  }, []);
+
+  const payload = JSON.stringify({
+    enabled,
+    bands: bands
+      .map((b) => ({
+        minAbsences: Math.max(0, Math.min(31, Math.trunc(Number(b.minAbsences) || 0))),
+        deductionPercent: Math.max(0, Math.min(100, Number(b.deductionPercent) || 0)),
+      }))
+      .sort((a, b) => a.minAbsences - b.minAbsences),
+  });
+
+  return (
+    <fetcher.Form method="post" className="card p-4 space-y-3">
+      <input type="hidden" name="intent" value="saveAttendanceBands" />
+      <input type="hidden" name="payRoleId" value={payRoleId} />
+      <input type="hidden" name="configJson" value={payload} />
+
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-app-fg">Attendance deduction</h3>
+          <p className="text-xs text-app-fg-muted">
+            Reduce base salary when a staff member's monthly absences reach a band. Bonuses
+            and add-ons are unaffected. PAYE follows the reduced base.
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-xs font-medium text-app-fg whitespace-nowrap">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+            className="h-4 w-4"
+          />
+          Enabled
+        </label>
+      </div>
+
+      {enabled ? (
+        <div className="space-y-2">
+          {bands.map((band, i) => (
+            <div key={i} className="flex flex-wrap items-end gap-2">
+              <TextInput
+                label={i === 0 ? 'Absences ≥' : undefined}
+                type="number"
+                min={0}
+                max={31}
+                value={String(band.minAbsences)}
+                onChange={(e) => setBand(i, { minAbsences: Number(e.target.value) })}
+                className="w-24"
+              />
+              <TextInput
+                label={i === 0 ? 'Deduct %' : undefined}
+                type="number"
+                min={0}
+                max={100}
+                value={String(band.deductionPercent)}
+                onChange={(e) => setBand(i, { deductionPercent: Number(e.target.value) })}
+                className="w-24"
+              />
+              <Button type="button" variant="ghost" size="sm" onClick={() => removeBand(i)}>
+                Remove
+              </Button>
+            </div>
+          ))}
+          <Button type="button" variant="ghost" size="sm" onClick={addBand}>
+            Add band
+          </Button>
+          <p className="text-2xs text-app-fg-muted">
+            Example: one band of Absences ≥ 5, Deduct 100% removes the whole base once a
+            staff member hits 5 absences (i.e. more than 4).
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-app-fg-muted">
+          Attendance does not affect base salary for this role.
+        </p>
+      )}
+
+      <ModalFetcherInlineError message={surface.errorMatchingIntent('saveAttendanceBands')} />
+      <div>
+        <Button
+          type="submit"
+          variant="primary"
+          size="sm"
+          loading={fetcher.state === 'submitting'}
+          loadingText="Saving…"
+        >
+          Save attendance deduction
+        </Button>
+      </div>
+    </fetcher.Form>
   );
 }

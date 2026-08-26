@@ -6,7 +6,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { canMirror, canViewAllBranches, isAdminLevel } from '../common/authz';
+import { canMirror, canViewAllBranches, canViewAllCountries, isAdminLevel } from '../common/authz';
 import { and, eq, inArray, isNull, sql, desc, asc } from 'drizzle-orm';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
@@ -298,6 +298,8 @@ export class AuthService {
       // Captured here so the tRPC branch-scope guard can fall back to the
       // sole branch for single-branch org-wide heads instead of throwing.
       branchIds: memberships.map((m) => m.branchId as string),
+      // Multi-country data-scope — resolved into effectiveCurrencyCodes on ctx.
+      currencyCodes: await this.getUserCurrencyCodes(user.id),
       appTheme: user.appTheme ?? null,
       fontScale: user.fontScale ?? null,
     };
@@ -543,6 +545,8 @@ export class AuthService {
       activeGroupId: mirrorActiveGroupId,
       selectedBranchIds: mirrorSelectedBranchIds,
       branchIds: targetMemberships.map((m) => m.branchId as string),
+      // Mirror sees exactly the target's country scope (read-only walkthrough).
+      currencyCodes: await this.getUserCurrencyCodes(target.id),
       // Surface the target's appearance so the admin sees the app exactly as the
       // user would. The green border makes Mirror Mode obvious; the theme is part
       // of the read-only "live walkthrough".
@@ -668,6 +672,8 @@ export class AuthService {
       logisticsLocationId: actor.logisticsLocationId,
       currentBranchId,
       branchIds: memberships.map((m) => m.branchId as string),
+      // Restore the actor's own country scope on mirror-stop.
+      currencyCodes: await this.getUserCurrencyCodes(actor.id),
       appTheme: actor.appTheme ?? null,
       fontScale: actor.fontScale ?? null,
       mirroredBy: null,
@@ -841,6 +847,59 @@ export class AuthService {
    * Updates Redis session and returns the full updated SessionUser so the
    * controller can re-issue the bundle cookie in the same response.
    */
+  /**
+   * Multi-country VIEW switcher — set the country the user is currently viewing
+   * (top-bar switcher), analogous to switchBranch. `code = null` clears it (view
+   * all allowed countries). Validates the code is (a) an ACTIVE currency in the
+   * user's active company and (b) within the user's allowed countries unless they
+   * hold all-countries access. Never widens the user's data-scope permission.
+   */
+  async switchCurrency(sessionToken: string, code: string | null): Promise<SessionUser> {
+    const sessionData = await this.sessionStore.getSession(sessionToken);
+    if (!sessionData) {
+      throw new UnauthorizedException('Session not found');
+    }
+    const user: SessionUser = sessionData;
+
+    // Clearing the view is always allowed.
+    if (!code) {
+      const cleared: SessionUser = { ...user, currentCurrencyCode: null };
+      await this.sessionStore.updateSession(sessionToken, cleared, this.sessionTtl);
+      return cleared;
+    }
+
+    const wanted = code.toUpperCase();
+
+    // (a) must be an ACTIVE currency in the user's active company.
+    const activeCurrencies = await this.db
+      .select({ code: schema.currencies.code })
+      .from(schema.currencies)
+      .where(
+        and(
+          user.activeGroupId
+            ? eq(schema.currencies.groupId, user.activeGroupId)
+            : isNull(schema.currencies.groupId),
+          eq(schema.currencies.active, true),
+        ),
+      );
+    const activeSet = new Set(activeCurrencies.map((c) => c.code.toUpperCase()));
+    if (!activeSet.has(wanted)) {
+      throw new ForbiddenException('That country is not available for your company.');
+    }
+
+    // (b) must be within the user's allowed countries (unless all-countries).
+    if (!canViewAllCountries(user)) {
+      const allowed = new Set((user.currencyCodes ?? ['NGN']).map((c) => c.toUpperCase()));
+      if (!allowed.has(wanted)) {
+        throw new ForbiddenException('You do not have access to that country.');
+      }
+    }
+
+    const updated: SessionUser = { ...user, currentCurrencyCode: wanted };
+    await this.sessionStore.updateSession(sessionToken, updated, this.sessionTtl);
+    return updated;
+  }
+
   async switchBranch(sessionToken: string, branchId: string | null, selectedBranchIds?: string[] | null): Promise<SessionUser> {
     const sessionData = await this.sessionStore.getSession(sessionToken);
     if (!sessionData) {
@@ -1013,6 +1072,20 @@ export class AuthService {
       .from(schema.branches)
       .where(eq(schema.branches.groupId, groupId));
     return rows.map((r) => r.id);
+  }
+
+  /**
+   * Multi-country: the currency codes a user is assigned in `user_countries`.
+   * Captured into the session so `effectiveCurrencyCodes` can be resolved on the
+   * tRPC context. Empty for a user with no assignment (context then falls back to
+   * base country NGN for non-view_all users). Ignored for MB/admin/view_all.
+   */
+  async getUserCurrencyCodes(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ currencyCode: schema.userCountries.currencyCode })
+      .from(schema.userCountries)
+      .where(eq(schema.userCountries.userId, userId));
+    return rows.map((r) => r.currencyCode);
   }
 
   /**

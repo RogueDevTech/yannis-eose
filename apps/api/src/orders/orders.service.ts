@@ -58,6 +58,7 @@ import { isAdminLevel } from '../common/authz';
 import { hasFinanceAccess, hasFinanceWriteAccess } from '../common/utils/strip-finance-fields';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { EventsService } from '../events/events.service';
 import { emitOrderAutomationEvents } from '../automation/automation-hooks';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -2286,9 +2287,16 @@ export class OrdersService {
     servicingBranchId = branchId;
     if (branchId) {
       const primaryProductId = orderInput.items[0]?.productId ?? null;
+      // Multi-country: steer the order to a servicing branch by its country
+      // (currency) as well as product. Mirrors the stamp at create (line ~2528):
+      // missing/blank → NGN, so single-currency orders route exactly as before.
+      const routingCurrency = orderInput.currencyCode
+        ? orderInput.currencyCode.toUpperCase()
+        : 'NGN';
       const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
         branchId,
         primaryProductId,
+        routingCurrency,
       );
       if (servicingBranch) {
         servicingBranchId = servicingBranch;
@@ -3106,6 +3114,129 @@ export class OrdersService {
     });
 
     return { id: order.id };
+  }
+
+  /**
+   * Idempotent bulk-import upsert of ONE order, keyed by `importExternalId`
+   * (the unique id from the source CRM file). Used by the resumable
+   * BulkImportService worker. Re-processing the same external id OVERWRITES the
+   * existing order instead of creating a duplicate — this is what makes Continue
+   * and Retry safe, and guarantees no duplicates even mid-import.
+   *
+   * Same simplified semantics as `importOrder` (no dedup-by-phone, no CS routing,
+   * no notifications). The ON CONFLICT target is the partial unique index
+   * `orders_import_external_id_uidx` (mig 0332); the matching WHERE clause is
+   * required for a partial-index upsert (see MEMORY partial_index_onconflict).
+   */
+  async upsertImportOrderByExternalId(
+    input: ImportOrderInput & { importExternalId: string },
+    actorId: string,
+  ): Promise<{ id: string; created: boolean }> {
+    const customerPhoneHash = this.hashPhone(input.customerPhone);
+
+    let createdAtDate: Date | undefined;
+    if (input.createdAtOverride) {
+      const parsed = new Date(input.createdAtOverride);
+      if (!isNaN(parsed.getTime())) createdAtDate = parsed;
+    }
+
+    const statusTimestamps: Record<string, Date | undefined> = {};
+    if (createdAtDate) {
+      const ts = input.targetStatus;
+      if (['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'RETURNED', 'REMITTED'].includes(ts)) {
+        statusTimestamps.confirmedAt = createdAtDate;
+      }
+      if (['DELIVERED', 'RETURNED', 'REMITTED'].includes(ts)) {
+        statusTimestamps.allocatedAt = createdAtDate;
+        statusTimestamps.dispatchedAt = createdAtDate;
+        statusTimestamps.deliveredAt = createdAtDate;
+      }
+    }
+
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const values = {
+        mediaBuyerId: input.mediaBuyerId ?? null,
+        branchId: input.branchId,
+        servicingBranchId: input.branchId,
+        assignedCsId: input.assignedCsId ?? null,
+        customerName: input.customerName,
+        customerPhoneHash,
+        customerPhone: input.customerPhone,
+        customerAddress: input.customerAddress ?? null,
+        deliveryAddress: input.deliveryAddress ?? input.customerAddress ?? null,
+        deliveryNotes: input.deliveryNotes ?? null,
+        deliveryState: input.deliveryState ?? null,
+        customerGender: input.customerGender ?? null,
+        customerEmail: input.customerEmail ?? null,
+        paymentMethod: 'PAY_ON_DELIVERY',
+        items: input.items,
+        totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
+        status: input.targetStatus,
+        orderSource: 'import',
+        importExternalId: input.importExternalId,
+        customFields: input.customFields ?? null,
+        // Multi-country: stamp the order currency when the importer resolved one.
+        // Omitted → column default (base currency), so single-currency imports
+        // behave exactly as before.
+        ...(input.currencyCode ? { currencyCode: input.currencyCode } : {}),
+        ...(createdAtDate ? { createdAt: createdAtDate } : {}),
+        ...statusTimestamps,
+      };
+
+      const rows = await tx
+        .insert(schema.orders)
+        .values(values)
+        .onConflictDoUpdate({
+          target: schema.orders.importExternalId,
+          targetWhere: sql`${schema.orders.importExternalId} IS NOT NULL`,
+          set: {
+            mediaBuyerId: values.mediaBuyerId,
+            branchId: values.branchId,
+            servicingBranchId: values.servicingBranchId,
+            assignedCsId: values.assignedCsId,
+            customerName: values.customerName,
+            customerPhoneHash: values.customerPhoneHash,
+            customerPhone: values.customerPhone,
+            customerAddress: values.customerAddress,
+            deliveryAddress: values.deliveryAddress,
+            deliveryNotes: values.deliveryNotes,
+            deliveryState: values.deliveryState,
+            customerGender: values.customerGender,
+            customerEmail: values.customerEmail,
+            items: values.items,
+            totalAmount: values.totalAmount,
+            status: values.status,
+            customFields: values.customFields,
+            // Re-import back-fills/updates currency when one was resolved. Not
+            // spread when absent, so a re-import without a currency doesn't wipe
+            // an existing one back to default.
+            ...(input.currencyCode ? { currencyCode: input.currencyCode } : {}),
+            ...(createdAtDate ? { createdAt: createdAtDate } : {}),
+            ...statusTimestamps,
+            updatedAt: sql`now()`,
+          },
+        })
+        .returning({ id: schema.orders.id, createdAt: schema.orders.createdAt });
+
+      const upserted = rows[0];
+      if (!upserted) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to upsert imported order' });
+      }
+
+      // Replace line items wholesale so a re-import reflects the latest file.
+      await tx.delete(schema.orderItems).where(eq(schema.orderItems.orderId, upserted.id));
+      await tx.insert(schema.orderItems).values(
+        input.items.map((item) => ({
+          orderId: upserted.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: sql`${item.unitPrice}::numeric`,
+          offerLabel: item.offerLabel ?? null,
+        })),
+      );
+
+      return { id: upserted.id, created: true };
+    });
   }
 
   /**
@@ -4907,6 +5038,13 @@ export class OrdersService {
        *  `'marketing'`. */
       branchScope?: 'servicing' | 'marketing';
       effectiveBranchIds?: string[] | null;
+      /**
+       * Multi-country data-scope — the currency codes this viewer may see
+       * (`ctx.effectiveCurrencyCodes`). `null`/undefined = no country filter
+       * (MB / admin / view_all). STACKS with branch scope. See
+       * `countryScopeCondition`.
+       */
+      effectiveCurrencyCodes?: string[] | null;
       /** When true, exclude graduated follow-up orders (is_follow_up=true). */
       excludeGraduated?: boolean;
       /** When true, also exclude cart-graduated orders (order_source='online').
@@ -5162,6 +5300,17 @@ export class OrdersService {
         const cond = this.orderBranchScopeCondition(branchId, scope, eIds);
         if (cond) conditions.push(cond);
       }
+    }
+
+    // Multi-country data-scope — stacks on top of branch scope. A country-scoped
+    // viewer only sees orders in their assigned currencies. No-op for MB / admin
+    // / view_all (effectiveCurrencyCodes == null).
+    {
+      const cCond = countryScopeCondition(
+        schema.orders.currencyCode,
+        listOpts?.effectiveCurrencyCodes,
+      );
+      if (cCond) conditions.push(cCond);
     }
 
     if (input.scheduleKind === 'callback_due') {
@@ -5425,6 +5574,7 @@ export class OrdersService {
     input: ScheduleCalendarHeatInput,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ): Promise<
     Array<{ date: string; callbackCount: number; deliveryCount: number; deliveredCount: number }>
   > {
@@ -5440,6 +5590,10 @@ export class OrdersService {
     // CS schedule calendar — scope by the servicing branch (migration 0150).
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) base.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) base.push(cCond);
+    }
     if (input.supervisorScope) {
       const { csUserIds, mediaBuyerIds } = input.supervisorScope;
       const orParts = [];
@@ -5921,11 +6075,33 @@ export class OrdersService {
     let allocationProviderId: string | undefined;
     if (newStatus === 'AGENT_ASSIGNED' && typeof input.metadata?.logisticsLocationId === 'string') {
       const locRow = await this.db
-        .select({ providerId: schema.logisticsLocations.providerId })
+        .select({
+          providerId: schema.logisticsLocations.providerId,
+          providerCurrency: schema.logisticsProviders.currencyCode,
+        })
         .from(schema.logisticsLocations)
+        .leftJoin(
+          schema.logisticsProviders,
+          eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+        )
         .where(eq(schema.logisticsLocations.id, input.metadata.logisticsLocationId))
         .limit(1);
       allocationProviderId = locRow[0]?.providerId ?? undefined;
+
+      // Multi-country block point (Phase 3): an order can only be assigned to a
+      // logistics provider/agent in the SAME country (currency). This is where
+      // fulfillment coherence is enforced — NOT at routing. If the order's
+      // country has no matching provider the CS picker is already empty; this
+      // guards the direct-mutation path too. NGN vs NGN (single-currency) always
+      // passes, so existing behaviour is unchanged.
+      const orderCurrency = (order.currencyCode ?? 'NGN').toUpperCase();
+      const providerCurrency = (locRow[0]?.providerCurrency ?? 'NGN').toUpperCase();
+      if (orderCurrency !== providerCurrency) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `This order is a ${orderCurrency} order and can only be assigned to a ${orderCurrency} logistics agent. The selected agent operates in ${providerCurrency}.`,
+        });
+      }
     }
 
     // Build update fields
@@ -6692,9 +6868,14 @@ export class OrdersService {
       let paystackServicingBranchId = paystackBranchId;
       if (paystackBranchId) {
         const primaryProductId = orderInput.items?.[0]?.productId ?? null;
+        // Paystack is NGN-only (online pay is out of the multi-currency scope),
+        // so route explicitly as NGN. This matches the edge-form create path so
+        // an explicit NGN routing rule applies to Paystack orders too (not only
+        // country-agnostic rules).
         const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
           paystackBranchId,
           primaryProductId,
+          'NGN',
         );
         if (servicingBranch) {
           paystackServicingBranchId = servicingBranch;
@@ -7454,6 +7635,9 @@ export class OrdersService {
     supervisorScope?: OrdersAggregateSupervisorScope;
     branchScope?: 'servicing' | 'marketing';
     effectiveBranchIds?: string[] | null;
+    /** Multi-country data-scope (`ctx.effectiveCurrencyCodes`). Stacks on branch
+     *  scope. `null`/undefined = no country filter. See `countryScopeCondition`. */
+    effectiveCurrencyCodes?: string[] | null;
     orderSource?: string; teamMemberIds?: string[];
     /** When true, exclude all follow-up orders (is_follow_up=true) and
      *  delivered_follow_up copies. Matches orders.list excludeGraduated=true
@@ -7498,6 +7682,10 @@ export class OrdersService {
     });
     const bCond = this.orderBranchScopeCondition(opts.branchId, opts.branchScope ?? 'servicing', opts.effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, opts.effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
     if (opts.startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(opts.startDate)));
     if (opts.endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(opts.endDate)));
     const results = await this.db
@@ -7538,6 +7726,9 @@ export class OrdersService {
     supervisorScope?: OrdersAggregateSupervisorScope;
     branchScope?: 'servicing' | 'marketing';
     effectiveBranchIds?: string[] | null;
+    /** Multi-country data-scope (`ctx.effectiveCurrencyCodes`). Stacks on branch
+     *  scope. `null`/undefined = no country filter. See `countryScopeCondition`. */
+    effectiveCurrencyCodes?: string[] | null;
     orderSource?: string; teamMemberIds?: string[];
     excludeFollowUps?: boolean;
     excludeCartGraduated?: boolean;
@@ -7573,6 +7764,10 @@ export class OrdersService {
     });
     const bCond = this.orderBranchScopeCondition(opts.branchId, opts.branchScope ?? 'servicing', opts.effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, opts.effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
     // Carry-over is anchored to the LAST month of the filter range: delivered
     // within that final month (by delivered_at) AND generated before that month
     // began (created_at < carryOverStart). The created_at bound excludes the
@@ -7635,6 +7830,9 @@ export class OrdersService {
     onlyGraduateNonMarketing?: boolean,
     /** Multi-currency filter — mirror the list's currency filter so strip == list. */
     currencyCode?: string,
+    /** Multi-country data-scope (`ctx.effectiveCurrencyCodes`). Stacks on branch
+     *  scope. `null`/undefined = no country filter. See `countryScopeCondition`. */
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     // Match orders.list: soft-deleted rows (deletedAt IS NOT NULL) must only
     // count under DELETED/CANCELLED, never inflate other status buckets.
@@ -7707,6 +7905,10 @@ export class OrdersService {
     if (statuses?.length) conditions.push(inArray(schema.orders.status, statuses));
     const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
     if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -7747,11 +7949,16 @@ export class OrdersService {
     effectiveBranchIds?: string[] | null,
     /** Multi-currency filter — restrict to one currency. Undefined = all. */
     currencyCode?: string,
+    /** Multi-country data-scope (`ctx.effectiveCurrencyCodes`). Stacks on branch
+     *  scope. `null`/undefined = no country filter. See `countryScopeCondition`. */
+    effectiveCurrencyCodes?: string[] | null,
   ): Promise<{ offlineCount: number; offlineDeliveredCount: number; duplicateCount: number; deliveredFollowUpCount: number }> {
     const conditions: Parameters<typeof and>[0][] = [
       eq(schema.orders.isFollowUp, false),
     ];
     if (currencyCode) conditions.push(eq(schema.orders.currencyCode, currencyCode));
+    const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+    if (cCond) conditions.push(cCond);
     appendOrdersAggregateScopeConditions(conditions, { mediaBuyerId, assignedCsId, supervisorScope });
     const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
@@ -7769,6 +7976,7 @@ export class OrdersService {
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
     ];
     if (currencyCode) deliveredFollowUpOfflineConditions.push(eq(schema.orders.currencyCode, currencyCode));
+    if (cCond) deliveredFollowUpOfflineConditions.push(cCond);
     appendOrdersAggregateScopeConditions(deliveredFollowUpOfflineConditions, { mediaBuyerId, assignedCsId, supervisorScope });
     if (bCond) deliveredFollowUpOfflineConditions.push(bCond);
     if (startDate) deliveredFollowUpOfflineConditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
@@ -7817,12 +8025,17 @@ export class OrdersService {
     endDate?: string,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ): Promise<{ funnel: number; offline: number; followUp: number; cart: number; deliveredFollowUp: number }> {
     const conditions: Parameters<typeof and>[0][] = [
       sql`${schema.orders.status} <> 'DELETED'`,
     ];
     const bCond = this.orderBranchScopeCondition(branchId, 'servicing', effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
     if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
 
@@ -7850,7 +8063,7 @@ export class OrdersService {
    * Get order pipeline chart data — Volume, Unconfirmed, Confirmed, Logistics distributed, Delivered.
    * For the CEO Executive Overview order funnel chart. Same date filter as getStatusCounts (created_at).
    */
-  async getOrderPipelineChart(startDate?: string, endDate?: string, branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<{
+  async getOrderPipelineChart(startDate?: string, endDate?: string, branchId?: string | null, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null): Promise<{
     volume: number;
     unconfirmed: number;
     confirmed: number;
@@ -7868,6 +8081,16 @@ export class OrdersService {
       undefined,
       'servicing',
       effectiveBranchIds,
+      undefined, // isFollowUp
+      undefined, // excludeOffline
+      undefined, // excludeGraduated
+      undefined, // excludeCartGraduated
+      undefined, // onlyOffline
+      undefined, // servicingBranchId
+      undefined, // teamMemberIds
+      undefined, // onlyGraduateNonMarketing
+      undefined, // currencyCode
+      effectiveCurrencyCodes,
     );
     // `volume` is the funnel's top-of-stack count. DELETED orders are editorial
     // removals (test/fake/mistake), never real business volume — exclude them.
@@ -7895,6 +8118,7 @@ export class OrdersService {
     branchId?: string | null,
     onlyAgentId?: string,
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ): Promise<Record<string, number>> {
     // Include follow-up orders — CS confirms/cancels on follow-up orders
     // count toward daily performance (CEO 2026-06-09).
@@ -7906,6 +8130,10 @@ export class OrdersService {
     ];
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
     if (onlyAgentId) {
       conditions.push(eq(schema.orders.assignedCsId, onlyAgentId));
     }
@@ -7937,6 +8165,7 @@ export class OrdersService {
     opts?: { pendingCountsAcrossAllBranches?: boolean },
     /** Filter pending counts to specific order categories. Empty/undefined = all. */
     categories?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     const pendingCountsAcrossAllBranches = opts?.pendingCountsAcrossAllBranches === true;
 
@@ -7978,6 +8207,7 @@ export class OrdersService {
             .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')));
 
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
 
     // Build category conditions for pending count (same logic as getCSCloserLeaderboard).
     const catConditions: ReturnType<typeof sql>[] = [];
@@ -8007,11 +8237,12 @@ export class OrdersService {
             isNull(schema.orders.deletedAt),
             inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
             ...(!pendingCountsAcrossAllBranches && bCond ? [bCond] : []),
+            ...(cCond ? [cCond] : []),
             ...catConditions,
           ),
         )
         .groupBy(schema.orders.assignedCsId),
-      this.getTodayCsStageCloseCountsByAgent(branchId),
+      this.getTodayCsStageCloseCountsByAgent(branchId, undefined, effectiveBranchIds, effectiveCurrencyCodes),
     ]);
 
     const pendingMap: Record<string, number> = {};
@@ -8033,7 +8264,7 @@ export class OrdersService {
    * Pending workload orders for a Sales closer (same status/branch rules as getCSCloserWorkloads),
    * with line items for HoCS queue modal. Sorted by updatedAt desc (most recently touched first).
    */
-  async getCloserWorkloadOrdersWithItems(agentId: string, branchId?: string | null, effectiveBranchIds?: string[] | null) {
+  async getCloserWorkloadOrdersWithItems(agentId: string, branchId?: string | null, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null) {
     const workloadStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] as const;
     const conditions: Parameters<typeof and>[0][] = [
       eq(schema.orders.assignedCsId, agentId),
@@ -8041,6 +8272,10 @@ export class OrdersService {
     ];
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
 
     const orderRows = await this.db
       .select({
@@ -8155,7 +8390,7 @@ export class OrdersService {
    * Get delivered orders aggregated by day — for CEO overview time-series chart.
    * Returns { date: YYYY-MM-DD, revenue, orderCount }[] for the given date range (delivered_at).
    */
-  async getDeliveredOrdersTimeSeries(startDate?: string, endDate?: string, branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<{ date: string; revenue: number; orderCount: number }[]> {
+  async getDeliveredOrdersTimeSeries(startDate?: string, endDate?: string, branchId?: string | null, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null): Promise<{ date: string; revenue: number; orderCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       sql`${schema.orders.deliveredAt} IS NOT NULL`,
@@ -8164,6 +8399,10 @@ export class OrdersService {
     if (endDate) conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(endDate)));
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
     const whereClause = and(...conditions);
     const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.deliveredAt})::date`;
 
@@ -8225,6 +8464,7 @@ export class OrdersService {
     endDate?: string,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ): Promise<{ delivered: Record<string, number>; remitted: Record<string, number> }> {
     const conditions: SQL[] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
@@ -8234,6 +8474,10 @@ export class OrdersService {
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
 
     // Classify order sources for delivered/remitted breakdown.
     // Pipeline graduations (graduated_follow_up) belong under Follow-Up Orders so the
@@ -8291,6 +8535,7 @@ export class OrdersService {
     endDate?: string,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ): Promise<{
     delivered: Record<string, { gross: number; net: number }>;
     remitted: Record<string, { gross: number; net: number }>;
@@ -8303,6 +8548,10 @@ export class OrdersService {
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
 
     const sourceCase = sql<string>`CASE
       WHEN ${schema.orders.orderSource} = 'delivered_follow_up' THEN 'delivered_follow_up'
@@ -8330,7 +8579,7 @@ export class OrdersService {
     return { delivered, remitted };
   }
 
-  async getDeliveriesByProduct(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<
+  async getDeliveriesByProduct(branchId?: string | null, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null): Promise<
     Array<{
       productId: string;
       productName: string;
@@ -8353,6 +8602,10 @@ export class OrdersService {
     ];
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
 
     const rows = await this.db
       .select({
@@ -8411,6 +8664,7 @@ export class OrdersService {
     endDate?: string,
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ): Promise<
     Array<{
       productId: string;
@@ -8436,6 +8690,8 @@ export class OrdersService {
     ];
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+    if (cCond) conditions.push(cCond);
     if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
 
@@ -8465,6 +8721,7 @@ export class OrdersService {
       sql`(${schema.orders.orderSource} IS NULL OR ${schema.orders.orderSource} = 'edge-form' OR ${schema.orders.orderSource} = 'import')`,
     ];
     if (bCond) carryOverConditions.push(bCond);
+    if (cCond) carryOverConditions.push(cCond);
 
     const [mainRows, carryRows] = await Promise.all([
       this.db
@@ -8513,7 +8770,7 @@ export class OrdersService {
    * Bounded to current month for index-friendly scans; CASE expressions
    * compute the narrower today/week buckets within that range.
    */
-  async getRevenueByPeriod(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<{
+  async getRevenueByPeriod(branchId?: string | null, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null): Promise<{
     today: number;
     thisWeek: number;
     thisMonth: number;
@@ -8532,6 +8789,10 @@ export class OrdersService {
     ];
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
 
     const [row] = await this.db
       .select({
@@ -8562,6 +8823,7 @@ export class OrdersService {
     extra?: OrdersAggregateScopeFilters,
     branchScope: 'servicing' | 'marketing' = 'servicing',
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ): Promise<{ date: string; deliveredCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [
       isNull(schema.orders.deletedAt),
@@ -8572,6 +8834,10 @@ export class OrdersService {
     if (endDate) conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(endDate)));
     const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId: extra?.mediaBuyerId,
       assignedCsId: extra?.csCloserId,
@@ -8623,6 +8889,7 @@ export class OrdersService {
     extra?: OrdersAggregateScopeFilters,
     branchScope: 'servicing' | 'marketing' = 'servicing',
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ): Promise<{ date: string; orderCount: number; deliveredCount: number }[]> {
     // CEO directive 2026-05-23: exclude both DELETED and legacy CANCELLED from default views.
     const conditions: Parameters<typeof and>[0][] = [
@@ -8633,6 +8900,10 @@ export class OrdersService {
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const bCond = this.orderBranchScopeCondition(branchId, branchScope, effectiveBranchIds);
     if (bCond) conditions.push(bCond);
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId: extra?.mediaBuyerId,
       assignedCsId: extra?.csCloserId,
@@ -8666,7 +8937,7 @@ export class OrdersService {
     // because it was a single 1-RTT-per-step waterfall with `db ≈ total`.
     const [createdRows, delivered] = await Promise.all([
       createdQuery.groupBy(dateTrunc).orderBy(asc(dateTrunc)),
-      this.getOrdersTimeSeriesByDelivered(startDate, endDate, branchId, extra, branchScope, effectiveBranchIds),
+      this.getOrdersTimeSeriesByDelivered(startDate, endDate, branchId, extra, branchScope, effectiveBranchIds, effectiveCurrencyCodes),
     ]);
 
     const created = createdRows.map((r) => ({
@@ -8733,7 +9004,7 @@ export class OrdersService {
    *      CS statuses, restricted to the same agent set via `IN (...)`.
    * Constant 2 RTTs regardless of agent count.
    */
-  async getInactiveAgents(thresholdMinutes = 10, branchId?: string | null, effectiveBranchIds?: string[] | null) {
+  async getInactiveAgents(thresholdMinutes = 10, branchId?: string | null, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null) {
     const threshold = new Date(Date.now() - thresholdMinutes * 60 * 1000);
 
     const needsBranchJoin = branchId || (!branchId && effectiveBranchIds?.length);
@@ -8780,6 +9051,7 @@ export class OrdersService {
 
     const agentIds = agents.map((a) => a.id);
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
     const pendingRows = await this.db
       .select({
         agentId: schema.orders.assignedCsId,
@@ -8792,6 +9064,7 @@ export class OrdersService {
           inArray(schema.orders.assignedCsId, agentIds),
           inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
           ...(bCond ? [bCond] : []),
+          ...(cCond ? [cCond] : []),
         ),
       )
       .groupBy(schema.orders.assignedCsId);
@@ -8850,6 +9123,7 @@ export class OrdersService {
     effectiveBranchIds?: string[] | null,
     /** Filter leaderboard to specific order categories. Empty/undefined = all. */
     categories?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     const useCustomRange = startDate && endDate;
     const periodStart = useCustomRange
@@ -8944,9 +9218,11 @@ export class OrdersService {
     // delivered follow-up orders count toward CS delivery performance and
     // the engaged denominator stays consistent (CEO 2026-06-09).
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
     const orderWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
       ...(bCond ? [bCond] : []),
+      ...(cCond ? [cCond] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
       ...categoryConditions,
     );
@@ -8954,6 +9230,7 @@ export class OrdersService {
       inArray(schema.orders.assignedCsId, agentIds),
       deliveredOrRemitted,
       ...(bCond ? [bCond] : []),
+      ...(cCond ? [cCond] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
       ...categoryConditions,
     );
@@ -8983,7 +9260,7 @@ export class OrdersService {
       // When categories are active, call logs must join orders to scope by orderSource.
       // When branch-scoped (branchId or effectiveBranchIds), also requires the join.
       // Only the no-branch+no-category path can skip the join for efficiency.
-      bCond || categoryConditions.length
+      bCond || cCond || categoryConditions.length
         ? this.db
             .select({
               agentId: schema.callLogs.agentId,
@@ -8996,6 +9273,7 @@ export class OrdersService {
               and(
                 inArray(schema.callLogs.agentId, agentIds),
                 ...(bCond ? [bCond] : []),
+                ...(cCond ? [cCond] : []),
                 ...(callLogsDateFilter ? [callLogsDateFilter] : []),
                 ...categoryConditions,
               ),
@@ -9142,7 +9420,12 @@ export class OrdersService {
 
     const routing =
       branchId != null
-        ? await this.csOrderRouting.resolveRoutingForDispatch(branchId, primaryProductId, orderId)
+        ? await this.csOrderRouting.resolveRoutingForDispatch(
+            branchId,
+            primaryProductId,
+            orderId,
+            orderRow?.currencyCode ?? null,
+          )
         : null;
 
     // Routing winner: when a routing rule resolved (`routing != null`), respect
@@ -9252,7 +9535,7 @@ export class OrdersService {
     await this.releaseExpiredLocks();
 
     const [orderRow] = await this.db
-      .select({ branchId: schema.orders.branchId })
+      .select({ branchId: schema.orders.branchId, currencyCode: schema.orders.currencyCode })
       .from(schema.orders)
       .where(eq(schema.orders.id, orderId))
       .limit(1);
@@ -9268,7 +9551,12 @@ export class OrdersService {
 
     const routing =
       branchId != null
-        ? await this.csOrderRouting.resolveRoutingForDispatch(branchId, primaryProductId, orderId)
+        ? await this.csOrderRouting.resolveRoutingForDispatch(
+            branchId,
+            primaryProductId,
+            orderId,
+            orderRow?.currencyCode ?? null,
+          )
         : null;
     const { strategy } = await this.getEffectiveCsDispatchStrategy(routing?.dispatchSettingsTeamId ?? null);
 
@@ -9377,7 +9665,7 @@ export class OrdersService {
    * Get all UNPROCESSED orders available for claiming (claim mode only).
    * Sorted oldest-first so longer-waiting orders are visible first.
    */
-  async getClaimQueue(branchId?: string | null, effectiveBranchIds?: string[] | null): Promise<Array<{
+  async getClaimQueue(branchId?: string | null, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null): Promise<Array<{
     id: string;
     customerName: string;
     createdAt: Date;
@@ -9386,6 +9674,7 @@ export class OrdersService {
     productSummary: string;
   }>> {
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
     const orders = await this.db
       .select({
         id: schema.orders.id,
@@ -9401,6 +9690,7 @@ export class OrdersService {
           eq(schema.orders.status, 'UNPROCESSED'),
           sql`(${schema.orders.lockedUntil} IS NULL OR ${schema.orders.lockedUntil} < NOW())`,
           ...(bCond ? [bCond] : []),
+          ...(cCond ? [cCond] : []),
         ),
       )
       .orderBy(asc(schema.orders.createdAt))
@@ -10093,12 +10383,17 @@ export class OrdersService {
             qtyByProduct.set(item.productId, (qtyByProduct.get(item.productId) ?? 0) + item.quantity);
           }
 
+          // Multi-country: confirm-time COGS costs only from the order's country
+          // pool, in lockstep with the confirm availability gate + delivery
+          // consumption. Defaults to NGN so single-currency confirm is unchanged.
+          const confirmCurrency = (updatedOrder.currencyCode ?? 'NGN').toUpperCase();
           let totalLandedCost = 0;
           for (const [productId, qty] of qtyByProduct) {
             totalLandedCost += await this.inventoryService.computeFifoLandedCostForQuantityInTx(
               tx,
               productId,
               qty,
+              confirmCurrency,
             );
           }
 
@@ -10586,8 +10881,9 @@ export class OrdersService {
   /**
    * Get all orders with scheduled callbacks (including future ones).
    */
-  async getScheduledCallbacks(branchId?: string | null, effectiveBranchIds?: string[] | null) {
+  async getScheduledCallbacks(branchId?: string | null, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null) {
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
     const orders = await this.db
       .select()
       .from(schema.orders)
@@ -10601,6 +10897,7 @@ export class OrdersService {
             eq(schema.orders.status, 'CS_ENGAGED'),
           ),
           ...(bCond ? [bCond] : []),
+          ...(cCond ? [cCond] : []),
         ),
       )
       .orderBy(asc(schema.orders.callbackScheduledAt));
@@ -10754,8 +11051,9 @@ export class OrdersService {
     };
   }
 
-  async getFlaggedDuplicates(branchId?: string | null, effectiveBranchIds?: string[] | null) {
+  async getFlaggedDuplicates(branchId?: string | null, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null) {
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
+    const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
     const flagged = await this.db
       .select()
       .from(schema.orders)
@@ -10763,6 +11061,7 @@ export class OrdersService {
         and(
           inArray(schema.orders.isDuplicate, ['FLAGGED', 'POSSIBLY_DUPLICATE']),
           ...(bCond ? [bCond] : []),
+          ...(cCond ? [cCond] : []),
         ),
       )
       .orderBy(desc(schema.orders.createdAt));
@@ -10779,6 +11078,7 @@ export class OrdersService {
           and(
             inArray(schema.orders.id, originalIds),
             ...(bCond ? [bCond] : []),
+            ...(cCond ? [cCond] : []),
           ),
         );
       for (const row of originalRows) originalById.set(row.id, row);

@@ -60,6 +60,13 @@ export const shipments = pgTable('shipments', {
   offloadingCost: numeric('offloading_cost', { precision: 20, scale: 4 }).default('0'),
   /** Customs / import duties. */
   importDuties: numeric('import_duties', { precision: 20, scale: 4 }).default('0'),
+  /**
+   * Multi-country (mig 0329): the currency/country of this shipment. All costs
+   * above are denominated in this currency. Derived from the destination
+   * location's country at create; stamped onto the stock_batches produced on
+   * VERIFY so FIFO layers land in the right country pool. Default 'NGN'.
+   */
+  currencyCode: text('currency_code').default('NGN').notNull(),
   cancelledReason: text('cancelled_reason'),
   verifiedBy: uuid('verified_by').references(() => users.id),
   closedBy: uuid('closed_by').references(() => users.id),

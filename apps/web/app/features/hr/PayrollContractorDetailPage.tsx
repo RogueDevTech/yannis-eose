@@ -756,6 +756,11 @@ function EditContractorModal({
         <TextInput label="Account name" name="accountName" defaultValue={contractor.accountName ?? ''} />
         <TextInput label="Notes" name="notes" defaultValue={contractor.notes ?? ''} />
 
+        <ContractorAttendanceExemptField
+          defaultExempt={contractor.attendanceExempt ?? false}
+          defaultReason={contractor.attendanceExemptReason ?? ''}
+        />
+
         <div className="flex gap-2 pt-1">
           <Button type="submit" variant="primary" size="sm" loading={submitting} loadingText="Saving…">
             Save contractor
@@ -766,5 +771,50 @@ function EditContractorModal({
         </div>
       </fetcher.Form>
     </Modal>
+  );
+}
+
+/**
+ * Attendance-exemption toggle for a contractor edit form. When on, the contractor
+ * is dropped from the attendance roster and any attendance-based pay eligibility.
+ * Always emits `attendanceExemptPresent` so an unchecked box reliably clears the
+ * flag server-side (checkboxes submit nothing when off).
+ */
+function ContractorAttendanceExemptField({
+  defaultExempt,
+  defaultReason,
+}: {
+  defaultExempt: boolean;
+  defaultReason: string;
+}) {
+  const [exempt, setExempt] = useState(defaultExempt);
+  return (
+    <div className="rounded-lg border border-app-border p-3 space-y-2">
+      <input type="hidden" name="attendanceExemptPresent" value="1" />
+      <label className="flex items-start gap-2 text-sm font-medium text-app-fg">
+        <input
+          type="checkbox"
+          name="attendanceExempt"
+          value="true"
+          checked={exempt}
+          onChange={(e) => setExempt(e.target.checked)}
+          className="mt-0.5 h-4 w-4"
+        />
+        <span>
+          Attendance exempt
+          <span className="block text-xs font-normal text-app-fg-muted">
+            Drop this contractor from the attendance roster. Their pay is unaffected.
+          </span>
+        </span>
+      </label>
+      {exempt ? (
+        <TextInput
+          label="Reason"
+          name="attendanceExemptReason"
+          defaultValue={defaultReason}
+          placeholder="Why is this contractor exempt?"
+        />
+      ) : null}
+    </div>
   );
 }

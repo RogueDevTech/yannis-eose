@@ -1,6 +1,15 @@
 import type { Request, Response } from 'express';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { canViewAllBranches } from '../common/authz';
+import { canViewAllBranches, canViewAllCountries } from '../common/authz';
+
+/**
+ * Base country the operational view defaults to when an all-countries admin has
+ * made no explicit switcher selection. NGN is the system base everywhere
+ * (currency_code DEFAULT 'NGN' on every table; the switcher UI's own baseCode
+ * fallback; the ['NGN'] fallback for unassigned country-scoped users below).
+ * Resolved as a constant to keep the per-request context path query-free.
+ */
+const BASE_CURRENCY_CODE = 'NGN';
 
 /**
  * tRPC context — created for every request.
@@ -36,6 +45,29 @@ export interface TrpcContext {
   effectiveBranchIds: string[] | null;
   /** The active branch-group (company) ID from the session. */
   activeGroupId: string | null;
+  /**
+   * Multi-country data-scope — the concrete set of currency codes this request
+   * is allowed to see. The country analogue of `effectiveBranchIds`, STACKS
+   * with it (services push both a branch and a country condition).
+   *
+   *  - `null` → no country filter. MEDIA_BUYER, anyone with `countries.view_all`,
+   *    and admin-level users see every country.
+   *  - `['NGN']` → an unassigned non-view_all user: base country only
+   *    (rollout-safe, never a fully empty app).
+   *  - `[codes…]` → the user's explicitly assigned currencies.
+   *
+   * Built from the session's `currencyCodes` (from `user_countries`) at login.
+   * See `countryScopeCondition`.
+   */
+  effectiveCurrencyCodes: string[] | null;
+  /**
+   * Multi-country VIEW — the single country the user has selected in the top-bar
+   * switcher, or null for "all countries I can see". This narrows the effective
+   * view WITHIN `effectiveCurrencyCodes` (the permission). Like `currentBranchId`
+   * relative to `effectiveBranchIds`. Services can read this to show one country
+   * at a time; `effectiveCurrencyCodes` already folds it in (see below).
+   */
+  currentCurrencyCode: string | null;
 }
 
 export function createContext(req: Request, res: Response): TrpcContext {
@@ -98,5 +130,71 @@ export function createContext(req: Request, res: Response): TrpcContext {
     // else: global user without company selection AND no activeGroupId → null (org-wide).
   }
 
-  return { user, req, res, sessionToken, currentBranchId, effectiveBranchIds, activeGroupId };
+  // Resolve effectiveCurrencyCodes — the country-scope analogue of
+  // effectiveBranchIds. Priority:
+  //  1. No user → null (public/unauthed; procedures gate separately).
+  //  2. canViewAllCountries (MB, admin-class, countries.view_all) → null (see all).
+  //  3. Assigned currencyCodes present → exactly those.
+  //  4. Non-view_all user with NO assignment → ['NGN'] (base country only,
+  //     rollout-safe: never a fully empty app, foreign countries stay hidden).
+  let effectiveCurrencyCodes: string[] | null = null;
+  if (user) {
+    if (canViewAllCountries(user)) {
+      effectiveCurrencyCodes = null;
+    } else {
+      const assigned = user.currencyCodes ?? [];
+      effectiveCurrencyCodes = assigned.length > 0 ? assigned : ['NGN'];
+    }
+  }
+
+  // Multi-country VIEW switcher: when the user has picked a single country in the
+  // top-bar, narrow the effective view to it — but ONLY to a country they are
+  // allowed to see (never widens the permission). This is the country analogue of
+  // currentBranchId narrowing within effectiveBranchIds.
+  //
+  // The switcher now narrows ALL users, including all-countries admins (CEO
+  // directive: operational sections — logistics / inventory / shipments /
+  // transfers / remittances / CS / finance — must show one country at a time).
+  // Marketing surfaces are the deliberate EXCEPTION: they do NOT read
+  // `ctx.effectiveCurrencyCodes` — the marketing/orders routers hardcode a null
+  // `marketingCurrencyScope` (see marketing.router.ts:1157, orders.router.ts:784)
+  // so a Media Buyer / marketing view keeps its cross-country visibility. That
+  // opt-out lives at the query layer, so narrowing here is safe for marketing.
+  const currentCurrencyCode = user?.currentCurrencyCode
+    ? user.currentCurrencyCode.toUpperCase()
+    : null;
+  if (currentCurrencyCode) {
+    const allowed =
+      effectiveCurrencyCodes == null || effectiveCurrencyCodes.includes(currentCurrencyCode);
+    if (allowed) {
+      // Narrow to the single selected country (within permission). For an
+      // all-countries admin `effectiveCurrencyCodes` was null (see-all) and now
+      // becomes exactly the selected country.
+      effectiveCurrencyCodes = [currentCurrencyCode];
+    }
+    // If not allowed (stale selection after a revoke), ignore it and keep the
+    // permission-scoped set — never expose a country the user can't see.
+  } else if (user && effectiveCurrencyCodes == null) {
+    // All-countries admin with NO explicit switcher selection: default the
+    // operational view to the BASE country (CEO directive — non-marketing
+    // sections show one country at a time, matching what the switcher displays,
+    // which is the base country until the admin picks another). NGN is the base
+    // by system default (currency_code default 'NGN' on every table, and the
+    // switcher's own baseCode fallback). Marketing surfaces still ignore this
+    // (they hardcode a null marketingCurrencyScope), so cross-country marketing
+    // views are unaffected.
+    effectiveCurrencyCodes = [BASE_CURRENCY_CODE];
+  }
+
+  return {
+    user,
+    req,
+    res,
+    sessionToken,
+    currentBranchId,
+    effectiveBranchIds,
+    activeGroupId,
+    effectiveCurrencyCodes,
+    currentCurrencyCode,
+  };
 }

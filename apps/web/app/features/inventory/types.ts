@@ -299,6 +299,8 @@ export interface ShipmentRow {
   status: ShipmentStatus;
   destinationLocationId: string;
   destinationLocationName: string | null;
+  /** The shipment's country/currency (mig 0329). Drives the money symbol in the list. */
+  currencyCode: string | null;
   supplierName: string | null;
   supplierReference: string | null;
   expectedArrivalAt: string | null;
@@ -321,6 +323,8 @@ export interface ShipmentDetail {
     status: ShipmentStatus;
     destinationLocationId: string;
     destinationLocationName: string | null;
+    /** The shipment's country/currency (mig 0329). Drives money symbols on this page. */
+    currencyCode: string | null;
     supplierName: string | null;
     supplierReference: string | null;
     expectedArrivalAt: string | null;

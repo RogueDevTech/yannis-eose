@@ -20,6 +20,7 @@ import type {
 } from './types';
 import { formatRole, ROLE_AVATAR_GRADIENTS } from './types';
 import { useFetcherToast } from '~/components/ui/toast';
+import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { PermissionMatrix } from './PermissionMatrix';
 import {
   PayrollUserProfileSection,
@@ -157,6 +158,8 @@ export interface EditingUser {
   /** Per-company-group primary branch map: { groupId → branchId }. */
   primaryBranchByGroup?: Record<string, string>;
   branchIds: string[];
+  /** Currency (country) codes this user can access. Empty = base country only. */
+  currencyCodes?: string[];
   roleTemplateId: string | null;
   permissionOverrides: Record<string, boolean>;
   payRoleId?: string | null;
@@ -524,6 +527,23 @@ export function UserCreatePage({
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>(
     editingUser?.productIds ?? [],
   );
+  // Multi-currency (dormant until the company has 2+ active currencies). When
+  // active, the admin can scope this user to specific countries; empty = base
+  // country only. Media Buyers and Admins always see all countries server-side.
+  const currenciesCatalog = useCurrenciesCatalog();
+  const showCurrencyScope = useHasMultipleCurrencies();
+  const activeCurrencies = useMemo(
+    () => currenciesCatalog.filter((c) => c.active),
+    [currenciesCatalog],
+  );
+  const [selectedCurrencyCodes, setSelectedCurrencyCodes] = useState<string[]>(
+    editingUser?.currencyCodes ?? [],
+  );
+  const toggleCurrencyCode = (code: string) => {
+    setSelectedCurrencyCodes((prev) =>
+      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code],
+    );
+  };
   const [compensationMode, setCompensationMode] = useState<'existing' | 'inline'>('inline');
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
   // Soft duplicate-name guard. The server returns `requiresDuplicateConfirmation`
@@ -935,6 +955,15 @@ export function UserCreatePage({
           name="permissionOverrides"
           value={JSON.stringify(permissionOverrides)}
         />
+        {/* Only submit currency scoping when the feature is active — single-currency
+            installs default to base (NGN) server-side. */}
+        {showCurrencyScope ? (
+          <input
+            type="hidden"
+            name="currencyCodes"
+            value={JSON.stringify(selectedCurrencyCodes)}
+          />
+        ) : null}
         {showLogisticsLocation ? (
           <input type="hidden" name="logisticsLocationId" value={logisticsLocationId} />
         ) : null}
@@ -1196,6 +1225,36 @@ export function UserCreatePage({
                 />
               </div>
             )}
+
+            {/* Country / currency scope — only when the company runs 2+ active
+                currencies. Single-currency installs render nothing and default
+                to base (NGN) server-side. */}
+            {showCurrencyScope && selectedRole && activeCurrencies.length > 0 ? (
+              <div className="sm:col-span-2 space-y-2">
+                <label className="block text-sm font-medium text-app-fg-muted">
+                  Countries this user can access
+                </label>
+                <div className="border border-app-border rounded-lg overflow-hidden">
+                  <div className="max-h-48 overflow-y-auto">
+                    {activeCurrencies.map((c) => (
+                      <label
+                        key={c.code}
+                        className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
+                      >
+                        <Checkbox
+                          checked={selectedCurrencyCodes.includes(c.code)}
+                          onChange={() => toggleCurrencyCode(c.code)}
+                        />
+                        <span className="text-sm text-app-fg">{c.countryName || c.code}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-xs text-app-fg-muted">
+                  Leave empty for base country only. Media Buyers and Admins always see all countries.
+                </p>
+              </div>
+            ) : null}
 
             <div>
               {isEditMode ? (

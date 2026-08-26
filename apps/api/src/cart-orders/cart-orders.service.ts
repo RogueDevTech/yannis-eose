@@ -8,6 +8,7 @@ import { DRIZZLE, PG_CLIENT_RAW } from '../database/database.module';
 import type postgres from 'postgres';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -264,6 +265,9 @@ export class CartOrdersService {
      *  ONLY when the closer is viewing their own queue. */
     viewerCloserId?: string | null,
     listOpts?: { searchIncludeCustomerPhone?: boolean },
+    /** Multi-country data-scope (`ctx.effectiveCurrencyCodes`). Stacks on branch
+     *  scope. `null`/undefined = no country filter. See `countryScopeCondition`. */
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     const conditions: Parameters<typeof and>[0][] = input.showDeleted
       ? [sql`${schema.cartOrders.deletedAt} IS NOT NULL`]
@@ -319,6 +323,8 @@ export class CartOrdersService {
       } else if (bCond) {
         conditions.push(bCond);
       }
+      const cCond = countryScopeCondition(schema.cartOrders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
     }
     // Status-aware date column: when filtering by a terminal status, use the
     // milestone timestamp so "delivered this month" shows orders delivered in
@@ -430,9 +436,14 @@ export class CartOrdersService {
     mediaBuyerIds?: string[] | null,
     /** Multi-currency filter — restrict to one currency. Undefined = all. */
     currencyCode?: string,
+    /** Multi-country data-scope (`ctx.effectiveCurrencyCodes`). Stacks on branch
+     *  scope. `null`/undefined = no country filter. See `countryScopeCondition`. */
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.cartOrders.deletedAt)];
     if (currencyCode) conditions.push(eq(schema.cartOrders.currencyCode, currencyCode));
+    const cCond = countryScopeCondition(schema.cartOrders.currencyCode, effectiveCurrencyCodes);
+    if (cCond) conditions.push(cCond);
     if (assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
     if (mediaBuyerIds && mediaBuyerIds.length > 0) {
       conditions.push(inArray(schema.cartOrders.mediaBuyerId, mediaBuyerIds));
@@ -468,6 +479,7 @@ export class CartOrdersService {
     // Deleted count (separate query, soft-deleted orders excluded from main)
     const deletedConditions: Parameters<typeof and>[0][] = [sql`${schema.cartOrders.deletedAt} IS NOT NULL`];
     if (currencyCode) deletedConditions.push(eq(schema.cartOrders.currencyCode, currencyCode));
+    if (cCond) deletedConditions.push(cCond);
     {
       const bCond = branchScopeCondition(schema.cartOrders.servicingBranchId, branchId, effectiveBranchIds);
       if (bCond) deletedConditions.push(bCond);
@@ -514,12 +526,19 @@ export class CartOrdersService {
     mediaBuyerIds?: string[] | null,
     /** Multi-currency filter — restrict to one currency. Undefined = all. */
     currencyCode?: string,
+    /** Multi-country data-scope (`ctx.effectiveCurrencyCodes`). Stacks on branch
+     *  scope. `null`/undefined = no country filter. See `countryScopeCondition`. */
+    effectiveCurrencyCodes?: string[] | null,
   ): Promise<number> {
     const conditions: Parameters<typeof and>[0][] = [
       isNull(schema.cartOrders.deletedAt),
       inArray(schema.cartOrders.status, ['DELIVERED', 'REMITTED']),
     ];
     if (currencyCode) conditions.push(eq(schema.cartOrders.currencyCode, currencyCode));
+    {
+      const cCond = countryScopeCondition(schema.cartOrders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
     if (assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, assignedCsId));
     if (mediaBuyerIds && mediaBuyerIds.length > 0) {
       conditions.push(inArray(schema.cartOrders.mediaBuyerId, mediaBuyerIds));

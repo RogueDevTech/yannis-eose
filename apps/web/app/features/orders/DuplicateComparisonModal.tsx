@@ -197,8 +197,8 @@ export function DuplicateComparisonModal({
       },
       {
         label: 'Delivery fee',
-        newValue: n.deliveryFee && Number(n.deliveryFee) > 0 ? <NairaPrice amount={Number(n.deliveryFee)} /> : '—',
-        origValue: orig.deliveryFee && Number(orig.deliveryFee) > 0 ? <NairaPrice amount={Number(orig.deliveryFee)} /> : '—',
+        newValue: n.deliveryFee && Number(n.deliveryFee) > 0 ? <NairaPrice amount={Number(n.deliveryFee)} currencyCode={n.currencyCode} /> : '—',
+        origValue: orig.deliveryFee && Number(orig.deliveryFee) > 0 ? <NairaPrice amount={Number(orig.deliveryFee)} currencyCode={orig.currencyCode} /> : '—',
         newStr: n.deliveryFee ?? '—',
         origStr: orig.deliveryFee ?? '—',
       },

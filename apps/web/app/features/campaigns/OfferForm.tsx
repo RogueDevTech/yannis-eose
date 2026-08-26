@@ -30,6 +30,13 @@ interface Props {
   initialName?: string;
   initialProductId?: string;
   initialLines?: OfferLineInput[];
+  /**
+   * Multi-country: currency codes the current user may EDIT prices for.
+   * `null`/undefined = edit any currency (view-all). When set, per-currency
+   * price inputs outside this set render read-only; the base ₦ input is editable
+   * only when 'NGN' is in the set. The server enforces the same rule.
+   */
+  editableCurrencyCodes?: string[] | null;
 }
 
 const EMPTY_LINE: OfferLineInput = { label: '', quantity: 1, price: '', prices: {} };
@@ -49,8 +56,14 @@ export function OfferForm({
   initialName = '',
   initialProductId = '',
   initialLines,
+  editableCurrencyCodes,
 }: Props) {
   const isEdit = mode === 'edit';
+  // Multi-country edit gate: null = edit any currency; otherwise only these.
+  const canEditCurrency = (code: string) =>
+    editableCurrencyCodes == null ||
+    editableCurrencyCodes.map((c) => c.toUpperCase()).includes(code.toUpperCase());
+  const canEditBase = canEditCurrency('NGN');
   const [name, setName] = useState(initialName);
   const [productId, setProductId] = useState(initialProductId);
   const [lines, setLines] = useState<OfferLineInput[]>(
@@ -169,10 +182,12 @@ export function OfferForm({
                   <tr>
                     <th className="px-3 py-2 font-medium">Label</th>
                     <th className="w-20 px-3 py-2 font-medium">Qty</th>
-                    <th className="w-40 px-3 py-2 font-medium">Price (₦)</th>
+                    <th className="w-40 px-3 py-2 font-medium">
+                      Price (₦){!canEditBase && ' · locked'}
+                    </th>
                     {visibleExtraCurrencies.map((c) => (
                       <th key={c.code} className="w-40 px-3 py-2 font-medium">
-                        Price ({c.symbol} {c.code})
+                        Price ({c.symbol} {c.code}){!canEditCurrency(c.code) && ' · locked'}
                       </th>
                     ))}
                     <th className="w-10 px-3 py-2" />
@@ -221,6 +236,7 @@ export function OfferForm({
                           value={it.price}
                           onChange={(raw) => patchLine(idx, { price: raw })}
                           placeholder={Number.isFinite(basePrice) ? fmt(basePrice * (it.quantity ?? 1)) : '0'}
+                          disabled={!canEditBase}
                         />
                       </td>
                       {visibleExtraCurrencies.map((c) => (
@@ -230,6 +246,7 @@ export function OfferForm({
                             value={it.prices?.[c.code] ?? ''}
                             onChange={(raw) => patchLinePrice(idx, c.code, raw)}
                             placeholder="0"
+                            disabled={!canEditCurrency(c.code)}
                           />
                         </td>
                       ))}
@@ -254,6 +271,12 @@ export function OfferForm({
             </div>
           )}
 
+          {editableCurrencyCodes != null && (
+            <p className="border-t border-app-border px-4 py-2 text-xs text-app-muted-fg">
+              You can edit prices for your assigned countries only. Locked
+              currencies are managed by an all-countries admin.
+            </p>
+          )}
           {extraCurrencies.length > 0 && (
             <p className="border-t border-app-border px-4 py-2 text-xs text-app-muted-fg">
               Leave a currency price blank to hide that line in that currency.

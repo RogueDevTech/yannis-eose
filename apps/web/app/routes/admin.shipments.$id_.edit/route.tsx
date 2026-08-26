@@ -132,6 +132,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     products,
     locations,
     canIntake,
+    // This shipment's own stored currency labels the cost fields, so an existing
+    // shipment's Total landing cost / Factory cost always read in the currency
+    // they were entered and stored in (derived from the destination warehouse at
+    // create), not whatever country the viewer currently has selected. Falls back
+    // to the active view currency, then NGN, only if the shipment is unstamped.
+    currencyCode: (
+      detail.shipment.currencyCode ||
+      (user as { currentCurrencyCode?: string | null }).currentCurrencyCode ||
+      'NGN'
+    ).toUpperCase(),
     loadError:
       productsRes.ok && locationsRes.ok
         ? null
@@ -214,6 +224,7 @@ export default function EditShipmentRoute() {
     products: ProductOption[];
     locations: LocationOption[];
     canIntake: boolean;
+    currencyCode: string;
     loadError: string | null;
   };
   const actionData = useActionData<typeof action>() as { error?: string } | undefined;
@@ -283,6 +294,7 @@ export default function EditShipmentRoute() {
         disabled={!data.canIntake}
         products={data.products}
         locations={data.locations}
+        currencyCode={data.currencyCode}
         actionUrl={`${detailUrl}/edit`}
         initial={data.initial}
         cancelTo={detailUrl}

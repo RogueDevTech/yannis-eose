@@ -5,6 +5,8 @@ export interface Provider {
   coverageArea: string | null;
   status: string;
   createdAt: string;
+  /** Country / currency this provider operates in (defaults to base NGN). */
+  currencyCode?: string | null;
 }
 
 export interface Location {

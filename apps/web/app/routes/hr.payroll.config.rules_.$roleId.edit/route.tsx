@@ -130,6 +130,38 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return redirect(`/hr/payroll/config/rules/${payRoleId}`);
   }
 
+  if (intent === 'saveAttendanceBands') {
+    if (!payRoleId) return json({ error: 'Missing pay role' }, { status: 400 });
+    const configJson = formData.get('configJson')?.toString()?.trim();
+    let config: { enabled: boolean; bands: Array<{ minAbsences: number; deductionPercent: number }> };
+    try {
+      const parsed = JSON.parse(configJson ?? '') as unknown;
+      if (
+        !parsed ||
+        typeof parsed !== 'object' ||
+        typeof (parsed as { enabled?: unknown }).enabled !== 'boolean' ||
+        !Array.isArray((parsed as { bands?: unknown }).bands)
+      ) {
+        return json({ error: 'Invalid attendance config' }, { status: 400 });
+      }
+      config = parsed as typeof config;
+    } catch {
+      return json({ error: 'Invalid attendance config JSON' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/attendance.savePayRoleConfig', {
+      method: 'POST',
+      cookie,
+      body: { payRoleId, config },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to save attendance deduction') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
   if (intent === 'previewFormula') {
     const formulaJson = formData.get('formulaJson')?.toString() ?? '{}';
     let formula: Record<string, unknown> = {};

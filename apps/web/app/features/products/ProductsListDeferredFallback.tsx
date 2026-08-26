@@ -3,6 +3,7 @@ import type { Product } from './types';
 
 const skeletonColumns: CompactTableColumn<Product>[] = [
   { key: 'product', header: 'Product', minWidth: 'min-w-[200px]', render: () => null },
+  { key: 'code', header: 'Code', render: () => null },
   { key: 'category', header: 'Category', render: () => null },
   { key: 'offers', header: 'Offers', render: () => null },
   { key: 'status', header: 'Status', render: () => null },

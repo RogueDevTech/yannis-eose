@@ -83,6 +83,10 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'createProvider' || intent === 'createProviders') {
+    // Shared currency for every provider in this submission. Present only when
+    // the company runs 2+ active currencies; absent → server defaults to base
+    // (NGN).
+    const currencyCode = formData.get('currencyCode')?.toString()?.trim() || undefined;
     const providers: { name: string; contactInfo?: string; coverageArea?: string }[] = [];
     if (intent === 'createProviders') {
       for (let i = 0; i < 50; i++) {
@@ -124,7 +128,12 @@ export async function action({ request }: ActionFunctionArgs) {
       const res = await apiRequest<unknown>('/trpc/logistics.createProvider', {
         method: 'POST',
         cookie,
-        body: { name: p.name, contactInfo: p.contactInfo, coverageArea: p.coverageArea },
+        body: {
+          name: p.name,
+          contactInfo: p.contactInfo,
+          coverageArea: p.coverageArea,
+          ...(currencyCode ? { currencyCode } : {}),
+        },
       });
       if (!res.ok) {
         const err = extractApiErrorMessage(res.data, 'Failed to create logistics company');
@@ -143,6 +152,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!contactInfo || !coverageArea) {
       return json({ error: 'Contact info and coverage area are required.' }, { status: 400 });
     }
+    const currencyCode = formData.get('currencyCode')?.toString()?.trim() || undefined;
     const res = await apiRequest<unknown>('/trpc/logistics.updateProvider', {
       method: 'POST',
       cookie,
@@ -152,6 +162,7 @@ export async function action({ request }: ActionFunctionArgs) {
         contactInfo,
         coverageArea,
         status: formData.get('status')?.toString() || undefined,
+        ...(currencyCode ? { currencyCode } : {}),
       },
     });
     if (!res.ok) {

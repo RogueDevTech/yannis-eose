@@ -73,6 +73,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     products,
     locations,
     canIntake,
+    // Active view currency (top-bar country switcher). Labels the cost fields so
+    // Total landing cost / Factory cost read in the selected country's currency.
+    currencyCode: (
+      (user as { currentCurrencyCode?: string | null }).currentCurrencyCode ?? 'NGN'
+    ).toUpperCase(),
     loadError: productsRes.ok && locationsRes.ok
       ? null
       : [
@@ -157,6 +162,7 @@ export default function ReceiveShipmentRoute() {
     products: ProductOption[];
     locations: LocationOption[];
     canIntake: boolean;
+    currencyCode: string;
     loadError: string | null;
   };
   const actionData = useActionData<typeof action>() as { error?: string } | undefined;
@@ -220,6 +226,7 @@ export default function ReceiveShipmentRoute() {
         disabled={!data.canIntake}
         products={data.products}
         locations={data.locations}
+        currencyCode={data.currencyCode}
         actionUrl="/admin/shipments/receive"
       />
     </div>

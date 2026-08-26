@@ -15,6 +15,7 @@ import type {
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { withActorAndBranch } from '../common/db/with-actor';
+import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevel } from '../common/authz';
@@ -56,6 +57,24 @@ export class ShipmentsService {
     if (isAdminLevel(actor)) return true;
     const want = canonicalPermissionCode('inventory.intake');
     return (actor.permissions ?? []).map((c) => canonicalPermissionCode(c)).includes(want);
+  }
+
+  /**
+   * Multi-country: resolve a destination warehouse's currency/country via its
+   * provider (providers carry currency since mig 0329). Stamped on the shipment
+   * so its costs + produced FIFO batches land in the right country. Default NGN.
+   */
+  private async resolveDestinationCurrency(locationId: string): Promise<string> {
+    const [row] = await this.db
+      .select({ currencyCode: schema.logisticsProviders.currencyCode })
+      .from(schema.logisticsLocations)
+      .leftJoin(
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+      )
+      .where(eq(schema.logisticsLocations.id, locationId))
+      .limit(1);
+    return (row?.currencyCode ?? 'NGN').toUpperCase();
   }
 
   private hasVerifyPermission(actor: SessionUser): boolean {
@@ -223,8 +242,16 @@ export class ShipmentsService {
     currentBranchId: string | null,
     effectiveBranchIds?: string[] | null,
     groupId?: string | null,
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     const baseConditions = [];
+    // Multi-country data-scope — a country-scoped viewer only sees shipments in
+    // their assigned currencies. No-op for admin / view_all (null). Applied to
+    // baseConditions so both the list and the status-summary agree.
+    {
+      const cCond = countryScopeCondition(schema.shipments.currencyCode, effectiveCurrencyCodes);
+      if (cCond) baseConditions.push(cCond);
+    }
     if (input.destinationLocationId)
       baseConditions.push(eq(schema.shipments.destinationLocationId, input.destinationLocationId));
     if (input.search) {
@@ -293,6 +320,7 @@ export class ShipmentsService {
           status: schema.shipments.status,
           destinationLocationId: schema.shipments.destinationLocationId,
           destinationLocationName: schema.logisticsLocations.name,
+          currencyCode: schema.shipments.currencyCode,
           supplierName: schema.shipments.supplierName,
           supplierReference: schema.shipments.supplierReference,
           expectedArrivalAt: schema.shipments.expectedArrivalAt,
@@ -391,6 +419,7 @@ export class ShipmentsService {
         // logistics_locations.branch_id exists in the DB (migration 0041) but
         // is not yet on the Drizzle schema — read raw and alias.
         destinationBranchId: sql<string | null>`${schema.logisticsLocations}.branch_id`,
+        currencyCode: schema.shipments.currencyCode,
         supplierName: schema.shipments.supplierName,
         supplierReference: schema.shipments.supplierReference,
         expectedArrivalAt: schema.shipments.expectedArrivalAt,
@@ -483,7 +512,25 @@ export class ShipmentsService {
               schema.logisticsLocations,
               eq(schema.inventoryLevels.locationId, schema.logisticsLocations.id),
             )
-            .where(inArray(schema.inventoryLevels.productId, productIds))
+            // Multi-country: a location's country is its provider's currency_code.
+            // The stock distribution is about THIS shipment's product in THIS
+            // shipment's country, so only include locations in the same country.
+            // Without this, a product that also exists in other countries' hubs
+            // (e.g. ARJUNA in Nigerian warehouses) leaks into a Tanzania shipment's
+            // distribution table.
+            .innerJoin(
+              schema.logisticsProviders,
+              eq(schema.logisticsLocations.providerId, schema.logisticsProviders.id),
+            )
+            .where(
+              and(
+                inArray(schema.inventoryLevels.productId, productIds),
+                eq(
+                  schema.logisticsProviders.currencyCode,
+                  (row.currencyCode ?? 'NGN').toUpperCase(),
+                ),
+              ),
+            )
         : Promise.resolve([]),
     ]);
 
@@ -624,7 +671,14 @@ export class ShipmentsService {
   // Writes — lifecycle
   // ============================================================
 
-  async createShipment(input: CreateShipmentInput, actor: SessionUser) {
+  async createShipment(
+    input: CreateShipmentInput,
+    actor: SessionUser,
+    /** Actor's resolved country scope (from ctx). Null = all-countries
+     *  (MB/admin/view_all). Used to reject an out-of-country destination that a
+     *  stale/hand-rolled client could still POST past the scoped picker. */
+    effectiveCurrencyCodes?: string[] | null,
+  ) {
     if (!this.hasIntakePermission(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -640,12 +694,34 @@ export class ShipmentsService {
     const arrivedNow = input.arrivedNow === true;
     const status: ShipmentStatus = arrivedNow ? 'ARRIVED' : 'CREATED';
 
+    // Multi-country: a shipment belongs to the country of its destination
+    // warehouse (derived from the location's provider currency, mig 0329). All
+    // shipment costs + the batches it produces on VERIFY are denominated here.
+    const shipmentCurrency = await this.resolveDestinationCurrency(input.destinationLocationId);
+
+    // Country DATA-SCOPE guard: a scoped user must not create a shipment into a
+    // warehouse outside their countries — it would be stamped with that country's
+    // currency and vanish from their own scoped list. The picker already hides
+    // such warehouses; this is the server-side backstop. No-op for all-countries
+    // users (effectiveCurrencyCodes null).
+    if (
+      effectiveCurrencyCodes != null &&
+      effectiveCurrencyCodes.length > 0 &&
+      !effectiveCurrencyCodes.map((c) => c.toUpperCase()).includes(shipmentCurrency)
+    ) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Destination warehouse is not in your selected country.',
+      });
+    }
+
     const created = await withActorAndBranch(this.db, actor, async (tx) => {
       const [parent] = await tx
         .insert(schema.shipments)
         .values({
           status,
           destinationLocationId: input.destinationLocationId,
+          currencyCode: shipmentCurrency,
           label: input.label?.trim() ? input.label.trim() : null,
           supplierName: input.supplierName?.trim() ? input.supplierName.trim() : null,
           supplierReference: input.supplierReference?.trim()
@@ -953,7 +1029,8 @@ export class ShipmentsService {
           line.receivedQuantity > 0 ? lineLanding / line.receivedQuantity : 0;
         const totalLandedCostPerUnit = factoryCostNum + perUnitLanding;
 
-        // 1) Create FIFO batch
+        // 1) Create FIFO batch — stamped with the shipment's country so the
+        //    layer lands in the right country pool (multi-country FIFO, mig 0329).
         const [batch] = await tx
           .insert(schema.stockBatches)
           .values({
@@ -963,6 +1040,7 @@ export class ShipmentsService {
             totalLandedCost: sql`${totalLandedCostPerUnit}::numeric`,
             quantity: line.receivedQuantity,
             remainingQuantity: line.receivedQuantity,
+            currencyCode: (existing.currencyCode ?? 'NGN').toUpperCase(),
           })
           .returning();
         if (!batch) {

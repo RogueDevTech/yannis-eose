@@ -1,4 +1,4 @@
-import { boolean, integer, pgTable, uuid } from 'drizzle-orm/pg-core';
+import { boolean, integer, pgTable, text, uuid } from 'drizzle-orm/pg-core';
 import { branches } from './branches';
 import { branchTeams } from './branch-teams';
 import { products } from './products';
@@ -18,6 +18,13 @@ export const csOrderRoutingRules = pgTable('cs_order_routing_rules', {
     .references(() => branches.id),
   /** When null, rule applies to any product (catch-all) after more specific rules. */
   productId: uuid('product_id').references(() => products.id),
+  /**
+   * Multi-country (mig 0331): match the order's currency/country. When null, the
+   * rule applies to ANY country (catch-all) after more country-specific rules.
+   * This is where "Ghana orders → Ghana servicing branch" is configured.
+   * Order country = orders.currency_code.
+   */
+  currencyCode: text('currency_code'),
   priority: integer('priority').notNull().default(0),
   enabled: boolean('enabled').notNull().default(true),
   strategy: csOrderRoutingStrategyEnum('strategy').notNull().default('EQUAL'),

@@ -179,6 +179,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const primaryBranchId = formData.get('primaryBranchId')?.toString() || undefined;
   const branchIdsStr = formData.get('branchIds')?.toString();
   const roleTemplateId = formData.get('roleTemplateId')?.toString() || undefined;
+  const currencyCodesStr = formData.get('currencyCodes')?.toString();
   // Set once the admin has confirmed the duplicate-name warning modal — tells
   // the server to skip the soft duplicate-name guard on this resubmission.
   const confirmDuplicateName = formData.get('confirmDuplicateName') === 'true';
@@ -230,6 +231,18 @@ export async function action({ request }: ActionFunctionArgs) {
   if (commissionPlanId) body.commissionPlanId = commissionPlanId;
   try {
     if (branchIdsStr) body.branchIds = JSON.parse(branchIdsStr);
+  } catch {
+    // ignore invalid JSON
+  }
+  // Multi-currency: only present when the company runs 2+ active currencies.
+  // Absent → server defaults the user to the base country (NGN).
+  try {
+    if (currencyCodesStr) {
+      const parsed = JSON.parse(currencyCodesStr) as unknown;
+      if (Array.isArray(parsed) && parsed.every((c): c is string => typeof c === 'string')) {
+        body.currencyCodes = parsed;
+      }
+    }
   } catch {
     // ignore invalid JSON
   }

@@ -71,11 +71,17 @@ export function useCurrencyFilterOptions(): { value: string; label: string }[] |
   const hasMultiple = useHasMultipleCurrencies();
   return useMemo(() => {
     if (!hasMultiple) return null;
-    return [
-      { value: 'ALL', label: 'All currencies' },
-      ...list
-        .filter((c) => c.active)
-        .map((c) => ({ value: c.code, label: `${c.symbol} ${c.code}` })),
-    ];
+    // Dedupe by code — group-scoped currencies repeat the same code per company
+    // (dev has 12 NGN rows), which would otherwise list "₦ NGN" a dozen times.
+    const seen = new Set<string>();
+    const opts: { value: string; label: string }[] = [];
+    for (const c of list) {
+      if (!c.active) continue;
+      const code = c.code.toUpperCase();
+      if (seen.has(code)) continue;
+      seen.add(code);
+      opts.push({ value: c.code, label: `${c.symbol} ${c.code}` });
+    }
+    return [{ value: 'ALL', label: 'All currencies' }, ...opts];
   }, [list, hasMultiple]);
 }

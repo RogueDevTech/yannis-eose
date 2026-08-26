@@ -157,6 +157,80 @@ export class CurrenciesService {
     });
   }
 
+  /**
+   * Go-dark safeguard (multi-country). Finds active, non-default currencies that
+   * have ORDER data but NO user assigned in `user_countries` holding a REQUIRED
+   * org role (Finance / Stock Manager / Head of Logistics). Those roles are
+   * country-scoped, so an unassigned country is invisible to them — orders exist
+   * that nobody in finance/stock/logistics can see.
+   *
+   * Surfaced two ways (Phase 1): an admin dashboard banner (via this method) and
+   * a notification when a country first crosses into "has data, no owner".
+   *
+   * Users with `countries.view_all` (or MB/admin, who bypass in code) count as
+   * covering EVERY currency, so they satisfy the check for all countries.
+   *
+   * Returns one row per orphaned currency with the missing roles + order count.
+   */
+  async getUnassignedCountryAlarms(
+    groupId: string | null,
+  ): Promise<
+    Array<{ currencyCode: string; countryName: string | null; orderCount: number; missingRoles: string[] }>
+  > {
+    // Roles that MUST be able to see every country with data.
+    const REQUIRED_ROLES = ['FINANCE_OFFICER', 'STOCK_MANAGER', 'HEAD_OF_LOGISTICS'] as const;
+
+    // Active, non-default currencies for this group (base NGN never orphans).
+    const currencies = await this.db
+      .select({ code: schema.currencies.code, countryName: schema.currencies.countryName })
+      .from(schema.currencies)
+      .where(and(this.groupEq(groupId), eq(schema.currencies.active, true), eq(schema.currencies.isDefault, false)));
+    if (currencies.length === 0) return [];
+
+    const alarms: Array<{ currencyCode: string; countryName: string | null; orderCount: number; missingRoles: string[] }> = [];
+    for (const cur of currencies) {
+      // Does this currency have any order data at all? No data → no alarm.
+      const [{ n: orderCount } = { n: 0 }] = await this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.orders)
+        .where(eq(schema.orders.currencyCode, cur.code));
+      if (!orderCount) continue;
+
+      // Which required roles have NO user assigned to this currency (and no
+      // view_all grant)? A user covers this currency if they either hold
+      // countries.view_all OR have a user_countries row for cur.code.
+      const missingRoles: string[] = [];
+      for (const role of REQUIRED_ROLES) {
+        const [{ n: covered } = { n: 0 }] = await this.db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(schema.users)
+          .where(
+            and(
+              eq(schema.users.role, role),
+              eq(schema.users.status, 'ACTIVE'),
+              sql`(
+                EXISTS (
+                  SELECT 1 FROM ${schema.userCountries} uc
+                  WHERE uc.user_id = ${schema.users.id} AND uc.currency_code = ${cur.code}
+                )
+                OR EXISTS (
+                  SELECT 1 FROM user_permissions up
+                  JOIN permissions p ON p.id = up.permission_id
+                  WHERE up.user_id = ${schema.users.id} AND up.granted = true AND p.code = 'countries.view_all'
+                )
+              )`,
+            ),
+          );
+        if (!covered) missingRoles.push(role);
+      }
+
+      if (missingRoles.length > 0) {
+        alarms.push({ currencyCode: cur.code, countryName: cur.countryName, orderCount, missingRoles });
+      }
+    }
+    return alarms;
+  }
+
   // ── helpers ────────────────────────────────────────────────────────────────
   private groupEq(groupId: string | null): SQL {
     return groupId == null ? sql`${schema.currencies.groupId} IS NULL` : eq(schema.currencies.groupId, groupId);

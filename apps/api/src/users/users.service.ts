@@ -21,6 +21,7 @@ import { DRIZZLE } from '../database/database.module';
 import { AuthService } from '../auth/auth.service';
 import { UserBundleCacheService } from '../auth/user-bundle-cache.service';
 import { withActor } from '../common/db/with-actor';
+import { nigeriaToday } from '../common/utils/date-range';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import { EventsService } from '../events/events.service';
@@ -894,6 +895,9 @@ export class UsersService {
           capacity: input.capacity ?? 10,
           logisticsLocationId: input.logisticsLocationId ?? null,
           primaryBranchId: input.primaryBranchId ?? null,
+          // Default joining date to today (WAT) so new staff enter the attendance
+          // roster from day one instead of being silently absent from attendance.
+          dateOfJoining: input.dateOfJoining ?? nigeriaToday(),
           phone: input.phone ?? null,
           visibleOrderStatuses: input.visibleOrderStatuses ?? null,
           restrictProductAccess: input.restrictProductAccess ?? false,
@@ -973,6 +977,26 @@ export class UsersService {
               })),
             );
           }
+        }
+      }
+
+      // Multi-country: assign the user's country/currency scope. When none is
+      // supplied, default to base country (NGN) so a new user is never created
+      // "dark" (mirrors the migration backfill). MB / admin / view_all ignore
+      // this at read time, but we still stamp NGN for consistency.
+      {
+        const codes = [
+          ...new Set(
+            (input.currencyCodes && input.currencyCodes.length > 0
+              ? input.currencyCodes
+              : ['NGN']
+            ).map((c) => c.trim().toUpperCase()).filter(Boolean),
+          ),
+        ];
+        if (codes.length > 0) {
+          await tx.insert(schema.userCountries).values(
+            codes.map((currencyCode) => ({ userId: createdUser.id, currencyCode })),
+          );
         }
       }
 
@@ -1145,11 +1169,20 @@ export class UsersService {
 
     const assignedProductIds = [...new Set(assignmentRows.map((r) => r.productId))];
 
+    // Multi-country: the user's assigned country/currency codes, so the edit form
+    // can pre-populate the country picker.
+    const countryRows = await this.db
+      .select({ currencyCode: schema.userCountries.currencyCode })
+      .from(schema.userCountries)
+      .where(eq(schema.userCountries.userId, user.id));
+    const assignedCurrencyCodes = [...new Set(countryRows.map((r) => r.currencyCode))];
+
     return {
       ...user,
       phone: this.resolveStaffPhone(actor, { id: user.id, role: user.role, phone: user.phone }),
       branchMemberships,
       assignedProductIds,
+      assignedCurrencyCodes,
     };
   }
 
@@ -2469,6 +2502,28 @@ export class UsersService {
           }
         }
       }
+
+      // Multi-country: replace the user's country/currency scope when explicitly
+      // provided (independent of branch changes). Empty array → base country NGN
+      // only, so a scoped user is never left with zero countries (which would
+      // otherwise fall back to NGN at read time anyway, but we persist it for
+      // clarity). Omitted → leave existing assignments untouched.
+      if (input.currencyCodes !== undefined) {
+        const codes = [
+          ...new Set(
+            (input.currencyCodes.length > 0 ? input.currencyCodes : ['NGN'])
+              .map((c) => c.trim().toUpperCase())
+              .filter(Boolean),
+          ),
+        ];
+        await tx.delete(schema.userCountries).where(eq(schema.userCountries.userId, input.userId));
+        if (codes.length > 0) {
+          await tx.insert(schema.userCountries).values(
+            codes.map((currencyCode) => ({ userId: input.userId, currencyCode })),
+          );
+        }
+      }
+
       if (shouldRematerializePermissions && nextRoleTemplateIdForSnapshot) {
         const snapshotRole = input.role !== undefined ? input.role : beforeRow.role;
         await this.replaceUserPermissionSnapshot(tx, {

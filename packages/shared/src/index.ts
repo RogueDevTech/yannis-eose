@@ -13,6 +13,7 @@ export * from './hr/nigerian-banks';
 export * from './hr/nigerian-states';
 export * from './currency/currency';
 export * from './currency/african-countries';
+export * from './currency/country-flag';
 export * from './notifications/config';
 export * from './rbac/permission-codes';
 export * from './rbac/permission-catalog';

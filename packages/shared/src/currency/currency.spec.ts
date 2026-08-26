@@ -32,6 +32,15 @@ describe('hasMultipleCurrencies (the dormancy gate)', () => {
   it('is false for an empty list (pre-config)', () => {
     expect(hasMultipleCurrencies([])).toBe(false);
   });
+  it('is false when the same code repeats across companies (group-scoped dup rows)', () => {
+    // A single-country org spanning multiple companies has one NGN row per
+    // company. That is still ONE currency — the feature must stay dormant.
+    expect(hasMultipleCurrencies([NGN, { ...NGN }, { ...NGN }])).toBe(false);
+  });
+  it('counts distinct codes, not rows', () => {
+    // Duplicate NGN rows + a single real GHS row = two distinct currencies.
+    expect(hasMultipleCurrencies([NGN, { ...NGN }, ghs, { ...ghs }])).toBe(true);
+  });
 });
 
 describe('baseCurrency', () => {

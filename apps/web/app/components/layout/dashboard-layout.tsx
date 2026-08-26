@@ -1526,6 +1526,8 @@ function DashboardLayoutInner({
         branchGroups={branchGroups}
         branchesHydrationReady={branchesHydrationReady}
         currentBranchId={user?.currentBranchId}
+        currencies={currencies}
+        currentCurrencyCode={(user as { currentCurrencyCode?: string | null })?.currentCurrencyCode ?? null}
         selectedBranchIds={(user as { selectedBranchIds?: string[] | null })?.selectedBranchIds ?? undefined}
         mirroredBy={user?.mirroredBy ?? null}
         onSearchOpen={() => setSearchOpen(true)}

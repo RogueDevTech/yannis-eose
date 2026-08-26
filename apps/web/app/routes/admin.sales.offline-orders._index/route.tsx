@@ -151,8 +151,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const categoryParam = url.searchParams.get('category') || undefined;
   const sortBy = url.searchParams.get('sortBy') || 'createdAt';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
-  // Multi-currency filter (dormant unless the company added a 2nd currency).
-  const currencyCode = url.searchParams.get('currency')?.toUpperCase() || undefined;
+  // Currency scope is now driven session-wide by the global country switcher
+  // (ctx.effectiveCurrencyCodes), so no per-page `?currency=` filter arg here.
 
   const expandConfirmedFilter = status === 'CONFIRMED';
   const expandDeliveredFilter = status === 'DELIVERED';
@@ -182,7 +182,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Otherwise show both offline + import (the page's default).
     orderSource: categoryParam === 'imported' ? 'import' : orderSource,
     ...(teamIdParam && { teamId: teamIdParam }),
-    ...(currencyCode && { currencyCode }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
     ...(!hasScheduleListFilter && apiEndDate && { endDate: apiEndDate }),
   };
@@ -273,7 +272,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       canCreateOffline,
       orderSource: 'offline_and_import',
       ...(teamIdParam && { teamId: teamIdParam }),
-      ...(currencyCode && { currencyCode }),
     }),
   );
   const [listRes, bundleRes] = await Promise.all([

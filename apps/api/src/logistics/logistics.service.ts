@@ -52,6 +52,7 @@ import { CacheService } from '../common/cache/cache.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { isAdminLevel } from '../common/authz';
 import { OrdersService } from '../orders/orders.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
@@ -319,7 +320,12 @@ export class LogisticsService implements OnModuleInit {
   // Providers
   // ============================================
 
-  async createProvider(input: CreateProviderInput, actorId: string, groupId?: string | null) {
+  async createProvider(
+    input: CreateProviderInput,
+    actorId: string,
+    groupId?: string | null,
+    activeCurrencyCode?: string | null,
+  ) {
     return withActor(this.db, { id: actorId }, async (tx) => {
       // Block duplicate names within the same company group
       const groupCondition = groupId
@@ -342,6 +348,12 @@ export class LogisticsService implements OnModuleInit {
           coverageArea: input.coverageArea,
           rateCard: input.rateCard ?? null,
           groupId: groupId ?? null,
+          // Multi-country: country/currency the provider operates in. The form
+          // no longer offers a per-provider country picker — the provider is
+          // stamped with the country the caller is VIEWING (global top-bar
+          // switcher → ctx.currentCurrencyCode). Falls back to base NGN when
+          // there's no active country (single-country installs).
+          currencyCode: (input.currencyCode ?? activeCurrencyCode ?? 'NGN').toUpperCase(),
         })
         .returning();
 
@@ -353,7 +365,7 @@ export class LogisticsService implements OnModuleInit {
     });
   }
 
-  async updateProvider(input: UpdateProviderInput, actorId: string) {
+  async updateProvider(input: UpdateProviderInput, actorId: string, activeCurrencyCode?: string | null) {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const updateFields: Record<string, unknown> = { updatedAt: new Date() };
       if (input.name !== undefined) updateFields['name'] = input.name;
@@ -361,6 +373,12 @@ export class LogisticsService implements OnModuleInit {
       if (input.coverageArea !== undefined) updateFields['coverageArea'] = input.coverageArea;
       if (input.rateCard !== undefined) updateFields['rateCard'] = input.rateCard;
       if (input.status !== undefined) updateFields['status'] = input.status;
+      // Multi-country: the provider's country follows the country the caller is
+      // VIEWING (global top-bar switcher → activeCurrencyCode), not a per-form
+      // picker. An explicit input.currencyCode still wins (e.g. import flows);
+      // otherwise re-stamp to the active country when one is set.
+      const resolvedCurrency = input.currencyCode ?? activeCurrencyCode ?? undefined;
+      if (resolvedCurrency !== undefined) updateFields['currencyCode'] = resolvedCurrency.toUpperCase();
 
       const rows = await tx
         .update(schema.logisticsProviders)
@@ -399,7 +417,11 @@ export class LogisticsService implements OnModuleInit {
     return { ...rows[0], locationCount: locationRows[0]?.count ?? 0 };
   }
 
-  async listProviders(input: ListProvidersInput, groupId?: string | null) {
+  async listProviders(
+    input: ListProvidersInput,
+    groupId?: string | null,
+    effectiveCurrencyCodes?: string[] | null,
+  ) {
     const conditions = [];
     if (input.status) {
       conditions.push(eq(schema.logisticsProviders.status, input.status));
@@ -409,6 +431,18 @@ export class LogisticsService implements OnModuleInit {
     }
     if (input.kind) {
       conditions.push(eq(schema.logisticsProviders.kind, input.kind));
+    }
+    if (input.currencyCode) {
+      // Multi-country: the CS assign-to-agent picker passes the order's currency
+      // so only same-country providers/agents appear.
+      conditions.push(eq(schema.logisticsProviders.currencyCode, input.currencyCode));
+    }
+    // Multi-country DATA SCOPE: a country-scoped user only sees providers in their
+    // assigned countries. Stacks on the explicit picker filter above and on group
+    // scope. No-op for MB / admin / view_all (effectiveCurrencyCodes == null).
+    {
+      const cCond = countryScopeCondition(schema.logisticsProviders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
     }
     if (groupId) {
       conditions.push(or(eq(schema.logisticsProviders.groupId, groupId), isNull(schema.logisticsProviders.groupId))!);
@@ -428,6 +462,7 @@ export class LogisticsService implements OnModuleInit {
           contactInfo: schema.logisticsProviders.contactInfo,
           coverageArea: schema.logisticsProviders.coverageArea,
           kind: schema.logisticsProviders.kind,
+          currencyCode: schema.logisticsProviders.currencyCode,
           status: schema.logisticsProviders.status,
           createdAt: schema.logisticsProviders.createdAt,
           updatedAt: schema.logisticsProviders.updatedAt,
@@ -572,7 +607,12 @@ export class LogisticsService implements OnModuleInit {
     });
   }
 
-  async listLocations(input: ListLocationsInput, groupId?: string | null, effectiveBranchIds?: string[] | null) {
+  async listLocations(
+    input: ListLocationsInput,
+    groupId?: string | null,
+    effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
+  ) {
     const conditions = [];
     if (input.providerId) {
       conditions.push(eq(schema.logisticsLocations.providerId, input.providerId));
@@ -585,6 +625,18 @@ export class LogisticsService implements OnModuleInit {
     }
     if (groupId) {
       conditions.push(or(eq(schema.logisticsProviders.groupId, groupId), isNull(schema.logisticsProviders.groupId))!);
+    }
+    // Multi-country: a location belongs to the country of its provider. Scope by
+    // the active country (global switcher / data scope) via the provider join, so
+    // locations stay consistent with the country-scoped providers list. No-op for
+    // view_all (effectiveCurrencyCodes null).
+    let countryScoped = false;
+    {
+      const cCond = countryScopeCondition(schema.logisticsProviders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) {
+        conditions.push(cCond);
+        countryScoped = true;
+      }
     }
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       conditions.push(
@@ -625,7 +677,7 @@ export class LogisticsService implements OnModuleInit {
         .orderBy(desc(schema.logisticsLocations.createdAt))
         .limit(input.limit)
         .offset(offset),
-      (input.providerKind || groupId)
+      (input.providerKind || groupId || countryScoped)
         ? this.db
             .select({ count: count() })
             .from(schema.logisticsLocations)
@@ -685,6 +737,12 @@ export class LogisticsService implements OnModuleInit {
     status?: 'ACTIVE' | 'INACTIVE';
     providerKind?: 'THIRD_PARTY' | 'WAREHOUSE';
     groupId?: string | null;
+    /** Multi-country data scope: only locations whose provider currency is in the
+     *  caller's countries. Null (MB/admin/view_all) = all. Keeps the shipment
+     *  destination picker from offering out-of-country warehouses (which would
+     *  then be stamped with another country's currency and vanish from the
+     *  scoped user's own shipments list). */
+    effectiveCurrencyCodes?: string[] | null;
   }): Promise<
     Array<{
       id: string;
@@ -698,6 +756,13 @@ export class LogisticsService implements OnModuleInit {
     const conditions = [];
     if (input.status) conditions.push(eq(schema.logisticsLocations.status, input.status));
     if (input.providerKind) conditions.push(eq(schema.logisticsProviders.kind, input.providerKind));
+    {
+      const cCond = countryScopeCondition(
+        schema.logisticsProviders.currencyCode,
+        input.effectiveCurrencyCodes,
+      );
+      if (cCond) conditions.push(cCond);
+    }
     if (input.groupId) conditions.push(or(eq(schema.logisticsProviders.groupId, input.groupId), isNull(schema.logisticsProviders.groupId))!);
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -733,12 +798,23 @@ export class LogisticsService implements OnModuleInit {
   // ============================================
 
   /**
-   * Singleton internal warehouse provider — locations of kind WAREHOUSE all hang off it.
-   * Auto-created the first time a warehouse is added; survives subsequent calls
-   * via `ON CONFLICT DO NOTHING`-style lookup-then-insert.
+   * Internal warehouse provider — locations of kind WAREHOUSE all hang off it.
+   * Multi-country: one provider per (group × currency), so a warehouse anchors
+   * to the country of the switcher it was created under. The provider's
+   * `currency_code` is what shipments/FIFO batches read via
+   * `resolveDestinationCurrency`. Auto-created the first time a warehouse is
+   * added for that currency; race-safe lookup-then-insert.
    */
-  private async getOrCreateOurWarehouseProvider(actorId: string, groupId?: string | null): Promise<string> {
-    const conditions: SQL[] = [eq(schema.logisticsProviders.kind, 'WAREHOUSE')];
+  private async getOrCreateOurWarehouseProvider(
+    actorId: string,
+    groupId?: string | null,
+    currencyCode?: string | null,
+  ): Promise<string> {
+    const code = (currencyCode || 'NGN').toUpperCase();
+    const conditions: SQL[] = [
+      eq(schema.logisticsProviders.kind, 'WAREHOUSE'),
+      eq(schema.logisticsProviders.currencyCode, code),
+    ];
     if (groupId) conditions.push(eq(schema.logisticsProviders.groupId, groupId));
     const existing = await this.db
       .select({ id: schema.logisticsProviders.id })
@@ -763,6 +839,7 @@ export class LogisticsService implements OnModuleInit {
           contactInfo: null,
           coverageArea: null,
           kind: 'WAREHOUSE',
+          currencyCode: code,
           status: 'ACTIVE',
           ...(groupId ? { groupId } : {}),
         })
@@ -782,8 +859,11 @@ export class LogisticsService implements OnModuleInit {
     input: { name: string; address: string; coordinates?: string },
     actorId: string,
     groupId?: string | null,
+    /** Country the warehouse belongs to (the switcher's selected currency).
+     *  Defaults to base NGN when unset (single-country world / no selection). */
+    currencyCode?: string | null,
   ) {
-    const providerId = await this.getOrCreateOurWarehouseProvider(actorId, groupId);
+    const providerId = await this.getOrCreateOurWarehouseProvider(actorId, groupId, currencyCode);
     return withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
         .insert(schema.logisticsLocations)
@@ -861,6 +941,9 @@ export class LogisticsService implements OnModuleInit {
     page: number;
     limit: number;
     groupId?: string | null;
+    /** Multi-country data scope: only warehouses whose provider currency is in
+     *  the caller's assigned/selected countries. Null (MB/admin/view_all) = all. */
+    effectiveCurrencyCodes?: string[] | null;
   }) {
     const conditions: SQL[] = [];
     if (input.listScope === 'our') {
@@ -871,6 +954,15 @@ export class LogisticsService implements OnModuleInit {
     }
     if (input.search) {
       conditions.push(ilike(schema.logisticsLocations.name, `%${input.search}%`));
+    }
+    // Multi-country DATA SCOPE: a warehouse's country lives on its provider's
+    // currency_code. No-op for MB / admin / view_all (effectiveCurrencyCodes null).
+    {
+      const cCond = countryScopeCondition(
+        schema.logisticsProviders.currencyCode,
+        input.effectiveCurrencyCodes,
+      );
+      if (cCond) conditions.push(cCond);
     }
     if (input.groupId) {
       // Include providers in the active group OR legacy providers with NULL groupId
@@ -986,10 +1078,21 @@ export class LogisticsService implements OnModuleInit {
     };
   }
 
-  async getWarehousesOverview(input?: { status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED'; groupId?: string | null }) {
+  async getWarehousesOverview(input?: {
+    status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED';
+    groupId?: string | null;
+    effectiveCurrencyCodes?: string[] | null;
+  }) {
     const conditions: SQL[] = [eq(schema.logisticsProviders.kind, 'WAREHOUSE')];
     if (input?.status) {
       conditions.push(eq(schema.logisticsLocations.status, input.status));
+    }
+    {
+      const cCond = countryScopeCondition(
+        schema.logisticsProviders.currencyCode,
+        input?.effectiveCurrencyCodes,
+      );
+      if (cCond) conditions.push(cCond);
     }
     if (input?.groupId) {
       conditions.push(
@@ -1330,7 +1433,7 @@ export class LogisticsService implements OnModuleInit {
     sortBy?: string;
     sortOrder?: string;
     currencyCode?: string;
-  }, effectiveBranchIds?: string[] | null) {
+  }, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null) {
     const offset = (input.page - 1) * input.limit;
 
     // Build WHERE conditions as parameterised SQL fragments for the UNION
@@ -1359,6 +1462,14 @@ export class LogisticsService implements OnModuleInit {
     // Multi-currency filter — all three unified tables carry currency_code.
     if (input.currencyCode) {
       paramConditions.push(sql`currency_code = ${input.currencyCode}`);
+    }
+    // Multi-country data-scope: restrict to the viewer's effective currencies
+    // (stacks on branch scope). Include NULL currency_code defensively. No-op for
+    // view_all (effectiveCurrencyCodes null / empty). Applies to all three
+    // unified tables via the shared WHERE.
+    if (effectiveCurrencyCodes && effectiveCurrencyCodes.length > 0) {
+      const codes = sql.join(effectiveCurrencyCodes.map((c) => sql`${c.toUpperCase()}`), sql`, `);
+      paramConditions.push(sql`(UPPER(currency_code) IN (${codes}) OR currency_code IS NULL)`);
     }
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       paramConditions.push(sql`servicing_branch_id IN (${sql.join(effectiveBranchIds.map((id) => sql`${id}`), sql`, `)})`);
@@ -1495,7 +1606,7 @@ export class LogisticsService implements OnModuleInit {
     startDate?: string;
     endDate?: string;
     currencyCode?: string;
-  }, effectiveBranchIds?: string[] | null): Promise<Record<string, number>> {
+  }, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null): Promise<Record<string, number>> {
     const paramConditions: SQL[] = [];
     if (input.logisticsLocationId) {
       paramConditions.push(sql`logistics_location_id = ${input.logisticsLocationId}`);
@@ -1506,6 +1617,14 @@ export class LogisticsService implements OnModuleInit {
     // Multi-currency filter — all three unified tables carry currency_code.
     if (input.currencyCode) {
       paramConditions.push(sql`currency_code = ${input.currencyCode}`);
+    }
+    // Multi-country data-scope: restrict to the viewer's effective currencies
+    // (stacks on branch scope). Include NULL currency_code defensively. No-op for
+    // view_all (effectiveCurrencyCodes null / empty). Applies to all three
+    // unified tables via the shared WHERE.
+    if (effectiveCurrencyCodes && effectiveCurrencyCodes.length > 0) {
+      const codes = sql.join(effectiveCurrencyCodes.map((c) => sql`${c.toUpperCase()}`), sql`, `);
+      paramConditions.push(sql`(UPPER(currency_code) IN (${codes}) OR currency_code IS NULL)`);
     }
     if (effectiveBranchIds && effectiveBranchIds.length > 0) {
       paramConditions.push(sql`servicing_branch_id IN (${sql.join(effectiveBranchIds.map((id) => sql`${id}`), sql`, `)})`);
@@ -2254,7 +2373,7 @@ export class LogisticsService implements OnModuleInit {
   /**
    * List delivery remittances. TPL_MANAGER sees own location's; Finance and HoL see all.
    */
-  async listDeliveryRemittances(input: Omit<ListDeliveryRemittancesInput, 'summaryOnly'> & { summaryOnly?: boolean }, actor: SessionUser, groupId?: string | null, effectiveBranchIds?: string[] | null) {
+  async listDeliveryRemittances(input: Omit<ListDeliveryRemittancesInput, 'summaryOnly'> & { summaryOnly?: boolean }, actor: SessionUser, groupId?: string | null, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null) {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER');
     const canListGlobal =
@@ -2285,6 +2404,12 @@ export class LogisticsService implements OnModuleInit {
     // the batch's own currency_code (keeps the list consistent with the totals).
     if (input.currencyCode) {
       conditions.push(eq(schema.deliveryRemittances.currencyCode, input.currencyCode));
+    }
+    // Multi-country data-scope: restrict to the viewer's effective currencies.
+    // No-op for view_all (effectiveCurrencyCodes null / empty).
+    {
+      const cCond = countryScopeCondition(schema.deliveryRemittances.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
     }
     if (input.startDate) {
       conditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
@@ -2844,6 +2969,7 @@ export class LogisticsService implements OnModuleInit {
     actor: SessionUser,
     groupId?: string | null,
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER');
@@ -2866,6 +2992,12 @@ export class LogisticsService implements OnModuleInit {
     if (input.sentBy) conditions.push(eq(schema.deliveryRemittances.sentBy, input.sentBy));
     if (input.status) conditions.push(eq(schema.deliveryRemittances.status, input.status));
     if (input.currencyCode) conditions.push(eq(schema.orders.currencyCode, input.currencyCode));
+    // Multi-country data-scope: restrict to the viewer's effective currencies
+    // (the order's currency). No-op for view_all.
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
+    }
     if (input.startDate) conditions.push(gte(schema.deliveryRemittances.sentAt, nigeriaDayStart(input.startDate)));
     if (input.endDate) conditions.push(lte(schema.deliveryRemittances.sentAt, nigeriaDayEnd(input.endDate)));
     if (groupId) {
@@ -3584,6 +3716,7 @@ export class LogisticsService implements OnModuleInit {
     input: ListDeliveryRemittanceEligibleOrdersInput,
     actor: SessionUser,
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     // Phase 18 — accountant view of "delivered orders not yet on a remittance".
     // TPL_MANAGER keeps their own-location-only behavior for the legacy 3PL
@@ -3613,6 +3746,12 @@ export class LogisticsService implements OnModuleInit {
     // batch built from this list can never mix currencies (matches the totals).
     if (input.currencyCode) {
       conditions.push(eq(schema.orders.currencyCode, input.currencyCode));
+    }
+    // Multi-country data-scope: restrict to the viewer's effective currencies.
+    // No-op for view_all.
+    {
+      const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
     }
 
     if (isTplCaller && !canListGlobal) {
@@ -3828,6 +3967,7 @@ export class LogisticsService implements OnModuleInit {
     actor: SessionUser,
     groupId?: string | null,
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') &&
@@ -3936,6 +4076,24 @@ export class LogisticsService implements OnModuleInit {
         .where(eq(schema.logisticsLocations.providerId, providerId))
         .orderBy(asc(schema.logisticsLocations.name));
       locations = locRows.map((r) => ({ ...r, providerName: r.providerName ?? null }));
+    }
+
+    // Multi-country data-scope: a country-restricted user cannot pull a statement
+    // for a provider outside their effective currencies. Resolve the provider's
+    // currency and reject out-of-scope requests (NOT_FOUND, not FORBIDDEN, so the
+    // existence of other countries' partners isn't leaked). No-op for view_all.
+    if (effectiveCurrencyCodes && effectiveCurrencyCodes.length > 0 && resolvedProviderId) {
+      const provCur = await this.db
+        .select({ currencyCode: schema.logisticsProviders.currencyCode })
+        .from(schema.logisticsProviders)
+        .where(eq(schema.logisticsProviders.id, resolvedProviderId))
+        .limit(1);
+      const code = (provCur[0]?.currencyCode ?? '').toUpperCase();
+      const allowed = effectiveCurrencyCodes.map((c) => c.toUpperCase());
+      // Allow NULL/empty currency (unstamped legacy providers) defensively.
+      if (code && !allowed.includes(code)) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Logistics partner not found' });
+      }
     }
 
     const dateScope = input.dateScope ?? 'createdAt';
@@ -4523,6 +4681,7 @@ export class LogisticsService implements OnModuleInit {
     input: ListDeliveryConfirmationRequestsInput,
     actor: SessionUser,
     effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     const isOrgWide =
       isAdminLevel(actor) ||
@@ -4540,16 +4699,20 @@ export class LogisticsService implements OnModuleInit {
       conditions.push(eq(schema.deliveryConfirmationRequests.status, input.status));
     }
 
-    // Branch-scope via the related order's servicingBranchId (subquery avoids join shape change)
+    // Branch-scope + country-scope via the related order (subquery avoids join
+    // shape change). Both stack: the request is visible only if its order is in
+    // the viewer's branches AND countries. No-op parts are dropped.
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, null, effectiveBranchIds);
-    if (bCond) {
+    const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+    const orderScope = [bCond, cCond].filter((c): c is SQL => !!c);
+    if (orderScope.length > 0) {
       conditions.push(
         inArray(
           schema.deliveryConfirmationRequests.orderId,
           this.db
             .select({ id: schema.orders.id })
             .from(schema.orders)
-            .where(bCond),
+            .where(and(...orderScope)),
         ),
       );
     }
@@ -4760,6 +4923,8 @@ export class LogisticsService implements OnModuleInit {
     includeInactive?: boolean,
     /** Company-group isolation — when set, only providers in this group are listed. */
     activeGroupId?: string | null,
+    /** Multi-country data-scope: restrict to providers in these currencies. */
+    effectiveCurrencyCodes?: string[] | null,
   ): Promise<
     Array<{
       providerId: string;
@@ -4767,6 +4932,7 @@ export class LogisticsService implements OnModuleInit {
       contactInfo: string;
       coverageArea: string;
       status: string;
+      currencyCode: string;
       locationCount: number;
       totalAssigned: number;
       delivered: number;
@@ -4840,6 +5006,12 @@ export class LogisticsService implements OnModuleInit {
     if (effectiveEnd) orderConditions.push(sql`${logisticsDateCol} <= ${effectiveEnd.toISOString()}::timestamptz`);
     const bCond1 = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond1) orderConditions.push(bCond1);
+    // Multi-country: scope per-provider order counts to the viewer's currencies
+    // (the order's own currency_code). No-op for view_all.
+    {
+      const cCond1 = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond1) orderConditions.push(cCond1);
+    }
 
     const statusRows = await this.db
       .select({
@@ -4877,9 +5049,23 @@ export class LogisticsService implements OnModuleInit {
         status: schema.logisticsProviders.status,
         contactInfo: schema.logisticsProviders.contactInfo,
         coverageArea: schema.logisticsProviders.coverageArea,
+        currencyCode: schema.logisticsProviders.currencyCode,
       })
       .from(schema.logisticsProviders)
-      .where(activeGroupId ? or(eq(schema.logisticsProviders.groupId, activeGroupId), isNull(schema.logisticsProviders.groupId))! : undefined);
+      .where(
+        (() => {
+          const provConds: SQL[] = [];
+          if (activeGroupId) {
+            provConds.push(
+              or(eq(schema.logisticsProviders.groupId, activeGroupId), isNull(schema.logisticsProviders.groupId))!,
+            );
+          }
+          // Multi-country data-scope: only providers in the viewer's currencies.
+          const cCond = countryScopeCondition(schema.logisticsProviders.currencyCode, effectiveCurrencyCodes);
+          if (cCond) provConds.push(cCond);
+          return provConds.length > 0 ? and(...provConds) : undefined;
+        })(),
+      );
 
     // ── Pass 4: per-provider remittance amounts ────────────────────────────
     // Approved/disputed from delivery_remittance_outcomes (same source of
@@ -5020,6 +5206,11 @@ export class LogisticsService implements OnModuleInit {
     if (effectiveBranchIds?.length) {
       owingConditions.push(inArray(schema.orders.servicingBranchId, effectiveBranchIds));
     }
+    // Multi-country: only orders in the viewer's currencies count toward owing.
+    {
+      const cCondOwing = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCondOwing) owingConditions.push(cCondOwing);
+    }
 
     const owingRows = await this.db
       .select({
@@ -5051,6 +5242,11 @@ export class LogisticsService implements OnModuleInit {
     if (effectiveEnd) unitsConditions.push(sql`${unitsDateCol} <= ${effectiveEnd.toISOString()}::timestamptz`);
     const bCond3 = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCond3) unitsConditions.push(bCond3);
+    // Multi-country: only orders in the viewer's currencies count toward units.
+    {
+      const cCond3 = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCond3) unitsConditions.push(cCond3);
+    }
 
     const unitsRows = await this.db
       .select({
@@ -5203,6 +5399,9 @@ export class LogisticsService implements OnModuleInit {
         contactInfo: p.contactInfo ?? '',
         coverageArea: p.coverageArea ?? '',
         status: p.status,
+        // Provider's frozen currency — drives the money symbols on the client so
+        // a TZS/GHS provider's amounts don't render with a hardcoded ₦.
+        currencyCode: (p.currencyCode ?? 'NGN').toUpperCase(),
         locationCount: locationCountByProvider.get(p.id) ?? 0,
         totalAssigned,
         delivered: delivered + completed,
@@ -5245,6 +5444,13 @@ export class LogisticsService implements OnModuleInit {
     if (effectiveEnd) unallocConditions.push(sql`${logisticsDateCol} <= ${effectiveEnd.toISOString()}::timestamptz`);
     const bCondUnalloc = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     if (bCondUnalloc) unallocConditions.push(bCondUnalloc);
+    // Multi-country: scope the offline/unallocated bucket to the viewer's
+    // currencies (the order's own currency_code), so a Tanzania view doesn't
+    // count NGN deliveries. No-op for view_all (effectiveCurrencyCodes null).
+    {
+      const cCondUnalloc = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);
+      if (cCondUnalloc) unallocConditions.push(cCondUnalloc);
+    }
     // Only count real fulfilment states; ignore early-funnel + deleted rows so the
     // bucket reflects deliveries, not the whole order table.
     unallocConditions.push(isNull(schema.orders.deletedAt));
@@ -5287,6 +5493,9 @@ export class LogisticsService implements OnModuleInit {
             contactInfo: '',
             coverageArea: '',
             status: 'ACTIVE' as const,
+            // Synthetic bucket has no single provider currency: reflect the
+            // country in view (first effective currency) or base NGN.
+            currencyCode: (effectiveCurrencyCodes?.[0] ?? 'NGN').toUpperCase(),
             locationCount: 0,
             totalAssigned: uTotalAssigned,
             delivered: uDelivered + uCompleted,
@@ -5353,6 +5562,8 @@ export class LogisticsService implements OnModuleInit {
     productId?: string,
     /** Company-group isolation — when set, only locations of providers in this group are listed. */
     activeGroupId?: string | null,
+    /** Multi-country data-scope: restrict to locations of providers in these currencies. */
+    effectiveCurrencyCodes?: string[] | null,
   ) {
     let effectiveStart: Date | null = null;
     let effectiveEnd: Date | null = null;
@@ -5375,10 +5586,25 @@ export class LogisticsService implements OnModuleInit {
         providerId: schema.logisticsLocations.providerId,
         providerName: schema.logisticsProviders.name,
         status: schema.logisticsLocations.status,
+        currencyCode: schema.logisticsProviders.currencyCode,
       })
       .from(schema.logisticsLocations)
       .innerJoin(schema.logisticsProviders, eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId))
-      .where(activeGroupId ? or(eq(schema.logisticsProviders.groupId, activeGroupId), isNull(schema.logisticsProviders.groupId))! : undefined);
+      .where(
+        (() => {
+          const locConds: SQL[] = [];
+          if (activeGroupId) {
+            locConds.push(
+              or(eq(schema.logisticsProviders.groupId, activeGroupId), isNull(schema.logisticsProviders.groupId))!,
+            );
+          }
+          // Multi-country data-scope: only locations whose provider is in the
+          // viewer's currencies.
+          const cCond = countryScopeCondition(schema.logisticsProviders.currencyCode, effectiveCurrencyCodes);
+          if (cCond) locConds.push(cCond);
+          return locConds.length > 0 ? and(...locConds) : undefined;
+        })(),
+      );
 
     if (locations.length === 0) return [];
 
@@ -5505,6 +5731,8 @@ export class LogisticsService implements OnModuleInit {
         providerId: loc.providerId,
         providerName: loc.providerName,
         status: loc.status ?? 'ACTIVE',
+        // Provider's frozen currency — drives money symbols on the client.
+        currencyCode: (loc.currencyCode ?? 'NGN').toUpperCase(),
         totalAssigned,
         delivered,
         inTransit,

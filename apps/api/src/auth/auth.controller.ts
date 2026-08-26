@@ -162,6 +162,11 @@ function bundleInputFromSessionUser(user: SessionUser): SessionBundleInput {
     selectedBranchIds: user.selectedBranchIds ?? null,
     activeGroupId: user.activeGroupId ?? null,
     branchIds: user.branchIds ?? [],
+    currentCurrencyCode: user.currentCurrencyCode ?? null,
+    // Multi-country HARD scope (assigned countries) — distinct from the
+    // currentCurrencyCode view switcher. Drives offer-price edit gating in the
+    // web UI; empty/absent for a non-view_all user means base (NGN) only.
+    currencyCodes: user.currencyCodes ?? [],
     appTheme: user.appTheme ?? null,
     fontScale: user.fontScale ?? null,
     mirroredBy: user.mirroredBy ?? null,
@@ -546,6 +551,28 @@ export class AuthController {
     setBundleCookie(res, merged, BUNDLE_TTL_SECONDS * 60);
 
     return { currentBranchId: merged.currentBranchId, user: merged };
+  }
+
+  /**
+   * Multi-country VIEW switcher (top-bar). Sets the country the user is viewing;
+   * `code = null` clears it (view all allowed countries). Mirrors switch-branch.
+   */
+  @Post('switch-currency')
+  @HttpCode(HttpStatus.OK)
+  async switchCurrency(
+    @Body() body: { code: string | null },
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const sessionToken = this.extractSessionToken(req);
+    if (!sessionToken) {
+      throw new ForbiddenException('No active session.');
+    }
+
+    const updated = await this.authService.switchCurrency(sessionToken, body?.code ?? null);
+    setBundleCookie(res, updated, BUNDLE_TTL_SECONDS * 60);
+
+    return { currentCurrencyCode: updated.currentCurrencyCode, user: updated };
   }
 
   /**

@@ -140,6 +140,15 @@ export const payrollContractors = pgTable('payroll_contractors', {
   active: boolean('active').default(true).notNull(),
   jobTitle: text('job_title'),
   notes: text('notes'),
+  /**
+   * When true, this contractor is dropped from the attendance roster and from any
+   * attendance-based pay eligibility (mirrors `users.attendance_excluded`). Some
+   * agency contractors don't keep standard hours. Migration 0335.
+   */
+  attendanceExempt: boolean('attendance_exempt').default(false).notNull(),
+  attendanceExemptReason: text('attendance_exempt_reason'),
+  attendanceExemptBy: uuid('attendance_exempt_by'),
+  attendanceExemptAt: timestamp('attendance_exempt_at', { withTimezone: true }),
   ...temporalColumns,
   ...timestampColumns,
 });

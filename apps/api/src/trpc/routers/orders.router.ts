@@ -212,6 +212,7 @@ export function buildOrdersListOpts(
       searchIncludeCustomerPhone?: boolean;
       branchScope?: 'servicing' | 'marketing';
       effectiveBranchIds?: string[] | null;
+      effectiveCurrencyCodes?: string[] | null;
     }
   | undefined {
   const closer = csCloserSelfQueueListOpts(user, input);
@@ -774,6 +775,13 @@ export const ordersRouter = router({
       // CS (servicing-scoped) and marketing (marketing-scoped) pages correctly.
       if (input.branchScope) baseOpts.branchScope = input.branchScope;
       baseOpts.effectiveBranchIds = ctx.effectiveBranchIds;
+      // Multi-country: the MARKETING orders surface is governed by its own
+      // per-page currency filter (`input.currencyCode`, default "all"), NOT by
+      // the global top-bar country switcher — an MB sees all their orders across
+      // countries by default. So skip the global country scope for marketing;
+      // every other surface stays scoped by the switcher.
+      baseOpts.effectiveCurrencyCodes =
+        input.branchScope === 'marketing' ? null : ctx.effectiveCurrencyCodes;
       // Exclude graduated follow-up orders from list views — they belong in
       // the Follow-Up strip only. CS also excludes cart-graduated (own strip);
       // Marketing keeps cart-graduated (MB credit). Logistics passes
@@ -822,7 +830,7 @@ export const ordersRouter = router({
     .query(async ({ input, ctx }) => {
       const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
       if (ctx.user.role === 'SUPER_ADMIN') {
-        return getOrdersService().scheduleCalendarHeat(input, branchId, ctx.effectiveBranchIds);
+        return getOrdersService().scheduleCalendarHeat(input, branchId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
       }
       const perms = ctx.user.permissions ?? [];
       const hasOrdersRead = perms.includes('orders.read');
@@ -847,7 +855,7 @@ export const ordersRouter = router({
         });
       }
       if (hasOrgWideScope) {
-        return getOrdersService().scheduleCalendarHeat(input, branchId, ctx.effectiveBranchIds);
+        return getOrdersService().scheduleCalendarHeat(input, branchId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
       }
       let effectiveInput = input;
       if (ctx.user.role === 'MEDIA_BUYER') {
@@ -857,7 +865,7 @@ export const ordersRouter = router({
         effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
       }
       effectiveInput = await applySupervisorScope(ctx, effectiveInput, branchId);
-      return getOrdersService().scheduleCalendarHeat(effectiveInput, branchId, ctx.effectiveBranchIds);
+      return getOrdersService().scheduleCalendarHeat(effectiveInput, branchId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
     }),
 
   /**
@@ -1230,6 +1238,7 @@ export const ordersRouter = router({
           teamMemberIds,
           input?.onlyGraduateNonMarketing,
           input?.currencyCode,
+          ctx.effectiveCurrencyCodes,
         );
       }
 
@@ -1248,6 +1257,7 @@ export const ordersRouter = router({
           onlyGraduateNonMarketing: input?.onlyGraduateNonMarketing,
           onlyOffline: input?.onlyOffline,
           currencyCode: input?.currencyCode,
+          effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -1271,6 +1281,7 @@ export const ordersRouter = router({
           teamMemberIds,
           input?.onlyGraduateNonMarketing,
           input?.currencyCode,
+          ctx.effectiveCurrencyCodes,
         ),
       );
     }),
@@ -1304,6 +1315,8 @@ export const ordersRouter = router({
         narrowed.supervisorScope,
         branchScope,
         countsEffBranchIds,
+        undefined,
+        ctx.effectiveCurrencyCodes,
       );
     }),
 
@@ -1376,6 +1389,7 @@ export const ordersRouter = router({
           filters,
           tsBranchScope,
           ctx.effectiveBranchIds,
+          ctx.effectiveCurrencyCodes,
         );
       }
 
@@ -1388,6 +1402,7 @@ export const ordersRouter = router({
           narrowed,
           tsBranchScope,
           effectiveBranchIds: ctx.effectiveBranchIds,
+          effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -1398,6 +1413,7 @@ export const ordersRouter = router({
           filters,
           tsBranchScope,
           ctx.effectiveBranchIds,
+          ctx.effectiveCurrencyCodes,
         ),
       );
     }),
@@ -1407,7 +1423,7 @@ export const ordersRouter = router({
    * Restricted to Head of CS and SuperAdmin.
    */
   csWorkloads: permissionProcedure('orders.csWorkloads').query(async ({ ctx }) => {
-    return getOrdersService().getCSCloserWorkloads(ctx.currentBranchId, ctx.effectiveBranchIds);
+    return getOrdersService().getCSCloserWorkloads(ctx.currentBranchId, ctx.effectiveBranchIds, undefined, undefined, ctx.effectiveCurrencyCodes);
   }),
 
   /**
@@ -1416,7 +1432,7 @@ export const ordersRouter = router({
   closerWorkloadOrders: permissionProcedure('orders.csWorkloads')
     .input(z.object({ agentId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      return getOrdersService().getCloserWorkloadOrdersWithItems(input.agentId, ctx.currentBranchId, ctx.effectiveBranchIds);
+      return getOrdersService().getCloserWorkloadOrdersWithItems(input.agentId, ctx.currentBranchId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
     }),
 
   /**
@@ -1448,7 +1464,7 @@ export const ordersRouter = router({
   inactiveAgents: permissionProcedure('orders.inactiveAgents')
     .input(z.object({ thresholdMinutes: z.number().min(1).default(10) }).optional())
     .query(async ({ input, ctx }) => {
-      return getOrdersService().getInactiveAgents(input?.thresholdMinutes ?? 10, ctx.currentBranchId, ctx.effectiveBranchIds);
+      return getOrdersService().getInactiveAgents(input?.thresholdMinutes ?? 10, ctx.currentBranchId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
     }),
 
   /**
@@ -1471,6 +1487,8 @@ export const ordersRouter = router({
         input.endDate,
         ctx.currentBranchId,
         ctx.effectiveBranchIds,
+        undefined,
+        ctx.effectiveCurrencyCodes,
       ),
     ),
 
@@ -1627,6 +1645,7 @@ export const ordersRouter = router({
           bundleTeamMemberIds, // teamMemberIds
           !input.orderSource ? true : undefined, // onlyGraduateNonMarketing — Total strip only
           input.currencyCode, // currencyCode — mirror orders.list so strip == table
+          ctx.effectiveCurrencyCodes, // country data-scope
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(
@@ -1636,17 +1655,18 @@ export const ordersRouter = router({
           trendFilters,
           bundleBranchScope,
           aggregateEffectiveBranchIds,
+          ctx.effectiveCurrencyCodes,
         ),
-        getOrdersService().scheduleCalendarHeat(scheduleHeatInput, aggregateBranchId, aggregateEffectiveBranchIds),
+        getOrdersService().scheduleCalendarHeat(scheduleHeatInput, aggregateBranchId, aggregateEffectiveBranchIds, ctx.effectiveCurrencyCodes),
         // csWorkloads requires `orders.csWorkloads` permission. Defense-in-depth
         // — bundle gate is `orders.read` so we re-check before exposing the
         // agent roster.
         input.showCSCloserColumn &&
         (ctx.user.permissions ?? []).includes('orders.csWorkloads')
-          ? getOrdersService().getCSCloserWorkloads(branchId, ctx.effectiveBranchIds)
+          ? getOrdersService().getCSCloserWorkloads(branchId, ctx.effectiveBranchIds, undefined, undefined, ctx.effectiveCurrencyCodes)
           : Promise.resolve([]),
         input.showCSCloserColumn
-          ? getLogisticsService().listLocationOptions({ status: 'ACTIVE', providerKind: 'THIRD_PARTY' })
+          ? getLogisticsService().listLocationOptions({ status: 'ACTIVE', providerKind: 'THIRD_PARTY', groupId: ctx.activeGroupId, effectiveCurrencyCodes: ctx.effectiveCurrencyCodes })
           : Promise.resolve([]),
         input.canCreateOffline
           ? getProductsService().list(
@@ -1672,6 +1692,8 @@ export const ordersRouter = router({
           scope.supervisorScope,
           bundleBranchScope,
           aggregateEffectiveBranchIds,
+          undefined, // currencyCode
+          ctx.effectiveCurrencyCodes,
         ),
         // Offline orders — separate funnel strip on HoCS/closer dashboards.
         getOrdersService().getStatusCounts(
@@ -1686,6 +1708,11 @@ export const ordersRouter = router({
           bundleBranchScope,
           aggregateEffectiveBranchIds,
           false, false, false, false, true, // onlyOffline
+          undefined, // servicingBranchId
+          undefined, // teamMemberIds
+          undefined, // onlyGraduateNonMarketing
+          undefined, // currencyCode
+          ctx.effectiveCurrencyCodes,
         ),
         // Delivered follow-up orders — separate funnel strip.
         getOrdersService().getStatusCounts(
@@ -1700,6 +1727,11 @@ export const ordersRouter = router({
           bundleBranchScope,
           aggregateEffectiveBranchIds,
           false, false, false, false, 'delivered_follow_up', // onlyDeliveredFollowUp via string overload
+          undefined, // servicingBranchId
+          undefined, // teamMemberIds
+          undefined, // onlyGraduateNonMarketing
+          undefined, // currencyCode
+          ctx.effectiveCurrencyCodes,
         ),
         // Teams for the team filter dropdown
         branchId
@@ -1797,7 +1829,7 @@ export const ordersRouter = router({
 
       const [team, workloads, leaderboard, inactiveAgents, supplementary, funnelStatusCounts, offlineStatusCounts, totalOrdersStatusCounts, deliveredFollowUpStatusCounts, followUpCounts, cartCounts] = await Promise.all([
         getUsersService().listCSTeam(branchId, eIds),
-        getOrdersService().getCSCloserWorkloads(branchId, eIds, undefined, cats),
+        getOrdersService().getCSCloserWorkloads(branchId, eIds, undefined, cats, ctx.effectiveCurrencyCodes),
         getOrdersService().getCSCloserLeaderboard(
           input.period,
           input.startDate,
@@ -1805,8 +1837,9 @@ export const ordersRouter = router({
           branchId,
           eIds,
           cats,
+          ctx.effectiveCurrencyCodes,
         ),
-        getOrdersService().getInactiveAgents(input.inactiveThresholdMinutes, branchId, eIds),
+        getOrdersService().getInactiveAgents(input.inactiveThresholdMinutes, branchId, eIds, ctx.effectiveCurrencyCodes),
         getOrdersService().getSupplementaryCounts(
           undefined,
           effStart,
@@ -1816,12 +1849,14 @@ export const ordersRouter = router({
           undefined,
           'servicing',
           ctx.effectiveBranchIds,
+          undefined, // currencyCode
+          ctx.effectiveCurrencyCodes,
         ),
         // Funnel: excludes offline, graduated follow-ups, and cart-graduated orders.
         // Matches Dashboard csStatusCounts (line 92 of dashboard.router.ts).
-        getOrdersService().getStatusCounts(undefined, effStart, effEnd, undefined, undefined, branchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, 'include-imports', true, true),
+        getOrdersService().getStatusCounts(undefined, effStart, effEnd, undefined, undefined, branchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, 'include-imports', true, true, undefined, undefined, undefined, undefined, undefined, ctx.effectiveCurrencyCodes),
         // Offline orders — separate category on stat strip.
-        getOrdersService().getStatusCounts(undefined, effStart, effEnd, undefined, undefined, branchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, false, false, true),
+        getOrdersService().getStatusCounts(undefined, effStart, effEnd, undefined, undefined, branchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, false, false, true, undefined, undefined, undefined, undefined, ctx.effectiveCurrencyCodes),
         // Total orders: marketing orders at all statuses, non-marketing only at DELIVERED/REMITTED.
         // Prevents double-counting with follow-up/cart strips from their own tables.
         getOrdersService().getStatusCounts(
@@ -1835,9 +1870,11 @@ export const ordersRouter = router({
           undefined, // servicingBranchId
           undefined, // teamMemberIds
           true,      // onlyGraduateNonMarketing
+          undefined, // currencyCode
+          ctx.effectiveCurrencyCodes,
         ),
         // Delivered follow-up orders — separate category on stat strip.
-        getOrdersService().getStatusCounts(undefined, effStart, effEnd, undefined, undefined, branchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, false, false, 'delivered_follow_up'),
+        getOrdersService().getStatusCounts(undefined, effStart, effEnd, undefined, undefined, branchId, undefined, undefined, 'servicing', ctx.effectiveBranchIds, false, false, false, false, 'delivered_follow_up', undefined, undefined, undefined, undefined, ctx.effectiveCurrencyCodes),
         // Follow-up and cart orders live in separate tables — fetch their counts
         // so the overview strip totals match the Dashboard's TotalOrdersStrip.
         getFollowUpConfigService().getFollowUpDashboardCounts({
@@ -1845,8 +1882,9 @@ export const ordersRouter = router({
           effectiveBranchIds: eIds,
           startDate: effStart,
           endDate: effEnd,
+          effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
         }),
-        getCartOrdersService().getStatusCounts(branchId, undefined, effStart, effEnd, eIds),
+        getCartOrdersService().getStatusCounts(branchId, undefined, effStart, effEnd, eIds, undefined, undefined, 'servicing', undefined, undefined, ctx.effectiveCurrencyCodes),
       ]);
 
       // Derive category counts from status-count maps (same logic as Dashboard's TotalOrdersStrip).
@@ -1934,7 +1972,7 @@ export const ordersRouter = router({
 
       const [ordersResult, statusCounts, transfers, returnedOrders] =
         await Promise.all([
-          getOrdersService().list(listInput, branchId, { ...buildOrdersListOpts(ctx.user, listInput), effectiveBranchIds: ctx.effectiveBranchIds }),
+          getOrdersService().list(listInput, branchId, { ...buildOrdersListOpts(ctx.user, listInput), effectiveBranchIds: ctx.effectiveBranchIds, effectiveCurrencyCodes: ctx.effectiveCurrencyCodes }),
           getOrdersService().getStatusCounts(
             undefined,
             input.startDate,
@@ -1946,8 +1984,18 @@ export const ordersRouter = router({
             undefined,
             'servicing',
             ctx.effectiveBranchIds,
+            undefined, // isFollowUp
+            undefined, // excludeOffline
+            undefined, // excludeGraduated
+            undefined, // excludeCartGraduated
+            undefined, // onlyOffline
+            undefined, // servicingBranchId
+            undefined, // teamMemberIds
+            undefined, // onlyGraduateNonMarketing
+            undefined, // currencyCode
+            ctx.effectiveCurrencyCodes, // multi-country data-scope (mirror the paired list above)
           ),
-          getInventoryService().listTransfers(undefined, ctx.user),
+          getInventoryService().listTransfers(undefined, ctx.user, undefined, undefined, ctx.activeGroupId, ctx.effectiveCurrencyCodes),
           getInventoryService().listReturnedOrders(locationFilter, ctx.effectiveBranchIds),
         ]);
 
@@ -2072,7 +2120,7 @@ export const ordersRouter = router({
 
       const [ordersResult, statusCounts, locationsResult] =
         await Promise.all([
-          getOrdersService().list(listInput, branchId, { ...buildOrdersListOpts(ctx.user, listInput), effectiveBranchIds: ctx.effectiveBranchIds }),
+          getOrdersService().list(listInput, branchId, { ...buildOrdersListOpts(ctx.user, listInput), effectiveBranchIds: ctx.effectiveBranchIds, effectiveCurrencyCodes: ctx.effectiveCurrencyCodes }),
           getOrdersService().getStatusCounts(
             undefined,
             input.startDate,
@@ -2093,8 +2141,14 @@ export const ordersRouter = router({
             undefined, // teamMemberIds
             undefined, // onlyGraduateNonMarketing
             input.currencyCode, // currencyCode — strip mirrors the list's currency filter
+            ctx.effectiveCurrencyCodes, // multi-country data-scope (mirror the paired list above)
           ),
-          getLogisticsService().listLocations({ page: 1, limit: 20, status: 'ACTIVE' }),
+          getLogisticsService().listLocations(
+            { page: 1, limit: 20, status: 'ACTIVE' },
+            ctx.activeGroupId,
+            ctx.effectiveBranchIds,
+            ctx.effectiveCurrencyCodes,
+          ),
         ]);
 
       return {
@@ -2216,7 +2270,7 @@ export const ordersRouter = router({
    * Get all scheduled callbacks (including future).
    */
   scheduledCallbacks: permissionProcedure('orders.scheduledCallbacks').query(async ({ ctx }) => {
-    return getOrdersService().getScheduledCallbacks(ctx.currentBranchId, ctx.effectiveBranchIds);
+    return getOrdersService().getScheduledCallbacks(ctx.currentBranchId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
   }),
 
   // ── Duplicate Order Management ────────────────────────────
@@ -2225,7 +2279,7 @@ export const ordersRouter = router({
    * Get flagged duplicate orders for review.
    */
   flaggedDuplicates: permissionProcedure('orders.flaggedDuplicates').query(async ({ ctx }) => {
-    return getOrdersService().getFlaggedDuplicates(ctx.currentBranchId, ctx.effectiveBranchIds);
+    return getOrdersService().getFlaggedDuplicates(ctx.currentBranchId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
   }),
 
   /** Raw phones for a duplicate pair — used by the comparison modal on the order detail page. */
@@ -2468,7 +2522,7 @@ export const ordersRouter = router({
    */
   claimQueue: permissionProcedure('orders.read')
     .query(async ({ ctx }) => {
-      return getOrdersService().getClaimQueue(ctx.currentBranchId, ctx.effectiveBranchIds);
+      return getOrdersService().getClaimQueue(ctx.currentBranchId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
     }),
 
   /**
@@ -2842,7 +2896,7 @@ export const ordersRouter = router({
     .input(listFollowUpOrdersSchema)
     .query(async ({ input, ctx }) => {
       const viewerCloserId = ctx.user.role === 'CS_CLOSER' ? ctx.user.id : null;
-      return getFollowUpConfigService().listFollowUpOrders(input, ctx.currentBranchId, ctx.effectiveBranchIds, viewerCloserId);
+      return getFollowUpConfigService().listFollowUpOrders(input, ctx.currentBranchId, ctx.effectiveBranchIds, viewerCloserId, { effectiveCurrencyCodes: ctx.effectiveCurrencyCodes });
     }),
 
   followUpOrdersStatusCounts: permissionProcedure('orders.followUp')
@@ -2858,7 +2912,7 @@ export const ordersRouter = router({
       const assignedCsId = input.assignedCsId ?? (ctx.user?.role === 'CS_CLOSER' ? ctx.user.id : null);
       const branchId = input.branchId ?? ctx.currentBranchId ?? undefined;
       const viewerCloserId = ctx.user?.role === 'CS_CLOSER' ? ctx.user.id : null;
-      return getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, assignedCsId, input.startDate, input.endDate, ctx.effectiveBranchIds, viewerCloserId, input.currencyCode);
+      return getFollowUpConfigService().getFollowUpOrderStatusCounts(branchId, assignedCsId, input.startDate, input.endDate, ctx.effectiveBranchIds, viewerCloserId, input.currencyCode, ctx.effectiveCurrencyCodes);
     }),
 
   /** Lightweight follow-up counts for dashboard stat strips (assigned + delivered). */
@@ -2874,6 +2928,7 @@ export const ordersRouter = router({
         startDate: input?.startDate,
         endDate: input?.endDate,
         viewerCloserId: isCloser ? ctx.user.id : null,
+        effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
       });
     }),
 
@@ -3040,7 +3095,7 @@ export const ordersRouter = router({
             null,
             null,
             null,
-            { searchIncludeCustomerPhone },
+            { searchIncludeCustomerPhone, effectiveCurrencyCodes: ctx.effectiveCurrencyCodes },
           )
           .catch(() => ({ orders: [], total: 0, totalPages: 0 })),
         getCartOrdersService()

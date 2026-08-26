@@ -176,6 +176,13 @@ export const importOrderSchema = z.object({
   assignedCsId: z.string().uuid().optional(),
   /** Branch for the order */
   branchId: z.string().uuid(),
+  /**
+   * Order currency/country (multi-country). Stamps orders.currency_code — feeds
+   * FIFO COGS + remittance, so it must be an ACTIVE currency in the company.
+   * Resolved by the importer (explicit column → media buyer/CS country → base).
+   * Omit for single-currency installs (defaults to the base currency).
+   */
+  currencyCode: z.string().trim().toUpperCase().max(5).optional(),
   /** Ad-hoc fields from the CRM export (whatsappNumber, unit, deliveryTime, importMediaBuyer, importCS, etc.) */
   customFields: z
     .record(z.union([z.string(), z.number(), z.boolean(), z.array(z.string()).max(50), z.object({ label: z.string(), value: z.string() })]))
@@ -183,6 +190,69 @@ export const importOrderSchema = z.object({
 });
 
 export type ImportOrderInput = z.infer<typeof importOrderSchema>;
+
+// ── Resumable bulk import (large-file, server-side, idempotent) ───────────────
+
+/** Column-mapping + options for a bulk import job (persisted on import_jobs.config). */
+export const importJobConfigSchema = z.object({
+  // Optional now: each order's branch is DERIVED from its media buyer / CS
+  // closer primary branch (falling back to the company's first branch). Kept for
+  // a caller that wants to pin every row to one branch.
+  branchId: z.string().uuid().optional(),
+  // Stamped server-side from the creator's active company (never client-trusted).
+  groupId: z.string().uuid().nullish(),
+  mediaBuyerId: z.string().uuid().nullish(),
+  assignedCsId: z.string().uuid().nullish(),
+  targetStatus: z.enum(['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELIVERED', 'RETURNED', 'CANCELLED', 'REMITTED', 'DELETED']),
+  /** Source header holding the unique external id (the idempotency key). */
+  externalIdColumn: z.string().min(1),
+  columnMap: z.object({
+    customerName: z.string().min(1),
+    customerPhone: z.string().min(1),
+    customerAddress: z.string().optional(),
+    deliveryState: z.string().optional(),
+    totalAmount: z.string().optional(),
+    createdAt: z.string().optional(),
+    productId: z.string().optional(),
+    quantity: z.string().optional(),
+    unitPrice: z.string().optional(),
+    offerLabel: z.string().optional(),
+    // ── Display-code columns (resolved to internal UUIDs at import time) ──
+    // Each holds a source header whose cells carry a human-facing code:
+    //   productCode    → products.product_number    (e.g. "PDT-7", "PDT7", "7")
+    //   mediaBuyerCode → users.user_number           (e.g. "USR-3", "MB3", "3")
+    //   closerCode     → users.user_number
+    // Codes resolve only to entities in the caller's company. An unknown product,
+    // media buyer, or closer code HARD-FAILS the row so the user can fix the code
+    // or the record (product also falls back to defaultProductId first). Branch is
+    // never taken from the sheet — it is derived from the MB / CS user.
+    productCode: z.string().optional(),
+    mediaBuyerCode: z.string().optional(),
+    closerCode: z.string().optional(),
+    // Source header holding a currency code or country name (e.g. "NGN",
+    // "Ghana"). Resolved to an active company currency at import; enforced
+    // against the caller's country scope (allowedCurrencyCodes) in the worker.
+    currency: z.string().optional(),
+  }),
+  defaultProductId: z.string().uuid().optional(),
+  defaultQuantity: z.coerce.number().int().min(1).optional(),
+  defaultUnitPrice: z.coerce.number().min(0).optional(),
+});
+export type ImportJobConfigInput = z.infer<typeof importJobConfigSchema>;
+
+export const createImportJobSchema = z.object({
+  fileUrl: z.string().url(),
+  fileKey: z.string().min(1),
+  fileName: z.string().min(1).max(255),
+  fileType: z.enum(['xlsx', 'csv']),
+  // Client-counted data-row count, shown as TOTAL immediately. The worker still
+  // recomputes the authoritative count on its first pass and overwrites this.
+  totalRows: z.number().int().min(0).optional(),
+  config: importJobConfigSchema,
+});
+export type CreateImportJobInput = z.infer<typeof createImportJobSchema>;
+
+export const importJobIdSchema = z.object({ jobId: z.string().uuid() });
 
 /**
  * Import of an OFFLINE contractor delivery record. Contractors / delivery

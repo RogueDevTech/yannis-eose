@@ -11,6 +11,11 @@ export const csRoutingRuleTargetInputSchema = z.object({
 export const createCsRoutingRuleSchema = z.object({
   ownerBranchId: z.string().uuid(),
   productId: z.string().uuid().nullable().optional(),
+  /**
+   * Multi-country: match the order's currency/country. null/omitted = any-country
+   * catch-all. A country-specific rule wins over the catch-all at dispatch.
+   */
+  currencyCode: z.string().trim().min(2).max(5).nullable().optional(),
   priority: z.number().int().min(0).max(1_000_000).optional(),
   enabled: z.boolean().optional(),
   strategy: csRoutingStrategySchema.optional(),
@@ -20,6 +25,8 @@ export const createCsRoutingRuleSchema = z.object({
 export const updateCsRoutingRuleSchema = z.object({
   ruleId: z.string().uuid(),
   productId: z.string().uuid().nullable().optional(),
+  /** Multi-country: reassign the rule's country/currency. null = any-country. */
+  currencyCode: z.string().trim().min(2).max(5).nullable().optional(),
   priority: z.number().int().min(0).max(1_000_000).optional(),
   enabled: z.boolean().optional(),
   strategy: csRoutingStrategySchema.optional(),

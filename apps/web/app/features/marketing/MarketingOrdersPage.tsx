@@ -701,6 +701,9 @@ export function MarketingOrdersPage({
               <>
                 {/* Status stays immediate (not draft): it maps to several params
                     and is also driven by stat-strip tile clicks. */}
+                {/* Currency filter — available to everyone on this page. Defaults
+                    to "All currencies" and can override the global country switcher
+                    to slice this mixed-currency order list by currency. */}
                 {currencyFilterOptions ? (
                   <FilterField onClear={draftCurrency !== 'ALL' ? () => df.set('currency', null) : undefined}>
                     <FormSelect
@@ -1061,7 +1064,7 @@ export function MarketingOrdersPage({
                   }
                   desktopInlineFilters={
                     <>
-                      {/* Currency — widest scoping axis, dormant until a 2nd currency exists. */}
+                      {/* Currency filter — available to everyone (see toolbar note). */}
                       {currencyFilterOptions ? (
                         <InlineFilter
                           type="select"

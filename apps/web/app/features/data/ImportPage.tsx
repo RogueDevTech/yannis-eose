@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { PageHeader } from '~/components/ui/page-header';
-import { OrdersImportPage, type OrdersImportPageProps } from '~/features/orders/OrdersImportPage';
+import { BulkImportPage } from '~/features/orders/BulkImportPage';
+
+interface UserOption { id: string; name: string }
+interface ProductOption { id: string; name: string }
 
 /* ── Import type card metadata ──────────────────────────────── */
 
@@ -34,7 +37,13 @@ function OrdersIcon() {
 
 /* ── Main component ──────────────────────────────────────────── */
 
-export interface ImportPageProps extends OrdersImportPageProps {}
+export interface ImportPageProps {
+  // Passed through to BulkImportPage for a future code-reference legend; the
+  // importer itself resolves everything from per-row codes.
+  mediaBuyers?: UserOption[];
+  csAgents?: UserOption[];
+  products?: ProductOption[];
+}
 
 export function ImportPage(props: ImportPageProps) {
   const [selectedKey, setSelectedKey] = useState<ImportTypeKey | null>(null);
@@ -81,7 +90,12 @@ export function ImportPage(props: ImportPageProps) {
       {/* Expanded import content */}
       {selectedKey === 'orders' && (
         <div className="mt-6">
-          <OrdersImportPage {...props} />
+          <BulkImportPage
+            products={props.products}
+            mediaBuyers={props.mediaBuyers}
+            csAgents={props.csAgents}
+            backHref="/admin/data/import"
+          />
         </div>
       )}
     </div>

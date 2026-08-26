@@ -801,6 +801,91 @@ export class OnboardingService {
   }
 
   /**
+   * Revoke an ALREADY-APPROVED onboarding so the staff member can correct and
+   * resubmit. Mirrors `requestChanges` but is the only path that accepts an
+   * APPROVED record — it flips APPROVED → IN_PROGRESS, records who/why via the
+   * shared `changesRequested*` columns, and the resubmission re-enters the normal
+   * approve flow. The full approval → revoke → resubmit trail lives in
+   * staff_onboarding_history (temporal trigger).
+   */
+  async revokeApproval(
+    targetUserId: string,
+    reason: string,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    if (!this.canApproveOnboarding(actor)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only HR or an admin can revoke an onboarding approval.',
+      });
+    }
+    if (targetUserId === actor.id) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'You cannot revoke your own onboarding approval.',
+      });
+    }
+    await this.assertTargetInCompanyScope(targetUserId, effectiveBranchIds);
+    const trimmedReason = reason.trim();
+    if (trimmedReason.length < 10) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Please provide a reason of at least 10 characters.',
+      });
+    }
+
+    const updated = await withActor(this.db, actor, async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(schema.staffOnboarding)
+        .where(eq(schema.staffOnboarding.userId, targetUserId))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'No onboarding record exists for this user.',
+        });
+      }
+      if (existing.status !== 'APPROVED') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Only an approved onboarding can be revoked for resubmission.',
+        });
+      }
+      const [row] = await tx
+        .update(schema.staffOnboarding)
+        .set({
+          status: 'IN_PROGRESS',
+          submittedAt: null,
+          approvedAt: null,
+          approvedBy: null,
+          changesRequestedAt: new Date(),
+          changesRequestedBy: actor.id,
+          changesRequestedReason: trimmedReason,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.staffOnboarding.userId, targetUserId))
+        .returning();
+      return row!;
+    });
+
+    // Status flipped APPROVED → IN_PROGRESS. Drop the cached user bundle so the
+    // staff's /auth/me reflects the reopened onboarding on their next call.
+    await this.invalidateUserBundle(targetUserId);
+
+    this.notifications.enqueueCreate({
+      userId: targetUserId,
+      type: 'hr:onboarding_approval_revoked',
+      title: 'Onboarding — approval revoked',
+      body: trimmedReason,
+      data: { userId: targetUserId, reason: trimmedReason },
+    });
+
+    return updated;
+  }
+
+  /**
    * HR overview: paginated staff directory with effective onboarding status
    * (`NOT_STARTED` when there is no `staff_onboarding` row yet). Branch scoping
    * mirrors `UsersService.list`.

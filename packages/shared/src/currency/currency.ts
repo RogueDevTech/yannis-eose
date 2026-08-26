@@ -38,8 +38,17 @@ export const NGN: CurrencyInfo = {
  * surface (dropdowns, filters, form toggle, per-currency tiles) must stay hidden
  * and behaviour is byte-for-byte identical to the single-NGN world.
  */
-export function hasMultipleCurrencies(currencies: Pick<CurrencyInfo, 'active'>[]): boolean {
-  return currencies.filter((c) => c.active).length > 1;
+export function hasMultipleCurrencies(currencies: Pick<CurrencyInfo, 'active' | 'code'>[]): boolean {
+  // Count DISTINCT active codes, not rows. Currencies are group-scoped, so the
+  // same code repeats once per company (a single-country org can have many NGN
+  // rows). Counting rows would un-dormant the whole feature for a one-country
+  // install that merely spans multiple companies — breaking the single-NGN
+  // guarantee. Two DISTINCT active codes = a real second currency.
+  const codes = new Set<string>();
+  for (const c of currencies) {
+    if (c.active) codes.add(c.code.toUpperCase());
+  }
+  return codes.size > 1;
 }
 
 /** The base (default) currency from a list, or NGN if none is marked. */

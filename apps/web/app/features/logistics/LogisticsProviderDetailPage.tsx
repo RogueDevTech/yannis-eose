@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
-import { formatOrderNumber } from '@yannis/shared';
+import { formatOrderNumber, symbolForCurrencyCode } from '@yannis/shared';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { Button } from '~/components/ui/button';
 import {
@@ -39,10 +39,16 @@ import { CashStatementExportModal } from '~/features/finance/CashStatementExport
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatNaira(value: string | number | null | undefined): string {
+/**
+ * Format a money value with the provider's own currency symbol. The symbol comes
+ * from the provider's frozen `currencyCode` (mig 0329) via the shared catalog, so
+ * a Tanzania provider's remittances render TSh, a Ghana one GH₵, etc. Never
+ * hardcode ₦ — it mislabels every non-Nigerian provider.
+ */
+function formatMoney(value: string | number | null | undefined, symbol: string): string {
   const n = typeof value === 'string' ? parseFloat(value) : (value ?? 0);
-  if (!Number.isFinite(n) || n === 0) return '₦0';
-  return `₦${n.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`;
+  if (!Number.isFinite(n) || n === 0) return `${symbol}0`;
+  return `${symbol}${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 }
 
 function formatDate(iso: string | null | undefined): string {
@@ -96,6 +102,7 @@ function generateStockReport(
   name: string,
   row: StockBreakdownRow & { qtyRemitted: number; qtyPending: number; amountRemitted: string; amountPending: string; qtyAwaitingRemittance: number; amountAwaitingRemittance: string },
   providerName: string,
+  currencySymbol: string,
 ): string {
   const { expectedAvailable, diff, isConsistent } = checkConsistency(row);
   const lines: string[] = [];
@@ -141,11 +148,11 @@ function generateStockReport(
   lines.push('');
   lines.push(`REMITTANCE STATUS`);
   lines.push(`-----------------`);
-  lines.push(`Remitted:   ${row.qtyRemitted.toLocaleString()} units (${formatNaira(row.amountRemitted)})`);
-  lines.push(`Pending:    ${row.qtyPending.toLocaleString()} units (${formatNaira(row.amountPending)})`);
+  lines.push(`Remitted:   ${row.qtyRemitted.toLocaleString()} units (${formatMoney(row.amountRemitted, currencySymbol)})`);
+  lines.push(`Pending:    ${row.qtyPending.toLocaleString()} units (${formatMoney(row.amountPending, currencySymbol)})`);
 
   if (row.qtyAwaitingRemittance > 0) {
-    lines.push(`Awaiting:   ${row.qtyAwaitingRemittance.toLocaleString()} units (${formatNaira(row.amountAwaitingRemittance)}). Delivered, no remittance batch yet.`);
+    lines.push(`Awaiting:   ${row.qtyAwaitingRemittance.toLocaleString()} units (${formatMoney(row.amountAwaitingRemittance, currencySymbol)}). Delivered, no remittance batch yet.`);
   }
 
   lines.push('');
@@ -406,6 +413,10 @@ export function LogisticsProviderDetailPage({
   dateFilters,
 }: LogisticsProviderDetailPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  // The provider's own currency symbol (Tanzania → TSh, Ghana → GH₵, …). All
+  // remittance/order money on this page is denominated in the provider's country,
+  // so drive the symbol off the provider's frozen currencyCode, never a ₦ literal.
+  const currencySymbol = symbolForCurrencyCode(performance?.currencyCode);
   const loaderRefetchBusy = useLoaderRefetchBusy({ samePathnameOnly: true }).busy;
   const [selectedMovement, setSelectedMovement] = useState<MovementWithProduct | null>(null);
   const [direction, setDirection] = useState<DirectionFilter>('all');
@@ -640,17 +651,17 @@ export function LogisticsProviderDetailPage({
               },
               {
                 label: 'Remitted',
-                value: formatNaira(performance.remittedAmount),
+                value: formatMoney(performance.remittedAmount, currencySymbol),
                 valueClassName: 'text-success-600 dark:text-success-400',
               },
               {
                 label: 'Pending',
-                value: formatNaira(performance.pendingRemittanceAmount),
+                value: formatMoney(performance.pendingRemittanceAmount, currencySymbol),
                 valueClassName: Number(performance.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted',
               },
               {
                 label: 'Disputed',
-                value: formatNaira(performance.disputedRemittanceAmount),
+                value: formatMoney(performance.disputedRemittanceAmount, currencySymbol),
                 valueClassName: Number(performance.disputedRemittanceAmount) > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted',
               },
             ]}
@@ -691,12 +702,12 @@ export function LogisticsProviderDetailPage({
                   <span className="text-app-fg-muted">Remitted</span>
                   <span className="text-right">
                     <span className={`font-semibold ${l.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>{l.qtyRemitted.toLocaleString()}</span>
-                    <span className={`ml-1 ${l.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>({formatNaira(l.amountRemitted)})</span>
-                    {l.qtyPending > 0 && <span className="ml-1.5 text-warning-600 dark:text-warning-400"><span className="font-semibold">{l.qtyPending.toLocaleString()}</span> ({formatNaira(l.amountPending)}) pending</span>}
+                    <span className={`ml-1 ${l.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>({formatMoney(l.amountRemitted, currencySymbol)})</span>
+                    {l.qtyPending > 0 && <span className="ml-1.5 text-warning-600 dark:text-warning-400"><span className="font-semibold">{l.qtyPending.toLocaleString()}</span> ({formatMoney(l.amountPending, currencySymbol)}) pending</span>}
                   </span>
                 </li>
                 {l.qtyAwaitingRemittance > 0 && (
-                  <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{l.qtyAwaitingRemittance.toLocaleString()} ({formatNaira(l.amountAwaitingRemittance)})</span></li>
+                  <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{l.qtyAwaitingRemittance.toLocaleString()} ({formatMoney(l.amountAwaitingRemittance, currencySymbol)})</span></li>
                 )}
               </ul>
               <button
@@ -737,12 +748,12 @@ export function LogisticsProviderDetailPage({
                     <span className="text-app-fg-muted">Remitted</span>
                     <span className="text-right">
                       <span className={`font-semibold ${p.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>{p.qtyRemitted.toLocaleString()}</span>
-                      <span className={`ml-1 ${p.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>({formatNaira(p.amountRemitted)})</span>
-                      {p.qtyPending > 0 && <span className="ml-1.5 text-warning-600 dark:text-warning-400"><span className="font-semibold">{p.qtyPending.toLocaleString()}</span> ({formatNaira(p.amountPending)}) pending</span>}
+                      <span className={`ml-1 ${p.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}`}>({formatMoney(p.amountRemitted, currencySymbol)})</span>
+                      {p.qtyPending > 0 && <span className="ml-1.5 text-warning-600 dark:text-warning-400"><span className="font-semibold">{p.qtyPending.toLocaleString()}</span> ({formatMoney(p.amountPending, currencySymbol)}) pending</span>}
                     </span>
                   </li>
                   {p.qtyAwaitingRemittance > 0 && (
-                    <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{p.qtyAwaitingRemittance.toLocaleString()} ({formatNaira(p.amountAwaitingRemittance)})</span></li>
+                    <li className="flex justify-between gap-2"><span className="text-app-fg-muted">Awaiting</span> <span className="font-semibold text-danger-600 dark:text-danger-400">{p.qtyAwaitingRemittance.toLocaleString()} ({formatMoney(p.amountAwaitingRemittance, currencySymbol)})</span></li>
                   )}
                 </ul>
                 <button
@@ -904,7 +915,7 @@ export function LogisticsProviderDetailPage({
           </div>
           <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
             {reportView === 'summary' ? (
-              <pre className="text-xs font-mono bg-app-hover/40 rounded-lg p-5 whitespace-pre-wrap text-app-fg leading-relaxed">{generateStockReport(reportModal.name, r, provider.name)}</pre>
+              <pre className="text-xs font-mono bg-app-hover/40 rounded-lg p-5 whitespace-pre-wrap text-app-fg leading-relaxed">{generateStockReport(reportModal.name, r, provider.name, currencySymbol)}</pre>
             ) : (
               <div className="space-y-5">
                 <div className="space-y-2">
@@ -933,9 +944,9 @@ export function LogisticsProviderDetailPage({
                 <div className="space-y-2">
                   <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Remittance Status</h3>
                   <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
-                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={r.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}>{r.qtyRemitted.toLocaleString()} units ({formatNaira(r.amountRemitted)})</span></td></tr>
-                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={r.qtyPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{r.qtyPending.toLocaleString()} units ({formatNaira(r.amountPending)})</span></td></tr>
-                    {r.qtyAwaitingRemittance > 0 && <tr className="bg-danger-50 dark:bg-danger-900/10"><td className="px-4 py-2.5 text-danger-700 dark:text-danger-400 font-medium">Awaiting</td><td className="px-4 py-2.5 text-right font-semibold text-danger-700 dark:text-danger-400 tabular-nums">{r.qtyAwaitingRemittance.toLocaleString()} delivered. No remittance yet ({formatNaira(r.amountAwaitingRemittance)})</td></tr>}
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={r.qtyRemitted > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted'}>{r.qtyRemitted.toLocaleString()} units ({formatMoney(r.amountRemitted, currencySymbol)})</span></td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={r.qtyPending > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{r.qtyPending.toLocaleString()} units ({formatMoney(r.amountPending, currencySymbol)})</span></td></tr>
+                    {r.qtyAwaitingRemittance > 0 && <tr className="bg-danger-50 dark:bg-danger-900/10"><td className="px-4 py-2.5 text-danger-700 dark:text-danger-400 font-medium">Awaiting</td><td className="px-4 py-2.5 text-right font-semibold text-danger-700 dark:text-danger-400 tabular-nums">{r.qtyAwaitingRemittance.toLocaleString()} delivered. No remittance yet ({formatMoney(r.amountAwaitingRemittance, currencySymbol)})</td></tr>}
                   </tbody></table></div>
                 </div>
               </div>
@@ -943,7 +954,7 @@ export function LogisticsProviderDetailPage({
           </div>
           <div className="px-5 py-4 border-t border-app-border flex justify-end gap-2 shrink-0">
             <Button type="button" variant="secondary" onClick={() => { setReportModal(null); setReportView('summary'); }}>Close</Button>
-            <Button type="button" variant="primary" onClick={() => { const safeName = reportModal.name.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-'); downloadReport(`stock-report-${safeName}-${new Date().toISOString().slice(0, 10)}.txt`, generateStockReport(reportModal.name, r, provider.name)); }}>Download report</Button>
+            <Button type="button" variant="primary" onClick={() => { const safeName = reportModal.name.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-'); downloadReport(`stock-report-${safeName}-${new Date().toISOString().slice(0, 10)}.txt`, generateStockReport(reportModal.name, r, provider.name, currencySymbol)); }}>Download report</Button>
           </div>
         </Modal>
         );

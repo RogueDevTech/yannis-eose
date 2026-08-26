@@ -8,6 +8,7 @@ import { FormField } from '~/components/ui/form-field';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { useFetcherToast } from '~/components/ui/toast';
+import { symbolForCurrencyCode } from '@yannis/shared';
 import type { LocationOption, ProductOption } from './types';
 
 interface ReceiveLineDraft {
@@ -37,6 +38,7 @@ export function ReceiveShipmentForm({
   disabled = false,
   initial,
   cancelTo = '/admin/shipments',
+  currencyCode = 'NGN',
 }: {
   products: ProductOption[];
   locations: LocationOption[];
@@ -46,7 +48,10 @@ export function ReceiveShipmentForm({
   initial?: ReceiveShipmentInitial;
   /** Destination for the Cancel link. */
   cancelTo?: string;
+  /** Active view currency (top-bar country switcher). Labels the cost fields. */
+  currencyCode?: string;
 }) {
+  const currencySymbol = symbolForCurrencyCode(currencyCode);
   const id = useId();
   const isEdit = !!initial;
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -193,7 +198,7 @@ export function ReceiveShipmentForm({
         <FormField label="Expected arrival">
           <TextInput type="date" value={expectedArrivalDate} onChange={(e) => setExpectedArrivalDate(e.target.value)} disabled={disabled} />
         </FormField>
-        <FormField label="Total landing cost (₦)" hint="Freight + duty + clearing. Allocated across lines on verify.">
+        <FormField label={`Total landing cost (${currencySymbol})`} hint="Freight + duty + clearing. Allocated across lines on verify.">
           <AmountInput value={totalLandingCost} onChange={setTotalLandingCost} disabled={disabled} />
         </FormField>
       </div>
@@ -264,7 +269,7 @@ export function ReceiveShipmentForm({
                   <TextInput
                     type="number"
                     inputMode="decimal"
-                    placeholder="Factory cost ₦ (optional)"
+                    placeholder={`Factory cost ${currencySymbol} (optional)`}
                     value={line.factoryCost}
                     onChange={(e) => updateLine(line.uid, { factoryCost: e.target.value })}
                     min={0}

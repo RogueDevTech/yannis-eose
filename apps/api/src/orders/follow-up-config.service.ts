@@ -16,6 +16,7 @@ import { expandCustomerPhoneSearchDigitRuns } from './orders.service';
 import { isAdminLevel } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { CacheService } from '../common/cache/cache.service';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { EventsService } from '../events/events.service';
@@ -965,7 +966,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
     viewerCloserId?: string | null,
-    listOpts?: { searchIncludeCustomerPhone?: boolean },
+    listOpts?: { searchIncludeCustomerPhone?: boolean; effectiveCurrencyCodes?: string[] | null },
   ) {
     const conditions: Parameters<typeof and>[0][] = input.showDeleted
       ? [sql`${schema.followUpOrders.deletedAt} IS NOT NULL`]
@@ -1018,6 +1019,14 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       } else if (bCond) {
         conditions.push(bCond);
       }
+    }
+    // Multi-country data-scope (stacks on branch scope) — mirrors orders.list.
+    {
+      const cCond = countryScopeCondition(
+        schema.followUpOrders.currencyCode,
+        listOpts?.effectiveCurrencyCodes,
+      );
+      if (cCond) conditions.push(cCond);
     }
     // Date filter: use the timestamp column that matches the status filter.
     // When filtering by DELIVERED/REMITTED the user wants "delivered this month",
@@ -1135,7 +1144,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     };
   }
 
-  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, startDate?: string, endDate?: string, effectiveBranchIds?: string[] | null, viewerCloserId?: string | null, currencyCode?: string) {
+  async getFollowUpOrderStatusCounts(branchId?: string | null, assignedCsId?: string | null, startDate?: string, endDate?: string, effectiveBranchIds?: string[] | null, viewerCloserId?: string | null, currencyCode?: string, effectiveCurrencyCodes?: string[] | null) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
     if (currencyCode) conditions.push(eq(schema.followUpOrders.currencyCode, currencyCode));
     if (assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, assignedCsId));
@@ -1147,6 +1156,11 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       } else if (bCond) {
         conditions.push(bCond);
       }
+    }
+    // Multi-country scope — stacks on branch scope so counts match the list.
+    {
+      const cCond = countryScopeCondition(schema.followUpOrders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) conditions.push(cCond);
     }
     if (startDate) conditions.push(gte(schema.followUpOrders.createdAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.followUpOrders.createdAt, nigeriaDayEnd(endDate)));
@@ -1176,6 +1190,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         deletedConditions.push(bCond);
       }
     }
+    {
+      const cCond = countryScopeCondition(schema.followUpOrders.currencyCode, effectiveCurrencyCodes);
+      if (cCond) deletedConditions.push(cCond);
+    }
     if (startDate) deletedConditions.push(gte(schema.followUpOrders.createdAt, nigeriaDayStart(startDate)));
     if (endDate) deletedConditions.push(lte(schema.followUpOrders.createdAt, nigeriaDayEnd(endDate)));
     const [deletedRow] = await this.db
@@ -1188,9 +1206,12 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   }
 
   /** Lightweight per-status counts for dashboard stat strips. */
-  async getFollowUpDashboardCounts(opts?: { assignedCsId?: string; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string; endDate?: string; viewerCloserId?: string | null }) {
+  async getFollowUpDashboardCounts(opts?: { assignedCsId?: string; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string; endDate?: string; viewerCloserId?: string | null; effectiveCurrencyCodes?: string[] | null }) {
     const eIdsKey = opts?.effectiveBranchIds?.join(',') ?? '';
-    const cacheKey = `cache:followup:dashboard_counts:${opts?.assignedCsId ?? 'all'}:${opts?.branchId ?? 'all'}:${eIdsKey}:${opts?.startDate ?? ''}:${opts?.endDate ?? ''}`;
+    // Multi-country: the currency scope MUST be in the cache key, else a
+    // NGN-scoped user's cached counts would be served to a GHS-scoped user.
+    const curKey = opts?.effectiveCurrencyCodes?.join(',') ?? 'all';
+    const cacheKey = `cache:followup:dashboard_counts:${opts?.assignedCsId ?? 'all'}:${opts?.branchId ?? 'all'}:${eIdsKey}:${curKey}:${opts?.startDate ?? ''}:${opts?.endDate ?? ''}`;
     return this.cache.getOrSet(cacheKey, 30, async () => {
       const conditions: Parameters<typeof and>[0][] = [isNull(schema.followUpOrders.deletedAt)];
       if (opts?.assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, opts.assignedCsId));
@@ -1202,6 +1223,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         } else if (bCond) {
           conditions.push(bCond);
         }
+      }
+      {
+        const cCond = countryScopeCondition(schema.followUpOrders.currencyCode, opts?.effectiveCurrencyCodes);
+        if (cCond) conditions.push(cCond);
       }
       if (opts?.startDate) conditions.push(gte(schema.followUpOrders.createdAt, nigeriaDayStart(opts.startDate)));
       if (opts?.endDate) conditions.push(lte(schema.followUpOrders.createdAt, nigeriaDayEnd(opts.endDate)));

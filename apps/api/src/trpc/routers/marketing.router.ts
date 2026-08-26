@@ -62,6 +62,7 @@ import { getCartOrdersService } from './cart-orders.router';
 import { getSettingsService } from './settings.router';
 
 import { isAdminLevel } from '../../common/authz';
+import { editableCurrencyCodesForActor } from '../../common/authz/offer-currency-scope';
 import { hasFinanceAccess } from '../../common/utils/strip-finance-fields';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
 import type { OrdersAggregateSupervisorScope } from '../../orders/orders.service';
@@ -1000,7 +1001,14 @@ export const marketingRouter = router({
     .input(updateOfferTemplateSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...offerTemplateInput } = input;
-      return getMarketingService().updateOfferTemplate(offerTemplateInput, ctx.user.id);
+      // Multi-country: a country-scoped actor may only edit their assigned
+      // currencies' prices; out-of-scope currencies are preserved server-side.
+      const editableCurrencyCodes = editableCurrencyCodesForActor(ctx.user);
+      return getMarketingService().updateOfferTemplate(
+        offerTemplateInput,
+        ctx.user.id,
+        editableCurrencyCodes,
+      );
     }),
 
   archiveAllOfferTemplatesForProduct: permissionProcedure('products.offers')
@@ -1037,7 +1045,13 @@ export const marketingRouter = router({
     .input(updateOfferGroupSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...offerGroupInput } = input;
-      return getMarketingService().updateOfferGroup(offerGroupInput, ctx.user.id);
+      // Multi-country: preserve out-of-scope per-item currency prices on edit.
+      const editableCurrencyCodes = editableCurrencyCodesForActor(ctx.user);
+      return getMarketingService().updateOfferGroup(
+        offerGroupInput,
+        ctx.user.id,
+        editableCurrencyCodes,
+      );
     }),
 
   getOfferGroup: authedProcedure
@@ -1148,6 +1162,13 @@ export const marketingRouter = router({
     )
     .query(async ({ input, ctx }) => {
       const { mediaBuyerId, status, startDate, endDate, includeMarketingExportPicklists, currencyCode } = input;
+      // Multi-country: the Marketing Orders surface is governed by its OWN
+      // per-page currency filter (`currencyCode`, default "all currencies"), NOT
+      // by the global top-bar country switcher. So an MB (and marketing viewers)
+      // see ALL their orders across countries by default and can slice by
+      // currency here. We therefore ignore marketingCurrencyScope on this
+      // bundle and let `currencyCode` be the sole currency control.
+      const marketingCurrencyScope: string[] | null = null;
       // Branch scope must mirror `orders.list` (`orderListBranchIdOwnerAware`)
       // so the overview strip matches the orders table:
       //  - A plain Media Buyer scopes by their header branch lens — the
@@ -1218,6 +1239,7 @@ export const marketingRouter = router({
             supervisorScope: ordersScope.supervisorScope,
             branchScope: 'marketing',
             effectiveBranchIds: ctx.effectiveBranchIds,
+            effectiveCurrencyCodes: marketingCurrencyScope,
             orderSource: mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import',
             excludeFollowUps: true,
             excludeCartGraduated: true,
@@ -1237,6 +1259,7 @@ export const marketingRouter = router({
           'marketing',
           supervisorBuyerIds,
           currencyCode,
+          marketingCurrencyScope,
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
@@ -1261,6 +1284,7 @@ export const marketingRouter = router({
           // Marketing Orders page — scope the trend by the marketing branch.
           'marketing',
           ctx.effectiveBranchIds,
+          marketingCurrencyScope,
         ),
         canSeeBuyerPicklist
           ? supervisorBuyerIds && supervisorBuyerIds.length > 0
@@ -1344,6 +1368,7 @@ export const marketingRouter = router({
           supervisorScope: ordersScope.supervisorScope,
           branchScope: 'marketing',
           effectiveBranchIds: ctx.effectiveBranchIds,
+          effectiveCurrencyCodes: marketingCurrencyScope,
           orderSource: mediaBuyerId === '__system__' ? undefined : 'edge-form-and-import',
           excludeFollowUps: true,
           excludeCartGraduated: true,
@@ -1360,6 +1385,7 @@ export const marketingRouter = router({
           'marketing',
           supervisorBuyerIds,
           currencyCode,
+          marketingCurrencyScope,
         ),
       ]);
 

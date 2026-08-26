@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { TRPCError } from '@trpc/server';
-import { and, asc, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -167,6 +167,8 @@ export class CsOrderRoutingService {
         .values({
           ownerBranchId: input.ownerBranchId,
           productId: input.productId ?? null,
+          // Multi-country: null = any-country catch-all. Uppercased for match consistency.
+          currencyCode: input.currencyCode ? input.currencyCode.toUpperCase() : null,
           priority: input.priority ?? 0,
           enabled: input.enabled ?? true,
           strategy,
@@ -224,6 +226,9 @@ export class CsOrderRoutingService {
         .update(schema.csOrderRoutingRules)
         .set({
           ...(input.productId !== undefined ? { productId: input.productId } : {}),
+          ...(input.currencyCode !== undefined
+            ? { currencyCode: input.currencyCode ? input.currencyCode.toUpperCase() : null }
+            : {}),
           ...(input.priority !== undefined ? { priority: input.priority } : {}),
           ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
           ...(input.strategy !== undefined ? { strategy: input.strategy } : {}),
@@ -282,6 +287,13 @@ export class CsOrderRoutingService {
   async resolveServicingBranchForProduct(
     ownerBranchId: string,
     productId: string | null | undefined,
+    /**
+     * Multi-country: the order's currency/country (orders.currency_code). A rule
+     * whose currency_code matches wins over a country-agnostic (NULL) rule;
+     * country-agnostic rules still apply as the catch-all. Omit/undefined →
+     * behaves exactly as before (country dimension ignored).
+     */
+    currencyCode?: string | null,
   ): Promise<string | null> {
     const mode = await this.getRelationshipMode(ownerBranchId);
     if (mode === 'SPLIT_ALL_BRANCHES') return null;
@@ -292,6 +304,17 @@ export class CsOrderRoutingService {
         ? isNull(schema.csOrderRoutingRules.productId)
         : eq(schema.csOrderRoutingRules.productId, productId!);
 
+    // Country match: a rule for this currency OR a country-agnostic rule (NULL).
+    // Country-specific rules are preferred via the ORDER BY below. When no
+    // currencyCode is supplied, only country-agnostic rules are considered so
+    // existing behaviour is preserved.
+    const countryMatch = currencyCode
+      ? or(
+          eq(schema.csOrderRoutingRules.currencyCode, currencyCode),
+          isNull(schema.csOrderRoutingRules.currencyCode),
+        )!
+      : isNull(schema.csOrderRoutingRules.currencyCode);
+
     const [rule] = await this.db
       .select({ id: schema.csOrderRoutingRules.id })
       .from(schema.csOrderRoutingRules)
@@ -300,9 +323,16 @@ export class CsOrderRoutingService {
           eq(schema.csOrderRoutingRules.ownerBranchId, ownerBranchId),
           eq(schema.csOrderRoutingRules.enabled, true),
           productMatch,
+          countryMatch,
         ),
       )
-      .orderBy(desc(schema.csOrderRoutingRules.priority), asc(schema.csOrderRoutingRules.createdAt))
+      // Country-specific rule (currency_code NOT NULL) wins over the catch-all,
+      // then priority, then oldest.
+      .orderBy(
+        sql`(${schema.csOrderRoutingRules.currencyCode} IS NOT NULL) DESC`,
+        desc(schema.csOrderRoutingRules.priority),
+        asc(schema.csOrderRoutingRules.createdAt),
+      )
       .limit(1);
 
     if (!rule) return null;
@@ -326,6 +356,8 @@ export class CsOrderRoutingService {
     orderBranchId: string | null | undefined,
     primaryProductId: string | null | undefined,
     orderId: string,
+    /** Multi-country: the order's currency/country. See resolveServicingBranchForProduct. */
+    currencyCode?: string | null,
   ): Promise<CsRoutingDispatchResolution | null> {
     if (!orderBranchId) return null;
 
@@ -359,6 +391,15 @@ export class CsOrderRoutingService {
         ? isNull(schema.csOrderRoutingRules.productId)
         : eq(schema.csOrderRoutingRules.productId, primaryProductId!);
 
+    // Country match — same semantics as resolveServicingBranchForProduct:
+    // country-specific rule preferred, country-agnostic (NULL) as catch-all.
+    const countryMatch = currencyCode
+      ? or(
+          eq(schema.csOrderRoutingRules.currencyCode, currencyCode),
+          isNull(schema.csOrderRoutingRules.currencyCode),
+        )!
+      : isNull(schema.csOrderRoutingRules.currencyCode);
+
     const [rule] = await this.db
       .select()
       .from(schema.csOrderRoutingRules)
@@ -367,9 +408,14 @@ export class CsOrderRoutingService {
           eq(schema.csOrderRoutingRules.ownerBranchId, orderBranchId),
           eq(schema.csOrderRoutingRules.enabled, true),
           productMatch,
+          countryMatch,
         ),
       )
-      .orderBy(desc(schema.csOrderRoutingRules.priority), asc(schema.csOrderRoutingRules.createdAt))
+      .orderBy(
+        sql`(${schema.csOrderRoutingRules.currencyCode} IS NOT NULL) DESC`,
+        desc(schema.csOrderRoutingRules.priority),
+        asc(schema.csOrderRoutingRules.createdAt),
+      )
       .limit(1);
 
     if (!rule) {

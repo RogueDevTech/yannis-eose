@@ -138,10 +138,16 @@ export async function loadCsOrderRoutingPageData(
       relationshipMode = 'BRANCH_DEFAULT';
     }
 
+    // Multi-country: a product can be routed to a DIFFERENT servicing branch per
+    // country, so dedupe on (productId, currencyCode) — NOT productId alone. The
+    // old product-only key collapsed every country rule to the first one, hiding
+    // e.g. "ARJUNA · Nigeria → Lagos CS" vs "ARJUNA · Tanzania → Dar CS".
     const seen = new Set<string>();
     for (const { rules: branchRules } of perBranch) {
       for (const r of branchRules) {
-        const key = r.productId ?? `__noproduct__${r.id}`;
+        const key = r.productId
+          ? `${r.productId}::${r.currencyCode ?? ''}`
+          : `__noproduct__${r.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
         rules.push(r);
@@ -174,10 +180,18 @@ export type CsOrderRoutingMutationPayload =
       productIds: string[];
       servicingBranchId: string;
       teamId?: string | null;
+      /** Country scope for the rule. null/undefined = any country. */
+      currencyCode?: string | null;
     }
   | {
       intent: 'deleteProductRouting';
       productId: string;
+      /**
+       * When present, remove only this country's rule for the product (null =
+       * the any-country catch-all). When omitted, remove ALL rules for the
+       * product (legacy behaviour).
+       */
+      currencyCode?: string | null;
     }
   // Legacy intents kept for backward compat with any open form/widget that may
   // still POST them (e.g. a stale tab). Each is rewritten to a global op.
@@ -251,6 +265,10 @@ export async function handleCsOrderRoutingFormJson(request: Request, formData: F
       return json({ error: 'Select at least one product' }, { status: 400 });
     }
     const targetTeamId = payload.teamId?.trim() ? payload.teamId.trim() : null;
+    // Country scope — only present when the company runs 2+ active currencies.
+    // undefined leaves the server default; null means "any country".
+    const ruleCurrencyCode =
+      payload.currencyCode === undefined ? undefined : payload.currencyCode || null;
 
     // Load existing rules per branch in parallel so we can decide create vs update.
     const rulesByBranch = await Promise.all(
@@ -258,13 +276,24 @@ export async function handleCsOrderRoutingFormJson(request: Request, formData: F
     );
 
     const ops: Array<Promise<{ ok: boolean; status: number; data: unknown }>> = [];
+    // Multi-country: key existing rules on (productId, currencyCode) so a
+    // country-specific save creates a NEW rule ALONGSIDE any any-country
+    // catch-all instead of mutating (destroying) it. Keying on productId alone
+    // silently overwrote the catch-all's country. NULL currency normalises to
+    // '' so the catch-all has a stable, distinct key.
+    const ruleKey = (productId: string, currency: string | null | undefined) =>
+      `${productId}::${currency ?? ''}`;
     for (const { branchId: bid, rules: branchRules } of rulesByBranch) {
-      const existingByProduct = new Map<string, CsRoutingRuleRow>();
+      const existingByKey = new Map<string, CsRoutingRuleRow>();
       for (const r of branchRules) {
-        if (r.productId) existingByProduct.set(r.productId, r);
+        if (r.productId) existingByKey.set(ruleKey(r.productId, r.currencyCode ?? null), r);
       }
       for (const productId of uniqueProducts) {
-        const existing = existingByProduct.get(productId);
+        // Match an existing rule with the SAME product AND the same country
+        // (ruleCurrencyCode undefined = no country dimension in play → catch-all key '').
+        const existing = existingByKey.get(
+          ruleKey(productId, ruleCurrencyCode === undefined ? null : ruleCurrencyCode),
+        );
         const targets = [{ servicingBranchId, teamId: targetTeamId, weight: 1 }];
         if (existing) {
           ops.push(
@@ -278,6 +307,7 @@ export async function handleCsOrderRoutingFormJson(request: Request, formData: F
                 enabled: true,
                 strategy: 'EQUAL',
                 targets,
+                ...(ruleCurrencyCode !== undefined ? { currencyCode: ruleCurrencyCode } : {}),
               },
             }),
           );
@@ -293,6 +323,7 @@ export async function handleCsOrderRoutingFormJson(request: Request, formData: F
                 enabled: true,
                 strategy: 'EQUAL',
                 targets,
+                ...(ruleCurrencyCode !== undefined ? { currencyCode: ruleCurrencyCode } : {}),
               },
             }),
           );
@@ -311,19 +342,29 @@ export async function handleCsOrderRoutingFormJson(request: Request, formData: F
     return json({ success: true as const });
   }
 
-  // ── Remove a product's routing globally ──────────────────────────
+  // ── Remove a product's routing ───────────────────────────────────
+  // When `currencyCode` is provided, remove only that country's rule for the
+  // product (so other countries' routes survive). `null` scopes to the
+  // any-country catch-all rule. When the field is OMITTED, remove every rule for
+  // the product (legacy "remove all" behaviour).
   if (payload.intent === 'deleteProductRouting') {
     const productId = payload.productId?.trim();
     if (!productId) {
       return json({ error: 'productId is required' }, { status: 400 });
     }
+    const scopeToCurrency = 'currencyCode' in payload;
+    const targetCurrency =
+      payload.currencyCode == null ? null : payload.currencyCode.toUpperCase();
     const rulesByBranch = await Promise.all(
       branchIds.map((bid) => listRulesForBranch(cookie ?? '', bid)),
     );
     const ruleIds: string[] = [];
     for (const branchRules of rulesByBranch) {
       for (const r of branchRules) {
-        if (r.productId === productId) ruleIds.push(r.id);
+        if (r.productId !== productId) continue;
+        // Currency-scoped delete: only the matching country's rule.
+        if (scopeToCurrency && (r.currencyCode ?? null) !== targetCurrency) continue;
+        ruleIds.push(r.id);
       }
     }
     if (ruleIds.length === 0) {

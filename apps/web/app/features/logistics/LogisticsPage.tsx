@@ -35,6 +35,7 @@ import { Pagination } from '~/components/ui/pagination';
 import { TableRowActionsSheet, type TableRowSheetAction } from '~/components/ui/table-row-actions-sheet';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
@@ -61,12 +62,20 @@ function AddProviderForm({
   fetcher,
   onCancel,
   submissionError,
+  currencyOptions,
 }: {
   fetcher: ReturnType<typeof useFetcher>;
   onCancel: () => void;
   submissionError?: string | null;
+  /** Active country/currency options; empty in the single-currency world. */
+  currencyOptions: { value: string; label: string }[];
 }) {
   const [rows, setRows] = useState<ProviderRow[]>([{ name: '', contactInfo: '', coverageArea: '' }]);
+  // Multi-country: when the company runs 2+ currencies, a single shared
+  // country/currency applies to every provider in this submission. Absent (the
+  // single-currency world) → the server stamps the country the caller is
+  // VIEWING (global top-bar switcher, ctx.currentCurrencyCode).
+  const showCurrency = currencyOptions.length > 0;
 
   function addRow() {
     setRows((prev) => [...prev, { name: '', contactInfo: '', coverageArea: '' }]);
@@ -95,6 +104,15 @@ function AddProviderForm({
         </Button>
       </div>
       <input type="hidden" name="intent" value={rows.length > 1 ? 'createProviders' : 'createProvider'} />
+      {showCurrency && (
+        <FormSelect
+          name="currencyCode"
+          label="Country / currency"
+          defaultValue={currencyOptions[0]?.value}
+          options={currencyOptions}
+          hint="Which country these logistics companies operate in."
+        />
+      )}
       <div className="space-y-3">
         {rows.map((row, idx) => {
           const partialRow =
@@ -204,6 +222,32 @@ function detectState(loc: Location, providerCoverage?: string | null): string | 
 
 export function LogisticsPage({ providers, totalProviders, locations, totalLocations, globalLowStockThreshold }: LogisticsPageProps) {
   const fetcher = useFetcher();
+  // Multi-country: only expose a per-provider country/currency picker once the
+  // company runs 2+ active currencies. In the single-currency world this stays
+  // dormant and the create/edit forms look exactly as before (currency follows
+  // the top-bar switcher server-side). Options are deduped by code because the
+  // catalog repeats a code per company.
+  const currenciesCatalog = useCurrenciesCatalog();
+  const hasMultipleCurrencies = useHasMultipleCurrencies();
+  const countryCurrencyOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const opts: { value: string; label: string }[] = [];
+    for (const c of currenciesCatalog) {
+      if (!c.active) continue;
+      const code = c.code.toUpperCase();
+      if (seen.has(code)) continue;
+      seen.add(code);
+      opts.push({ value: code, label: `${c.symbol} ${c.code}` });
+    }
+    return opts;
+  }, [currenciesCatalog]);
+  // Multi-country: the provider's country is no longer edited per-provider — it
+  // follows the country the caller is VIEWING (global top-bar country switcher),
+  // resolved server-side. No country picker on the edit form.
+  // Multi-country: country filtering is now driven by the GLOBAL top-bar country
+  // switcher, which narrows the server-side data scope. So the providers/locations
+  // the loader returns (and their totals) are already country-correct — no
+  // client-side country filter or per-page toggle needed here.
   const [activeTab, setActiveTab] = useState<'providers' | 'locations'>('locations');
   const [search, setSearch] = useState('');
   const [filterProviderId, setFilterProviderId] = useState('');
@@ -340,6 +384,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     if (coverageArea) patch.coverageArea = coverageArea;
     const status = fd.get('status')?.toString();
     if (status) patch.status = status;
+    const currencyCode = fd.get('currencyCode')?.toString();
+    if (currencyCode) patch.currencyCode = currencyCode;
     return [{ id, patch }];
   }, []);
   const providerPatches = useOptimisticListPatches<Provider>(fetcher, buildProviderPatches);
@@ -386,6 +432,9 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     () => [...optimisticLocations, ...applyOptimisticPatches(locations, locationPatches)],
     [locations, optimisticLocations, locationPatches],
   );
+  // Totals come from the loader's pagination.total, which the server already
+  // scopes to the active country (global switcher → effectiveCurrencyCodes), so
+  // these are country-correct — including 0 for a country with no data.
   const displayTotalProviders = totalProviders + optimisticProviders.length;
   const displayTotalLocations = totalLocations + optimisticLocations.length;
 
@@ -737,10 +786,10 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             sheet={
               <>
                 <Button variant="secondary" className="h-12 w-full justify-center" onClick={() => setShowAddProvider(true)}>
-                  Company
+                  Create Company
                 </Button>
                 <Button variant="secondary" className="h-12 w-full justify-center" onClick={() => { setAddLocationProviderId(''); setShowAddLocation(true); }}>
-                  Location
+                  Create Location
                 </Button>
                 <Link to="/admin/logistics/partners/import-combined" prefetch="intent" className="btn-secondary h-12 w-full justify-center text-center">
                   Import from Excel
@@ -800,6 +849,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             fetcher={fetcher}
             onCancel={() => setShowAddProvider(false)}
             submissionError={fetcherSurface.errorMatchingIntent(['createProvider', 'createProviders'])}
+            currencyOptions={hasMultipleCurrencies ? countryCurrencyOptions : []}
           />
         </Modal>
       )}
@@ -972,6 +1022,15 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                   { value: 'INACTIVE', label: 'Inactive' },
                 ]}
               />
+              {hasMultipleCurrencies && countryCurrencyOptions.length > 0 && (
+                <FormSelect
+                  name="currencyCode"
+                  label="Country / currency"
+                  defaultValue={(editingProvider.currencyCode ?? '').toUpperCase() || countryCurrencyOptions[0]?.value}
+                  options={countryCurrencyOptions}
+                  hint="Sets which country this logistics company appears under."
+                />
+              )}
               <div className="flex gap-2 pt-2">
                 <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving...">
                   Save changes

@@ -66,6 +66,12 @@ import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { runGlPostWithFinanceAlert } from '../finance/gl-posting-notify';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevel, canViewAllBranches } from '../common/authz';
+import {
+  canEditBasePrice,
+  mergeScopedPrices,
+  mergeScopedItemPrices,
+  offerGroupItemKey,
+} from '../common/authz/offer-currency-scope';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import {
   appendOrdersAggregateScopeConditions,
@@ -6457,10 +6463,28 @@ export class MarketingService {
     tx: MarketingFundingTx,
     offerTemplateId: string,
     prices: Record<string, number> | undefined,
+    // null = view-all (incoming map is authoritative); otherwise out-of-scope
+    // currencies are preserved from what's already stored (merge, not replace).
+    editableCurrencyCodes: string[] | null = null,
   ): Promise<void> {
     if (prices === undefined) return; // caller isn't touching currency prices
+
+    // Load current non-default prices so a scoped submit can't wipe currencies
+    // the actor isn't allowed to edit.
+    const currentRows = await tx
+      .select({
+        currencyCode: schema.offerTemplatePrices.currencyCode,
+        price: schema.offerTemplatePrices.price,
+      })
+      .from(schema.offerTemplatePrices)
+      .where(eq(schema.offerTemplatePrices.offerTemplateId, offerTemplateId));
+    const existing: Record<string, number> = {};
+    for (const r of currentRows) existing[r.currencyCode.toUpperCase()] = Number(r.price);
+
+    const merged = mergeScopedPrices(existing, prices, editableCurrencyCodes);
+
     await tx.delete(schema.offerTemplatePrices).where(eq(schema.offerTemplatePrices.offerTemplateId, offerTemplateId));
-    const rows = Object.entries(prices)
+    const rows = Object.entries(merged)
       .filter(([, v]) => Number.isFinite(v) && v > 0)
       .map(([code, v]) => ({
         id: uuidv7(),
@@ -6571,7 +6595,14 @@ export class MarketingService {
     });
   }
 
-  async updateOfferTemplate(input: UpdateOfferTemplateInput, actorId: string) {
+  async updateOfferTemplate(
+    input: UpdateOfferTemplateInput,
+    actorId: string,
+    // Multi-country: currencies this actor may edit (null = view-all / any).
+    // When set, out-of-scope currency prices are preserved and the base (NGN)
+    // price is only writable if NGN is in the set. See offer-currency-scope.ts.
+    editableCurrencyCodes: string[] | null = null,
+  ) {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const existing = await tx
         .select()
@@ -6585,7 +6616,10 @@ export class MarketingService {
 
       const updateData: Record<string, unknown> = {};
       if (input.name !== undefined) updateData['name'] = input.name;
-      if (input.price !== undefined) updateData['price'] = sql`${input.price}::numeric`;
+      // Base price is NGN by design — only writable by an actor scoped to NGN.
+      if (input.price !== undefined && canEditBasePrice(editableCurrencyCodes)) {
+        updateData['price'] = sql`${input.price}::numeric`;
+      }
       if (input.quantity !== undefined) updateData['quantity'] = input.quantity;
       if (input.imageUrls !== undefined) updateData['imageUrls'] = input.imageUrls;
       if (input.variants !== undefined) updateData['variants'] = input.variants;
@@ -6599,7 +6633,7 @@ export class MarketingService {
 
       const row = updated[0];
       if (row) {
-        await this.replaceOfferTemplatePrices(tx, row.id, input.prices);
+        await this.replaceOfferTemplatePrices(tx, row.id, input.prices, editableCurrencyCodes);
         await this.syncProductBaseSalePriceFromTemplates(tx, row.productId);
       }
       return row;
@@ -6899,11 +6933,33 @@ export class MarketingService {
   private async insertOfferGroupItemPrices(
     tx: MarketingFundingTx,
     createdItems: Array<{ id: string }>,
-    inputItems: Array<{ prices?: Record<string, number> }>,
+    inputItems: Array<{
+      productId: string;
+      label?: string | null;
+      quantity?: number | null;
+      prices?: Record<string, number>;
+    }>,
+    // Multi-country: currencies the actor may edit (null = view-all). When set,
+    // out-of-scope currency prices are preserved from `existingByKey` so a
+    // scoped edit can't drop other countries' item prices during the rebuild.
+    editableCurrencyCodes: string[] | null = null,
+    existingByKey?: Map<string, Record<string, number>>,
   ): Promise<void> {
     const rows: Array<{ id: string; offerGroupItemId: string; currencyCode: string; price: SQL }> = [];
     createdItems.forEach((item, idx) => {
-      const prices = inputItems[idx]?.prices;
+      const inputItem = inputItems[idx];
+      if (!inputItem) return;
+      // View-all (or a create with no snapshot): incoming map is authoritative.
+      // Scoped: merge against the pre-edit snapshot for this item's natural key.
+      const prices =
+        editableCurrencyCodes == null || !existingByKey
+          ? inputItem.prices
+          : mergeScopedItemPrices(
+              existingByKey,
+              offerGroupItemKey(inputItem),
+              inputItem.prices,
+              editableCurrencyCodes,
+            );
       if (!prices) return;
       for (const [code, v] of Object.entries(prices)) {
         if (!Number.isFinite(v) || v <= 0) continue;
@@ -6913,7 +6969,14 @@ export class MarketingService {
     if (rows.length) await tx.insert(schema.offerGroupItemPrices).values(rows);
   }
 
-  async updateOfferGroup(input: UpdateOfferGroupInput, actorId: string) {
+  async updateOfferGroup(
+    input: UpdateOfferGroupInput,
+    actorId: string,
+    // Multi-country: currencies this actor may edit (null = view-all / any).
+    // See offer-currency-scope.ts. Preserves out-of-scope per-item currency
+    // prices (and the NGN item base price) across the item rebuild below.
+    editableCurrencyCodes: string[] | null = null,
+  ) {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const [existing] = await tx
         .select()
@@ -6950,29 +7013,104 @@ export class MarketingService {
           await this.assertOfferItemImageInProductGallery(tx, productId, it.imageUrl);
         }
 
+        // Normalize the incoming items with a concrete sortOrder up front so the
+        // natural key (which includes sortOrder) aligns with the stored rows'
+        // sort_order on both the snapshot and the rebuild. The web form preserves
+        // line order across an edit, so ordinal i here == the pre-edit row's
+        // sort_order for the same line.
+        const normalizedItems = input.items.map((it, idx) => ({
+          ...it,
+          sortOrder: it.sortOrder ?? idx,
+        }));
+
+        // Multi-country: before the rebuild, snapshot the current per-item prices
+        // (base NGN + non-default currencies) keyed by natural key, so a scoped
+        // actor's edit preserves currencies / base prices they may not touch.
+        const scoped = editableCurrencyCodes != null;
+        const existingItemPricesByKey = new Map<string, Record<string, number>>();
+        const existingItemBaseByKey = new Map<string, number>();
+        if (scoped) {
+          const prevItems = await tx
+            .select({
+              id: schema.offerGroupItems.id,
+              productId: schema.offerGroupItems.productId,
+              label: schema.offerGroupItems.label,
+              quantity: schema.offerGroupItems.quantity,
+              price: schema.offerGroupItems.price,
+              sortOrder: schema.offerGroupItems.sortOrder,
+            })
+            .from(schema.offerGroupItems)
+            .where(eq(schema.offerGroupItems.offerGroupId, input.id));
+          const prevPrices = prevItems.length
+            ? await tx
+                .select({
+                  offerGroupItemId: schema.offerGroupItemPrices.offerGroupItemId,
+                  currencyCode: schema.offerGroupItemPrices.currencyCode,
+                  price: schema.offerGroupItemPrices.price,
+                })
+                .from(schema.offerGroupItemPrices)
+                .where(
+                  inArray(
+                    schema.offerGroupItemPrices.offerGroupItemId,
+                    prevItems.map((i) => i.id),
+                  ),
+                )
+            : [];
+          const pricesByItemId = new Map<string, Record<string, number>>();
+          for (const p of prevPrices) {
+            const m = pricesByItemId.get(p.offerGroupItemId) ?? {};
+            m[p.currencyCode.toUpperCase()] = Number(p.price);
+            pricesByItemId.set(p.offerGroupItemId, m);
+          }
+          for (const it of prevItems) {
+            const key = offerGroupItemKey(it);
+            existingItemPricesByKey.set(key, pricesByItemId.get(it.id) ?? {});
+            existingItemBaseByKey.set(key, Number(it.price));
+          }
+        }
+
         await tx
           .delete(schema.offerGroupItems)
           .where(eq(schema.offerGroupItems.offerGroupId, input.id));
 
-        const itemValues = input.items.map((it, idx) => ({
-          offerGroupId: input.id,
-          productId: it.productId,
-          label: it.label,
-          quantity: it.quantity ?? 1,
-          // Use the submitted price when provided (allows discounts); fall back
-          // to unit price × qty when price is 0 or missing.
-          price: it.price > 0
-            ? sql`${String(it.price)}::numeric`
-            : Number.isFinite(inheritedUnitPrice)
-              ? sql`${String(inheritedUnitPrice * (it.quantity ?? 1))}::numeric`
-              : sql`0::numeric`,
-          imageUrl: it.imageUrl ?? null,
-          sortOrder: it.sortOrder ?? idx,
-          status: 'ACTIVE' as const,
-        }));
+        // Base item price is NGN — a scoped actor who can't edit NGN keeps the
+        // prior base price instead of overwriting it from the submit.
+        const canWriteBase = canEditBasePrice(editableCurrencyCodes);
+        const itemValues = normalizedItems.map((it) => {
+          const key = offerGroupItemKey(it);
+          const inheritedBase = Number.isFinite(inheritedUnitPrice)
+            ? inheritedUnitPrice * (it.quantity ?? 1)
+            : 0;
+          const submittedBase = it.price > 0 ? Number(it.price) : inheritedBase;
+          // Base price is NGN. A scoped actor who can't edit NGN never sets it:
+          // an existing line keeps its prior base; a brand-new line falls back to
+          // the product's inherited unit price rather than the submitted amount.
+          const effectiveBase =
+            scoped && !canWriteBase
+              ? existingItemBaseByKey.has(key)
+                ? existingItemBaseByKey.get(key)!
+                : inheritedBase
+              : submittedBase;
+          return {
+            offerGroupId: input.id,
+            productId: it.productId,
+            label: it.label,
+            quantity: it.quantity ?? 1,
+            price: sql`${String(effectiveBase)}::numeric`,
+            imageUrl: it.imageUrl ?? null,
+            sortOrder: it.sortOrder,
+            status: 'ACTIVE' as const,
+          };
+        });
         // Old offer_group_item_prices cascade-deleted with the items above.
         const insertedItems = await tx.insert(schema.offerGroupItems).values(itemValues).returning();
-        await this.insertOfferGroupItemPrices(tx, insertedItems, input.items);
+        await this.insertOfferGroupItemPrices(
+          tx,
+          insertedItems,
+          normalizedItems,
+          editableCurrencyCodes,
+          scoped ? existingItemPricesByKey : undefined,
+        );
       }
 
       const items = await tx

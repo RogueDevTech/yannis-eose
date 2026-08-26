@@ -40,6 +40,22 @@ export interface SessionUser {
    * Multi-branch holders get the existing strict gate.
    */
   branchIds?: string[];
+  /**
+   * Multi-country data-scope — the currency codes this user is assigned in
+   * `user_countries`, captured at login. Resolved into `effectiveCurrencyCodes`
+   * on the tRPC context. Empty/absent for a non-view_all user means "base
+   * country (NGN) only" (see context.ts). Ignored for MB / admin / view_all
+   * holders, who see all countries regardless.
+   */
+  currencyCodes?: string[];
+  /**
+   * Multi-country VIEW switcher (top-bar), distinct from `currencyCodes` (the
+   * hard data-scope). The country the user is currently VIEWING — like
+   * `currentBranchId` for branches. Null = base/default country (or feature
+   * dormant). Always within the user's allowed `currencyCodes`. Set by
+   * `switchCurrency`; read as `ctx.currentCurrencyCode`.
+   */
+  currentCurrencyCode?: string | null;
   /** Saved appearance id; undefined/null = use org default (`client_ui_config`). */
   appTheme?: string | null;
   /** Saved font scale id; undefined/null = base. */

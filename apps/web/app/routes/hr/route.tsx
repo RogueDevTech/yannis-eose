@@ -85,7 +85,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .catch(() => [] as BranchGroupEntry[])
     : Promise.resolve([] as BranchGroupEntry[]);
 
-  return defer({ user, notifications: notificationsPromise, branches: branchesPromise, branchGroups: branchGroupsPromise });
+  // Active currency catalog — feeds the top-bar country switcher AND the
+  // "Countries this user can access" control on the user create/edit form.
+  // Must mirror the /admin layout — without this, /hr/* pages fall back to the
+  // NGN-only catalog and silently hide every multi-country control.
+  type CurrencyRow = {
+    code: string; symbol: string; countryName: string; precision: number;
+    isDefault: boolean; active: boolean; fxRateToBase: string | null; color: string | null;
+  };
+  type CurrencyEntry = {
+    code: string; symbol: string; countryName: string; precision: number;
+    isDefault: boolean; active: boolean; fxRateToBase: number | null; color: string | null;
+  };
+  const currenciesPromise: Promise<CurrencyEntry[]> = apiRequest<unknown>('/trpc/currencies.listActive', { method: 'GET', cookie })
+    .then((res) => {
+      if (!res.ok) return [] as CurrencyEntry[];
+      const rows = (res.data as { result?: { data?: CurrencyRow[] } })?.result?.data ?? [];
+      return rows.map((r) => ({
+        code: r.code, symbol: r.symbol, countryName: r.countryName, precision: r.precision,
+        isDefault: r.isDefault, active: r.active,
+        fxRateToBase: r.fxRateToBase == null ? null : Number(r.fxRateToBase),
+        color: r.color ?? null,
+      }));
+    })
+    .catch(() => [] as CurrencyEntry[]);
+
+  return defer({ user, notifications: notificationsPromise, branches: branchesPromise, branchGroups: branchGroupsPromise, currencies: currenciesPromise });
 }
 
 /**
@@ -158,13 +183,16 @@ export async function action({ request }: ActionFunctionArgs) {
  * Single mount + state bridge keeps the Outlet alive across resolution.
  */
 export default function HrLayout() {
-  const { user, notifications, branches, branchGroups } = useLoaderData<typeof loader>();
+  const { user, notifications, branches, branchGroups, currencies } = useLoaderData<typeof loader>();
   const [resolvedBranches, setResolvedBranches] = useState<
     Array<{ id: string; name: string; code: string }> | null
   >(null);
   const [resolvedGroups, setResolvedGroups] = useState<
     Array<{ id: string; name: string; status?: string }> | undefined
   >(undefined);
+  const [resolvedCurrencies, setResolvedCurrencies] = useState<
+    Array<{ code: string; symbol: string; countryName: string; precision: number; isDefault: boolean; active: boolean; fxRateToBase: number | null; color: string | null }> | null
+  >(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,10 +210,15 @@ export default function HrLayout() {
       .catch(() => {
         if (!cancelled) setResolvedGroups(undefined);
       });
+    Promise.resolve(currencies)
+      .then((list) => {
+        if (!cancelled && Array.isArray(list)) setResolvedCurrencies(list);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [branches, branchGroups]);
+  }, [branches, branchGroups, currencies]);
 
   return (
     <DashboardLayout
@@ -195,6 +228,7 @@ export default function HrLayout() {
       branchesHydrationReady={resolvedBranches !== null}
       notificationsPromise={notifications}
       notificationsActionUrl="/hr"
+      currencies={resolvedCurrencies ?? undefined}
     />
   );
 }

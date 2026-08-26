@@ -27,5 +27,11 @@ export function templatesToPreviewOffers(
     qty: typeof t.quantity === 'number' && Number.isFinite(t.quantity) ? t.quantity : Number.parseInt(String(t.quantity), 10) || 1,
     price: typeof t.price === 'number' ? String(t.price) : String(t.price ?? ''),
     ...(Array.isArray(t.imageUrls) && t.imageUrls.length > 0 ? { imageUrls: t.imageUrls } : {}),
+    // Forward per-currency tier prices so offer-TIER-based form previews are
+    // multi-currency, matching the offer-GROUP path (rowToOffer). Dropping this
+    // forced tier previews to NGN-only.
+    ...(t.pricesByCurrency && Object.keys(t.pricesByCurrency).length > 0
+      ? { pricesByCurrency: t.pricesByCurrency }
+      : {}),
   }));
 }

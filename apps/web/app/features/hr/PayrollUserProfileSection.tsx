@@ -148,6 +148,12 @@ export function PayrollUserProfileSection({
         searchPlaceholder="Search pay roles..."
         options={filteredPayRoles.map((r) => ({ value: r.id, label: r.name }))}
         />
+        {!values.payRoleId && values.salaryBasis !== 'FLAT_RATE' ? (
+          <p className="mt-1.5 text-xs font-medium text-app-danger">
+            No pay role assigned: this person resolves ₦0 base and is invisible in attendance
+            until a role (or flat rate) is set.
+          </p>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -7,6 +7,8 @@ export interface LogisticsProviderRow {
   providerId: string;
   providerName: string;
   status: string;
+  /** Provider's frozen currency (e.g. NGN, TZS) — drives money symbols. */
+  currencyCode: string;
   locationCount: number;
   totalAssigned: number;
   delivered: number;
@@ -60,6 +62,8 @@ export interface LogisticsLocationRow {
   providerId: string;
   providerName: string;
   status: string;
+  /** Provider's frozen currency (e.g. NGN, TZS) — drives money symbols. */
+  currencyCode: string;
   totalAssigned: number;
   delivered: number;
   returned: number;

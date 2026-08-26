@@ -4,8 +4,9 @@ import { useActionData, useLoaderData, useNavigation } from '@remix-run/react';
 import { useEffect, useState } from 'react';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { OfferForm } from '~/features/campaigns/OfferForm';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getCurrentUser, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { editableOfferCurrencyCodes } from '~/lib/offer-currency-scope';
 import type { Product } from '~/features/campaigns/types';
 
 export const meta: MetaFunction = () => [{ title: 'Edit offer — Yannis EOSE' }];
@@ -61,6 +62,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const productId = data.items[0]?.productId ?? '';
 
+  // Multi-country: which currencies may THIS user edit? null = all (view-all).
+  // Drives read-only locking of out-of-scope price inputs; server re-enforces.
+  const currentUser = await getCurrentUser(request);
+  const editableCurrencyCodes = currentUser
+    ? editableOfferCurrencyCodes(currentUser)
+    : ['NGN'];
+
   // App Shell pattern — defer the products fetch so the form chrome (current
   // offer name, line items with labels and quantities) renders instantly.
   // Only the Product picker (and product-derived gallery + base price) wait.
@@ -97,6 +105,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     group: data.group,
     items: data.items,
     productId,
+    editableCurrencyCodes,
     productsPromise,
   });
 }
@@ -185,7 +194,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function EditOfferRoute() {
-  const { returnTo, group, items, productId: initialProductId, productsPromise } =
+  const { returnTo, group, items, productId: initialProductId, editableCurrencyCodes, productsPromise } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>() as { error?: string } | undefined;
   const navigation = useNavigation();
@@ -247,6 +256,7 @@ export default function EditOfferRoute() {
       initialName={group.name}
       initialProductId={initialProductId}
       initialLines={initialLines}
+      editableCurrencyCodes={editableCurrencyCodes}
     />
   );
 }

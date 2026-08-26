@@ -43,7 +43,13 @@ export function setLogisticsCacheService(service: CacheService) {
 
 const LOGISTICS_OPTIONS_TTL_SECONDS = 60 * 15;
 
-async function invalidateLogisticsOptionsCache(): Promise<void> {
+/**
+ * Bust the logistics options cache (provider + location option lists). Exported
+ * so sibling routers that mutate warehouses/providers/locations — e.g. the
+ * inventory router's `warehouses.create`/`update` — can invalidate the shipment
+ * destination picker, which reads `logistics.locationOptions` (cached 15m).
+ */
+export async function invalidateLogisticsOptionsCache(): Promise<void> {
   if (!logisticsCacheService) return;
   await logisticsCacheService.delPattern('cache:logistics:options:*').catch(() => {
     /* fail-open */
@@ -83,7 +89,7 @@ export const logisticsRouter = router({
   listProviders: authedProcedure
     .input(listProvidersSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listProviders(input, ctx.activeGroupId);
+      return getLogisticsService().listProviders(input, ctx.activeGroupId, ctx.effectiveCurrencyCodes);
     }),
 
   /**
@@ -132,7 +138,12 @@ export const logisticsRouter = router({
   createProvider: permissionProcedure('logistics.write')
     .input(createProviderSchema)
     .mutation(async ({ input, ctx }) => {
-      const res = await getLogisticsService().createProvider(input, ctx.user.id, ctx.activeGroupId);
+      const res = await getLogisticsService().createProvider(
+        input,
+        ctx.user.id,
+        ctx.activeGroupId,
+        ctx.currentCurrencyCode,
+      );
       await invalidateLogisticsOptionsCache();
       return res;
     }),
@@ -140,7 +151,7 @@ export const logisticsRouter = router({
   updateProvider: permissionProcedure('logistics.write')
     .input(updateProviderSchema)
     .mutation(async ({ input, ctx }) => {
-      const res = await getLogisticsService().updateProvider(input, ctx.user.id);
+      const res = await getLogisticsService().updateProvider(input, ctx.user.id, ctx.currentCurrencyCode);
       await invalidateLogisticsOptionsCache();
       return res;
     }),
@@ -149,7 +160,7 @@ export const logisticsRouter = router({
   listLocations: authedProcedure
     .input(listLocationsSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listLocations(input, ctx.activeGroupId, ctx.effectiveBranchIds);
+      return getLogisticsService().listLocations(input, ctx.activeGroupId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
     }),
 
   /**
@@ -170,7 +181,11 @@ export const logisticsRouter = router({
         providerKind: input?.providerKind,
       } as const;
 
-      const withGroup = { ...effective, groupId: ctx.activeGroupId };
+      const withGroup = {
+        ...effective,
+        groupId: ctx.activeGroupId,
+        effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
+      };
       if (!logisticsCacheService) {
         return getLogisticsService().listLocationOptions(withGroup);
       }
@@ -181,6 +196,9 @@ export const logisticsRouter = router({
           branchId: ctx.currentBranchId ?? null,
           groupId: ctx.activeGroupId ?? null,
           role: ctx.user.role,
+          // Country scope MUST be in the cache key — else a scoped user gets
+          // another country's cached location options.
+          currencyCodes: ctx.effectiveCurrencyCodes ?? null,
           status: effective.status,
           providerKind: effective.providerKind ?? null,
         });
@@ -291,7 +309,7 @@ export const logisticsRouter = router({
   listDeliveryRemittanceOrders: authedProcedure
     .input(listDeliveryRemittancesSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listDeliveryRemittanceOrders(input, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds);
+      return getLogisticsService().listDeliveryRemittanceOrders(input, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
     }),
 
   /** Duplicate order comparison: original + all duplicates with invoices and remittance info. */
@@ -336,7 +354,7 @@ export const logisticsRouter = router({
     )
     .query(async ({ input, ctx }) => {
       const [ordersResult, statusCounts, locations, branches] = await Promise.all([
-        getLogisticsService().listUnifiedLogisticsOrders(input, ctx.effectiveBranchIds),
+        getLogisticsService().listUnifiedLogisticsOrders(input, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes),
         getLogisticsService().getUnifiedLogisticsStatusCounts(
           {
             statuses: input.statuses,
@@ -347,8 +365,9 @@ export const logisticsRouter = router({
             currencyCode: input.currencyCode,
           },
           ctx.effectiveBranchIds,
+          ctx.effectiveCurrencyCodes,
         ),
-        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId }),
+        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId, effectiveCurrencyCodes: ctx.effectiveCurrencyCodes }),
         (async () => {
           const { listBranchesForUser } = await import('./branches.router');
           return listBranchesForUser(ctx.user);
@@ -386,8 +405,8 @@ export const logisticsRouter = router({
     .query(async ({ input, ctx }) => {
       const { getUsersService } = await import('./users.router');
       const [remittances, locations, usersResult] = await Promise.all([
-        getLogisticsService().listDeliveryRemittances(input, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds),
-        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId }),
+        getLogisticsService().listDeliveryRemittances(input, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes),
+        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId, effectiveCurrencyCodes: ctx.effectiveCurrencyCodes }),
         getUsersService().list(
           { page: 1, limit: 100, sortBy: 'createdAt', sortOrder: 'desc', includeBranchMemberships: false },
           ctx.user,
@@ -405,6 +424,7 @@ export const logisticsRouter = router({
         input ?? { page: 1, limit: 100 },
         ctx.user,
         ctx.effectiveBranchIds,
+        ctx.effectiveCurrencyCodes,
       );
     }),
 
@@ -417,6 +437,7 @@ export const logisticsRouter = router({
         ctx.user,
         ctx.activeGroupId,
         ctx.effectiveBranchIds,
+        ctx.effectiveCurrencyCodes,
       );
     }),
 
@@ -448,7 +469,7 @@ export const logisticsRouter = router({
   listDeliveryConfirmationRequests: permissionProcedure('logistics.read')
     .input(listDeliveryConfirmationRequestsSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listDeliveryConfirmationRequests(input, ctx.user, ctx.effectiveBranchIds);
+      return getLogisticsService().listDeliveryConfirmationRequests(input, ctx.user, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
     }),
 
   approveDeliveryConfirmation: permissionProcedure('logistics.write')
@@ -483,6 +504,7 @@ export const logisticsRouter = router({
         input.productId,
         false,
         ctx.activeGroupId,
+        ctx.effectiveCurrencyCodes,
       );
     }),
 
@@ -504,6 +526,7 @@ export const logisticsRouter = router({
         ctx.effectiveBranchIds,
         input.productId,
         ctx.activeGroupId,
+        ctx.effectiveCurrencyCodes,
       );
     }),
 });

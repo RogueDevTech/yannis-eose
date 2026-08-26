@@ -23,7 +23,8 @@ import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-t
 import { Modal } from '~/components/ui/modal';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { formatNaira } from '~/lib/format-amount';
+import { useCurrenciesCatalog } from '~/contexts/currencies-catalog-context';
+import { currencyByCode, formatMoneyByCode, type CurrencyInfo } from '@yannis/shared';
 import { CashStatementExportModal } from '~/features/finance/CashStatementExportModal';
 
 export interface LogisticsTeamPageProps {
@@ -41,6 +42,9 @@ export interface LogisticsTeamPageProps {
   q?: string;
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
+  /** Active view currency (top-bar country switcher). Labels the stat-strip
+   *  totals when there are no rows to derive the currency from. */
+  viewCurrencyCode?: string;
 }
 
 function checkProviderConsistency(p: LogisticsProviderRow) {
@@ -49,8 +53,10 @@ function checkProviderConsistency(p: LogisticsProviderRow) {
   return { expected, diff, isConsistent: diff === 0 };
 }
 
-function generateProviderReport(p: LogisticsProviderRow, filters?: { productName?: string; startDate?: string; endDate?: string; periodAllTime?: boolean }): string {
+function generateProviderReport(p: LogisticsProviderRow, currencies: CurrencyInfo[], filters?: { productName?: string; startDate?: string; endDate?: string; periodAllTime?: boolean }): string {
   const c = checkProviderConsistency(p);
+  // Money in the provider's frozen currency, not a hardcoded ₦.
+  const money = (n: number) => formatMoneyByCode(n, currencies, p.currencyCode);
   const lines: string[] = [];
   lines.push(`STOCK RECONCILIATION REPORT`);
   lines.push(`==========================`);
@@ -97,9 +103,9 @@ function generateProviderReport(p: LogisticsProviderRow, filters?: { productName
   lines.push('');
   lines.push(`REMITTANCE`);
   lines.push(`----------`);
-  lines.push(`Remitted:            ${formatNaira(Number(p.remittedAmount))}`);
-  lines.push(`Pending:             ${formatNaira(Number(p.pendingRemittanceAmount))}`);
-  if (Number(p.disputedRemittanceAmount) > 0) lines.push(`Disputed:            ${formatNaira(Number(p.disputedRemittanceAmount))}`);
+  lines.push(`Remitted:            ${money(Number(p.remittedAmount))}`);
+  lines.push(`Pending:             ${money(Number(p.pendingRemittanceAmount))}`);
+  if (Number(p.disputedRemittanceAmount) > 0) lines.push(`Disputed:            ${money(Number(p.disputedRemittanceAmount))}`);
   lines.push('');
   lines.push(`--- End of Report ---`);
   return lines.join('\n');
@@ -291,18 +297,18 @@ function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: 
       <div className="text-xs mb-3">
         <div className="text-app-fg-muted">Remitted</div>
         <div className="font-semibold tabular-nums text-app-fg">
-          <NairaPrice amount={row.remittedAmount} />
+          <NairaPrice amount={row.remittedAmount} currencyCode={row.currencyCode} />
         </div>
         {(Number(row.pendingRemittanceAmount) > 0 || Number(row.disputedRemittanceAmount) > 0) && (
           <div className="flex flex-wrap gap-1 mt-1 text-micro">
             {Number(row.pendingRemittanceAmount) > 0 && (
               <span className="px-1 py-0.5 rounded bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
-                Pending <NairaPrice amount={row.pendingRemittanceAmount} />
+                Pending <NairaPrice amount={row.pendingRemittanceAmount} currencyCode={row.currencyCode} />
               </span>
             )}
             {Number(row.disputedRemittanceAmount) > 0 && (
               <span className="px-1 py-0.5 rounded bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400">
-                Disputed <NairaPrice amount={row.disputedRemittanceAmount} />
+                Disputed <NairaPrice amount={row.disputedRemittanceAmount} currencyCode={row.currencyCode} />
               </span>
             )}
           </div>
@@ -339,12 +345,41 @@ export function LogisticsTeamPage({
   q = '',
   sortBy: sortByFromLoader = 'deliveryRate',
   sortDir: sortDirFromLoader = 'desc',
+  viewCurrencyCode = 'NGN',
 }: LogisticsTeamPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const listQuerySuffix = useMemo(() => {
     const qs = searchParams.toString();
     return qs ? `?${qs}` : '';
   }, [searchParams]);
+
+  // The page is usually country-scoped (effectiveCurrencyCodes = one currency),
+  // so every provider / location shown shares one currency and the stat-strip
+  // totals + aggregate exports can carry that symbol. But a user assigned MORE
+  // than one country with no single country picked in the switcher can see rows
+  // spanning currencies; summing those under one symbol would mislabel a mixed
+  // total. So: derive the shared currency only when the displayed rows agree on
+  // it; otherwise treat the total as currency-less (plain number, no symbol).
+  const currenciesCatalog = useCurrenciesCatalog();
+  const displayedCurrencyCode = useMemo(() => {
+    const codes = new Set<string>();
+    for (const p of providers) codes.add((p.currencyCode || 'NGN').toUpperCase());
+    for (const l of locationRows) codes.add((l.currencyCode || 'NGN').toUpperCase());
+    // No rows to derive from → label totals in the active view currency (the
+    // top-bar country switcher), so an empty Tanzania page reads TSh0, not ₦0.
+    if (codes.size === 0) return (viewCurrencyCode || 'NGN').toUpperCase();
+    if (codes.size > 1) return null; // mixed — totals can't carry a single symbol
+    return [...codes][0]!;
+  }, [providers, locationRows, viewCurrencyCode]);
+  // Format an aggregate total: symbol'd in the shared currency, or a plain
+  // grouped number (no symbol) when the displayed rows span multiple currencies.
+  const money = useMemo(() => {
+    if (displayedCurrencyCode == null) {
+      return (n: number) => Math.round(n).toLocaleString('en-US');
+    }
+    const code = displayedCurrencyCode;
+    return (n: number) => formatMoneyByCode(n, currenciesCatalog, code);
+  }, [displayedCurrencyCode, currenciesCatalog]);
   const [peekProvider, setPeekProvider] = useState<LogisticsProviderRow | null>(null);
   const [reportProvider, setReportProvider] = useState<LogisticsProviderRow | null>(null);
   const [reportView, setReportView] = useState<'summary' | 'breakdown'>('summary');
@@ -406,8 +441,9 @@ export function LogisticsTeamPage({
     if (sortByFromLoader !== 'assigned') n += 1;
     if (sortDirFromLoader !== 'desc') n += 1;
     if (activeProductId) n += 1;
+    if (viewType !== 'company') n += 1;
     return n;
-  }, [sortByFromLoader, sortDirFromLoader, activeProductId]);
+  }, [sortByFromLoader, sortDirFromLoader, activeProductId, viewType]);
 
   const showSearchEmpty = unfilteredCount > 0 && providers.length === 0;
 
@@ -511,11 +547,11 @@ export function LogisticsTeamPage({
           return pending > 0 ? (
             <DualValue
               className="font-medium"
-              left={<span className="text-success-600 dark:text-success-400"><NairaPrice amount={p.remittedAmount} /></span>}
-              right={<span className="text-warning-600 dark:text-warning-400"><NairaPrice amount={p.pendingRemittanceAmount} /></span>}
+              left={<span className="text-success-600 dark:text-success-400"><NairaPrice amount={p.remittedAmount} currencyCode={p.currencyCode} /></span>}
+              right={<span className="text-warning-600 dark:text-warning-400"><NairaPrice amount={p.pendingRemittanceAmount} currencyCode={p.currencyCode} /></span>}
             />
           ) : (
-            <span className="text-success-600 dark:text-success-400 font-medium tabular-nums"><NairaPrice amount={p.remittedAmount} /></span>
+            <span className="text-success-600 dark:text-success-400 font-medium tabular-nums"><NairaPrice amount={p.remittedAmount} currencyCode={p.currencyCode} /></span>
           );
         },
       },
@@ -527,10 +563,10 @@ export function LogisticsTeamPage({
         render: (p) => {
           const amount = Number(p.owingAmount) || 0;
           const cnt = p.owingCount ?? 0;
-          if (amount <= 0) return <span className="text-app-fg-muted tabular-nums">₦0</span>;
+          if (amount <= 0) return <span className="text-app-fg-muted tabular-nums">{currencyByCode(currenciesCatalog, p.currencyCode).symbol}0</span>;
           return (
             <DualValue
-              left={<span className="text-danger-600 dark:text-danger-400 font-medium"><NairaPrice amount={amount} /></span>}
+              left={<span className="text-danger-600 dark:text-danger-400 font-medium"><NairaPrice amount={amount} currencyCode={p.currencyCode} /></span>}
               right={<span className="text-app-fg-muted">{cnt} order{cnt !== 1 ? 's' : ''}</span>}
             />
           );
@@ -636,11 +672,11 @@ export function LogisticsTeamPage({
         const pending = Number(l.pendingRemittanceAmount) || 0;
         return (
           <span className="tabular-nums">
-            <span className="text-success-600 dark:text-success-400 font-medium"><NairaPrice amount={l.remittedAmount} zeroAsDash /></span>
+            <span className="text-success-600 dark:text-success-400 font-medium"><NairaPrice amount={l.remittedAmount} currencyCode={l.currencyCode} zeroAsDash /></span>
             {pending > 0 && (
               <>
                 <span className="text-app-fg-muted mx-1">·</span>
-                <span className="text-warning-600 dark:text-warning-400 font-medium"><NairaPrice amount={l.pendingRemittanceAmount} /></span>
+                <span className="text-warning-600 dark:text-warning-400 font-medium"><NairaPrice amount={l.pendingRemittanceAmount} currencyCode={l.currencyCode} /></span>
               </>
             )}
           </span>
@@ -696,15 +732,25 @@ export function LogisticsTeamPage({
             saveFilterKey
             filtersBadgeCount={logisticsTeamToolbarFilterBadge}
             filters={
-              <SortMenu
-                value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
-                onChange={(next) =>
-                  mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
-                }
-                defaultValue={{ sortBy: 'assigned', sortDir: 'desc' }}
-                options={SORT_MENU_OPTIONS}
-                className="w-full justify-center"
-              />
+              <div className="space-y-3">
+                <FormSelect
+                  value={viewType}
+                  onChange={(e) => setViewType(e.target.value as 'company' | 'location')}
+                  className="w-full"
+                >
+                  <option value="company">By Logistics company</option>
+                  <option value="location">By Logistics location</option>
+                </FormSelect>
+                <SortMenu
+                  value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+                  onChange={(next) =>
+                    mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+                  }
+                  defaultValue={{ sortBy: 'assigned', sortDir: 'desc' }}
+                  options={SORT_MENU_OPTIONS}
+                  className="w-full justify-center"
+                />
+              </div>
             }
             desktopActions
             desktop={
@@ -779,9 +825,9 @@ export function LogisticsTeamPage({
           { label: 'Stock status', value: (<span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${stockBalanced ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400' : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'}`}>{stockBalanced ? '✓ Balanced' : `✗ ${inconsistentProviders} off`}</span>), plainValue: true },
           { label: 'Delivered', value: totalDelivered.toLocaleString(), valueClassName: 'text-app-fg' },
           { label: 'Delivery rate', value: totalAssigned > 0 ? `${Math.round(overallDeliveryRate)}%` : '0%', valueClassName: deliveryRateColorClass(overallDeliveryRate) },
-          { label: `Remitted (${totalRemittedOrders.toLocaleString()})`, value: formatNaira(totalRemitted), valueClassName: 'text-success-600 dark:text-success-400' },
-          ...(totalPending > 0 ? [{ label: 'Pending', value: formatNaira(totalPending), valueClassName: 'text-warning-600 dark:text-warning-400' }] : []),
-          ...(totalOwing > 0 ? [{ label: 'Owing', value: formatNaira(totalOwing), valueClassName: 'text-danger-600 dark:text-danger-400' }] : []),
+          { label: `Remitted (${totalRemittedOrders.toLocaleString()})`, value: money(totalRemitted), valueClassName: 'text-success-600 dark:text-success-400' },
+          ...(totalPending > 0 ? [{ label: 'Pending', value: money(totalPending), valueClassName: 'text-warning-600 dark:text-warning-400' }] : []),
+          ...(totalOwing > 0 ? [{ label: 'Owing', value: money(totalOwing), valueClassName: 'text-danger-600 dark:text-danger-400' }] : []),
         ] : [
           { label: 'Locations', value: filteredLocations.length, valueClassName: 'text-app-fg' },
           { label: 'Total assigned', value: locTotalAssigned, valueClassName: 'text-app-fg' },
@@ -790,8 +836,8 @@ export function LogisticsTeamPage({
           { label: 'Stock status', value: (<span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${locInconsistent === 0 ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400' : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'}`}>{locInconsistent === 0 ? '✓ Balanced' : `✗ ${locInconsistent} off`}</span>), plainValue: true },
           { label: 'Delivered', value: locTotalDelivered.toLocaleString(), valueClassName: 'text-app-fg' },
           { label: 'Delivery rate', value: locTotalAssigned > 0 ? `${Math.round(locDeliveryRate)}%` : '0%', valueClassName: deliveryRateColorClass(locDeliveryRate) },
-          { label: 'Remitted', value: formatNaira(locTotalRemitted), valueClassName: 'text-success-600 dark:text-success-400' },
-          ...(locTotalPending > 0 ? [{ label: 'Pending', value: formatNaira(locTotalPending), valueClassName: 'text-warning-600 dark:text-warning-400' }] : []),
+          { label: 'Remitted', value: money(locTotalRemitted), valueClassName: 'text-success-600 dark:text-success-400' },
+          ...(locTotalPending > 0 ? [{ label: 'Pending', value: money(locTotalPending), valueClassName: 'text-warning-600 dark:text-warning-400' }] : []),
         ]}
       />
 
@@ -808,18 +854,23 @@ export function LogisticsTeamPage({
                 title={viewType === 'company' ? 'Search companies' : 'Search locations'}
                 onApply={(query) => mergeListParams({ q: query, page: 1 })}
               />
-              <FormSelect
-                value={viewType}
-                onChange={(e) => setViewType(e.target.value as 'company' | 'location')}
-                className="w-auto shrink-0"
-              >
-                <option value="company">By Logistics company</option>
-                <option value="location">By Logistics location</option>
-              </FormSelect>
             </div>
           }
           desktopInlineFilters={
             <>
+              <div className="relative" data-toolbar-filter>
+                {viewType !== 'company' && (
+                  <FilterDismiss onClear={() => setViewType('company')} />
+                )}
+                <FormSelect
+                  value={viewType}
+                  onChange={(e) => setViewType(e.target.value as 'company' | 'location')}
+                  className="w-auto"
+                >
+                  <option value="company">By Logistics company</option>
+                  <option value="location">By Logistics location</option>
+                </FormSelect>
+              </div>
               {productOptions.length > 0 && (
                 <div className="relative" data-toolbar-filter>
                   {activeProductId && (
@@ -874,8 +925,8 @@ export function LogisticsTeamPage({
         {providers.length === 0 && !showSearchEmpty ? (
           <div className="card">
             <EmptyState
-              title="No logistics providers yet"
-              description="Add a logistics company from /admin/logistics/partners to see it here."
+              title="No logistics providers here"
+              description="This view is scoped to the selected company and country. If you expect providers from another country, switch company or country in the top bar. Otherwise add a logistics company from /admin/logistics/partners."
             />
           </div>
         ) : showSearchEmpty ? (
@@ -993,11 +1044,11 @@ export function LogisticsTeamPage({
                   {Number(p.pendingRemittanceAmount) > 0 ? (
                     <DualValue
                       className="font-medium"
-                      left={<span className="text-success-600 dark:text-success-400"><NairaPrice amount={p.remittedAmount} /></span>}
-                      right={<span className="text-warning-600 dark:text-warning-400"><NairaPrice amount={p.pendingRemittanceAmount} /></span>}
+                      left={<span className="text-success-600 dark:text-success-400"><NairaPrice amount={p.remittedAmount} currencyCode={p.currencyCode} /></span>}
+                      right={<span className="text-warning-600 dark:text-warning-400"><NairaPrice amount={p.pendingRemittanceAmount} currencyCode={p.currencyCode} /></span>}
                     />
                   ) : (
-                    <span className="font-medium tabular-nums text-success-600 dark:text-success-400"><NairaPrice amount={p.remittedAmount} /></span>
+                    <span className="font-medium tabular-nums text-success-600 dark:text-success-400"><NairaPrice amount={p.remittedAmount} currencyCode={p.currencyCode} /></span>
                   )}
                 </div>
               </div>
@@ -1019,6 +1070,7 @@ export function LogisticsTeamPage({
       {/* Stock Reconciliation Report Modal */}
       {reportProvider && (() => {
         const p = reportProvider;
+        const pMoney = (n: number) => formatMoneyByCode(n, currenciesCatalog, p.currencyCode);
         const c = checkProviderConsistency(p);
         const dateStr = new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
         const activeProductName = activeProductId ? productOptions.find((pr) => pr.id === activeProductId)?.name : undefined;
@@ -1042,7 +1094,7 @@ export function LogisticsTeamPage({
           </div>
           <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
             {reportView === 'summary' ? (
-              <pre className="text-xs font-mono bg-app-hover/40 rounded-lg p-5 whitespace-pre-wrap text-app-fg leading-relaxed">{generateProviderReport(p, reportFilters)}</pre>
+              <pre className="text-xs font-mono bg-app-hover/40 rounded-lg p-5 whitespace-pre-wrap text-app-fg leading-relaxed">{generateProviderReport(p, currenciesCatalog, reportFilters)}</pre>
             ) : (
               <div className="space-y-5">
                 <div className="space-y-2">
@@ -1081,9 +1133,9 @@ export function LogisticsTeamPage({
                 <div className="space-y-2">
                   <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Remittance</h3>
                   <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
-                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold text-success-600 dark:text-success-400 tabular-nums">{formatNaira(Number(p.remittedAmount))}</td></tr>
-                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={Number(p.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{formatNaira(Number(p.pendingRemittanceAmount))}</span></td></tr>
-                    {Number(p.disputedRemittanceAmount) > 0 && <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Disputed</td><td className="px-4 py-2.5 text-right font-semibold text-danger-600 dark:text-danger-400 tabular-nums">{formatNaira(Number(p.disputedRemittanceAmount))}</td></tr>}
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold text-success-600 dark:text-success-400 tabular-nums">{pMoney(Number(p.remittedAmount))}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={Number(p.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{pMoney(Number(p.pendingRemittanceAmount))}</span></td></tr>
+                    {Number(p.disputedRemittanceAmount) > 0 && <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Disputed</td><td className="px-4 py-2.5 text-right font-semibold text-danger-600 dark:text-danger-400 tabular-nums">{pMoney(Number(p.disputedRemittanceAmount))}</td></tr>}
                   </tbody></table></div>
                 </div>
               </div>
@@ -1091,7 +1143,7 @@ export function LogisticsTeamPage({
           </div>
           <div className="px-5 py-4 border-t border-app-border flex justify-end gap-2 shrink-0">
             <Button type="button" variant="secondary" onClick={() => { setReportProvider(null); setReportView('summary'); }}>Close</Button>
-            <Button type="button" variant="primary" onClick={() => { const safeName = p.providerName.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-'); downloadReport(`stock-report-${safeName}-${new Date().toISOString().slice(0, 10)}.txt`, generateProviderReport(p)); }}>Download report</Button>
+            <Button type="button" variant="primary" onClick={() => { const safeName = p.providerName.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '-'); downloadReport(`stock-report-${safeName}-${new Date().toISOString().slice(0, 10)}.txt`, generateProviderReport(p, currenciesCatalog)); }}>Download report</Button>
           </div>
         </Modal>
         );
@@ -1100,6 +1152,7 @@ export function LogisticsTeamPage({
       {/* Location Report Modal */}
       {reportLocation && (() => {
         const l = reportLocation;
+        const lMoney = (n: number) => formatMoneyByCode(n, currenciesCatalog, l.currencyCode);
         const expected = l.stockReceived - l.stockSold - l.stockTransferredOut + l.stockAdjusted - l.stockWrittenOff - (l.reservedStock ?? 0);
         const diff = l.availableStock - expected;
         const isConsistent = diff === 0;
@@ -1142,8 +1195,8 @@ export function LogisticsTeamPage({
           lines.push('');
           lines.push('REMITTANCE');
           lines.push('----------');
-          lines.push(`Remitted:            ${formatNaira(Number(l.remittedAmount))}`);
-          lines.push(`Pending:             ${formatNaira(Number(l.pendingRemittanceAmount))}`);
+          lines.push(`Remitted:            ${lMoney(Number(l.remittedAmount))}`);
+          lines.push(`Pending:             ${lMoney(Number(l.pendingRemittanceAmount))}`);
           lines.push('');
           lines.push('--- End of Report ---');
           return lines.join('\n');
@@ -1198,8 +1251,8 @@ export function LogisticsTeamPage({
                 <div className="space-y-2">
                   <h3 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">Remittance</h3>
                   <div className="rounded-lg border border-app-border overflow-hidden"><table className="w-full text-sm"><tbody className="divide-y divide-app-border">
-                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold text-success-600 dark:text-success-400 tabular-nums">{formatNaira(Number(l.remittedAmount))}</td></tr>
-                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={Number(l.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{formatNaira(Number(l.pendingRemittanceAmount))}</span></td></tr>
+                    <tr className="bg-app-hover/50"><td className="px-4 py-2.5 text-app-fg-muted">Remitted</td><td className="px-4 py-2.5 text-right font-semibold text-success-600 dark:text-success-400 tabular-nums">{lMoney(Number(l.remittedAmount))}</td></tr>
+                    <tr><td className="px-4 py-2.5 text-app-fg-muted">Pending</td><td className="px-4 py-2.5 text-right font-semibold tabular-nums"><span className={Number(l.pendingRemittanceAmount) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg-muted'}>{lMoney(Number(l.pendingRemittanceAmount))}</span></td></tr>
                   </tbody></table></div>
                 </div>
               </div>
@@ -1231,7 +1284,7 @@ export function LogisticsTeamPage({
             lines.push(`Providers: ${providers.length}`);
             lines.push('');
             for (const p of providers) {
-              lines.push(generateProviderReport(p, reportFilters));
+              lines.push(generateProviderReport(p, currenciesCatalog, reportFilters));
               lines.push('');
             }
           } else {
@@ -1243,7 +1296,7 @@ export function LogisticsTeamPage({
               lines.push(`${l.locationName} (${l.providerName})`);
               lines.push(`  Received: ${l.stockReceived.toLocaleString()} | Sold: ${l.stockSold.toLocaleString()} | Transferred: ${l.stockTransferredOut.toLocaleString()}`);
               lines.push(`  Available: ${l.availableStock.toLocaleString()} | Expected: ${expected.toLocaleString()} | ${diff === 0 ? '✓ Balanced' : `✗ ${diff > 0 ? '+' : ''}${diff.toLocaleString()} off`}`);
-              lines.push(`  Assigned: ${l.totalAssigned} | Delivered: ${l.delivered} | Remitted: ${formatNaira(Number(l.remittedAmount))}`);
+              lines.push(`  Assigned: ${l.totalAssigned} | Delivered: ${l.delivered} | Remitted: ${formatMoneyByCode(Number(l.remittedAmount), currenciesCatalog, l.currencyCode)}`);
               lines.push('');
             }
           }

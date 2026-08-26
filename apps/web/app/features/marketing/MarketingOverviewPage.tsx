@@ -14,7 +14,11 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { LiveActivityCard, LiveActivityDetailModal } from '~/components/ui/live-activity-card';
 import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
-import { CurrencyLens, useCurrencyLensMode } from '~/components/ui/currency-lens';
+// Currency lens control removed: the global country switcher is the single
+// currency control now. `useCurrencyLensMode` is kept but always resolves to
+// `base` (the `curLens` param is no longer set), so revenue shows the
+// base-currency slice under the switcher's server-side scope.
+import { useCurrencyLensMode } from '~/components/ui/currency-lens';
 import { LensedMoney } from '~/components/ui/lensed-money';
 import { useCurrenciesCatalog } from '~/contexts/currencies-catalog-context';
 import { toBaseAmount } from '@yannis/shared';
@@ -494,8 +498,6 @@ export function MarketingOverviewPage({
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
-                {/* Currency lens — self-hides unless the company has 2+ currencies. */}
-                <CurrencyLens />
                 <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters?.startDate ?? ''}
