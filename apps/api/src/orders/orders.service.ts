@@ -3117,6 +3117,129 @@ export class OrdersService {
   }
 
   /**
+   * Idempotent bulk-import upsert of ONE order, keyed by `importExternalId`
+   * (the unique id from the source CRM file). Used by the resumable
+   * BulkImportService worker. Re-processing the same external id OVERWRITES the
+   * existing order instead of creating a duplicate — this is what makes Continue
+   * and Retry safe, and guarantees no duplicates even mid-import.
+   *
+   * Same simplified semantics as `importOrder` (no dedup-by-phone, no CS routing,
+   * no notifications). The ON CONFLICT target is the partial unique index
+   * `orders_import_external_id_uidx` (mig 0332); the matching WHERE clause is
+   * required for a partial-index upsert (see MEMORY partial_index_onconflict).
+   */
+  async upsertImportOrderByExternalId(
+    input: ImportOrderInput & { importExternalId: string },
+    actorId: string,
+  ): Promise<{ id: string; created: boolean }> {
+    const customerPhoneHash = this.hashPhone(input.customerPhone);
+
+    let createdAtDate: Date | undefined;
+    if (input.createdAtOverride) {
+      const parsed = new Date(input.createdAtOverride);
+      if (!isNaN(parsed.getTime())) createdAtDate = parsed;
+    }
+
+    const statusTimestamps: Record<string, Date | undefined> = {};
+    if (createdAtDate) {
+      const ts = input.targetStatus;
+      if (['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'RETURNED', 'REMITTED'].includes(ts)) {
+        statusTimestamps.confirmedAt = createdAtDate;
+      }
+      if (['DELIVERED', 'RETURNED', 'REMITTED'].includes(ts)) {
+        statusTimestamps.allocatedAt = createdAtDate;
+        statusTimestamps.dispatchedAt = createdAtDate;
+        statusTimestamps.deliveredAt = createdAtDate;
+      }
+    }
+
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const values = {
+        mediaBuyerId: input.mediaBuyerId ?? null,
+        branchId: input.branchId,
+        servicingBranchId: input.branchId,
+        assignedCsId: input.assignedCsId ?? null,
+        customerName: input.customerName,
+        customerPhoneHash,
+        customerPhone: input.customerPhone,
+        customerAddress: input.customerAddress ?? null,
+        deliveryAddress: input.deliveryAddress ?? input.customerAddress ?? null,
+        deliveryNotes: input.deliveryNotes ?? null,
+        deliveryState: input.deliveryState ?? null,
+        customerGender: input.customerGender ?? null,
+        customerEmail: input.customerEmail ?? null,
+        paymentMethod: 'PAY_ON_DELIVERY',
+        items: input.items,
+        totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
+        status: input.targetStatus,
+        orderSource: 'import',
+        importExternalId: input.importExternalId,
+        customFields: input.customFields ?? null,
+        // Multi-country: stamp the order currency when the importer resolved one.
+        // Omitted → column default (base currency), so single-currency imports
+        // behave exactly as before.
+        ...(input.currencyCode ? { currencyCode: input.currencyCode } : {}),
+        ...(createdAtDate ? { createdAt: createdAtDate } : {}),
+        ...statusTimestamps,
+      };
+
+      const rows = await tx
+        .insert(schema.orders)
+        .values(values)
+        .onConflictDoUpdate({
+          target: schema.orders.importExternalId,
+          targetWhere: sql`${schema.orders.importExternalId} IS NOT NULL`,
+          set: {
+            mediaBuyerId: values.mediaBuyerId,
+            branchId: values.branchId,
+            servicingBranchId: values.servicingBranchId,
+            assignedCsId: values.assignedCsId,
+            customerName: values.customerName,
+            customerPhoneHash: values.customerPhoneHash,
+            customerPhone: values.customerPhone,
+            customerAddress: values.customerAddress,
+            deliveryAddress: values.deliveryAddress,
+            deliveryNotes: values.deliveryNotes,
+            deliveryState: values.deliveryState,
+            customerGender: values.customerGender,
+            customerEmail: values.customerEmail,
+            items: values.items,
+            totalAmount: values.totalAmount,
+            status: values.status,
+            customFields: values.customFields,
+            // Re-import back-fills/updates currency when one was resolved. Not
+            // spread when absent, so a re-import without a currency doesn't wipe
+            // an existing one back to default.
+            ...(input.currencyCode ? { currencyCode: input.currencyCode } : {}),
+            ...(createdAtDate ? { createdAt: createdAtDate } : {}),
+            ...statusTimestamps,
+            updatedAt: sql`now()`,
+          },
+        })
+        .returning({ id: schema.orders.id, createdAt: schema.orders.createdAt });
+
+      const upserted = rows[0];
+      if (!upserted) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to upsert imported order' });
+      }
+
+      // Replace line items wholesale so a re-import reflects the latest file.
+      await tx.delete(schema.orderItems).where(eq(schema.orderItems.orderId, upserted.id));
+      await tx.insert(schema.orderItems).values(
+        input.items.map((item) => ({
+          orderId: upserted.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: sql`${item.unitPrice}::numeric`,
+          offerLabel: item.offerLabel ?? null,
+        })),
+      );
+
+      return { id: upserted.id, created: true };
+    });
+  }
+
+  /**
    * Import an OFFLINE contractor delivery. Creates a DELIVERED (or REMITTED)
    * offline order attributed to a logistics provider/location so the delivery
    * feeds both the logistics performance dashboard and payroll metrics, even

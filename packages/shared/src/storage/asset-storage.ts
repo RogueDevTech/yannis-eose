@@ -8,6 +8,9 @@ export const ASSET_FOLDERS = {
   PRODUCT_IMAGES: 'product-images',
   ONBOARDING_DOCS: 'onboarding-docs',
   TAX_DOCS: 'tax-docs',
+  // Bulk-import source files (Excel/CSV CRM exports). Large; processed
+  // server-side by the resumable importer, never rendered in the browser.
+  IMPORTS: 'imports',
 } as const;
 
 export type AssetFolder = (typeof ASSET_FOLDERS)[keyof typeof ASSET_FOLDERS];
@@ -33,6 +36,10 @@ const ASSET_FOLDER_MAX_BYTES: Partial<Record<AssetFolder, number>> = {
   // Tax documents (TIN certificates, tax cards, PAYE receipts) are PDFs/scans,
   // routinely larger than the 2 MB image default — match onboarding's 10 MB.
   'tax-docs': 10 * 1024 * 1024,
+  // Bulk-import CRM exports can be 100k+ rows. A 100k-row XLSX is ~15-30 MB;
+  // CSV larger. 100 MB gives generous headroom. The file is streamed row-by-row
+  // server-side (never fully materialised), so a big cap is safe here.
+  imports: 100 * 1024 * 1024,
 };
 
 export function resolveAssetMaxBytes(folder: AssetFolder): number {
@@ -47,6 +54,7 @@ const ASSET_FOLDER_PREFIXES: Record<AssetFolder, string> = {
   'product-images': 'products/images/uploads',
   'onboarding-docs': 'hr/onboarding-docs',
   'tax-docs': 'hr/tax-docs',
+  imports: 'imports/uploads',
 };
 
 function padDatePart(value: number): string {

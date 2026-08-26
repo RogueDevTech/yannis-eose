@@ -7,6 +7,7 @@ import {
   db as schema,
   computeAttendanceEligibility,
   resolveAttendanceEnabled,
+  ATTENDANCE_TRACKED_ROLES,
   type AttendanceConfig,
   type AttendanceGridInput,
   type MarkAttendanceInput,
@@ -198,7 +199,10 @@ export class AttendanceService {
     const staffConds = [
       eq(schema.users.status, 'ACTIVE'),
       eq(schema.users.attendanceExcluded, false), // excluded staff are not tracked
-      sql`(${schema.users.payRoleId} IS NOT NULL OR ${schema.users.flatMonthlyAmount} IS NOT NULL)`,
+      // Roster membership is ROLE-based, not comp-basis-based: a new MB/CS appears
+      // from day one even before HR assigns a pay role. The pay-eligibility math
+      // no-ops without a config, so showing them here can't corrupt pay.
+      inArray(schema.users.role, [...ATTENDANCE_TRACKED_ROLES] as typeof schema.users.role.enumValues[number][]),
     ];
     const membershipInScope = (branches: string[]) =>
       inArray(
@@ -362,7 +366,10 @@ export class AttendanceService {
     // relies on — and (b) fail to isolate branchless contractors by company. So
     // branch-scoped rows match by branch_id while branchless rows match by the
     // group_id(s) of the in-scope branches (matching payroll-batch.service.ts).
-    const contractorConds = [eq(schema.payrollContractors.active, true)];
+    const contractorConds = [
+      eq(schema.payrollContractors.active, true),
+      eq(schema.payrollContractors.attendanceExempt, false), // exempt contractors are not tracked
+    ];
     if (baViewBranch) {
       // A Branch Admin sees only their own branch's contractors — branchless
       // contractors have no office and aren't part of a single branch's sheet.
@@ -1397,7 +1404,9 @@ export class AttendanceService {
     const staffConds = [
       eq(schema.users.status, 'ACTIVE'),
       eq(schema.users.attendanceExcluded, false), // excluded staff are not auto-marked
-      sql`(${schema.users.payRoleId} IS NOT NULL OR ${schema.users.flatMonthlyAmount} IS NOT NULL)`,
+      // Role-based roster (mirrors the grid). New joiners are tracked from their
+      // joining date regardless of pay-role assignment.
+      inArray(schema.users.role, [...ATTENDANCE_TRACKED_ROLES] as typeof schema.users.role.enumValues[number][]),
       sql`(${schema.users.dateOfJoining} IS NULL OR ${schema.users.dateOfJoining}::date <= ${date}::date)`,
       sql`(${schema.users.exitDate} IS NULL OR ${schema.users.exitDate}::date >= ${date}::date)`,
       // No existing record for this staff/day.

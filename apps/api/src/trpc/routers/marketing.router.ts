@@ -62,6 +62,7 @@ import { getCartOrdersService } from './cart-orders.router';
 import { getSettingsService } from './settings.router';
 
 import { isAdminLevel } from '../../common/authz';
+import { editableCurrencyCodesForActor } from '../../common/authz/offer-currency-scope';
 import { hasFinanceAccess } from '../../common/utils/strip-finance-fields';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
 import type { OrdersAggregateSupervisorScope } from '../../orders/orders.service';
@@ -1000,7 +1001,14 @@ export const marketingRouter = router({
     .input(updateOfferTemplateSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...offerTemplateInput } = input;
-      return getMarketingService().updateOfferTemplate(offerTemplateInput, ctx.user.id);
+      // Multi-country: a country-scoped actor may only edit their assigned
+      // currencies' prices; out-of-scope currencies are preserved server-side.
+      const editableCurrencyCodes = editableCurrencyCodesForActor(ctx.user);
+      return getMarketingService().updateOfferTemplate(
+        offerTemplateInput,
+        ctx.user.id,
+        editableCurrencyCodes,
+      );
     }),
 
   archiveAllOfferTemplatesForProduct: permissionProcedure('products.offers')
@@ -1037,7 +1045,13 @@ export const marketingRouter = router({
     .input(updateOfferGroupSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...offerGroupInput } = input;
-      return getMarketingService().updateOfferGroup(offerGroupInput, ctx.user.id);
+      // Multi-country: preserve out-of-scope per-item currency prices on edit.
+      const editableCurrencyCodes = editableCurrencyCodesForActor(ctx.user);
+      return getMarketingService().updateOfferGroup(
+        offerGroupInput,
+        ctx.user.id,
+        editableCurrencyCodes,
+      );
     }),
 
   getOfferGroup: authedProcedure

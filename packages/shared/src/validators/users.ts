@@ -129,6 +129,13 @@ export const createStaffSchema = z.object({
   // Role-specific settings
   capacity: z.number().int().min(1).max(100).optional(),
   logisticsLocationId: z.string().uuid().optional(),
+  // Joining/resumption date. Drives when the user enters the attendance roster.
+  // When omitted, the server defaults it to today (WAT) so new staff are tracked
+  // from day one rather than silently absent from attendance. Format: YYYY-MM-DD.
+  dateOfJoining: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD')
+    .optional(),
   visibleOrderStatuses: z.array(visibleOrderStatusSchema).optional(),
   productIds: z.array(z.string().uuid()).optional(),
   restrictProductAccess: z.boolean().optional(),

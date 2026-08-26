@@ -130,9 +130,9 @@ export function MarketingFormCreatePage({
   const [showProductImages, setShowProductImages] = useState(
     dupCfg?.showProductImages !== false && dupCfg?.showProductImages !== 'false',
   );
-  const [allowMultiCurrency, setAllowMultiCurrency] = useState(
-    (dupCfg as { allowMultiCurrency?: boolean } | undefined)?.allowMultiCurrency === true,
-  );
+  // Country-only mode: the form is always locked to a single currency (derived
+  // from the country), so multi-currency selection is permanently off.
+  const allowMultiCurrency = false;
   const [pinnedCurrency, setPinnedCurrency] = useState(
     (dupCfg as { pinnedCurrency?: string } | undefined)?.pinnedCurrency ?? '',
   );
@@ -162,9 +162,9 @@ export function MarketingFormCreatePage({
   const [deliveryCountry, setDeliveryCountry] = useState<string>(
     (dupCfg as { deliveryCountry?: string } | null)?.deliveryCountry ?? 'Nigeria',
   );
-  const [allowCountrySelection, setAllowCountrySelection] = useState<boolean>(
-    (dupCfg as { allowCountrySelection?: boolean } | null)?.allowCountrySelection === true,
-  );
+  // Country-only mode: the form is always locked to one country (no customer
+  // country picker) and to that country's single currency. Both selection
+  // toggles were removed; the hidden inputs submit false.
   const onDeliveryCountryChange = (country: string) => {
     setDeliveryCountry(country);
     const regions = regionsForCountry(country);
@@ -372,13 +372,14 @@ export function MarketingFormCreatePage({
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
             <input type="hidden" name="offerGroupId" value={selectedOfferGroupId} readOnly />
             <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
-            {/* Only send the toggle as ON when the selected offer actually has multi-currency prices. */}
-            <input type="hidden" name="allowMultiCurrency" value={offerHasMultiCurrency && allowMultiCurrency ? 'true' : 'false'} readOnly />
-            {/* pinnedCurrency = the form's default/starting currency (used whether the
-                picker is on or off). Only sent when the offer supports multi-currency. */}
+            {/* Country-only mode: the form is ALWAYS locked to one country + one
+                currency. Both selection toggles are removed from the UI, so these
+                are hard-locked to false. pinnedCurrency is the single currency,
+                derived automatically from the chosen country. */}
+            <input type="hidden" name="allowMultiCurrency" value="false" readOnly />
             <input type="hidden" name="pinnedCurrency" value={offerHasMultiCurrency ? pinnedCurrency : ''} readOnly />
             <input type="hidden" name="deliveryCountry" value={deliveryCountry} readOnly />
-            <input type="hidden" name="allowCountrySelection" value={allowCountrySelection ? 'true' : 'false'} readOnly />
+            <input type="hidden" name="allowCountrySelection" value="false" readOnly />
 
             <div className="card space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -473,66 +474,25 @@ export function MarketingFormCreatePage({
                 </div>
               </div>
 
-              {/* Multi country and currency — country + currency controls in one section. */}
+              {/* Country — the form is locked to one country; its currency follows
+                  automatically (e.g. Nigeria → NGN). Only shown when more than one
+                  country is configured in Country & Currency settings. Disabled
+                  until an offer is selected (the offer determines the currency). */}
               {configuredCountries.length > 1 && (
                 <div className="rounded-2xl border border-app-border p-4">
-                  <h2 className="mb-3 text-sm font-semibold text-app-fg">Multi country and currency</h2>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {/* Country selection only matters when the offer is priced in
-                        more than one currency — a single-currency (Naira-only)
-                        offer has nothing to switch between. */}
-                    {offerHasMultiCurrency && (
-                      <FormSelect
-                        label="Country mode"
-                        value={allowCountrySelection ? 'multi' : 'single'}
-                        onChange={(e) => setAllowCountrySelection(e.target.value === 'multi')}
-                        options={[
-                          { value: 'multi', label: 'Allow country selection' },
-                          { value: 'single', label: 'Lock one country' },
-                        ]}
-                      />
-                    )}
-                    {offerHasMultiCurrency && (
-                      <FormSelect
-                        label={allowCountrySelection ? 'Default country (shown first)' : 'Country'}
-                        value={deliveryCountry}
-                        onChange={(e) => onDeliveryCountryChange(e.target.value)}
-                        options={configuredCountries.map((country) => ({ value: country, label: country }))}
-                      />
-                    )}
-                    {offerHasMultiCurrency && (
-                      <FormSelect
-                        label="Currency mode"
-                        value={allowMultiCurrency ? 'multi' : 'single'}
-                        onChange={(e) => setAllowMultiCurrency(e.target.value === 'multi')}
-                        options={[
-                          { value: 'multi', label: 'Allow multi currency selection' },
-                          { value: 'single', label: 'Lock one currency' },
-                        ]}
-                      />
-                    )}
-                    {offerHasMultiCurrency && (
-                      <FormSelect
-                        label={allowMultiCurrency ? 'Default currency (shown first)' : 'Currency'}
-                        value={pinnedCurrency}
-                        onChange={(e) => setPinnedCurrency(e.target.value)}
-                        options={[
-                          { value: '', label: `${baseCurrency?.symbol ?? '₦'} ${baseCurrency?.code ?? 'NGN'} (default)` },
-                          ...selectedOfferCurrencies.map((code) => ({
-                            value: code,
-                            label: `${currenciesForForm.find((c) => c.code === code)?.symbol ?? ''} ${code}`,
-                          })),
-                        ]}
-                      />
-                    )}
-                  </div>
-                  {!offerHasMultiCurrency && (
-                    <p className="mt-2 text-xs text-app-fg-muted">
-                      {selectedOfferGroupId
-                        ? 'The selected offer only has a Naira price. Add other currency prices to the offer to let customers pick a currency.'
-                        : 'Select an offer with multiple currency prices to enable customer currency selection.'}
-                    </p>
-                  )}
+                  <h2 className="mb-3 text-sm font-semibold text-app-fg">Country</h2>
+                  <FormSelect
+                    label="Country"
+                    value={deliveryCountry}
+                    onChange={(e) => onDeliveryCountryChange(e.target.value)}
+                    options={configuredCountries.map((country) => ({ value: country, label: country }))}
+                    disabled={!selectedOfferGroupId}
+                  />
+                  <p className="mt-2 text-xs text-app-fg-muted">
+                    {selectedOfferGroupId
+                      ? 'This form is locked to one country. Its currency is set automatically from the country.'
+                      : 'Select an offer first. This form is then locked to one country, and its currency is set automatically from the country.'}
+                  </p>
                 </div>
               )}
             </div>

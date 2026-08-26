@@ -3,6 +3,7 @@ import { OrdersService } from './orders.service';
 import { CsOrderRoutingService } from './cs-order-routing.service';
 import { TestOrderPurgeService } from './test-order-purge.service';
 import { FollowUpConfigService } from './follow-up-config.service';
+import { BulkImportService } from './bulk-import.service';
 import { SettingsModule } from '../settings/settings.module';
 import { CartModule } from '../cart/cart.module';
 import { CartOrdersModule } from '../cart-orders/cart-orders.module';
@@ -25,7 +26,7 @@ import { LedgerModule } from '../finance/ledger.module';
     LedgerModule,
     forwardRef(() => PaymentsModule),
   ],
-  providers: [OrdersService, CsOrderRoutingService, TestOrderPurgeService, FollowUpConfigService],
-  exports: [OrdersService, CsOrderRoutingService, TestOrderPurgeService, FollowUpConfigService],
+  providers: [OrdersService, CsOrderRoutingService, TestOrderPurgeService, FollowUpConfigService, BulkImportService],
+  exports: [OrdersService, CsOrderRoutingService, TestOrderPurgeService, FollowUpConfigService, BulkImportService],
 })
 export class OrdersModule {}

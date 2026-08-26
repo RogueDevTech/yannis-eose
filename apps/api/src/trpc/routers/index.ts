@@ -29,6 +29,7 @@ import { aiAssistantRouter } from './ai-assistant.router';
 import { automationRouter } from './automation.router';
 import { attendanceRouter } from './attendance.router';
 import { currenciesRouter } from './currencies.router';
+import { bulkImportRouter } from './bulk-import.router';
 
 /**
  * Root tRPC router — merges all module routers.
@@ -65,6 +66,7 @@ export const appRouter = router({
   automation: automationRouter,
   attendance: attendanceRouter,
   currencies: currenciesRouter,
+  bulkImport: bulkImportRouter,
 });
 
 export type AppRouter = typeof appRouter;

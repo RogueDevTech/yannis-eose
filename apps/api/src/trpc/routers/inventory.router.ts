@@ -28,7 +28,7 @@ import type { InventoryService } from '../../inventory/inventory.service';
 import type { ShipmentsService } from '../../inventory/shipments.service';
 import type { LogisticsService } from '../../logistics/logistics.service';
 import { getProductsService } from './products.router';
-import { getLogisticsService } from './logistics.router';
+import { getLogisticsService, invalidateLogisticsOptionsCache } from './logistics.router';
 import { getSettingsService } from './settings.router';
 
 let inventoryServiceInstance: InventoryService | null = null;
@@ -321,7 +321,7 @@ export const inventoryRouter = router({
   transfers: permissionProcedure('inventory.read')
     .input(z.object({ status: z.string().optional(), page: z.number().int().min(1).optional(), limit: z.number().int().min(1).max(1000).optional() }))
     .query(async ({ input, ctx }) => {
-      return getInventoryService().listTransfers(input.status, ctx.user, input.page, input.limit, ctx.activeGroupId);
+      return getInventoryService().listTransfers(input.status, ctx.user, input.page, input.limit, ctx.activeGroupId, ctx.effectiveCurrencyCodes);
     }),
 
   /**
@@ -473,8 +473,8 @@ export const inventoryRouter = router({
           ctx.user.role,
           ctx.activeGroupId,
         ),
-        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId }),
-        getInventoryService().listTransfers(undefined, ctx.user, undefined, undefined, ctx.activeGroupId).then((r) => r.transfers),
+        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId, effectiveCurrencyCodes: ctx.effectiveCurrencyCodes }),
+        getInventoryService().listTransfers(undefined, ctx.user, undefined, undefined, ctx.activeGroupId, ctx.effectiveCurrencyCodes).then((r) => r.transfers),
         canSeeReturned
           ? getInventoryService().listReturnedOrders(effectiveLocationId, ctx.effectiveBranchIds)
           : Promise.resolve([]),
@@ -578,8 +578,9 @@ export const inventoryRouter = router({
           status: 'ACTIVE',
           providerKind: 'WAREHOUSE',
           groupId: ctx.activeGroupId,
+          effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
         }),
-        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId }),
+        getLogisticsService().listLocationOptions({ status: 'ACTIVE', groupId: ctx.activeGroupId, effectiveCurrencyCodes: ctx.effectiveCurrencyCodes }),
         getSettingsService().getAll(ctx.activeGroupId).catch(() => [] as unknown[]),
         getInventoryService().getLowStockAlerts(ctx.activeGroupId, ctx.effectiveBranchIds).catch((err) => {
           console.error('[inventoryAdminPageBundle] getLowStockAlerts failed:', err?.message ?? err);
@@ -599,7 +600,7 @@ export const inventoryRouter = router({
           )
           .catch(() => null),
         getLogisticsServiceForInventory()
-          .listWarehouses({ status: 'ACTIVE', listScope: 'our', page: 1, limit: input.warehousesLimit, groupId: ctx.activeGroupId })
+          .listWarehouses({ status: 'ACTIVE', listScope: 'our', page: 1, limit: input.warehousesLimit, groupId: ctx.activeGroupId, effectiveCurrencyCodes: ctx.effectiveCurrencyCodes })
           .catch(() => null),
       ]);
 
@@ -650,7 +651,7 @@ export const inventoryRouter = router({
     create: permissionProcedure('inventory.intake')
       .input(createShipmentSchema)
       .mutation(async ({ input, ctx }) => {
-        return getShipmentsService().createShipment(input, ctx.user);
+        return getShipmentsService().createShipment(input, ctx.user, ctx.effectiveCurrencyCodes);
       }),
 
     updateLines: permissionProcedure('inventory.intake')
@@ -697,12 +698,20 @@ export const inventoryRouter = router({
     list: permissionProcedure('inventory.read')
       .input(listWarehousesSchema)
       .query(async ({ input, ctx }) => {
-        return getLogisticsServiceForInventory().listWarehouses({ ...input, groupId: ctx.activeGroupId });
+        return getLogisticsServiceForInventory().listWarehouses({
+          ...input,
+          groupId: ctx.activeGroupId,
+          effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
+        });
       }),
 
     overview: permissionProcedure('inventory.read')
       .query(async ({ ctx }) => {
-        return getLogisticsServiceForInventory().getWarehousesOverview({ status: 'ACTIVE', groupId: ctx.activeGroupId });
+        return getLogisticsServiceForInventory().getWarehousesOverview({
+          status: 'ACTIVE',
+          groupId: ctx.activeGroupId,
+          effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
+        });
       }),
 
     get: permissionProcedure('inventory.read')
@@ -714,17 +723,23 @@ export const inventoryRouter = router({
     create: permissionProcedure('inventory.warehouses.write')
       .input(createWarehouseSchema)
       .mutation(async ({ input, ctx }) => {
-        return getLogisticsServiceForInventory().createWarehouse(
+        const result = await getLogisticsServiceForInventory().createWarehouse(
           { name: input.name, address: input.address, coordinates: input.coordinates },
           ctx.user.id,
           ctx.activeGroupId,
+          ctx.currentCurrencyCode,
         );
+        // A new warehouse must appear in the Receive-shipment destination picker
+        // immediately — that picker reads the cached `logistics.locationOptions`,
+        // so bust it here (warehouse mutations live in this router, not logistics).
+        await invalidateLogisticsOptionsCache();
+        return result;
       }),
 
     update: permissionProcedure('inventory.warehouses.write')
       .input(updateWarehouseSchema)
       .mutation(async ({ input, ctx }) => {
-        return getLogisticsServiceForInventory().updateWarehouse(
+        const result = await getLogisticsServiceForInventory().updateWarehouse(
           {
             warehouseId: input.warehouseId,
             name: input.name,
@@ -733,6 +748,9 @@ export const inventoryRouter = router({
           },
           ctx.user.id,
         );
+        // Name/status changes affect the picker labels + active set — invalidate.
+        await invalidateLogisticsOptionsCache();
+        return result;
       }),
   }),
 });

@@ -13,7 +13,6 @@ import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { CurrencyLens } from '~/components/ui/currency-lens';
 import { LensedMoney } from '~/components/ui/lensed-money';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
@@ -988,7 +987,6 @@ export function MarketingTeamPage({
             desktopActions
             desktop={
               <>
-                <CurrencyLens />
                 <PageRefreshButton />
                 <DateFilterBar
                     startDate={dateFilters.startDate}

@@ -139,9 +139,17 @@ export function CsOrderRoutingSettingsPage({
   useFetcherToast(fetcher.data, { successMessage: 'Saved', skipErrorToast: false });
   useFetcherToast(modeFetcher.data, { successMessage: 'Routing saved', skipErrorToast: false });
 
-  const [deleteProductId, setDeleteProductId] = useState<string | null>(null);
+  // Delete target carries the country so we remove only that country's route,
+  // not every rule for the product. `currencyCode: undefined` = remove all.
+  const [deleteTarget, setDeleteTarget] = useState<
+    { productId: string; productName: string; currencyCode: string | null; countryLabel: string } | null
+  >(null);
   const [assignConfirmOpen, setAssignConfirmOpen] = useState(false);
   const [saveModeConfirmOpen, setSaveModeConfirmOpen] = useState(false);
+  /** Set when the assign flow had to save an unsaved "By product" method first.
+   *  The mode-save success effect reads this to chain straight into the
+   *  assignment, so one "Assign selected" click does both steps. */
+  const pendingAssignAfterModeSaveRef = useRef(false);
 
   const [productSearch, setProductSearch] = useState('');
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(() => new Set());
@@ -180,11 +188,23 @@ export function CsOrderRoutingSettingsPage({
     handledModeSuccessRef.current = true;
     if (modeFetcher.data.success) {
       setSaveModeConfirmOpen(false); // close confirm modal on success
+      // Chained flow: the user clicked "Assign selected" with an unsaved
+      // method. Now that the method is saved, fire the assignment (the assign
+      // confirm modal is still open and shows its own in-flight state).
+      if (pendingAssignAfterModeSaveRef.current) {
+        pendingAssignAfterModeSaveRef.current = false;
+        fireBulkProductAssign();
+        // Skip revalidate here — the assignment's own success effect
+        // revalidates once, after both writes land.
+        return;
+      }
       rev.revalidate();
     } else {
-      // Save failed — keep modal open so the inline error is visible. Revert
+      // Save failed — abandon any chained assign so we don't fire it against a
+      // stale method. Keep modal open so the inline error is visible. Revert
       // local radio state so the dirty banner reflects the still-current
       // server value if the user dismisses without retrying.
+      pendingAssignAfterModeSaveRef.current = false;
       setUxMethod(modeToUxMethod(relationshipMode));
     }
   }, [modeFetcher.state, modeFetcher.data, relationshipMode, rev]);
@@ -204,20 +224,51 @@ export function CsOrderRoutingSettingsPage({
     );
   }, [products, productSearch]);
 
-  const ruleByProductId = useMemo(() => {
-    const m = new Map<string, CsRoutingRuleRow>();
+  // Multi-country: a product can carry MULTIPLE rules — one per country (plus an
+  // optional any-country catch-all). Group them so the list can show every
+  // "country → branch" route for a product, not just the first.
+  const rulesByProductId = useMemo(() => {
+    const m = new Map<string, CsRoutingRuleRow[]>();
     for (const r of rules) {
-      if (r.productId) m.set(r.productId, r);
+      if (!r.productId) continue;
+      const list = m.get(r.productId) ?? [];
+      list.push(r);
+      m.set(r.productId, list);
+    }
+    // Stable order: any-country catch-all last, otherwise by currency code.
+    for (const list of m.values()) {
+      list.sort((a, b) => {
+        const ca = a.currencyCode ?? '';
+        const cb = b.currencyCode ?? '';
+        if (!ca) return 1;
+        if (!cb) return -1;
+        return ca.localeCompare(cb);
+      });
     }
     return m;
   }, [rules]);
 
-  /** Click handler — validates inputs and opens the confirm modal. */
-  const requestBulkProductAssign = () => {
-    if (modeIsDirty) {
-      toast.toast.error('Save routing method first', 'Click Save above before assigning products.');
-      return;
+  /** Country label for a rule: the country name for a currency, or "Any country". */
+  const countryLabelForRule = (r: CsRoutingRuleRow): string => {
+    if (!r.currencyCode) return 'Any country';
+    const cur = currencies.find((c) => c.code === r.currencyCode);
+    return cur?.countryName ?? r.currencyCode;
+  };
+
+  /** The (product, country) pairs already routed — used to block duplicate assigns. */
+  const assignedCountryKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const [pid, list] of rulesByProductId) {
+      for (const r of list) s.add(`${pid}::${r.currencyCode ?? ''}`);
     }
+    return s;
+  }, [rulesByProductId]);
+
+  /** Click handler — validates inputs and opens the confirm modal. When the
+   *  routing method is still an unsaved "By product" draft, we no longer block:
+   *  the assign flow saves the method first, then assigns (see the mode-save
+   *  success effect). One click does both. */
+  const requestBulkProductAssign = () => {
     if (selectedProductIds.size === 0) {
       toast.toast.error('Select products', 'Tick at least one product to assign.');
       return;
@@ -229,13 +280,16 @@ export function CsOrderRoutingSettingsPage({
       );
       return;
     }
+    if (modeIsDirty && branches.length === 0) {
+      toast.toast.error('No branches', 'Set up a branch before changing routing.');
+      return;
+    }
     setAssignConfirmOpen(true);
   };
 
-  /** Modal confirm handler — fires the upsert. Modal stays open while the
-   *  request is in flight; the success effect below closes it on success;
-   *  on failure the inline error stays visible so the user can retry. */
-  const submitBulkProductAssign = () => {
+  /** Fires the product-routing upsert. Split out so it can run either directly
+   *  (method already saved) or as the second step after an auto mode-save. */
+  const fireBulkProductAssign = () => {
     const fd = new FormData();
     fd.set(
       'json',
@@ -251,12 +305,36 @@ export function CsOrderRoutingSettingsPage({
     fetcher.submit(fd, { method: 'post' });
   };
 
+  /** Modal confirm handler. When the routing method is an unsaved "By product"
+   *  draft, save the method FIRST — the mode-save success effect then chains
+   *  into the assignment. Otherwise assign directly. Modal stays open while the
+   *  request is in flight; the success effect below closes it on success; on
+   *  failure the inline error stays visible so the user can retry. */
+  const submitBulkProductAssign = () => {
+    if (modeIsDirty) {
+      // Two-step: persist PRODUCT_ALLOCATION, then assign on success.
+      pendingAssignAfterModeSaveRef.current = true;
+      confirmSaveRelationshipMode();
+      return;
+    }
+    fireBulkProductAssign();
+  };
+
   const confirmDelete = () => {
-    if (!deleteProductId) return;
+    if (!deleteTarget) return;
     const fd = new FormData();
-    fd.set('json', JSON.stringify({ intent: 'deleteProductRouting', productId: deleteProductId }));
+    fd.set(
+      'json',
+      JSON.stringify({
+        intent: 'deleteProductRouting',
+        productId: deleteTarget.productId,
+        // Scope the delete to this one country's rule (null = any-country rule).
+        // Only sent when multi-currency is active; otherwise omit to remove all.
+        ...(showCurrency ? { currencyCode: deleteTarget.currencyCode } : {}),
+      }),
+    );
     fetcher.submit(fd, { method: 'post' });
-    setDeleteProductId(null);
+    setDeleteTarget(null);
   };
 
   const formatTargetLine = (t: CsRoutingRuleRow['targets'][0]) => {
@@ -413,12 +491,14 @@ export function CsOrderRoutingSettingsPage({
                     setSelectedProductIds(
                       new Set(
                         filteredProductsForBulk
-                          .filter((p) => !ruleByProductId.has(p.id))
+                          .filter((p) => !assignedCountryKeys.has(`${p.id}::${ruleCurrencyCode}`))
                           .map((p) => p.id),
                       ),
                     )
                   }
-                  disabled={filteredProductsForBulk.every((p) => ruleByProductId.has(p.id))}
+                  disabled={filteredProductsForBulk.every((p) =>
+                    assignedCountryKeys.has(`${p.id}::${ruleCurrencyCode}`),
+                  )}
                 >
                   Select visible
                 </Button>
@@ -439,29 +519,24 @@ export function CsOrderRoutingSettingsPage({
             ) : (
               <div className="max-h-[min(28rem,60vh)] overflow-y-auto rounded-lg border border-app-border divide-y divide-app-border">
                 {filteredProductsForBulk.map((p) => {
-                  const rule = ruleByProductId.get(p.id);
-                  const assigned =
-                    rule && rule.targets.length > 0
-                      ? rule.targets.map(formatTargetLine).join(' · ')
-                      : null;
-                  // A product can only live in one CS branch at a time. The
-                  // checkbox is disabled while an assignment exists so the user
-                  // is forced to Remove the old route first — prevents an
-                  // accidental overwrite during a bulk action that crosses an
-                  // already-routed row.
-                  const isAlreadyAssigned = Boolean(rule);
+                  const productRules = rulesByProductId.get(p.id) ?? [];
+                  // Blocked ONLY for the currently-selected country: a product
+                  // already routed for Nigeria can still be assigned for Ghana.
+                  // (Single-currency installs: ruleCurrencyCode is '' so this is
+                  // the old "one route per product" behaviour.)
+                  const selectedCountryTaken = assignedCountryKeys.has(`${p.id}::${ruleCurrencyCode}`);
                   return (
                     <div
                       key={p.id}
-                      className={`flex flex-wrap items-center gap-3 px-3 py-2.5 ${
-                        isAlreadyAssigned ? 'bg-app-hover/30' : 'hover:bg-app-hover/40'
+                      className={`flex flex-wrap items-start gap-3 px-3 py-2.5 ${
+                        selectedCountryTaken ? 'bg-app-hover/30' : 'hover:bg-app-hover/40'
                       }`}
                     >
                       <Checkbox
                         checked={selectedProductIds.has(p.id)}
-                        disabled={isAlreadyAssigned}
+                        disabled={selectedCountryTaken}
                         onChange={() => {
-                          if (isAlreadyAssigned) return;
+                          if (selectedCountryTaken) return;
                           setSelectedProductIds((prev) => {
                             const next = new Set(prev);
                             if (next.has(p.id)) next.delete(p.id);
@@ -470,43 +545,70 @@ export function CsOrderRoutingSettingsPage({
                           });
                         }}
                         aria-label={
-                          isAlreadyAssigned
-                            ? `${p.name} is already assigned. Remove the existing route to re-assign`
+                          selectedCountryTaken
+                            ? `${p.name} is already routed for the selected country. Remove that route to re-assign`
                             : `Select ${p.name}`
                         }
                         title={
-                          isAlreadyAssigned
-                            ? 'Already assigned — click Remove to free this product, then re-assign.'
+                          selectedCountryTaken
+                            ? 'Already routed for the selected country — Remove it first, or pick a different country.'
                             : undefined
                         }
                       />
                       <span
-                        className="min-w-0 flex-1 text-sm font-medium text-app-fg truncate"
+                        className="mt-0.5 min-w-0 flex-1 text-sm font-medium text-app-fg truncate"
                         title={p.name}
                       >
                         {p.name}
                       </span>
-                      <span
-                        className={`text-xs max-w-[14rem] truncate sm:max-w-xs ${
-                          assigned
-                            ? 'text-app-fg-muted'
-                            : 'text-warning-700 dark:text-warning-400 italic'
-                        }`}
-                        title={
-                          assigned ?? 'No CS branch assigned — pick one and click Assign selected.'
-                        }
-                      >
-                        {assigned ?? 'Not assigned'}
-                      </span>
-                      {rule ? (
-                        <TableActionButton
-                          type="button"
-                          variant="danger"
-                          onClick={() => setDeleteProductId(p.id)}
-                        >
-                          Remove
-                        </TableActionButton>
-                      ) : null}
+                      {/* One line per (country → branch) route. Empty = unrouted. */}
+                      <div className="flex min-w-0 max-w-[18rem] flex-col items-end gap-1 sm:max-w-sm">
+                        {productRules.length === 0 ? (
+                          <span
+                            className="text-xs italic text-warning-700 dark:text-warning-400"
+                            title="No CS branch assigned — pick one and click Assign selected."
+                          >
+                            Not assigned
+                          </span>
+                        ) : (
+                          productRules.map((r) => {
+                            const targetLine =
+                              r.targets.length > 0
+                                ? r.targets.map(formatTargetLine).join(' · ')
+                                : '—';
+                            return (
+                              <div key={r.id} className="flex items-center gap-2">
+                                {showCurrency && (
+                                  <span className="shrink-0 rounded-full bg-app-hover px-1.5 py-0.5 text-[10px] font-medium text-app-fg">
+                                    {countryLabelForRule(r)}
+                                  </span>
+                                )}
+                                <span
+                                  className="truncate text-xs text-app-fg-muted"
+                                  title={`${countryLabelForRule(r)}: ${targetLine}`}
+                                >
+                                  {targetLine}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDeleteTarget({
+                                      productId: p.id,
+                                      productName: p.name,
+                                      currencyCode: r.currencyCode ?? null,
+                                      countryLabel: countryLabelForRule(r),
+                                    })
+                                  }
+                                  className="shrink-0 text-xs font-medium text-danger-600 hover:underline dark:text-danger-400"
+                                  aria-label={`Remove ${countryLabelForRule(r)} route for ${p.name}`}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -521,10 +623,16 @@ export function CsOrderRoutingSettingsPage({
       ) : null}
 
       <ConfirmActionModal
-        open={!!deleteProductId}
-        onClose={() => setDeleteProductId(null)}
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
         title="Remove product route?"
-        description="This product will be unassigned until you assign a CS branch again."
+        description={
+          deleteTarget
+            ? showCurrency
+              ? `${deleteTarget.productName} orders for ${deleteTarget.countryLabel} will be unrouted until you assign a CS branch again. Other countries' routes stay in place.`
+              : `${deleteTarget.productName} will be unassigned until you assign a CS branch again.`
+            : ''
+        }
         confirmLabel="Remove"
         variant="danger"
         onConfirm={confirmDelete}
@@ -533,7 +641,8 @@ export function CsOrderRoutingSettingsPage({
       <ConfirmActionModal
         open={assignConfirmOpen}
         onClose={() => {
-          if (busy) return; // block dismiss while in flight
+          if (busy || modeBusy) return; // block dismiss while either step is in flight
+          pendingAssignAfterModeSaveRef.current = false;
           setAssignConfirmOpen(false);
         }}
         title={`Assign ${selectedProductIds.size} product${selectedProductIds.size === 1 ? '' : 's'}?`}
@@ -541,12 +650,31 @@ export function CsOrderRoutingSettingsPage({
           const branchLabel =
             branchNameById.get(bulkServicingBranchId) ?? 'the chosen servicing branch';
           const verbing = selectedProductIds.size === 1 ? 'this product' : 'these products';
-          return `New orders for ${verbing} will route to Sales at ${branchLabel}. Existing routes will be replaced.`;
+          // Multi-country: name the country this route applies to, so the user
+          // knows other countries' routes for the same product are untouched.
+          const countryLabel =
+            showCurrency && ruleCurrencyCode
+              ? currencies.find((c) => c.code === ruleCurrencyCode)?.countryName ?? ruleCurrencyCode
+              : null;
+          const scope = countryLabel ? ` for ${countryLabel} orders` : '';
+          const base = countryLabel
+            ? `${countryLabel} orders for ${verbing} will route to Sales at ${branchLabel}. Other countries' routes are unchanged; an existing ${countryLabel} route is replaced.`
+            : `New orders for ${verbing}${scope} will route to Sales at ${branchLabel}. Existing routes will be replaced.`;
+          // When the method is an unsaved draft, one click does both: turn on
+          // by-product routing, then assign. Say so.
+          return modeIsDirty
+            ? `By-product routing will be turned on first, then assigned. ${base}`
+            : base;
         })()}
-        confirmLabel="Assign"
+        confirmLabel={modeIsDirty ? 'Save & assign' : 'Assign'}
         variant="warning"
-        loading={busy}
-        error={fetcher.data && !fetcher.data.success ? fetcher.data.error ?? null : null}
+        loading={busy || modeBusy}
+        error={(() => {
+          if (fetcher.data && !fetcher.data.success) return fetcher.data.error ?? null;
+          // Surface a mode-save failure from the chained first step too.
+          if (modeFetcher.data && !modeFetcher.data.success) return modeFetcher.data.error ?? null;
+          return null;
+        })()}
         onConfirm={submitBulkProductAssign}
       />
 

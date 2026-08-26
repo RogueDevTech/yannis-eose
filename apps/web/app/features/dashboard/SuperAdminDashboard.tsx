@@ -12,7 +12,6 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { formatNaira } from '~/lib/format-amount';
-import { CurrencyLens } from '~/components/ui/currency-lens';
 import { LensedMoney } from '~/components/ui/lensed-money';
 import type { CEODashboardData } from '~/features/ceo/types';
 import { FunnelInfoIcon, FunnelBreakdownModal } from './funnel-breakdown';
@@ -239,7 +238,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             desktop={
               <>
                 <PageRefreshButton />
-                <CurrencyLens />
                 <DateFilterBar
                     startDate={filters?.startDate ?? ''}
                     endDate={filters?.endDate ?? ''}
@@ -248,7 +246,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             }
             sheet={
               <div className="flex flex-col gap-2.5">
-                <CurrencyLens className="w-full" />
                 {renderRevenueSelect('sheet')}
                 <CompareButton source="admin-overview" />
               </div>

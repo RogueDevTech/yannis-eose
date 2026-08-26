@@ -7,6 +7,7 @@
 import * as XLSX from 'xlsx';
 
 const TEMPLATE_HEADERS = [
+  'Order ID',
   'Date',
   'Name',
   'Phone Number',
@@ -14,8 +15,11 @@ const TEMPLATE_HEADERS = [
   'Email',
   'Address',
   'State',
+  'Product ID',
+  'Product Name',
   'Quantity',
   'Cost',
+  'Currency',
   'Gender',
   'Delivery Time',
   'More details',
@@ -30,10 +34,12 @@ const TEMPLATE_HEADERS = [
   'Comment 3',
 ] as const;
 
+// One width per TEMPLATE_HEADERS column (25). Branch ID removed — branch is
+// derived from the media buyer / CS user, never supplied on the sheet.
 const COLUMN_WIDTHS: number[] = [
-  16, 22, 16, 16, 28, 44, 10,
-  10, 12, 8, 14, 36,
-  28, 14, 14, 10, 14, 18,
+  16, 16, 22, 16, 16, 28, 44, 10,
+  12, 24, 10, 12, 10, 8, 14, 36,
+  28, 16, 14, 16, 14, 18,
   36, 36, 30,
 ];
 
@@ -41,16 +47,16 @@ export function downloadOrdersImportTemplate(): void {
   const ws = XLSX.utils.aoa_to_sheet([
     [...TEMPLATE_HEADERS],
     [
-      '4/29/2026', 'Chuks David', '08068880766', '08068880766',
+      'CRM-1001', '4/29/2026', 'Chuks David', '08068880766', '08068880766',
       'chuks@example.com', 'O Cube Court Lafaji', 'Lagos',
-      1, 100000, 'Male', 'Tomorrow', '',
+      'PDT-1', 'Sample Product One', 1, 100000, 'NGN', 'Male', 'Tomorrow', '',
       'Delivered and Cash Remitted', 'Exre', 'USR-5', 'Annual', 'USR-12', 'Fomac Lagos',
       '', '', '',
     ],
     [
-      '5/2/2026', 'Adamu Garba', '07012345678', '07012345678',
+      'CRM-1002', '5/2/2026', 'Adamu Garba', '07012345678', '07012345678',
       'adamu@example.com', '12 Adeola Odeku, Victoria Island', 'Lagos',
-      1, 100000, 'Male', '3 Days', 'Gate is blue',
+      'PDT-2', 'Sample Product Two', 1, 100000, 'Nigeria', 'Male', '3 Days', 'Gate is blue',
       'Pending', 'Exre', '', 'Annual', '', '',
       'Customer wants morning delivery', '', '',
     ],
@@ -63,6 +69,7 @@ export function downloadOrdersImportTemplate(): void {
   // ── Reference sheet — column rules + status values ────
   const referenceRows: string[][] = [
     ['Column', 'Rule'],
+    ['Order ID', 'Required. A unique ID from your source (the idempotency key). Re-importing the same ID OVERWRITES that order instead of creating a duplicate.'],
     ['Date', 'Order date. Accepts "4/29/2026", "5/2/2026 9:05:30", or ISO format. Optional — defaults to today.'],
     ['Name', 'Customer name. Required, min 2 characters.'],
     ['Phone Number', 'Customer phone. Required. Accepts any format (spaces, dashes tolerated).'],
@@ -70,16 +77,19 @@ export function downloadOrdersImportTemplate(): void {
     ['Email', 'Optional. Must be a valid email if provided.'],
     ['Address', 'Customer / delivery address. Optional.'],
     ['State', 'Delivery state (e.g. Lagos, Abuja, Rivers). Optional.'],
+    ['Product ID', 'Required. Product code (e.g. PDT-1). Find codes on the Products page. An unknown code fails the row.'],
+    ['Product Name', 'Optional reference only. Helps you confirm the Product ID: the import ignores this column and matches on Product ID.'],
     ['Quantity', 'Number of units. Defaults to 1 if blank.'],
-    ['Cost', 'Order total in Naira. ₦, commas, and decimals are tolerated (e.g. ₦100,000 or 100000).'],
+    ['Cost', 'Order total. Currency symbols, commas, and decimals are tolerated (e.g. ₦100,000 or 100000).'],
+    ['Currency', 'Optional. Currency code or country name (e.g. NGN, GHS, Ghana). If blank, uses the media buyer / closer country, then the base currency. An unknown currency fails the row.'],
     ['Gender', 'Optional (e.g. Male, Female).'],
     ['Delivery Time', 'Optional free text (e.g. Tomorrow, 3 Days, Today).'],
     ['More details', 'Optional notes about delivery.'],
     ['Status', 'Required. See valid values below.'],
-    ['Media-Buyer', 'Optional. Stored as reference — batch MB is selected on the import page.'],
-    ['Media Buyer ID', 'Optional. User number (e.g. USR-42). Overrides the batch default media buyer for this row.'],
-    ['CS', 'Optional. Stored as reference — batch CS agent is selected on the import page.'],
-    ['CS ID', 'Optional. User number (e.g. USR-12). Overrides the batch default CS agent for this row.'],
+    ['Media-Buyer', 'Optional. Stored as reference (name). The Media Buyer ID column drives attribution.'],
+    ['Media Buyer ID', 'Optional. User code (e.g. USR-5). Attributes the order to that media buyer. An unknown code fails the row so you can fix the code or the record. The order branch is derived from this user.'],
+    ['CS', 'Optional. Stored as reference (name). The CS ID column drives assignment.'],
+    ['CS ID', 'Optional. User code (e.g. USR-12). Assigns the order to that CS closer. An unknown code fails the row so you can fix the code or the record.'],
     ['Delivery agent', 'Optional. Stored as reference in custom fields.'],
     ['Comment 1–3', 'Optional. Combined and stored in custom fields.'],
     ['', ''],

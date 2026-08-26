@@ -163,6 +163,10 @@ function bundleInputFromSessionUser(user: SessionUser): SessionBundleInput {
     activeGroupId: user.activeGroupId ?? null,
     branchIds: user.branchIds ?? [],
     currentCurrencyCode: user.currentCurrencyCode ?? null,
+    // Multi-country HARD scope (assigned countries) — distinct from the
+    // currentCurrencyCode view switcher. Drives offer-price edit gating in the
+    // web UI; empty/absent for a non-view_all user means base (NGN) only.
+    currencyCodes: user.currencyCodes ?? [],
     appTheme: user.appTheme ?? null,
     fontScale: user.fontScale ?? null,
     mirroredBy: user.mirroredBy ?? null,

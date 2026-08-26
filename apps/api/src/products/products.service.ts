@@ -409,6 +409,7 @@ export class ProductsService {
       this.db
         .select({
           id: schema.products.id,
+          productNumber: schema.products.productNumber,
           name: schema.products.name,
           description: schema.products.description,
           galleryImageUrls: schema.products.galleryImageUrls,
@@ -509,6 +510,7 @@ export class ProductsService {
 
     const products = rows.map((r) => ({
       id: r.id,
+      productNumber: r.productNumber,
       name: r.name,
       description: r.description,
       galleryImageUrls: parseJsonStringArray(r.galleryImageUrls),

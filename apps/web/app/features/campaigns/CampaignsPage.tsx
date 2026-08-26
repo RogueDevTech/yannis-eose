@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, Link } from '@remix-run/react';
 import { useToast } from '~/components/ui/toast';
-import { useCurrenciesCatalog } from '~/contexts/currencies-catalog-context';
+import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -175,6 +175,10 @@ export function FormsPage({
 }: FormsPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const currenciesCatalog = useCurrenciesCatalog();
+  // Master gate: the currency filter only exists once a 2nd active currency is
+  // added. In the single-currency world every form is base-currency, so the
+  // control would be dead weight.
+  const hasMultipleCurrencies = useHasMultipleCurrencies();
 
   // Map each offer group → the currency SYMBOLS it's priced in (base always +
   // any per-currency prices). Used to badge multi-currency forms on the cards.
@@ -196,6 +200,43 @@ export function FormsPage({
     }
     return out;
   }, [offerGroups, baseCurr]);
+
+  // Per form: the set of currency CODES it can take orders in. Same rule the
+  // card badge uses (see the card render below): a form that lets customers
+  // choose (allowMultiCurrency) spans ALL its offer-group currencies; a locked
+  // form is its pinned currency, else base. Drives the currency filter so the
+  // filtered set always matches the chips shown on each card.
+  const formCurrencyCodes = useMemo(() => {
+    const baseCode = (baseCurr?.code ?? 'NGN').toUpperCase();
+    const out = new Map<string, string[]>();
+    for (const c of forms as Campaign[]) {
+      const offerCodes = c.offerGroupId ? offerGroupCurrencyCodes.get(c.offerGroupId) ?? [] : [];
+      const allowMulti = isOptionOn(
+        (c.formConfig as { allowMultiCurrency?: boolean | string } | null)?.allowMultiCurrency,
+      );
+      const pinned = (c.formConfig as { pinnedCurrency?: string } | null)?.pinnedCurrency;
+      const lockedCode = (pinned || baseCode).toUpperCase();
+      out.set(c.id, allowMulti && offerCodes.length ? offerCodes : [lockedCode]);
+    }
+    return out;
+  }, [forms, offerGroupCurrencyCodes, baseCurr]);
+
+  // Currency filter options, labelled by country (e.g. "Nigeria", "Ghana") so
+  // the control reads as a country picker. Deduped by code — group-scoped rows
+  // repeat the same code per company.
+  const currencyFilterOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const opts: { value: string; label: string }[] = [{ value: '', label: 'All countries' }];
+    for (const cc of currenciesCatalog) {
+      if (!cc.active) continue;
+      const code = cc.code.toUpperCase();
+      if (seen.has(code)) continue;
+      seen.add(code);
+      opts.push({ value: code, label: cc.countryName ? `${cc.countryName} (${cc.code})` : cc.code });
+    }
+    return opts;
+  }, [currenciesCatalog]);
+
   const tabParam = searchParams.get('tab');
   /** URL: no/`all` → all forms (non-MB); `mine` → my forms. */
   const navFormsScope: 'all' | 'mine' = isMediaBuyer || tabParam === 'mine' ? 'mine' : 'all';
@@ -222,6 +263,21 @@ export function FormsPage({
     const url = new URL(window.location.href);
     if (value) url.searchParams.set('productId', value);
     else url.searchParams.delete('productId');
+    window.history.replaceState({}, '', url.pathname + url.search);
+  }, []);
+
+  /** Currency (country) filter — client-side over the loaded forms, URL-synced
+   *  (`?currency`, value = currency code) like the product filter. */
+  const [currencyFilter, setCurrencyFilter] = useState(() =>
+    (searchParams.get('currency') ?? '').toUpperCase(),
+  );
+  const applyCurrencyFilter = useCallback((value: string) => {
+    const code = value.toUpperCase();
+    setCurrencyFilter(code);
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (code) url.searchParams.set('currency', code);
+    else url.searchParams.delete('currency');
     window.history.replaceState({}, '', url.pathname + url.search);
   }, []);
 
@@ -266,6 +322,9 @@ export function FormsPage({
         (c) => Array.isArray(c.productIds) && c.productIds.includes(productFilter),
       );
     }
+    if (currencyFilter) {
+      list = list.filter((c) => (formCurrencyCodes.get(c.id) ?? []).includes(currencyFilter));
+    }
     const q = searchQuery.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -276,7 +335,7 @@ export function FormsPage({
       );
     }
     return list;
-  }, [forms, uiFormsScope, currentUserId, productFilter, searchQuery]);
+  }, [forms, uiFormsScope, currentUserId, productFilter, currencyFilter, formCurrencyCodes, searchQuery]);
 
   const showMyFormsOnly = uiFormsScope === 'mine';
 
@@ -369,8 +428,15 @@ export function FormsPage({
             sheetTitle="Actions"
             triggerAriaLabel="Forms toolbar"
             saveFilterKey
-            filtersBadgeCount={productFilter ? 1 : 0}
-            onClearFilters={productFilter ? () => applyProductFilter('') : undefined}
+            filtersBadgeCount={(productFilter ? 1 : 0) + (currencyFilter ? 1 : 0)}
+            onClearFilters={
+              productFilter || currencyFilter
+                ? () => {
+                    applyProductFilter('');
+                    applyCurrencyFilter('');
+                  }
+                : undefined
+            }
             desktopActions
             desktopActionsLabel="Actions"
             desktop={
@@ -379,20 +445,37 @@ export function FormsPage({
               </>
             }
             filters={
-              products.length > 0 ? (
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Product</span>
-                  <SearchableSelect
-                    id="forms-product-filter-mobile"
-                    value={productFilter}
-                    onChange={applyProductFilter}
-                    options={[
-                      { value: '', label: 'All products' },
-                      ...products.map((p) => ({ value: p.id, label: p.name })),
-                    ]}
-                    placeholder="All products"
-                    searchPlaceholder="Search products…"
-                  />
+              products.length > 0 || hasMultipleCurrencies ? (
+                <div className="space-y-3">
+                  {products.length > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-medium text-app-fg-muted">Product</span>
+                      <SearchableSelect
+                        id="forms-product-filter-mobile"
+                        value={productFilter}
+                        onChange={applyProductFilter}
+                        options={[
+                          { value: '', label: 'All products' },
+                          ...products.map((p) => ({ value: p.id, label: p.name })),
+                        ]}
+                        placeholder="All products"
+                        searchPlaceholder="Search products…"
+                      />
+                    </div>
+                  )}
+                  {hasMultipleCurrencies && (
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-medium text-app-fg-muted">Country</span>
+                      <SearchableSelect
+                        id="forms-currency-filter-mobile"
+                        value={currencyFilter}
+                        onChange={applyCurrencyFilter}
+                        options={currencyFilterOptions}
+                        placeholder="All countries"
+                        searchPlaceholder="Search countries…"
+                      />
+                    </div>
+                  )}
                 </div>
               ) : undefined
             }
@@ -447,10 +530,10 @@ export function FormsPage({
         <ToolbarFiltersCollapsible
           className="!border-0 !px-0 md:!px-4"
           hideMobileSheet
-          badgeCount={(productFilter ? 1 : 0) + (searchQuery ? 1 : 0)}
+          badgeCount={(productFilter ? 1 : 0) + (currencyFilter ? 1 : 0) + (searchQuery ? 1 : 0)}
           onClearAll={
-            productFilter || searchQuery
-              ? () => { applyProductFilter(''); applySearch(''); }
+            productFilter || currencyFilter || searchQuery
+              ? () => { applyProductFilter(''); applyCurrencyFilter(''); applySearch(''); }
               : undefined
           }
           searchRow={
@@ -462,19 +545,34 @@ export function FormsPage({
             />
           }
           desktopInlineFilters={
-            products.length > 0 ? (
-              <SearchableSelect
-                id="forms-product-filter"
-                value={productFilter}
-                onChange={applyProductFilter}
-                options={[
-                  { value: '', label: 'All products' },
-                  ...products.map((p) => ({ value: p.id, label: p.name })),
-                ]}
-                placeholder="All products"
-                searchPlaceholder="Search products…"
-                wrapperClassName="w-full min-w-0 sm:w-48"
-              />
+            products.length > 0 || hasMultipleCurrencies ? (
+              <>
+                {products.length > 0 && (
+                  <SearchableSelect
+                    id="forms-product-filter"
+                    value={productFilter}
+                    onChange={applyProductFilter}
+                    options={[
+                      { value: '', label: 'All products' },
+                      ...products.map((p) => ({ value: p.id, label: p.name })),
+                    ]}
+                    placeholder="All products"
+                    searchPlaceholder="Search products…"
+                    wrapperClassName="w-full min-w-0 sm:w-48"
+                  />
+                )}
+                {hasMultipleCurrencies && (
+                  <SearchableSelect
+                    id="forms-currency-filter"
+                    value={currencyFilter}
+                    onChange={applyCurrencyFilter}
+                    options={currencyFilterOptions}
+                    placeholder="All countries"
+                    searchPlaceholder="Search countries…"
+                    wrapperClassName="w-full min-w-0 sm:w-48"
+                  />
+                )}
+              </>
             ) : null
           }
         />
@@ -485,13 +583,14 @@ export function FormsPage({
       {/* Empty state hint: why you might not see forms */}
       {displayedForms.length === 0 && (
         <div className="rounded-lg bg-info-50 dark:bg-info-700/20 border border-info-200 dark:border-info-700/50 px-4 py-3">
-          {productFilter || searchQuery.trim() ? (
+          {productFilter || currencyFilter || searchQuery.trim() ? (
             <p className="text-sm text-info-800 dark:text-info-200">
               No forms match your current search or filter.{' '}
               <button
                 type="button"
                 onClick={() => {
                   applyProductFilter('');
+                  applyCurrencyFilter('');
                   applySearch('');
                 }}
                 className="font-semibold text-brand-600 dark:text-brand-400 hover:underline"

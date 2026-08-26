@@ -4,7 +4,8 @@ import { useActionData, useLoaderData, useNavigation } from '@remix-run/react';
 import { useEffect, useState } from 'react';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { OfferForm } from '~/features/campaigns/OfferForm';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getCurrentUser, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { editableOfferCurrencyCodes } from '~/lib/offer-currency-scope';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import type { Product } from '~/features/campaigns/types';
 
@@ -24,6 +25,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
   const returnTo = normalizeReturnTo(url.searchParams.get('returnTo'));
+
+  // Multi-country: which currencies may this user set prices for? null = all.
+  const currentUser = await getCurrentUser(request);
+  const editableCurrencyCodes = currentUser
+    ? editableOfferCurrencyCodes(currentUser)
+    : ['NGN'];
 
   const productsListInput = {
     page: 1,
@@ -52,7 +59,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })
     .catch(() => ({ products: [], productsLoadError: 'Could not load products. Refresh to retry.' }));
 
-  return defer({ returnTo, productsPromise });
+  return defer({ returnTo, editableCurrencyCodes, productsPromise });
 }
 
 export const clientLoader = cachedClientLoader;
@@ -138,7 +145,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CreateOfferRoute() {
-  const { returnTo, productsPromise } = useLoaderData<typeof loader>();
+  const { returnTo, editableCurrencyCodes, productsPromise } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>() as { error?: string } | undefined;
   const navigation = useNavigation();
   const busy = navigation.state !== 'idle' && navigation.formData?.get('intent') === 'createOffer';
@@ -186,6 +193,7 @@ export default function CreateOfferRoute() {
       returnTo={returnTo}
       busy={busy}
       error={actionData?.error}
+      editableCurrencyCodes={editableCurrencyCodes}
     />
   );
 }

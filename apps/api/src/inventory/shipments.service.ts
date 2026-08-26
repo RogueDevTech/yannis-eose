@@ -320,6 +320,7 @@ export class ShipmentsService {
           status: schema.shipments.status,
           destinationLocationId: schema.shipments.destinationLocationId,
           destinationLocationName: schema.logisticsLocations.name,
+          currencyCode: schema.shipments.currencyCode,
           supplierName: schema.shipments.supplierName,
           supplierReference: schema.shipments.supplierReference,
           expectedArrivalAt: schema.shipments.expectedArrivalAt,
@@ -418,6 +419,7 @@ export class ShipmentsService {
         // logistics_locations.branch_id exists in the DB (migration 0041) but
         // is not yet on the Drizzle schema — read raw and alias.
         destinationBranchId: sql<string | null>`${schema.logisticsLocations}.branch_id`,
+        currencyCode: schema.shipments.currencyCode,
         supplierName: schema.shipments.supplierName,
         supplierReference: schema.shipments.supplierReference,
         expectedArrivalAt: schema.shipments.expectedArrivalAt,
@@ -510,7 +512,25 @@ export class ShipmentsService {
               schema.logisticsLocations,
               eq(schema.inventoryLevels.locationId, schema.logisticsLocations.id),
             )
-            .where(inArray(schema.inventoryLevels.productId, productIds))
+            // Multi-country: a location's country is its provider's currency_code.
+            // The stock distribution is about THIS shipment's product in THIS
+            // shipment's country, so only include locations in the same country.
+            // Without this, a product that also exists in other countries' hubs
+            // (e.g. ARJUNA in Nigerian warehouses) leaks into a Tanzania shipment's
+            // distribution table.
+            .innerJoin(
+              schema.logisticsProviders,
+              eq(schema.logisticsLocations.providerId, schema.logisticsProviders.id),
+            )
+            .where(
+              and(
+                inArray(schema.inventoryLevels.productId, productIds),
+                eq(
+                  schema.logisticsProviders.currencyCode,
+                  (row.currencyCode ?? 'NGN').toUpperCase(),
+                ),
+              ),
+            )
         : Promise.resolve([]),
     ]);
 
@@ -651,7 +671,14 @@ export class ShipmentsService {
   // Writes — lifecycle
   // ============================================================
 
-  async createShipment(input: CreateShipmentInput, actor: SessionUser) {
+  async createShipment(
+    input: CreateShipmentInput,
+    actor: SessionUser,
+    /** Actor's resolved country scope (from ctx). Null = all-countries
+     *  (MB/admin/view_all). Used to reject an out-of-country destination that a
+     *  stale/hand-rolled client could still POST past the scoped picker. */
+    effectiveCurrencyCodes?: string[] | null,
+  ) {
     if (!this.hasIntakePermission(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -671,6 +698,22 @@ export class ShipmentsService {
     // warehouse (derived from the location's provider currency, mig 0329). All
     // shipment costs + the batches it produces on VERIFY are denominated here.
     const shipmentCurrency = await this.resolveDestinationCurrency(input.destinationLocationId);
+
+    // Country DATA-SCOPE guard: a scoped user must not create a shipment into a
+    // warehouse outside their countries — it would be stamped with that country's
+    // currency and vanish from their own scoped list. The picker already hides
+    // such warehouses; this is the server-side backstop. No-op for all-countries
+    // users (effectiveCurrencyCodes null).
+    if (
+      effectiveCurrencyCodes != null &&
+      effectiveCurrencyCodes.length > 0 &&
+      !effectiveCurrencyCodes.map((c) => c.toUpperCase()).includes(shipmentCurrency)
+    ) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Destination warehouse is not in your selected country.',
+      });
+    }
 
     const created = await withActorAndBranch(this.db, actor, async (tx) => {
       const [parent] = await tx

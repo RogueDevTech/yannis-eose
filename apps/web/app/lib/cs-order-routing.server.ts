@@ -138,10 +138,16 @@ export async function loadCsOrderRoutingPageData(
       relationshipMode = 'BRANCH_DEFAULT';
     }
 
+    // Multi-country: a product can be routed to a DIFFERENT servicing branch per
+    // country, so dedupe on (productId, currencyCode) — NOT productId alone. The
+    // old product-only key collapsed every country rule to the first one, hiding
+    // e.g. "ARJUNA · Nigeria → Lagos CS" vs "ARJUNA · Tanzania → Dar CS".
     const seen = new Set<string>();
     for (const { rules: branchRules } of perBranch) {
       for (const r of branchRules) {
-        const key = r.productId ?? `__noproduct__${r.id}`;
+        const key = r.productId
+          ? `${r.productId}::${r.currencyCode ?? ''}`
+          : `__noproduct__${r.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
         rules.push(r);
@@ -180,6 +186,12 @@ export type CsOrderRoutingMutationPayload =
   | {
       intent: 'deleteProductRouting';
       productId: string;
+      /**
+       * When present, remove only this country's rule for the product (null =
+       * the any-country catch-all). When omitted, remove ALL rules for the
+       * product (legacy behaviour).
+       */
+      currencyCode?: string | null;
     }
   // Legacy intents kept for backward compat with any open form/widget that may
   // still POST them (e.g. a stale tab). Each is rewritten to a global op.
@@ -330,19 +342,29 @@ export async function handleCsOrderRoutingFormJson(request: Request, formData: F
     return json({ success: true as const });
   }
 
-  // ── Remove a product's routing globally ──────────────────────────
+  // ── Remove a product's routing ───────────────────────────────────
+  // When `currencyCode` is provided, remove only that country's rule for the
+  // product (so other countries' routes survive). `null` scopes to the
+  // any-country catch-all rule. When the field is OMITTED, remove every rule for
+  // the product (legacy "remove all" behaviour).
   if (payload.intent === 'deleteProductRouting') {
     const productId = payload.productId?.trim();
     if (!productId) {
       return json({ error: 'productId is required' }, { status: 400 });
     }
+    const scopeToCurrency = 'currencyCode' in payload;
+    const targetCurrency =
+      payload.currencyCode == null ? null : payload.currencyCode.toUpperCase();
     const rulesByBranch = await Promise.all(
       branchIds.map((bid) => listRulesForBranch(cookie ?? '', bid)),
     );
     const ruleIds: string[] = [];
     for (const branchRules of rulesByBranch) {
       for (const r of branchRules) {
-        if (r.productId === productId) ruleIds.push(r.id);
+        if (r.productId !== productId) continue;
+        // Currency-scoped delete: only the matching country's rule.
+        if (scopeToCurrency && (r.currencyCode ?? null) !== targetCurrency) continue;
+        ruleIds.push(r.id);
       }
     }
     if (ruleIds.length === 0) {

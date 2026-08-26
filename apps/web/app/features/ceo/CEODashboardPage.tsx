@@ -19,7 +19,6 @@ import { FormSelect } from '~/components/ui/form-select';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { formatNaira } from '~/lib/format-amount';
-import { CurrencyLens } from '~/components/ui/currency-lens';
 import { LensedMoney } from '~/components/ui/lensed-money';
 import { STATUS_HEX, STATUS_LABELS, STATUS_OPTIONS, STATUS_TEXT_CLASS } from '~/features/shared/order-status';
 import type { CEODashboardData, CEODashboardFilters, ChartDataPayload } from './types';
@@ -312,7 +311,6 @@ export function CEODashboardPage({
             desktopActionsLabel="Actions"
             desktop={
               <div className="flex items-center gap-2">
-                <CurrencyLens />
                 <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
               </div>
             }

@@ -123,6 +123,14 @@ export const orders = pgTable('orders', {
    * visitor's browser blocked the beacon or for non-edge-form orders. Migration 0296.
    */
   sessionId: text('session_id'),
+  /**
+   * Unique key from the source CRM export, supplied per row on bulk import. A
+   * PARTIAL UNIQUE INDEX (orders_import_external_id_uidx, mig 0332) enforces
+   * uniqueness and is the ON CONFLICT target for the idempotent import upsert:
+   * re-importing the same external id OVERWRITES the order instead of creating a
+   * duplicate. NULL for every order not created via the resumable bulk importer.
+   */
+  importExternalId: text('import_external_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),

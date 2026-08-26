@@ -8,6 +8,8 @@ export interface ProductOffer {
 
 export interface Product {
   id: string;
+  /** Sequential product number, shown as the "PDT-N" code (import lookup key). */
+  productNumber?: number | null;
   name: string;
   description: string | null;
   /** Hydrated from offer templates for lists/previews — not edited on the product page. */

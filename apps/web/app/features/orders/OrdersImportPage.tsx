@@ -5,6 +5,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { Link } from '@remix-run/react';
 import {
   ImportBulkData,
   type ImportColumn,
@@ -346,6 +347,20 @@ export function OrdersImportPage({
 
   return (
     <div className="space-y-4">
+      {/* Large-file path: for exports over 1,000 rows, use the resumable importer */}
+      <Link
+        to="/admin/sales/orders/bulk-import"
+        className="flex items-center justify-between gap-3 rounded-lg border border-app-accent/30 bg-app-accent/5 px-4 py-3 text-sm hover:bg-app-accent/10"
+      >
+        <span className="text-app-fg">
+          <strong>Importing a large file?</strong>{' '}
+          <span className="text-app-fg-muted">
+            Files over 1,000 rows import in the background and can be paused, continued, and retried.
+          </span>
+        </span>
+        <span className="shrink-0 font-medium text-app-accent">Bulk import →</span>
+      </Link>
+
       {/* Global assignment selectors — applied to every imported row */}
       <div className="rounded-lg border border-app-border bg-app-card p-4 space-y-3">
         <h3 className="text-sm font-medium text-app-fg">Batch assignment</h3>

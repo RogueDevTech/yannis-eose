@@ -23,6 +23,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { FormField } from '~/components/ui/form-field';
 import { useFetcherToast } from '~/components/ui/toast';
+import { symbolForCurrencyCode } from '@yannis/shared';
 import type { ShipmentDetail, ShipmentStatus } from './types';
 import { SHIPMENT_STATUS_VARIANT, formatShipmentStatus } from './types';
 
@@ -36,10 +37,16 @@ interface LineDraft {
   varianceReason: string;
 }
 
-function formatNaira(value: string | number | null | undefined): string {
+/**
+ * Format a money value using the shipment's own currency symbol. The symbol is
+ * resolved from the shipment's `currencyCode` (mig 0329) via the shared catalog,
+ * so a Tanzania shipment renders TSh, a Ghana one GH₵, etc. Never hardcode ₦ —
+ * that mislabels every non-Nigerian shipment.
+ */
+function formatMoney(value: string | number | null | undefined, symbol: string): string {
   const n = typeof value === 'string' ? parseFloat(value) : value ?? 0;
-  if (!Number.isFinite(n)) return '₦0';
-  return `₦${n.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
+  if (!Number.isFinite(n)) return `${symbol}0`;
+  return `${symbol}${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 }
 
 function formatDate(iso: string | null | undefined): string {
@@ -58,6 +65,10 @@ function isStatusReached(current: ShipmentStatus, target: ShipmentStatus): boole
 
 export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps) {
   const { shipment, lines, summary, stockDistribution, allowedTransitions } = data;
+  // The shipment's own currency symbol (Tanzania → TSh, Ghana → GH₵, …). Every
+  // money value on this page is denominated in the shipment's country, not the
+  // viewer's — so drive the symbol off shipment.currencyCode, never a ₦ literal.
+  const currencySymbol = symbolForCurrencyCode(shipment.currencyCode);
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const navigation = useNavigation();
@@ -290,7 +301,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         header: 'Factory cost',
         align: 'right',
         nowrap: true,
-        render: (l) => <span className="text-app-fg-muted tabular-nums">{formatNaira(l.factoryCost)}</span>,
+        render: (l) => <span className="text-app-fg-muted tabular-nums">{formatMoney(l.factoryCost, currencySymbol)}</span>,
       },
       {
         key: 'landing',
@@ -299,7 +310,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         nowrap: true,
         render: (l) => (
           <span className="text-app-fg-muted tabular-nums">
-            {l.allocatedLandingCost != null ? formatNaira(l.allocatedLandingCost) : '—'}
+            {l.allocatedLandingCost != null ? formatMoney(l.allocatedLandingCost, currencySymbol) : '—'}
           </span>
         ),
       },
@@ -311,7 +322,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         ),
       },
     ],
-    [shipment.destinationLocationId, shipment.destinationLocationName],
+    [shipment.destinationLocationId, shipment.destinationLocationName, currencySymbol],
   );
 
   return (
@@ -439,7 +450,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
               { label: 'Destination', value: shipment.destinationLocationName },
               { label: 'Supplier', value: shipment.supplierName },
               { label: 'Supplier ref', value: shipment.supplierReference, hideIfEmpty: true },
-              { label: 'Landing cost', value: formatNaira(shipment.totalLandingCost) },
+              { label: 'Landing cost', value: formatMoney(shipment.totalLandingCost, currencySymbol) },
               { label: 'Expected arrival', value: formatDate(shipment.expectedArrivalAt) },
               { label: 'Arrived', value: formatDate(shipment.arrivedAt), hideIfEmpty: true },
               { label: 'Verified', value: formatDate(shipment.verifiedAt), hideIfEmpty: true },
@@ -625,10 +636,10 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
                     </p>
                     <p className="text-xs text-app-fg-muted">
                       Expected: <span className="tabular-nums">{line.expectedQuantity}</span> · Factory{' '}
-                      {formatNaira(line.factoryCost)}
+                      {formatMoney(line.factoryCost, currencySymbol)}
                     </p>
                     <p className="text-xs text-app-fg-muted">
-                      Allocated landing: <span className="tabular-nums">{formatNaira(livePreview.get(line.id))}</span>
+                      Allocated landing: <span className="tabular-nums">{formatMoney(livePreview.get(line.id), currencySymbol)}</span>
                     </p>
                   </div>
                   <div className="sm:col-span-3">

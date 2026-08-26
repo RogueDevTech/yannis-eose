@@ -37,10 +37,16 @@ function parseLocationsList(res: { ok: boolean; status: number; data: unknown })
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermissionOrRoles(request, {
+  const user = await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER'],
     permission: 'logistics.teamOverview',
   });
+  // Active view currency (top-bar country switcher). Labels the stat-strip
+  // totals when the list is empty — with no rows the page can't derive the
+  // currency from data, and would otherwise fall back to ₦ even under Tanzania.
+  const viewCurrencyCode = (
+    (user as { currentCurrencyCode?: string | null }).currentCurrencyCode ?? 'NGN'
+  ).toUpperCase();
   const cookie = getSessionCookie(request);
   if (!cookie) throw new Response('Session cookie missing', { status: 401 });
 
@@ -158,6 +164,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       q,
       sortBy,
       sortDir,
+      viewCurrencyCode,
     };
   })();
 
@@ -189,6 +196,7 @@ export default function LogisticsTeamIndexRoute() {
             q={data.q}
             sortBy={data.sortBy}
             sortDir={data.sortDir}
+            viewCurrencyCode={data.viewCurrencyCode}
           />
         )}
     </CachedAwait>

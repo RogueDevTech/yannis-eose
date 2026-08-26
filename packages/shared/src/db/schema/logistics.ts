@@ -1,4 +1,4 @@
-import { uuid, pgTable, text, jsonb, boolean, integer, timestamp } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, jsonb, boolean, integer, serial, timestamp } from 'drizzle-orm/pg-core';
 import { recordStatusEnum, reconciliationStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
@@ -27,6 +27,14 @@ export const logisticsProviders = pgTable('logistics_providers', {
    * Default 'NGN' → existing providers behave as before.
    */
   currencyCode: text('currency_code').default('NGN').notNull(),
+  /**
+   * Sequential human-friendly provider number, rendered app-side as "LOG-N".
+   * Auto-increment (mig 0333), backfilled by creation order. Global sequence,
+   * like products.product_number. Used as a readable lookup code on the
+   * bulk-import sheet; the importer resolves LOG-N → id within the caller's
+   * company.
+   */
+  providerNumber: serial('provider_number'),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
   ...temporalColumns,
   ...timestampColumns,

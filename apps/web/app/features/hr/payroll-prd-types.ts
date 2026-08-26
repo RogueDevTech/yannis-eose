@@ -25,6 +25,14 @@ export type PayRole = {
   defaultTaxStatus?: 'STANDARD_PAYE' | 'EMPLOYER_SUBSIDIZED_PAYE' | 'GROSS_NO_DEDUCTION' | string;
   /** Which delivered orders count toward pay. RECOVERY_COMBINED = cart + delivered follow-up. */
   deliveredMetricSource?: 'FUNNEL' | 'RECOVERY_COMBINED' | string;
+  /**
+   * Per-role attendance base-salary deduction. When enabled, an over-limit absence
+   * count cuts the base by the matched band's percent. Default OFF. Stored JSONB.
+   */
+  attendanceConfig?: {
+    enabled: boolean;
+    bands: Array<{ minAbsences: number; deductionPercent: number }>;
+  } | null;
   commissionPlanId: string | null;
   active: boolean;
   /** Combined headcount: active employees + active contractors on this role. */
@@ -175,6 +183,9 @@ export type PayrollContractor = {
   bankVerified: boolean;
   active: boolean;
   notes: string | null;
+  /** When true, excluded from the attendance roster + attendance-based pay eligibility. */
+  attendanceExempt?: boolean;
+  attendanceExemptReason?: string | null;
 };
 
 export type ContractorPayoutRow = {

@@ -104,6 +104,24 @@ async function bootstrap() {
   };
   process.on('SIGTERM', closeOnSignal);
   process.on('SIGINT', closeOnSignal);
+
+  // Safety net: a detached background job (e.g. the bulk-import worker fired via
+  // `void tick()`) can produce a rejected promise or a stream 'error' with no
+  // local catch. Without these handlers Node terminates the ENTIRE API for one
+  // bad job — which is exactly how a GCS 403/404 on an uploaded import file took
+  // the process down. Log loudly and keep serving; the job's own error path
+  // (drainChunk → PAUSED/markFailed) still records the failure.
+  process.on('unhandledRejection', (reason) => {
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    console.error('[Yannis API] Unhandled promise rejection (kept alive):', err.message, err.stack);
+  });
+  // An uncaught exception can leave state corrupt, so we do NOT swallow it —
+  // log a clear line and exit non-zero so the process manager restarts a clean
+  // instance (instead of Node's default terse crash).
+  process.on('uncaughtException', (err) => {
+    console.error('[Yannis API] Uncaught exception, exiting for a clean restart:', err.message, err.stack);
+    app.close().catch(() => undefined).finally(() => process.exit(1));
+  });
 }
 
 bootstrap().catch((err: unknown) => {

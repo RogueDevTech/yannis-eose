@@ -743,6 +743,23 @@ export class PayrollConfigService {
           ...(input.accountName != null ? { accountName: input.accountName } : {}),
           ...(input.notes != null ? { notes: input.notes } : {}),
           ...(input.active != null ? { active: input.active } : {}),
+          // Attendance exemption: stamp who/when whenever the flag is set, and
+          // record the reason. Clearing the flag wipes the reason/stamp.
+          ...(input.attendanceExempt !== undefined
+            ? input.attendanceExempt
+              ? {
+                  attendanceExempt: true,
+                  attendanceExemptReason: input.attendanceExemptReason ?? null,
+                  attendanceExemptBy: actor.id,
+                  attendanceExemptAt: new Date(),
+                }
+              : {
+                  attendanceExempt: false,
+                  attendanceExemptReason: null,
+                  attendanceExemptBy: null,
+                  attendanceExemptAt: null,
+                }
+            : {}),
           updatedAt: new Date(),
         })
         .where(

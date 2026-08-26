@@ -21,6 +21,7 @@ function productsHubShellColumns(): CompactTableColumn<{ id: string }>[] {
       nowrap: true,
       render: () => <TableCellTextPulse className="w-[14rem]" />,
     },
+    { key: 'code', header: 'Code', render: () => <TableCellTextPulse className="w-[4rem]" /> },
     { key: 'category', header: 'Category', render: () => <TableCellTextPulse className="w-[8rem]" /> },
     {
       key: 'price',

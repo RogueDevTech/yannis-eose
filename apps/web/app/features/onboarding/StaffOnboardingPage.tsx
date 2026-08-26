@@ -569,6 +569,9 @@ export function StaffOnboardingPage({
     (record.status === 'IN_PROGRESS' || record.status === 'NOT_STARTED');
   const canEditPayrollBank = mode === 'hr' && canHrEdit && !isMirroring && !hrEditing;
   const showHrPayrollBankEditor = canEditPayrollBank && hrEditingPayroll;
+  // HR can reopen an already-approved onboarding for correction & resubmission.
+  const showHrRevokeAction =
+    mode === 'hr' && canHrEdit && !isMirroring && record.status === 'APPROVED';
 
   const [proofUrl, setProofUrl] = useState(record.proofOfAddressUrl ?? '');
   const [signedContractUrl, setSignedContractUrl] = useState(record.signedContractUrl ?? '');
@@ -595,6 +598,8 @@ export function StaffOnboardingPage({
   const [confirmComplete, setConfirmComplete] = useState(false);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [requestChangesReason, setRequestChangesReason] = useState('');
+  const [revokeOpen, setRevokeOpen] = useState(false);
+  const [revokeReason, setRevokeReason] = useState('');
 
   // Required-at-submit checklist, mirroring the server guard in
   // onboarding.service.submit(). Personal fields read from the saved record
@@ -657,6 +662,8 @@ export function StaffOnboardingPage({
     setConfirmComplete(false);
     setRequestChangesOpen(false);
     setRequestChangesReason('');
+    setRevokeOpen(false);
+    setRevokeReason('');
   });
   // HR edit session ends after a successful save so they land back on review.
   useCloseOnFetcherSuccess(
@@ -680,8 +687,12 @@ export function StaffOnboardingPage({
     fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'completeAndApproveOnboarding';
   const isRequestingChanges =
     fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'requestOnboardingChanges';
+  const isRevoking =
+    fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'revokeOnboardingApproval';
   const trimmedReason = requestChangesReason.trim();
   const reasonReady = trimmedReason.length >= 10 && trimmedReason.length <= 1000;
+  const trimmedRevokeReason = revokeReason.trim();
+  const revokeReasonReady = trimmedRevokeReason.length >= 10 && trimmedRevokeReason.length <= 1000;
 
   const submittedDate = useMemo(
     () => (record.submittedAt ? new Date(record.submittedAt).toLocaleDateString('en-NG', { dateStyle: 'medium' }) : null),
@@ -940,6 +951,19 @@ export function StaffOnboardingPage({
                 onClick={() => setConfirmApprove(true)}
               >
                 Approve onboarding
+              </Button>
+            </div>
+          ) : null}
+
+          {showHrRevokeAction ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                loading={isRevoking}
+                onClick={() => setRevokeOpen(true)}
+              >
+                Revoke approval
               </Button>
             </div>
           ) : null}
@@ -1356,6 +1380,66 @@ export function StaffOnboardingPage({
               }}
             >
               Send to staff
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={revokeOpen}
+        onClose={() => {
+          if (isRevoking) return;
+          setRevokeOpen(false);
+          setRevokeReason('');
+        }}
+        aria-labelledby="revoke-approval-title"
+      >
+        <div className="space-y-3 p-5">
+          <h3 id="revoke-approval-title" className="text-base font-semibold text-app-fg">
+            Revoke approval
+          </h3>
+          <p className="text-sm text-app-fg-muted">
+            This reopens the approved onboarding so the staff member can correct and
+            resubmit it. They will be notified and the record returns to in-progress until
+            re-approved.
+          </p>
+          <FormField label="Why is this being reopened?" hint="Min 10 characters · sent to the staff member">
+            <Textarea
+              rows={4}
+              value={revokeReason}
+              onChange={(e) => setRevokeReason(e.target.value)}
+              placeholder="e.g. The signed contract needs re-uploading with both pages."
+              maxLength={1000}
+              autoFocus
+            />
+          </FormField>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setRevokeOpen(false);
+                setRevokeReason('');
+              }}
+              disabled={isRevoking}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              loading={isRevoking}
+              disabled={!revokeReasonReady}
+              onClick={() => {
+                if (!revokeReasonReady) return;
+                const fd = new FormData();
+                fd.set('intent', 'revokeOnboardingApproval');
+                fd.set('userId', subject.id);
+                fd.set('reason', trimmedRevokeReason);
+                fetcher.submit(fd, { method: 'post', action: actionUrl });
+              }}
+            >
+              Revoke approval
             </Button>
           </div>
         </div>

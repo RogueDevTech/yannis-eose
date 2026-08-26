@@ -26,6 +26,7 @@
     "@trpc/react-query": "^11.11.0",
     "@yannis/api": "workspace:*",
     "@yannis/shared": "workspace:*",
+    "google-auth-library": "9.15.1",
     "isbot": "^5.1.17",
     "jspdf": "^4.2.0",
     "jszip": "^3.10.1",

@@ -1,4 +1,4 @@
-import { uuid, pgTable, text, numeric, jsonb, integer, index } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, numeric, jsonb, integer, serial, index } from 'drizzle-orm/pg-core';
 import { recordStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { branchGroups } from './branch-groups';
@@ -38,6 +38,14 @@ export const products = pgTable('products', {
   costPrice: numeric('cost_price', { precision: 12, scale: 2 }),
   category: text('category'),
   categoryId: uuid('category_id').references(() => productCategories.id),
+  /**
+   * Sequential human-friendly product number, rendered app-side as "PDT-N".
+   * Auto-increment (mig 0333), backfilled by creation order. Global (one shared
+   * sequence), like orders.order_number / users.user_number. Used as a readable
+   * lookup code on the bulk-import sheet; the importer resolves PDT-N → id within
+   * the caller's company.
+   */
+  productNumber: serial('product_number'),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
   ...temporalColumns,
   ...timestampColumns,

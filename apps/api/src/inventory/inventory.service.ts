@@ -2942,8 +2942,43 @@ export class InventoryService {
    * `canApprove: boolean` so the client can render the Approve / Reject buttons
    * without mirroring the source-authority rule. Server is canonical.
    */
-  async listTransfers(status?: string, viewer?: SessionUser, page = 1, limit = 1000, groupId?: string | null) {
+  async listTransfers(
+    status?: string,
+    viewer?: SessionUser,
+    page = 1,
+    limit = 1000,
+    groupId?: string | null,
+    effectiveCurrencyCodes?: string[] | null,
+  ) {
     const conditions = [];
+
+    // Multi-country: stock_transfers has no currency column — a transfer's
+    // country is derived from its endpoint locations (location → provider
+    // currency, same pattern as listLevels). Scope to the active country by
+    // restricting to transfers where EITHER endpoint is a location whose
+    // provider is in one of the allowed currencies. No-op for view_all
+    // (effectiveCurrencyCodes null / empty).
+    if (effectiveCurrencyCodes && effectiveCurrencyCodes.length > 0) {
+      const curClause = sql.join(
+        effectiveCurrencyCodes.map((c) => sql`${c.toUpperCase()}`),
+        sql`, `,
+      );
+      conditions.push(
+        sql`(
+          ${schema.stockTransfers.fromLocationId} IN (
+            SELECT ll.id FROM logistics_locations ll
+            JOIN logistics_providers lp ON lp.id = ll.provider_id
+            WHERE UPPER(lp.currency_code) IN (${curClause})
+          )
+          OR ${schema.stockTransfers.toLocationId} IN (
+            SELECT ll.id FROM logistics_locations ll
+            JOIN logistics_providers lp ON lp.id = ll.provider_id
+            WHERE UPPER(lp.currency_code) IN (${curClause})
+          )
+        )`,
+      );
+    }
+
     // TPL isolation: a 3PL manager only sees transfers touching their own
     // warehouse. Enforced server-side — the frontend location filter is
     // convenience, not security.

@@ -35,8 +35,8 @@ import { Pagination } from '~/components/ui/pagination';
 import { TableRowActionsSheet, type TableRowSheetAction } from '~/components/ui/table-row-actions-sheet';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
-import { useCurrenciesCatalog, useHasMultipleCurrencies, useBaseCurrency } from '~/contexts/currencies-catalog-context';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type {
@@ -62,19 +62,20 @@ function AddProviderForm({
   fetcher,
   onCancel,
   submissionError,
+  currencyOptions,
 }: {
   fetcher: ReturnType<typeof useFetcher>;
   onCancel: () => void;
   submissionError?: string | null;
+  /** Active country/currency options; empty in the single-currency world. */
+  currencyOptions: { value: string; label: string }[];
 }) {
   const [rows, setRows] = useState<ProviderRow[]>([{ name: '', contactInfo: '', coverageArea: '' }]);
-  // Multi-currency: single currency select, only when the company runs 2+ active
-  // currencies. Single-currency installs default to base (NGN) server-side.
-  const currencies = useCurrenciesCatalog();
-  const showCurrency = useHasMultipleCurrencies();
-  const baseCurrency = useBaseCurrency();
-  const activeCurrencies = currencies.filter((c) => c.active);
-  const [currencyCode, setCurrencyCode] = useState<string>(() => baseCurrency.code);
+  // Multi-country: when the company runs 2+ currencies, a single shared
+  // country/currency applies to every provider in this submission. Absent (the
+  // single-currency world) → the server stamps the country the caller is
+  // VIEWING (global top-bar switcher, ctx.currentCurrencyCode).
+  const showCurrency = currencyOptions.length > 0;
 
   function addRow() {
     setRows((prev) => [...prev, { name: '', contactInfo: '', coverageArea: '' }]);
@@ -103,6 +104,15 @@ function AddProviderForm({
         </Button>
       </div>
       <input type="hidden" name="intent" value={rows.length > 1 ? 'createProviders' : 'createProvider'} />
+      {showCurrency && (
+        <FormSelect
+          name="currencyCode"
+          label="Country / currency"
+          defaultValue={currencyOptions[0]?.value}
+          options={currencyOptions}
+          hint="Which country these logistics companies operate in."
+        />
+      )}
       <div className="space-y-3">
         {rows.map((row, idx) => {
           const partialRow =
@@ -159,20 +169,6 @@ function AddProviderForm({
           );
         })}
       </div>
-      {showCurrency && activeCurrencies.length > 0 ? (
-        <div className="sm:w-1/2">
-          <FormSelect
-            name="currencyCode"
-            label="Country this provider operates in"
-            value={currencyCode}
-            onChange={(e) => setCurrencyCode(e.target.value)}
-            options={activeCurrencies.map((c) => ({
-              value: c.code,
-              label: c.countryName || c.code,
-            }))}
-          />
-        </div>
-      ) : null}
       <div className="flex gap-2">
         <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
           {filledCount > 1 ? `Create ${filledCount} logistics companies` : 'Create logistics company'}
@@ -226,12 +222,28 @@ function detectState(loc: Location, providerCoverage?: string | null): string | 
 
 export function LogisticsPage({ providers, totalProviders, locations, totalLocations, globalLowStockThreshold }: LogisticsPageProps) {
   const fetcher = useFetcher();
-  // Multi-currency: single currency select on the edit-provider form, only when
-  // the company runs 2+ active currencies.
-  const currencies = useCurrenciesCatalog();
-  const showProviderCurrency = useHasMultipleCurrencies();
-  const baseCurrency = useBaseCurrency();
-  const activeCurrencies = currencies.filter((c) => c.active);
+  // Multi-country: only expose a per-provider country/currency picker once the
+  // company runs 2+ active currencies. In the single-currency world this stays
+  // dormant and the create/edit forms look exactly as before (currency follows
+  // the top-bar switcher server-side). Options are deduped by code because the
+  // catalog repeats a code per company.
+  const currenciesCatalog = useCurrenciesCatalog();
+  const hasMultipleCurrencies = useHasMultipleCurrencies();
+  const countryCurrencyOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const opts: { value: string; label: string }[] = [];
+    for (const c of currenciesCatalog) {
+      if (!c.active) continue;
+      const code = c.code.toUpperCase();
+      if (seen.has(code)) continue;
+      seen.add(code);
+      opts.push({ value: code, label: `${c.symbol} ${c.code}` });
+    }
+    return opts;
+  }, [currenciesCatalog]);
+  // Multi-country: the provider's country is no longer edited per-provider — it
+  // follows the country the caller is VIEWING (global top-bar country switcher),
+  // resolved server-side. No country picker on the edit form.
   // Multi-country: country filtering is now driven by the GLOBAL top-bar country
   // switcher, which narrows the server-side data scope. So the providers/locations
   // the loader returns (and their totals) are already country-correct — no
@@ -372,6 +384,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     if (coverageArea) patch.coverageArea = coverageArea;
     const status = fd.get('status')?.toString();
     if (status) patch.status = status;
+    const currencyCode = fd.get('currencyCode')?.toString();
+    if (currencyCode) patch.currencyCode = currencyCode;
     return [{ id, patch }];
   }, []);
   const providerPatches = useOptimisticListPatches<Provider>(fetcher, buildProviderPatches);
@@ -835,6 +849,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             fetcher={fetcher}
             onCancel={() => setShowAddProvider(false)}
             submissionError={fetcherSurface.errorMatchingIntent(['createProvider', 'createProviders'])}
+            currencyOptions={hasMultipleCurrencies ? countryCurrencyOptions : []}
           />
         </Modal>
       )}
@@ -998,17 +1013,6 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 placeholder="e.g. Lagos, Abuja"
                 required
               />
-              {showProviderCurrency && activeCurrencies.length > 0 ? (
-                <FormSelect
-                  name="currencyCode"
-                  label="Country this provider operates in"
-                  defaultValue={editingProvider.currencyCode ?? baseCurrency.code}
-                  options={activeCurrencies.map((c) => ({
-                    value: c.code,
-                    label: c.countryName || c.code,
-                  }))}
-                />
-              ) : null}
               <FormSelect
                 name="status"
                 label="Status"
@@ -1018,6 +1022,15 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                   { value: 'INACTIVE', label: 'Inactive' },
                 ]}
               />
+              {hasMultipleCurrencies && countryCurrencyOptions.length > 0 && (
+                <FormSelect
+                  name="currencyCode"
+                  label="Country / currency"
+                  defaultValue={(editingProvider.currencyCode ?? '').toUpperCase() || countryCurrencyOptions[0]?.value}
+                  options={countryCurrencyOptions}
+                  hint="Sets which country this logistics company appears under."
+                />
+              )}
               <div className="flex gap-2 pt-2">
                 <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving...">
                   Save changes

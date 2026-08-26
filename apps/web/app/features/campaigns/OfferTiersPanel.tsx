@@ -24,6 +24,13 @@ export interface OfferTiersPanelProps {
   templates: MinimalOfferTemplateForPreview[];
   canManage: boolean;
   readOnly?: boolean;
+  /**
+   * Multi-country: currency codes the current user may EDIT prices for.
+   * `null`/undefined = edit any currency (view-all). When set, prices for
+   * currencies outside this set render read-only (locked). The base ₦ price is
+   * editable only when 'NGN' is in the set.
+   */
+  editableCurrencyCodes?: string[] | null;
   /** When this nonce increases and `productId` is set, open the “new tier” modal once (e.g. header Create offer). */
   openCreateTierNonce?: number;
   onOpenCreateTierDispatched?: () => void;
@@ -39,12 +46,21 @@ export function OfferTiersPanel({
   templates,
   canManage,
   readOnly,
+  editableCurrencyCodes,
   openCreateTierNonce,
   onOpenCreateTierDispatched,
   editTierKick,
   onEditTierKickDispatched,
   onTemplatesChanged,
 }: OfferTiersPanelProps) {
+  // Multi-country edit gate: null = edit any currency; otherwise only these.
+  const canEditCurrency = useCallback(
+    (code: string) =>
+      editableCurrencyCodes == null ||
+      editableCurrencyCodes.map((c) => c.toUpperCase()).includes(code.toUpperCase()),
+    [editableCurrencyCodes],
+  );
+  const canEditBase = canEditCurrency('NGN');
   const { revalidate } = useRevalidator();
   const { toast } = useToast();
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -100,6 +116,27 @@ export function OfferTiersPanel({
   const allCurrencies = useCurrenciesCatalog();
   const extraCurrencies = allCurrencies.filter((c) => c.active && !c.isDefault);
   const showCurrencyPrices = extraCurrencies.length > 0;
+  // Multi-currency: the base `price` is always NGN by design; non-NGN tier prices
+  // live in `pricesByCurrency`. Mirror the offer-group tab so a tier priced in
+  // e.g. TZS surfaces TSh alongside the base ₦ instead of showing NGN only.
+  const symbolFor = (code: string) =>
+    allCurrencies.find((c) => c.code.toUpperCase() === code.toUpperCase())?.symbol ?? code;
+  const renderTierCurrencyPrices = (prices?: Record<string, string>) => {
+    const entries = Object.entries(prices ?? {}).filter(
+      ([code, v]) => code.toUpperCase() !== 'NGN' && Number(v) > 0,
+    );
+    if (entries.length === 0) return null;
+    return (
+      <span className="mt-0.5 flex flex-wrap justify-end gap-x-1.5">
+        {entries.map(([code, v]) => (
+          <span key={code} className="text-sm font-medium text-app-fg">
+            {symbolFor(code)}
+            {Number(v).toLocaleString('en-US')}
+          </span>
+        ))}
+      </span>
+    );
+  };
   const [currencyPrices, setCurrencyPrices] = useState<Record<string, string>>({});
   const [statusDraft, setStatusDraft] = useState<'ACTIVE' | 'INACTIVE' | 'ARCHIVED'>('ACTIVE');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
@@ -287,7 +324,12 @@ export function OfferTiersPanel({
             key: 'price',
             header: 'Price',
             nowrap: true,
-            render: (row) => `₦${Number(row.price).toLocaleString()}`,
+            render: (row) => (
+              <span className="flex flex-col items-end">
+                <span>{`₦${Number(row.price).toLocaleString()}`}</span>
+                {renderTierCurrencyPrices(row.pricesByCurrency)}
+              </span>
+            ),
           },
           {
             key: 'actions',
@@ -337,8 +379,9 @@ export function OfferTiersPanel({
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-app-fg-muted">Price</dt>
-                <dd className="font-medium text-app-fg">
+                <dd className="flex flex-col items-end font-medium text-app-fg">
                   <NairaPrice amount={Number(viewingTier.price)} />
+                  {renderTierCurrencyPrices(viewingTier.pricesByCurrency)}
                 </dd>
               </div>
               <div className="flex justify-between gap-3 items-center">
@@ -383,8 +426,18 @@ export function OfferTiersPanel({
           <TextInput label="Tier label" required placeholder="e.g. Buy 2" value={name} onChange={(e) => setName(e.target.value)} />
           <div className="grid grid-cols-2 gap-3">
             <TextInput label="Qty" type="number" required min={1} value={qty} onChange={(e) => setQty(e.target.value)} />
-            <FormField label="Price (₦)" htmlFor="tier-price-modal">
-              <AmountInput id="tier-price-modal" required placeholder="0.00" value={price} onChange={setPrice} />
+            <FormField
+              label={`Price (₦)${canEditBase ? '' : ' · locked'}`}
+              htmlFor="tier-price-modal"
+            >
+              <AmountInput
+                id="tier-price-modal"
+                required={canEditBase}
+                placeholder="0.00"
+                value={price}
+                onChange={setPrice}
+                disabled={!canEditBase}
+              />
             </FormField>
           </div>
 
@@ -394,18 +447,32 @@ export function OfferTiersPanel({
                 Other currency prices (leave blank to hide this tier in that currency)
               </p>
               <div className="grid grid-cols-2 gap-3">
-                {extraCurrencies.map((c) => (
-                  <FormField key={c.code} label={`Price (${c.symbol} ${c.code})`} htmlFor={`tier-price-${c.code}`}>
-                    <AmountInput
-                      id={`tier-price-${c.code}`}
-                      placeholder="0.00"
-                      value={currencyPrices[c.code] ?? ''}
-                      onChange={(v) => setCurrencyPrices((prev) => ({ ...prev, [c.code]: v }))}
-                    />
-                  </FormField>
-                ))}
+                {extraCurrencies.map((c) => {
+                  const editable = canEditCurrency(c.code);
+                  return (
+                    <FormField
+                      key={c.code}
+                      label={`Price (${c.symbol} ${c.code})${editable ? '' : ' · locked'}`}
+                      htmlFor={`tier-price-${c.code}`}
+                    >
+                      <AmountInput
+                        id={`tier-price-${c.code}`}
+                        placeholder="0.00"
+                        value={currencyPrices[c.code] ?? ''}
+                        onChange={(v) => setCurrencyPrices((prev) => ({ ...prev, [c.code]: v }))}
+                        disabled={!editable}
+                      />
+                    </FormField>
+                  );
+                })}
               </div>
             </div>
+          )}
+          {editableCurrencyCodes != null && (
+            <p className="text-xs text-app-fg-muted">
+              You can edit prices for your assigned countries only. Locked
+              currencies are managed by an all-countries admin.
+            </p>
           )}
 
           <div>

@@ -91,6 +91,13 @@ export interface SessionBundlePayload {
   branchIds: string[];
   /** Multi-country VIEW switcher — the country the user is currently viewing. */
   currentCurrencyCode?: string | null;
+  /**
+   * Multi-country HARD scope — the currency codes this user is assigned in
+   * `user_countries`. Distinct from `currentCurrencyCode` (the view switcher).
+   * Used by the web UI to gate offer-price editing per currency. Empty for a
+   * non-view_all user = base (NGN) country only.
+   */
+  currencyCodes?: string[];
   appTheme: string | null;
   fontScale: string | null;
   mirroredBy: { id: string; name: string; role: string } | null;

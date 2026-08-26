@@ -302,6 +302,9 @@ export const createContractorSchema = z.object({
 export const updateContractorSchema = createContractorSchema.partial().extend({
   id: z.string().uuid(),
   active: z.boolean().optional(),
+  /** Drop this contractor from the attendance roster + attendance-based pay eligibility. */
+  attendanceExempt: z.boolean().optional(),
+  attendanceExemptReason: z.string().max(500).optional(),
 });
 
 export const getContractorSchema = z.object({

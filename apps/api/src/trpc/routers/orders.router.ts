@@ -1666,7 +1666,7 @@ export const ordersRouter = router({
           ? getOrdersService().getCSCloserWorkloads(branchId, ctx.effectiveBranchIds, undefined, undefined, ctx.effectiveCurrencyCodes)
           : Promise.resolve([]),
         input.showCSCloserColumn
-          ? getLogisticsService().listLocationOptions({ status: 'ACTIVE', providerKind: 'THIRD_PARTY' })
+          ? getLogisticsService().listLocationOptions({ status: 'ACTIVE', providerKind: 'THIRD_PARTY', groupId: ctx.activeGroupId, effectiveCurrencyCodes: ctx.effectiveCurrencyCodes })
           : Promise.resolve([]),
         input.canCreateOffline
           ? getProductsService().list(
@@ -1984,8 +1984,18 @@ export const ordersRouter = router({
             undefined,
             'servicing',
             ctx.effectiveBranchIds,
+            undefined, // isFollowUp
+            undefined, // excludeOffline
+            undefined, // excludeGraduated
+            undefined, // excludeCartGraduated
+            undefined, // onlyOffline
+            undefined, // servicingBranchId
+            undefined, // teamMemberIds
+            undefined, // onlyGraduateNonMarketing
+            undefined, // currencyCode
+            ctx.effectiveCurrencyCodes, // multi-country data-scope (mirror the paired list above)
           ),
-          getInventoryService().listTransfers(undefined, ctx.user),
+          getInventoryService().listTransfers(undefined, ctx.user, undefined, undefined, ctx.activeGroupId, ctx.effectiveCurrencyCodes),
           getInventoryService().listReturnedOrders(locationFilter, ctx.effectiveBranchIds),
         ]);
 
@@ -2131,8 +2141,14 @@ export const ordersRouter = router({
             undefined, // teamMemberIds
             undefined, // onlyGraduateNonMarketing
             input.currencyCode, // currencyCode — strip mirrors the list's currency filter
+            ctx.effectiveCurrencyCodes, // multi-country data-scope (mirror the paired list above)
           ),
-          getLogisticsService().listLocations({ page: 1, limit: 20, status: 'ACTIVE' }),
+          getLogisticsService().listLocations(
+            { page: 1, limit: 20, status: 'ACTIVE' },
+            ctx.activeGroupId,
+            ctx.effectiveBranchIds,
+            ctx.effectiveCurrencyCodes,
+          ),
         ]);
 
       return {

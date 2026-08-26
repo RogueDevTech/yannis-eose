@@ -98,6 +98,16 @@ export const onboardingRouter = router({
       return getService().requestChanges(input.userId, input.reason, ctx.user, ctx.effectiveBranchIds);
     }),
 
+  /**
+   * Revoke an APPROVED onboarding so the staff member can correct & resubmit.
+   * Same input shape as requestChanges; service enforces APPROVED-only + HR/admin.
+   */
+  revokeApproval: authedProcedure
+    .input(requestOnboardingChangesSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getService().revokeApproval(input.userId, input.reason, ctx.user, ctx.effectiveBranchIds);
+    }),
+
   /** HR overview — staff × onboarding status (service enforces HR onboarding visibility). */
   listStaffDocuments: authedProcedure
     .input(listStaffOnboardingDocumentsSchema)

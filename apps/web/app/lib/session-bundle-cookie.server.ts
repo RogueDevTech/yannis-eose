@@ -46,6 +46,12 @@ interface RawSessionBundlePayload {
   branchIds: string[];
   /** Multi-country VIEW switcher — the country the user is currently viewing. */
   currentCurrencyCode?: string | null;
+  /**
+   * Multi-country HARD scope — currency codes assigned in `user_countries`.
+   * Distinct from `currentCurrencyCode` (view switcher). Gates offer-price
+   * editing per currency; empty for a non-view_all user = base (NGN) only.
+   */
+  currencyCodes?: string[];
   appTheme: string | null;
   fontScale: string | null;
   mirroredBy: { id: string; name: string; role: string } | null;

@@ -523,6 +523,7 @@ function mapBundleToCurrentUser(bundle: SessionBundlePayload) {
     activeGroupId: bundle.activeGroupId,
     branchIds: bundle.branchIds,
     currentCurrencyCode: bundle.currentCurrencyCode ?? null,
+    currencyCodes: bundle.currencyCodes ?? [],
     appTheme: bundle.appTheme,
     fontScale: bundle.fontScale,
     mirroredBy: bundle.mirroredBy,
@@ -601,6 +602,8 @@ async function getCurrentUserUncached(request: Request, options?: GetCurrentUser
       branchIds?: string[];
       /** Multi-country VIEW switcher — the country the user is currently viewing. */
       currentCurrencyCode?: string | null;
+      /** Multi-country HARD scope — currencies assigned in `user_countries`. */
+      currencyCodes?: string[];
       appTheme?: string | null;
       /** Set when this session is in Mirror Mode — see CLAUDE.md "Mirror Mode". */
       mirroredBy?: { id: string; name: string; role: string } | null;

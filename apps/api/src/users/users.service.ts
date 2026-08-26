@@ -21,6 +21,7 @@ import { DRIZZLE } from '../database/database.module';
 import { AuthService } from '../auth/auth.service';
 import { UserBundleCacheService } from '../auth/user-bundle-cache.service';
 import { withActor } from '../common/db/with-actor';
+import { nigeriaToday } from '../common/utils/date-range';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import { EventsService } from '../events/events.service';
@@ -894,6 +895,9 @@ export class UsersService {
           capacity: input.capacity ?? 10,
           logisticsLocationId: input.logisticsLocationId ?? null,
           primaryBranchId: input.primaryBranchId ?? null,
+          // Default joining date to today (WAT) so new staff enter the attendance
+          // roster from day one instead of being silently absent from attendance.
+          dateOfJoining: input.dateOfJoining ?? nigeriaToday(),
           phone: input.phone ?? null,
           visibleOrderStatuses: input.visibleOrderStatuses ?? null,
           restrictProductAccess: input.restrictProductAccess ?? false,

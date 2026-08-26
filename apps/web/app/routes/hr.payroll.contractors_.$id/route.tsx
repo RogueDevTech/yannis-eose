@@ -205,6 +205,16 @@ export async function action({ request }: ActionFunctionArgs) {
     if (accountName !== undefined) body.accountName = accountName;
     const notes = pickOptional('notes');
     if (notes !== undefined) body.notes = notes;
+    // Attendance exemption: the form always submits the presence marker so an
+    // unchecked box reliably clears the flag (checkboxes omit themselves when off).
+    if (formData.has('attendanceExemptPresent')) {
+      const exempt = formData.get('attendanceExempt')?.toString() === 'true';
+      body.attendanceExempt = exempt;
+      if (exempt) {
+        const reason = pickOptional('attendanceExemptReason');
+        if (reason !== undefined) body.attendanceExemptReason = reason;
+      }
+    }
 
     const res = await apiRequest<unknown>('/trpc/hr.updateContractor', { method: 'POST', cookie, body });
     if (!res.ok) {

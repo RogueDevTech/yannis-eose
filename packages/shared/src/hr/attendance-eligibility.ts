@@ -19,6 +19,34 @@
  *    the caller before this function runs.
  */
 
+/**
+ * Roles that appear in the attendance roster (grid + auto-absent).
+ *
+ * Staff who work fixed hours and are on payroll. This is DELIBERATELY role-based,
+ * not comp-basis-based: a newly-created MEDIA_BUYER must appear in attendance from
+ * their joining date even before HR assigns a pay role (the pay-eligibility math
+ * safely no-ops without a config — see `computeAttendanceEligibility`). Excludes
+ * admin/read-only/external roles (SUPER_ADMIN, ADMIN, SUPPORT, AUDITOR) who don't
+ * mark attendance.
+ *
+ * `attendanceExcluded` on the user is still the hard per-person opt-out (e.g.
+ * BRANCH_ADMIN is defaulted excluded on create).
+ */
+export const ATTENDANCE_TRACKED_ROLES: ReadonlySet<string> = new Set([
+  'MEDIA_BUYER',
+  'HEAD_OF_MARKETING',
+  'CS_CLOSER',
+  'HEAD_OF_CS',
+  'HEAD_OF_LOGISTICS',
+  'STOCK_MANAGER',
+  'TPL_MANAGER',
+  'TPL_RIDER',
+  'HR_MANAGER',
+  'ACCOUNTANT',
+  'FINANCE_OFFICER',
+  'BRANCH_ADMIN',
+]);
+
 /** One configured absence band. Matches from `minAbsences` upward until the next band's floor. */
 export interface AbsenceBand {
   /** Inclusive lower bound on the ABSENT count for this band to apply. */

@@ -6,6 +6,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { Modal } from '~/components/ui/modal';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { isOptimisticId } from '~/lib/optimistic';
+import { symbolForCurrencyCode } from '@yannis/shared';
 import type { ShipmentRow, ShipmentStatus } from './types';
 import { SHIPMENT_STATUS_VARIANT, formatShipmentStatus } from './types';
 
@@ -15,10 +16,16 @@ interface ShipmentsTabProps {
   canIntake: boolean;
 }
 
-function formatNaira(value: string | number | null | undefined): string {
+/**
+ * Format a money value with the shipment's own currency symbol. Each row carries
+ * its country's currencyCode (mig 0329), so a Tanzania shipment renders TSh and a
+ * Ghana one GH₵ — never a hardcoded ₦, which mislabels non-Nigerian shipments.
+ */
+function formatMoney(value: string | number | null | undefined, currencyCode: string | null): string {
+  const symbol = symbolForCurrencyCode(currencyCode);
   const n = typeof value === 'string' ? parseFloat(value) : value ?? 0;
-  if (!Number.isFinite(n)) return '₦0';
-  return `₦${n.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
+  if (!Number.isFinite(n)) return `${symbol}0`;
+  return `${symbol}${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 }
 
 function formatDate(iso: string | null | undefined): string {
@@ -97,7 +104,7 @@ export function ShipmentsTab({
         nowrap: true,
         render: (s) => (
           <span className="text-sm text-app-fg-muted tabular-nums">
-            {formatNaira(s.totalLandingCost)}
+            {formatMoney(s.totalLandingCost, s.currencyCode)}
           </span>
         ),
       },
@@ -177,7 +184,7 @@ export function ShipmentsTab({
                 </div>
                 <div className="flex items-center gap-3 text-xs text-app-fg-muted tabular-nums">
                   <span>{s.lineCount} line{s.lineCount === 1 ? '' : 's'} ({s.totalExpected} units)</span>
-                  <span>{formatNaira(s.totalLandingCost)}</span>
+                  <span>{formatMoney(s.totalLandingCost, s.currencyCode)}</span>
                   {s.expectedArrivalAt ? <span>{formatDate(s.expectedArrivalAt)}</span> : null}
                 </div>
               </>
@@ -253,7 +260,7 @@ export function ShipmentsTab({
             </div>
             <div className="flex items-baseline justify-between gap-2">
               <dt className="text-app-fg-muted">Landing cost</dt>
-              <dd className="font-medium text-app-fg tabular-nums">{formatNaira(peekShipment.totalLandingCost)}</dd>
+              <dd className="font-medium text-app-fg tabular-nums">{formatMoney(peekShipment.totalLandingCost, peekShipment.currencyCode)}</dd>
             </div>
           </dl>
 
