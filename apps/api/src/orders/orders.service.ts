@@ -3153,7 +3153,7 @@ export class OrdersService {
       }
     }
 
-    return withActor(this.db, { id: actorId }, async (tx) => {
+    const result = await withActor(this.db, { id: actorId }, async (tx) => {
       const values = {
         mediaBuyerId: input.mediaBuyerId ?? null,
         branchId: input.branchId,
@@ -3216,7 +3216,14 @@ export class OrdersService {
             updatedAt: sql`now()`,
           },
         })
-        .returning({ id: schema.orders.id, createdAt: schema.orders.createdAt });
+        .returning({
+          id: schema.orders.id,
+          createdAt: schema.orders.createdAt,
+          // xmax = 0 on a fresh INSERT; non-zero when ON CONFLICT took the UPDATE
+          // path. Lets us log the "imported" timeline event only on first import,
+          // not on every idempotent re-import/retry.
+          wasInsert: sql<boolean>`(xmax = 0)`,
+        });
 
       const upserted = rows[0];
       if (!upserted) {
@@ -3235,8 +3242,24 @@ export class OrdersService {
         })),
       );
 
-      return { id: upserted.id, created: true };
+      return { id: upserted.id, created: !!upserted.wasInsert };
     });
+
+    // Activity log: record that this order was IMPORTED — but only on first
+    // import (not on idempotent re-imports/retries, which take the UPDATE path).
+    // Best-effort (void) so a timeline hiccup never fails the import row.
+    if (result.created) {
+      void this.writeTimelineEvent({
+        orderId: result.id,
+        eventType: 'ORDER_RECEIVED',
+        actorId,
+        description: 'Order imported from a bulk spreadsheet upload.',
+        branchId: input.branchId,
+        metadata: { source: 'import', importExternalId: input.importExternalId },
+      });
+    }
+
+    return result;
   }
 
   /**

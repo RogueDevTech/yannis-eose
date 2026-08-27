@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { Readable } from 'node:stream';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
@@ -27,6 +27,16 @@ const CHUNK_SIZE = 500;
 
 /** Cap on stored per-row failures so error_log can't grow unbounded on a bad file. */
 const MAX_ERROR_LOG = 1000;
+
+/**
+ * Mid-chunk progress heartbeat: flush accumulated row records + the running
+ * processed/failed counts every N rows WITHIN a chunk, so the live UI (which
+ * polls every ~2.5s) sees the progress bar advance and rows appear as they
+ * import — not just once the whole chunk finishes. Matters most on a slow/
+ * remote DB where a 500-row chunk can take many seconds (see dev_db_latency).
+ * Kept modest so the extra writes don't dominate throughput.
+ */
+const MID_CHUNK_FLUSH_EVERY = 10;
 
 /**
  * Options + column mapping chosen in the UI and persisted on the job's `config`.
@@ -63,6 +73,9 @@ export interface ImportJobConfig {
     quantity?: string;
     unitPrice?: string;
     offerLabel?: string;
+    // Header holding a per-row status label (Confirmed / Delivered / Pending…).
+    // Parsed via parseRowStatus; blank/unknown falls back to config.targetStatus.
+    status?: string;
     // Display-code columns resolved to UUIDs at import time (see mapRow).
     productCode?: string; // header holding a product code (PDT-N)
     mediaBuyerCode?: string; // header holding a user code (USR-N) for the MB
@@ -134,6 +147,28 @@ interface UnresolvedRef {
 function normalizeNumericCode(raw: string): string | null {
   const digits = raw.replace(/[^0-9]/g, '').replace(/^0+/, '');
   return digits.length > 0 ? digits : null;
+}
+
+/**
+ * Map a source CRM status label (e.g. "Confirmed", "Delivered", "No Response")
+ * to an order status. Mirrors the row-by-row importer's parser
+ * (orders-import-shared.parseStatus) so both import paths agree. Returns null
+ * for a blank/unknown label — the caller falls back to the job default.
+ */
+function parseRowStatus(raw: string): ImportOrderInput['targetStatus'] | null {
+  const lower = raw.toLowerCase().trim();
+  if (!lower) return null;
+  if (lower.includes('delivered') && (lower.includes('remitted') || lower.includes('cash'))) return 'REMITTED';
+  if (lower.includes('pending')) return 'CS_ASSIGNED';
+  if (lower.includes('no response') || lower.includes('no_response')) return 'CS_ENGAGED';
+  if (lower.includes('rescheduled')) return 'CS_ENGAGED';
+  if (lower.includes('confirmed')) return 'CONFIRMED';
+  if (lower.includes('delivered')) return 'DELIVERED';
+  if (lower.includes('returned')) return 'RETURNED';
+  if (lower.includes('cancelled') || lower.includes('canceled')) return 'CANCELLED';
+  if (lower.includes('remitted')) return 'REMITTED';
+  if (lower.includes('deleted')) return 'DELETED';
+  return null;
 }
 
 export interface CreateImportJobInput {
@@ -242,14 +277,33 @@ export class BulkImportService {
     const where = and(...conditions);
 
     const [rows, countRows] = await Promise.all([
+      // LEFT JOIN the imported order (by import_external_id) so the UI can show
+      // the actual order — name, amount, currency, status — not just the row
+      // outcome. FAILED rows have no order, so the joined columns come back null.
+      // NOTE: customer phone is intentionally NOT selected here (Pillar 2 — raw
+      // phones never leave the API for the import view).
       this.db
         .select({
           rowIndex: schema.importJobRows.rowIndex,
           status: schema.importJobRows.status,
           externalId: schema.importJobRows.externalId,
           reason: schema.importJobRows.reason,
+          orderId: schema.orders.id,
+          orderNumber: schema.orders.orderNumber,
+          customerName: schema.orders.customerName,
+          deliveryState: schema.orders.deliveryState,
+          totalAmount: schema.orders.totalAmount,
+          currencyCode: schema.orders.currencyCode,
+          orderStatus: schema.orders.status,
+          // Order date — the import stamps this from the sheet's date column
+          // (createdAtOverride), else defaults to when the row was imported.
+          orderCreatedAt: schema.orders.createdAt,
         })
         .from(schema.importJobRows)
+        .leftJoin(
+          schema.orders,
+          eq(schema.orders.importExternalId, schema.importJobRows.externalId),
+        )
         .where(where)
         .orderBy(schema.importJobRows.rowIndex)
         .limit(limit)
@@ -259,8 +313,32 @@ export class BulkImportService {
         .from(schema.importJobRows)
         .where(where),
     ]);
+
+    // Product name per order (first line item), fetched once for the page.
+    const orderIds = rows.map((r) => r.orderId).filter((id): id is string => !!id);
+    const productByOrder = new Map<string, string>();
+    if (orderIds.length > 0) {
+      const items = await this.db
+        .select({
+          orderId: schema.orderItems.orderId,
+          productName: schema.products.name,
+        })
+        .from(schema.orderItems)
+        .innerJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
+        .where(inArray(schema.orderItems.orderId, orderIds));
+      for (const it of items) {
+        // First item wins (import creates a single-line order per row).
+        if (!productByOrder.has(it.orderId)) productByOrder.set(it.orderId, it.productName);
+      }
+    }
+
+    const enriched = rows.map((r) => ({
+      ...r,
+      productName: r.orderId ? productByOrder.get(r.orderId) ?? null : null,
+    }));
+
     const total = countRows[0]?.count ?? 0;
-    return { rows, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)) };
+    return { rows: enriched, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)) };
   }
 
   /**
@@ -458,6 +536,15 @@ export class BulkImportService {
       externalId: string | null;
       reason: string | null;
     }> = [];
+    // How many of rowRecords have already been written by a mid-chunk heartbeat,
+    // so the boundary/error flush only writes the remainder (ON CONFLICT makes a
+    // re-write harmless, but this avoids the redundant round-trip).
+    let flushedUpTo = 0;
+    // Progress counts already written to the DB by mid-chunk heartbeats (which
+    // write ABSOLUTE values). The boundary persistProgress is ADD-based, so it
+    // must add only the delta SINCE the last heartbeat, or it would double-count.
+    let heartbeatProcessed = 0;
+    let heartbeatFailed = 0;
 
     let stream: Readable | null;
     try {
@@ -521,24 +608,63 @@ export class BulkImportService {
           rowRecords.push({ rowIndex, status: 'FAILED', externalId: failExternalId, reason: failReason });
         }
         processedInChunk += 1;
+
+        // Mid-chunk heartbeat: every N rows, push what we have so the live UI
+        // advances instead of sitting at 0% for the whole (possibly slow) chunk.
+        // We flush the NEW row records since the last heartbeat and write the
+        // running ABSOLUTE progress (base counts + this chunk's deltas). This is
+        // a lightweight direct update — the authoritative add-based
+        // persistProgress still runs at the chunk boundary.
+        if (processedInChunk % MID_CHUNK_FLUSH_EVERY === 0) {
+          const fresh = rowRecords.slice(flushedUpTo);
+          flushedUpTo = rowRecords.length;
+          await this.flushRowRecords(jobId, fresh);
+          await this.heartbeatProgress(jobId, {
+            processedRows: (job.processedRows ?? 0) + newProcessed,
+            failedRows: (job.failedRows ?? 0) + newFailures,
+            cursor: lastRowSeen + 1,
+          });
+          heartbeatProcessed = newProcessed;
+          heartbeatFailed = newFailures;
+        }
       }
     } catch (streamErr) {
-      // A mid-stream parse failure is recoverable: pause and let the user resume.
-      await this.flushRowRecords(jobId, rowRecords);
+      await this.flushRowRecords(jobId, rowRecords.slice(flushedUpTo));
+      flushedUpTo = rowRecords.length;
+      const msg = streamErr instanceof Error ? streamErr.message : String(streamErr);
+      // Distinguish "the file itself is unreadable" (NOT resumable — retrying
+      // hits the same error) from a genuine mid-stream parse failure (resumable
+      // — pause and let the user Continue). A missing object / access error, or
+      // a failure before we ever parsed a row, means re-upload is the only fix.
+      const isFileUnreadable =
+        /no such object|does not exist|not found|access denied|forbidden|permission|invalid zip|end of central directory|corrupt/i.test(
+          msg,
+        ) || newProcessed === 0;
+      if (isFileUnreadable) {
+        await this.markFailed(
+          jobId,
+          `Could not read the uploaded file: ${msg}. Re-upload the file and start a new import.`,
+        );
+        return;
+      }
+      // Genuine mid-stream parse failure: recoverable — pause and let the user resume.
       await this.persistProgress(jobId, {
         status: 'PAUSED',
         cursor: lastRowSeen + 1,
-        addProcessed: newProcessed,
-        addFailed: newFailures,
+        // Only the delta since the last heartbeat (which already wrote its share).
+        addProcessed: newProcessed - heartbeatProcessed,
+        addFailed: newFailures - heartbeatFailed,
         errorLog: failures,
-        lastError: `Parse error near row ${lastRowSeen}: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`,
+        lastError: `Parse error near row ${lastRowSeen}: ${msg}`,
       });
       return;
     }
 
-    // Persist per-row outcomes for this chunk before the progress write, so the
-    // job page's row list is consistent with the counters.
-    await this.flushRowRecords(jobId, rowRecords);
+    // Persist any per-row outcomes not yet written by a mid-chunk heartbeat,
+    // before the progress write, so the job page's row list is consistent with
+    // the counters.
+    await this.flushRowRecords(jobId, rowRecords.slice(flushedUpTo));
+    flushedUpTo = rowRecords.length;
 
     const nextCursor = reachedEnd ? lastRowSeen + 1 : endRowExclusive;
 
@@ -547,8 +673,9 @@ export class BulkImportService {
       await this.persistProgress(jobId, {
         status: 'COMPLETED',
         cursor: nextCursor,
-        addProcessed: newProcessed,
-        addFailed: newFailures,
+        // Only the delta since the last heartbeat (which already wrote its share).
+        addProcessed: newProcessed - heartbeatProcessed,
+        addFailed: newFailures - heartbeatFailed,
         errorLog: failures,
         totalRows: lastRowSeen + 1,
         finished: true,
@@ -566,8 +693,9 @@ export class BulkImportService {
     await this.persistProgress(jobId, {
       status: 'PENDING',
       cursor: nextCursor,
-      addProcessed: newProcessed,
-      addFailed: newFailures,
+      // Only the delta since the last heartbeat (which already wrote its share).
+      addProcessed: newProcessed - heartbeatProcessed,
+      addFailed: newFailures - heartbeatFailed,
       errorLog: failures,
     });
     if (newWarnings > 0) {
@@ -584,6 +712,35 @@ export class BulkImportService {
    * list is a convenience view, not the source of truth), so we log and move on.
    * Batched in one INSERT ... ON CONFLICT to keep it to a single round-trip.
    */
+  /**
+   * Lightweight mid-chunk progress heartbeat. Writes ABSOLUTE processed/failed
+   * counts + cursor directly (the boundary persistProgress is add-based and
+   * remains the authoritative write). Keeps `status='PROCESSING'` so a reaper
+   * can't mistake an actively-draining job for a crashed one. Best-effort: a
+   * failed heartbeat must not fail the chunk — the next one (or the boundary
+   * write) corrects it.
+   */
+  private async heartbeatProgress(
+    jobId: string,
+    p: { processedRows: number; failedRows: number; cursor: number },
+  ): Promise<void> {
+    try {
+      await this.db
+        .update(schema.importJobs)
+        .set({
+          processedRows: p.processedRows,
+          failedRows: p.failedRows,
+          cursor: p.cursor,
+          updatedAt: sql`now()`,
+        })
+        .where(and(eq(schema.importJobs.id, jobId), eq(schema.importJobs.status, 'PROCESSING')));
+    } catch (err) {
+      this.logger.warn(
+        `heartbeatProgress failed for job ${jobId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   private async flushRowRecords(
     jobId: string,
     rows: Array<{
@@ -839,6 +996,17 @@ export class BulkImportService {
 
     const createdAtOverride = m.createdAt ? this.readCell(record, m.createdAt) : undefined;
 
+    // Per-row status from the sheet's Status column (Confirmed / Delivered /
+    // Returned / Pending / No Response…). Blank or unknown → the job default.
+    // An unknown non-blank label hard-fails the row so it isn't silently wrong.
+    let rowStatus = config.targetStatus;
+    const statusRaw = m.status ? this.readCell(record, m.status) : undefined;
+    if (statusRaw && statusRaw.trim()) {
+      const parsed = parseRowStatus(statusRaw);
+      if (!parsed) throw new Error(`Unknown status "${statusRaw}"`);
+      rowStatus = parsed;
+    }
+
     // ── References: MB / CS resolved from codes; BRANCH derived from them ──────
     const unresolved: UnresolvedRef[] = [];
 
@@ -937,7 +1105,7 @@ export class BulkImportService {
         deliveryState: m.deliveryState ? this.readCell(record, m.deliveryState) : undefined,
         items: [{ productId, quantity, unitPrice, offerLabel }],
         totalAmount,
-        targetStatus: config.targetStatus,
+        targetStatus: rowStatus,
         createdAtOverride,
         mediaBuyerId,
         assignedCsId,
