@@ -217,6 +217,9 @@ export const importJobConfigSchema = z.object({
     quantity: z.string().optional(),
     unitPrice: z.string().optional(),
     offerLabel: z.string().optional(),
+    // Source header holding a per-row status label (Confirmed / Delivered /
+    // Pending…). Parsed server-side; blank/unknown falls back to targetStatus.
+    status: z.string().optional(),
     // ── Display-code columns (resolved to internal UUIDs at import time) ──
     // Each holds a source header whose cells carry a human-facing code:
     //   productCode    → products.product_number    (e.g. "PDT-7", "PDT7", "7")

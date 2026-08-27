@@ -95,7 +95,7 @@ function fileTypeOf(file: File): 'xlsx' | 'csv' | null {
 
 type MapField =
   | 'externalId' | 'name' | 'phone' | 'address' | 'state' | 'total'
-  | 'createdAt' | 'qty' | 'unitPrice'
+  | 'createdAt' | 'qty' | 'unitPrice' | 'status'
   | 'productCode' | 'mediaBuyerCode' | 'closerCode' | 'currency';
 
 /** Every field's accepted header names, already normalised (see `normHeader`). */
@@ -109,6 +109,7 @@ const FIELD_ALIASES: Record<MapField, string[]> = {
   createdAt: ['date', 'orderdate', 'createdat', 'created', 'datetime', 'timestamp'],
   qty: ['quantity', 'qty', 'units', 'count'],
   unitPrice: ['unitprice', 'priceperunit', 'unitcost', 'rate'],
+  status: ['status', 'orderstatus', 'state2', 'stage', 'disposition'],
   productCode: ['productid', 'productcode', 'product', 'sku', 'pdt', 'pdtcode'],
   mediaBuyerCode: ['mediabuyerid', 'mediabuyercode', 'mbid', 'mbcode', 'buyerid', 'mediabuyer'],
   closerCode: ['csid', 'csagentid', 'closercode', 'closerid', 'csclosercode', 'csclose', 'cs', 'csagent'],
@@ -154,7 +155,7 @@ function autoMapHeaders(headers: string[]): AutoMapResult {
   // (e.g. externalId claims "Order ID" before productCode can grab "Product ID").
   const order: MapField[] = [
     'externalId', 'name', 'phone', 'productCode',
-    'address', 'state', 'total', 'createdAt', 'qty', 'unitPrice',
+    'address', 'state', 'total', 'createdAt', 'qty', 'unitPrice', 'status',
     'mediaBuyerCode', 'closerCode', 'currency',
   ];
   const claimed = new Set<string>();
@@ -206,6 +207,9 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
   const [colCreatedAt, setColCreatedAt] = useState('');
   const [colQty, setColQty] = useState('');
   const [colUnitPrice, setColUnitPrice] = useState('');
+  // Per-row status column (Confirmed / Delivered / Pending…). Blank falls back
+  // to the default status server-side.
+  const [colStatus, setColStatus] = useState('');
   // Display-code columns: headers whose cells carry a human code (PDT-N / USR-N /
   // branch code) resolved to the internal UUID at import time. Optional — leave
   // as "None" to keep using the job-level MB/CS dropdowns + product column above.
@@ -216,13 +220,36 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
   const [colCurrency, setColCurrency] = useState('');
 
   const [busy, setBusy] = useState(false);
+  // Live upload progress (0-100) while the file streams to storage, before the
+  // background job is created. null = not uploading.
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<ImportJob | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const headerOptions = headers.map((h) => ({ value: h, label: h }));
-  const optionalHeaderOptions = [{ value: '', label: 'None' }, ...headerOptions];
+  // Columns currently claimed by a mapping. Used to hide an already-used column
+  // from every OTHER field's dropdown, so the same sheet column can never map to
+  // two fields (no duplicate mapping can be created in the first place).
+  const claimedColumns = new Set(
+    [
+      externalIdColumn, colName, colPhone, colProductCode,
+      colAddress, colState, colTotal, colCreatedAt, colQty, colUnitPrice, colStatus,
+      colMediaBuyerCode, colCloserCode, colCurrency,
+    ].filter(Boolean),
+  );
+  /**
+   * Options for one field's dropdown: the full header list minus columns claimed
+   * by other fields, but always keeping this field's own current value (so the
+   * selected column stays visible and re-selectable). `includeNone` prepends the
+   * "None" option for optional fields.
+   */
+  const optionsFor = (ownValue: string, includeNone: boolean) => {
+    const opts = headers
+      .filter((h) => h === ownValue || !claimedColumns.has(h))
+      .map((h) => ({ value: h, label: h }));
+    return includeNone ? [{ value: '', label: 'None' }, ...opts] : opts;
+  };
 
   // How many required fields auto-mapped on the last file pick (for the banner).
   const [autoMatched, setAutoMatched] = useState<number | null>(null);
@@ -230,7 +257,7 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
   const clearMapping = useCallback(() => {
     setExternalIdColumn(''); setColName(''); setColPhone('');
     setColAddress(''); setColState(''); setColTotal(''); setColCreatedAt('');
-    setColQty(''); setColUnitPrice('');
+    setColQty(''); setColUnitPrice(''); setColStatus('');
     setColProductCode(''); setColMediaBuyerCode(''); setColCloserCode(''); setColCurrency('');
   }, []);
 
@@ -265,6 +292,7 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
       setColCreatedAt(map.createdAt);
       setColQty(map.qty);
       setColUnitPrice(map.unitPrice);
+      setColStatus(map.status);
       setColProductCode(map.productCode);
       setColMediaBuyerCode(map.mediaBuyerCode);
       setColCloserCode(map.closerCode);
@@ -285,7 +313,41 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
   const missingRequired = REQUIRED_FIELDS.filter((r) => !requiredValues[r.field]);
   const allRequiredMapped = missingRequired.length === 0;
 
-  const canStart = !!file && headers.length > 0 && allRequiredMapped && !busy;
+  // Every mapped column, keyed by its field label, so we can flag two problems
+  // that make a mapping "incomplete" even when all four required fields have a
+  // value: (a) a picked column that no longer exists in the current headers
+  // (stale after a file replace), and (b) the same header claimed by two
+  // different fields (a duplicate mapping silently misimports one of them).
+  const allMappings: Array<{ label: string; value: string }> = [
+    { label: 'Unique ID', value: externalIdColumn },
+    { label: 'Customer name', value: colName },
+    { label: 'Customer phone', value: colPhone },
+    { label: 'Product code', value: colProductCode },
+    { label: 'Address', value: colAddress },
+    { label: 'State', value: colState },
+    { label: 'Total amount', value: colTotal },
+    { label: 'Order date', value: colCreatedAt },
+    { label: 'Quantity', value: colQty },
+    { label: 'Unit price', value: colUnitPrice },
+    { label: 'Order status', value: colStatus },
+    { label: 'Media buyer code', value: colMediaBuyerCode },
+    { label: 'Closer code', value: colCloserCode },
+    { label: 'Currency / country', value: colCurrency },
+  ];
+  const headerSet = new Set(headers);
+  // Mapped-but-missing header (e.g. after replacing the file with a different sheet).
+  const unknownColumnFields = allMappings.filter((m) => m.value && !headerSet.has(m.value));
+  // Headers used by more than one field.
+  const usageCount = new Map<string, number>();
+  for (const m of allMappings) {
+    if (m.value) usageCount.set(m.value, (usageCount.get(m.value) ?? 0) + 1);
+  }
+  const duplicateColumns = [...usageCount.entries()].filter(([, n]) => n > 1).map(([col]) => col);
+
+  const mappingComplete =
+    allRequiredMapped && unknownColumnFields.length === 0 && duplicateColumns.length === 0;
+
+  const canStart = !!file && headers.length > 0 && mappingComplete && !busy;
 
   // " and N rows to import" fragment for the banner (omitted if unknown/empty).
   const rowCountPhrase =
@@ -297,12 +359,30 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
     if (!file) return;
     const ft = fileTypeOf(file);
     if (!ft) return;
+    // Hard guard: never submit an incomplete mapping, even if the button state
+    // is stale. Mirrors `canStart` — a missing required column, a stale column
+    // that no longer exists, or the same column mapped twice all block the run.
+    if (missingRequired.length > 0) {
+      setError(`Finish mapping these columns before importing: ${missingRequired.map((m) => m.label).join(', ')}.`);
+      return;
+    }
+    if (unknownColumnFields.length > 0) {
+      setError(`These fields point to a column that is not in this file: ${unknownColumnFields.map((m) => m.label).join(', ')}. Re-select them.`);
+      return;
+    }
+    if (duplicateColumns.length > 0) {
+      setError(`Each column can map to only one field. Fix the duplicate mapping for: ${duplicateColumns.join(', ')}.`);
+      return;
+    }
     setBusy(true);
     setError(null);
+    setUploadPct(0);
     try {
       // 1. Upload the file to storage (returns URL + key for the worker).
-      const { fileUrl, key } = await uploadAssetDetailed(file, 'imports');
+      // onProgress drives the live upload bar so the user sees the file saving.
+      const { fileUrl, key } = await uploadAssetDetailed(file, 'imports', setUploadPct);
       if (!key) throw new Error('Upload did not return a storage key.');
+      setUploadPct(null); // upload done; the job's own progress takes over
 
       // 2. Create the background job. Branch / media buyer / CS agent are no
       // longer job-level: they're resolved per row from the code columns, and
@@ -319,6 +399,7 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
           ...(colCreatedAt ? { createdAt: colCreatedAt } : {}),
           ...(colQty ? { quantity: colQty } : {}),
           ...(colUnitPrice ? { unitPrice: colUnitPrice } : {}),
+          ...(colStatus ? { status: colStatus } : {}),
           productCode: colProductCode,
           ...(colMediaBuyerCode ? { mediaBuyerCode: colMediaBuyerCode } : {}),
           ...(colCloserCode ? { closerCode: colCloserCode } : {}),
@@ -339,12 +420,14 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
       setError(err instanceof Error ? err.message : 'Failed to start import.');
     } finally {
       setBusy(false);
+      setUploadPct(null);
     }
   }, [
     file, rowCount, targetStatus, externalIdColumn,
     colName, colPhone, colAddress, colState, colTotal, colCreatedAt,
-    colQty, colUnitPrice,
+    colQty, colUnitPrice, colStatus,
     colProductCode, colMediaBuyerCode, colCloserCode, colCurrency,
+    missingRequired, unknownColumnFields, duplicateColumns,
   ]);
 
   // Poll while a job is active (not terminal).
@@ -450,9 +533,14 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
         description="Upload a large Excel or CSV export. It imports in the background and can be paused, continued, and retried without creating duplicates."
         backTo={backHref}
         actions={
-          <Button variant="secondary" onClick={() => downloadOrdersImportTemplate()}>
-            Download template
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => void loadHistory()}>
+              Refresh
+            </Button>
+            <Button variant="secondary" onClick={() => downloadOrdersImportTemplate()}>
+              Download template
+            </Button>
+          </div>
         }
       />
 
@@ -504,9 +592,11 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
 
           {headers.length > 0 && (
             <>
-              {/* Auto-map confirmation: green when every required column was
-                  found, warning listing what still needs a column otherwise. */}
-              {allRequiredMapped ? (
+              {/* Auto-map confirmation: green only when the mapping is fully
+                  valid; otherwise a warning naming the exact blocker (missing
+                  required column, a stale column, or a duplicate mapping). The
+                  Start button stays disabled until this clears. */}
+              {mappingComplete ? (
                 <InlineNotification
                   variant="success"
                   message={`Detected ${headers.length} columns${rowCountPhrase}. All required columns matched automatically. Review the mapping below, then start the import.`}
@@ -514,7 +604,13 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
               ) : (
                 <InlineNotification
                   variant="warning"
-                  message={`Detected ${headers.length} columns${rowCountPhrase}. Select a column for: ${missingRequired.map((m) => m.label).join(', ')}.`}
+                  message={`Detected ${headers.length} columns${rowCountPhrase}. ${
+                    missingRequired.length > 0
+                      ? `Select a column for: ${missingRequired.map((m) => m.label).join(', ')}.`
+                      : unknownColumnFields.length > 0
+                        ? `These fields point to a column not in this file: ${unknownColumnFields.map((m) => m.label).join(', ')}. Re-select them.`
+                        : `Each column can map to only one field. Fix the duplicate mapping for: ${duplicateColumns.join(', ')}.`
+                  }`}
                 />
               )}
 
@@ -537,34 +633,37 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
 
               <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 <Field label="Unique ID column" required mapped={!!externalIdColumn}>
-                  <SearchableSelect value={externalIdColumn} onChange={setExternalIdColumn} options={headerOptions} placeholder="Select column" />
+                  <SearchableSelect value={externalIdColumn} onChange={setExternalIdColumn} options={optionsFor(externalIdColumn, false)} placeholder="Select column" />
                 </Field>
                 <Field label="Customer name" required mapped={!!colName}>
-                  <SearchableSelect value={colName} onChange={setColName} options={headerOptions} placeholder="Select column" />
+                  <SearchableSelect value={colName} onChange={setColName} options={optionsFor(colName, false)} placeholder="Select column" />
                 </Field>
                 <Field label="Customer phone" required mapped={!!colPhone}>
-                  <SearchableSelect value={colPhone} onChange={setColPhone} options={headerOptions} placeholder="Select column" />
+                  <SearchableSelect value={colPhone} onChange={setColPhone} options={optionsFor(colPhone, false)} placeholder="Select column" />
                 </Field>
                 <Field label="Product code" required mapped={!!colProductCode}>
-                  <SearchableSelect value={colProductCode} onChange={setColProductCode} options={optionalHeaderOptions} placeholder="Select column" />
+                  <SearchableSelect value={colProductCode} onChange={setColProductCode} options={optionsFor(colProductCode, true)} placeholder="Select column" />
                 </Field>
                 <Field label="Address" mapped={!!colAddress}>
-                  <SearchableSelect value={colAddress} onChange={setColAddress} options={optionalHeaderOptions} placeholder="None" />
+                  <SearchableSelect value={colAddress} onChange={setColAddress} options={optionsFor(colAddress, true)} placeholder="None" />
                 </Field>
                 <Field label="State" mapped={!!colState}>
-                  <SearchableSelect value={colState} onChange={setColState} options={optionalHeaderOptions} placeholder="None" />
+                  <SearchableSelect value={colState} onChange={setColState} options={optionsFor(colState, true)} placeholder="None" />
                 </Field>
                 <Field label="Total amount" mapped={!!colTotal}>
-                  <SearchableSelect value={colTotal} onChange={setColTotal} options={optionalHeaderOptions} placeholder="None" />
+                  <SearchableSelect value={colTotal} onChange={setColTotal} options={optionsFor(colTotal, true)} placeholder="None" />
                 </Field>
                 <Field label="Order date" mapped={!!colCreatedAt}>
-                  <SearchableSelect value={colCreatedAt} onChange={setColCreatedAt} options={optionalHeaderOptions} placeholder="None" />
+                  <SearchableSelect value={colCreatedAt} onChange={setColCreatedAt} options={optionsFor(colCreatedAt, true)} placeholder="None" />
                 </Field>
                 <Field label="Quantity" mapped={!!colQty}>
-                  <SearchableSelect value={colQty} onChange={setColQty} options={optionalHeaderOptions} placeholder="None (defaults to 1)" />
+                  <SearchableSelect value={colQty} onChange={setColQty} options={optionsFor(colQty, true)} placeholder="None (defaults to 1)" />
                 </Field>
                 <Field label="Unit price" mapped={!!colUnitPrice}>
-                  <SearchableSelect value={colUnitPrice} onChange={setColUnitPrice} options={optionalHeaderOptions} placeholder="None" />
+                  <SearchableSelect value={colUnitPrice} onChange={setColUnitPrice} options={optionsFor(colUnitPrice, true)} placeholder="None" />
+                </Field>
+                <Field label="Order status" mapped={!!colStatus}>
+                  <SearchableSelect value={colStatus} onChange={setColStatus} options={optionsFor(colStatus, true)} placeholder="None (uses default)" />
                 </Field>
               </div>
 
@@ -573,13 +672,13 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
                   fields. Branch is derived from the media buyer / CS user. */}
               <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 pt-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 <Field label="Media buyer code" mapped={!!colMediaBuyerCode}>
-                  <SearchableSelect value={colMediaBuyerCode} onChange={setColMediaBuyerCode} options={optionalHeaderOptions} placeholder="None" />
+                  <SearchableSelect value={colMediaBuyerCode} onChange={setColMediaBuyerCode} options={optionsFor(colMediaBuyerCode, true)} placeholder="None" />
                 </Field>
                 <Field label="Closer code" mapped={!!colCloserCode}>
-                  <SearchableSelect value={colCloserCode} onChange={setColCloserCode} options={optionalHeaderOptions} placeholder="None" />
+                  <SearchableSelect value={colCloserCode} onChange={setColCloserCode} options={optionsFor(colCloserCode, true)} placeholder="None" />
                 </Field>
                 <Field label="Currency / country" mapped={!!colCurrency}>
-                  <SearchableSelect value={colCurrency} onChange={setColCurrency} options={optionalHeaderOptions} placeholder="None" />
+                  <SearchableSelect value={colCurrency} onChange={setColCurrency} options={optionsFor(colCurrency, true)} placeholder="None" />
                 </Field>
               </div>
               <p className="text-xs text-app-fg-muted">
@@ -587,9 +686,30 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
                 the media buyer or closer&apos;s country, then the base currency. An unknown currency fails the row.
               </p>
 
+              {/* Live upload bar — the file streaming to storage before the
+                  background job starts. Real byte progress via XHR. */}
+              {uploadPct != null && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs text-app-fg-muted">
+                    <span>Uploading file…</span>
+                    <span className="tabular-nums">{uploadPct}%</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-app-border">
+                    <div
+                      className="h-full rounded-full bg-app-accent transition-all"
+                      style={{ width: `${uploadPct}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-end">
                 <Button onClick={() => void startImport()} disabled={!canStart}>
-                  {busy ? 'Starting...' : 'Start import'}
+                  {busy
+                    ? uploadPct != null
+                      ? `Uploading ${uploadPct}%…`
+                      : 'Starting…'
+                    : 'Start import'}
                 </Button>
               </div>
             </>
@@ -601,7 +721,6 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
         jobs={history}
         error={historyError}
         basePath={backHref}
-        onRefresh={() => void loadHistory()}
         onDelete={(j) => setDeleteHistoryJob(j)}
       />
 
@@ -633,22 +752,17 @@ function ImportHistory({
   jobs,
   error,
   basePath,
-  onRefresh,
   onDelete,
 }: {
   jobs: ImportJob[];
   error: string | null;
   /** Base import path; the job page lives at `${basePath}/${jobId}`. */
   basePath: string;
-  onRefresh: () => void;
   onDelete: (job: ImportJob) => void;
 }) {
   return (
     <div className="rounded-lg border border-app-border bg-app-surface p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-app-fg">Recent imports</h3>
-        <Button variant="secondary" onClick={onRefresh}>Refresh</Button>
-      </div>
+      <h3 className="mb-3 text-sm font-semibold text-app-fg">Recent imports</h3>
       {error && <InlineNotification variant="danger" message={error} />}
       {jobs.length === 0 ? (
         <p className="py-6 text-center text-sm text-app-fg-muted">No imports yet.</p>
@@ -833,7 +947,11 @@ export function ImportProgress({
           <div
             className={[
               'h-full transition-all',
-              job.status === 'FAILED' ? 'bg-app-danger' : job.status === 'COMPLETED' ? 'bg-app-success' : 'bg-app-accent',
+              job.status === 'FAILED'
+                ? 'bg-danger-500'
+                : job.status === 'COMPLETED'
+                  ? 'bg-success-500'
+                  : 'bg-brand-500',
             ].join(' ')}
             style={{ width: `${pct}%` }}
           />

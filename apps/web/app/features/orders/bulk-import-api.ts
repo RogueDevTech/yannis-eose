@@ -48,6 +48,9 @@ export interface ImportJobConfig {
     quantity?: string;
     unitPrice?: string;
     offerLabel?: string;
+    // Per-row status label header (Confirmed / Delivered / Pending…). Parsed
+    // server-side; blank/unknown falls back to the job's targetStatus.
+    status?: string;
     // Display-code columns resolved to UUIDs server-side (PDT-N / USR-N). Branch
     // is derived from the MB / CS user, never taken from the sheet.
     productCode?: string;
@@ -118,6 +121,18 @@ export interface ImportJobRow {
   status: ImportRowStatus;
   externalId: string | null;
   reason: string | null;
+  // The imported order joined by external id (null for FAILED rows / no match).
+  // Phone is intentionally omitted (Pillar 2 — raw phones never leave the API).
+  orderId: string | null;
+  orderNumber: number | null;
+  customerName: string | null;
+  deliveryState: string | null;
+  totalAmount: string | null;
+  currencyCode: string | null;
+  orderStatus: string | null;
+  productName: string | null;
+  /** The imported order's date (ISO). Reflects the sheet date column if mapped. */
+  orderCreatedAt: string | null;
 }
 
 export interface ImportJobRowsPage {

@@ -57,18 +57,34 @@ export async function uploadAssetDetailed(
   folder: AssetFolder,
   onProgress?: (percent: number) => void,
 ): Promise<UploadedAsset> {
-  onProgress?.(10);
+  // Presign step (~first 5%). The PUT itself is 5→100% via real byte progress.
+  onProgress?.(2);
   const { uploadUrl, fileUrl, key } = await getSignedUploadUrl(file, folder);
-  onProgress?.(35);
-  const uploadRes = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type || 'application/octet-stream' },
-    body: file,
-  });
-  if (!uploadRes.ok) {
-    throw new Error('Upload failed');
-  }
+  onProgress?.(5);
 
-  onProgress?.(100);
+  // Use XHR (not fetch) so we get real upload progress events for the bar.
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      // Map bytes 0..100% onto the 5..100% band (presign already used 0..5%).
+      const pct = 5 + Math.round((e.loaded / e.total) * 95);
+      onProgress?.(Math.min(99, pct));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(100);
+        resolve();
+      } else {
+        reject(new Error(`Upload failed (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Upload failed'));
+    xhr.onabort = () => reject(new Error('Upload cancelled'));
+    xhr.send(file);
+  });
+
   return { fileUrl, key };
 }

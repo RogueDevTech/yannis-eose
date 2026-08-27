@@ -69,6 +69,38 @@ describe('validatePayrollFormula', () => {
     expect(v.errors.some((e) => e.includes('duplicate/conflicting'))).toBe(true);
   });
 
+  it('does NOT flag tiers that share a primary condition but differ by extraConditions', () => {
+    const v = validatePayrollFormula({
+      bonusTiers: [
+        {
+          metric: 'INDIVIDUAL_DR', operator: 'GTE', threshold: 34.5, kind: 'FLAT', amount: 500,
+          extraConditions: [{ metric: 'TEAM_DR', operator: 'GTE', threshold: 40 }],
+        },
+        {
+          metric: 'INDIVIDUAL_DR', operator: 'GTE', threshold: 34.5, kind: 'FLAT', amount: 800,
+          extraConditions: [{ metric: 'TEAM_DR', operator: 'GTE', threshold: 50 }],
+        },
+      ],
+    });
+    expect(v.errors.some((e) => e.includes('duplicate/conflicting'))).toBe(false);
+  });
+
+  it('still flags tiers with an identical full condition set (primary + same extras)', () => {
+    const v = validatePayrollFormula({
+      bonusTiers: [
+        {
+          metric: 'INDIVIDUAL_DR', operator: 'GTE', threshold: 34.5, kind: 'FLAT', amount: 500,
+          extraConditions: [{ metric: 'TEAM_DR', operator: 'GTE', threshold: 40 }],
+        },
+        {
+          metric: 'INDIVIDUAL_DR', operator: 'GTE', threshold: 34.5, kind: 'FLAT', amount: 800,
+          extraConditions: [{ metric: 'TEAM_DR', operator: 'GTE', threshold: 40 }],
+        },
+      ],
+    });
+    expect(v.errors.some((e) => e.includes('duplicate/conflicting'))).toBe(true);
+  });
+
   it('warns (not errors) on a per-order bonus formula', () => {
     const v = validatePayrollFormula(REPORT_FORMULA);
     expect(v.warnings.some((w) => w.includes('Per-order bonus'))).toBe(true);

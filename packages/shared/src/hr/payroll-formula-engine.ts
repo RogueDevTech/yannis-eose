@@ -231,28 +231,35 @@ export function validatePayrollFormula(formula: PayrollFormula): FormulaValidati
   (formula.baseSalaryTiers ?? []).forEach((t, i) => checkTier(t, `Base tier ${i + 1}`));
   (formula.bonusTiers ?? []).forEach((t, i) => checkTier(t, `Bonus tier ${i + 1}`));
 
-  // Overlap / conflict detection within the bonus tiers, per metric. Two tiers
-  // on the same metric+operator with the same threshold are duplicates; two
-  // "greater-than" tiers where the lower threshold's band fully contains the
-  // higher one is fine (precedence resolves it, highest first). We flag EXACT
-  // duplicates as errors and same-direction same-threshold as ambiguous.
-  const byMetric = new Map<string, Array<{ operator: string; threshold: number; idx: number }>>();
-  (formula.bonusTiers ?? []).forEach((t, idx) => {
-    if (t.metric === 'NONE') return;
-    const list = byMetric.get(t.metric) ?? [];
-    list.push({ operator: t.operator, threshold: t.threshold, idx });
-    byMetric.set(t.metric, list);
-  });
-  for (const [metric, list] of byMetric) {
-    for (let a = 0; a < list.length; a++) {
-      for (let b = a + 1; b < list.length; b++) {
-        const x = list[a]!;
-        const y = list[b]!;
-        if (x.operator === y.operator && x.threshold === y.threshold) {
-          errors.push(
-            `Bonus tiers ${x.idx + 1} and ${y.idx + 1} both use ${metric} ${x.operator} ${x.threshold} — duplicate/conflicting rules.`,
-          );
-        }
+  // Duplicate detection within the bonus tiers. Two tiers are duplicates only
+  // when their ENTIRE condition set matches — the primary condition AND every
+  // extra (ANDed) condition. Tiers that share a primary condition but differ in
+  // their extraConditions are DISTINCT valid rules (e.g. both "INDIVIDUAL_DR >=
+  // 34.5" but one also requires "TEAM_DR >= 40"), so they must not be flagged.
+  // extraConditions are compared order-independently.
+  const condSig = (c: { metric: string; operator: string; threshold: number }) =>
+    `${c.metric}:${c.operator}:${c.threshold}`;
+  const tierSignature = (t: {
+    metric: string;
+    operator: string;
+    threshold: number;
+    extraConditions?: Array<{ metric: string; operator: string; threshold: number }>;
+  }): string => {
+    const extras = (t.extraConditions ?? []).map(condSig).sort();
+    return [condSig(t), ...extras].join(' & ');
+  };
+
+  const bonusTiers = formula.bonusTiers ?? [];
+  for (let a = 0; a < bonusTiers.length; a++) {
+    const x = bonusTiers[a]!;
+    if (x.metric === 'NONE') continue;
+    for (let b = a + 1; b < bonusTiers.length; b++) {
+      const y = bonusTiers[b]!;
+      if (y.metric === 'NONE') continue;
+      if (tierSignature(x) === tierSignature(y)) {
+        errors.push(
+          `Bonus tiers ${a + 1} and ${b + 1} use the same conditions (${tierConditionLabel(x)}) — duplicate/conflicting rules.`,
+        );
       }
     }
   }
