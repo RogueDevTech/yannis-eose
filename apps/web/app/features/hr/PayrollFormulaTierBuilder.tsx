@@ -5,7 +5,21 @@ import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { parseAmountRaw } from '~/lib/format-amount';
 import type { PayrollFormula } from '@yannis/shared';
+
+/**
+ * Parse a numeric string that MAY contain thousands separators (e.g. a value
+ * coming back from AmountInput's formatted state, "4,000,000"). Plain `Number()`
+ * turns "4,000,000" into NaN → callers then collapse it to 0, which silently
+ * broke revenue-tier previews (revenue read as ₦0, so the "< threshold" tier won
+ * instead of the "≥ threshold" tier). Strip separators first, then Number().
+ */
+function toNumberLoose(value: string | number | null | undefined): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const n = Number(parseAmountRaw(String(value ?? '')));
+  return Number.isFinite(n) ? n : 0;
+}
 
 const METRIC_OPTIONS = [
   { value: 'INDIVIDUAL_DR', label: 'Individual DR %' },
@@ -258,12 +272,12 @@ export function PayrollFormulaTierBuilder({
 
   const samples = useMemo<FormulaPreviewSamples>(
     () => ({
-      individualDr: Number(sampleDr) || 0,
-      teamDr: Number(sampleTeamDr) || 0,
-      cpa: Number(sampleCpa) || 0,
-      deliveredCount: Number(sampleDelivered) || 0,
-      returnedCount: Number(sampleReturned) || 0,
-      qualifyingRevenue: Number(sampleQualifyingRevenue) || 0,
+      individualDr: toNumberLoose(sampleDr),
+      teamDr: toNumberLoose(sampleTeamDr),
+      cpa: toNumberLoose(sampleCpa),
+      deliveredCount: toNumberLoose(sampleDelivered),
+      returnedCount: toNumberLoose(sampleReturned),
+      qualifyingRevenue: toNumberLoose(sampleQualifyingRevenue),
       targetMet: sampleTargetMet,
     }),
     [sampleDr, sampleTeamDr, sampleCpa, sampleDelivered, sampleReturned, sampleQualifyingRevenue, sampleTargetMet],

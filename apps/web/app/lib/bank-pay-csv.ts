@@ -5,7 +5,7 @@
  * for bulk salary processing. Column headers use the exact field names the bank
  * requires so the file needs no manual editing before upload.
  */
-import { toCsv, downloadCsv } from './csv-export';
+import { toCsv, downloadCsv, asSpreadsheetText } from './csv-export';
 import { bankPayNarration, type BankPayPdfInput } from './bank-pay-pdf';
 
 // Bank-upload column labels. Order matters for most bank templates.
@@ -25,8 +25,11 @@ const BANK_UPLOAD_COLUMNS: Array<{ key: string; label: string }> = [
 export function bankPayUploadRows(doc: BankPayPdfInput) {
   return doc.batches.flatMap((batch) =>
     batch.rows.map((row) => ({
-      bankCode: row.bankCode || '',
-      accountNumber: row.accountNumber || '',
+      // Bank code + account number are digit identifiers, not quantities — keep
+      // them as literal text so Excel doesn't render "0123456789" in scientific
+      // notation and drop leading zeros / trailing digits.
+      bankCode: asSpreadsheetText(row.bankCode || ''),
+      accountNumber: asSpreadsheetText(row.accountNumber || ''),
       beneficiaryName: row.beneficiaryName || row.staffName || 'Unknown',
       amount: Number(row.amount).toFixed(2),
       narration: bankPayNarration(row),

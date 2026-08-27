@@ -4,7 +4,7 @@
  * statutory deductions (Rent Relief, Pension, NHIS ...), Net, PAYE. Exempt staff
  * show PAYE 0. Mirrors the bank-pay CSV pattern (toCsv + downloadCsv).
  */
-import { toCsv, downloadCsv } from './csv-export';
+import { toCsv, downloadCsv, asSpreadsheetText } from './csv-export';
 
 export interface PayeRemittanceRow {
   staffName: string;
@@ -53,9 +53,11 @@ export function payeRemittanceRows(doc: PayeRemittanceDoc) {
     const statutoryOther = Math.max(0, Number(r.statutoryTotal || 0) - pension - nhis);
     return {
       staffName: r.staffName || '',
-      tin: r.tin || '',
+      // Phone + TIN are identifiers, not quantities — keep them as literal text so
+      // Excel doesn't turn "2349140000000" into "2.34914E+12" and lose the digits.
+      tin: asSpreadsheetText(r.tin || ''),
       role: r.role || '',
-      phone: r.phone || '',
+      phone: asSpreadsheetText(r.phone || ''),
       grossPay: Number(r.grossPay).toFixed(2),
       rentRelief: rentRelief.toFixed(2),
       pension: pension.toFixed(2),

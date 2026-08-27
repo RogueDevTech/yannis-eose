@@ -6,6 +6,27 @@
 type CsvRow = Record<string, string | number | boolean | null | undefined>;
 
 /**
+ * Force a numeric IDENTIFIER (phone, TIN, bank account/code) to stay TEXT when
+ * the CSV is opened in Excel/Sheets. A long all-digit string like a `234...`
+ * phone or a 10-digit account number is otherwise auto-parsed into scientific
+ * notation (`2.34914E+12`) and its digits are lost. Wrapping it as `="<digits>"`
+ * is the portable spreadsheet idiom for "treat this literally as text".
+ *
+ * Intended for identifier columns only — NOT free text. To avoid turning this
+ * into a CSV-formula-injection sink, the `="..."` wrapper is applied only to
+ * values that look like a phone/account/TIN (digits plus the usual separators
+ * `+ - ( ) space`). Anything else is returned unchanged for `escapeField` to
+ * handle as ordinary text. Empty values stay empty (no stray `=""`).
+ */
+export function asSpreadsheetText(value: string | number | null | undefined): string {
+  const v = String(value ?? '').trim();
+  if (!v) return '';
+  // Only identifier-shaped values get the text-literal wrapper.
+  if (!/^[\d+()\-\s]+$/.test(v)) return v;
+  return `="${v}"`;
+}
+
+/**
  * Escape a CSV field value (handle commas, quotes, newlines).
  */
 function escapeField(value: unknown): string {
