@@ -161,6 +161,10 @@ interface ProgressiveCartFields {
   paymentMethod?: string;
   quantity?: number;
   customFieldValues?: Record<string, CustomFieldValue>;
+  /** Frozen currency the customer selected (optional). Persisted to
+   *  `cart_abandonments.currency_code`; drives country-scoped cart routing.
+   *  STAMP-never-reject — absent defaults to NGN downstream. */
+  currencyCode?: string;
   /** Form Analytics attribution key (optional). Persisted to `cart_abandonments.session_id`. */
   sessionId?: string;
 }
@@ -1656,6 +1660,11 @@ function getFormScript(
           }
           var cfv = readCustomFieldValues();
           if (cfv) payload.customFieldValues = cfv;
+          // Frozen currency the customer selected. Stamped additively from the
+          // same currentCurrency the ORDER payload uses (line ~2138), so a cart
+          // and its eventual order share a currency. STAMP-never-reject: absent
+          // is fine, the API defaults to NGN and never rejects on it.
+          if (currentCurrency) payload.currencyCode = currentCurrency;
           // Form Analytics attribution — optional. Can't throw; if unset the API strips it.
           if (window.__yannisSessionId) payload.sessionId = window.__yannisSessionId;
           // Dedup: skip the network call if the payload is identical to the last
@@ -3217,6 +3226,12 @@ function validateCart(body: unknown): { valid: true; data: CartFormData } | { va
       paymentMethod: strField('paymentMethod'),
       quantity: numField('quantity'),
       customFieldValues: cfv && Object.keys(cfv).length > 0 ? cfv : undefined,
+      // Frozen currency (optional). Parsed identically to the ORDER path (line
+      // ~497): <=5 chars, upper-cased, else dropped. Never rejects.
+      currencyCode:
+        typeof b['currencyCode'] === 'string' && b['currencyCode'].length <= 5
+          ? b['currencyCode'].toUpperCase()
+          : undefined,
       sessionId: typeof b['sessionId'] === 'string' ? b['sessionId'] : undefined,
     },
   };
@@ -3320,6 +3335,7 @@ async function handleCart(request: Request, env: Env): Promise<Response> {
     paymentMethod: data.paymentMethod,
     quantity: data.quantity,
     customFieldValues: data.customFieldValues,
+    currencyCode: data.currencyCode,
     sessionId: data.sessionId,
   };
 

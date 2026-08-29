@@ -42,6 +42,14 @@ export const cartAbandonments = pgTable('cart_abandonments', {
   preferredDeliveryDate: text('preferred_delivery_date'),
   paymentMethod: text('payment_method'),
   quantity: integer('quantity'),
+  /**
+   * Frozen currency the customer selected on the form (edge intake). Nullable:
+   * a phone-only progressive save may land before currency selection.
+   * STAMP-never-reject — downstream (cart-order pull, graduation) defaults a
+   * NULL to NGN, mirroring orders.currency_code. Drives country-scoped cart
+   * routing. Migration 0338.
+   */
+  currencyCode: text('currency_code'),
   /** Form-builder custom fields — keys/values defined by the campaign's form schema. */
   customFieldValues: jsonb('custom_field_values'),
   /**

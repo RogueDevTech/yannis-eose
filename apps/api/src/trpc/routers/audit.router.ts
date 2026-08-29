@@ -99,7 +99,7 @@ export const auditRouter = router({
         startDate: z.string().optional(),
         endDate: z.string().optional(),
         page: z.number().int().min(1).default(1),
-        limit: z.number().int().min(1).max(100).default(20),
+        limit: z.number().int().min(1).max(200).default(20),
       }),
     )
     .query(async ({ input, ctx }) => {

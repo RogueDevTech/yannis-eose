@@ -99,7 +99,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (retracked) listInput.retracked = retracked;
   const sortBy = url.searchParams.get('sortBy') ?? undefined;
   const sortDir = url.searchParams.get('sortDir') ?? undefined;
-  if (sortBy && ['sentAt', 'deliveredAt', 'totalAmount', 'deliveryFee', 'orderNumber'].includes(sortBy)) {
+  if (sortBy && ['sentAt', 'deliveredAt', 'totalAmount', 'deliveryFee', 'orderNumber', 'orderCount', 'batchTotal'].includes(sortBy)) {
     listInput.sortBy = sortBy;
   }
   if (sortDir && ['asc', 'desc'].includes(sortDir)) {

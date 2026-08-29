@@ -758,6 +758,48 @@ export function DeliveryRemittancesPage({
     navigateTo(`/admin/finance/delivery-remittances/create?orders=${ids}`);
   }, [eligibleSelectedIds, eligibleMultiLocation, eligibleMultiCurrency, remittanceSelectionComplete, navigateTo]);
 
+  // Single SortMenu instance shared by the desktop toolbar and the mobile
+  // Actions sheet, so mobile never silently loses a sort the desktop offers.
+  // `w-full justify-center` matches the sheet's other full-width controls; the
+  // desktop toolbar sits in a flex row where it keeps its natural width.
+  const remittanceSortMenu = (
+    <SortMenu
+      className="w-full justify-center sm:w-auto sm:justify-start"
+      value={{
+        sortBy: new URLSearchParams(location.search).get('sortBy') ?? 'sentAt',
+        sortDir: (new URLSearchParams(location.search).get('sortDir') as 'asc' | 'desc') ?? 'desc',
+      }}
+      onChange={(next) => {
+        primeSamePathRefetch();
+        setSearchParams((p) => {
+          const params = new URLSearchParams(p);
+          if (next.sortBy !== 'sentAt') params.set('sortBy', next.sortBy);
+          else params.delete('sortBy');
+          if (next.sortDir !== 'desc') params.set('sortDir', next.sortDir);
+          else params.delete('sortDir');
+          params.set('page', '1');
+          return params;
+        });
+      }}
+      options={viewMode === 'orders'
+        ? [
+            { value: 'sentAt', label: 'Sent date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
+            { value: 'deliveredAt', label: 'Delivered date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
+            { value: 'totalAmount', label: 'Amount', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+            { value: 'deliveryFee', label: 'Delivery fee', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+            { value: 'orderNumber', label: 'Order #', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
+          ]
+        : [
+            { value: 'sentAt', label: 'Sent date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
+            { value: 'orderCount', label: 'Order count', defaultDir: 'desc', ascLabel: 'Fewest first', descLabel: 'Most first' },
+            { value: 'batchTotal', label: 'Batch total', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+            { value: 'deliveryFee', label: 'Delivery fee', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
+          ]
+      }
+      defaultValue={{ sortBy: 'sentAt', sortDir: 'desc' }}
+    />
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -831,6 +873,9 @@ export function DeliveryRemittancesPage({
                     />
                   </div>
                 )}
+                {/* Sort lives in the desktop toolbar, which is rendered with
+                    `hideMobileSheet` — without this the mobile sheet has no sort at all. */}
+                {viewTab === 'remittances' && remittanceSortMenu}
               </>
             }
             desktopActions
@@ -1538,38 +1583,7 @@ export function DeliveryRemittancesPage({
                       width="sort"
                     />
                   )}
-                  <SortMenu
-                    value={{
-                      sortBy: new URLSearchParams(location.search).get('sortBy') ?? 'sentAt',
-                      sortDir: (new URLSearchParams(location.search).get('sortDir') as 'asc' | 'desc') ?? 'desc',
-                    }}
-                    onChange={(next) => {
-                      setSearchParams((p) => {
-                        const params = new URLSearchParams(p);
-                        if (next.sortBy !== 'sentAt') params.set('sortBy', next.sortBy);
-                        else params.delete('sortBy');
-                        if (next.sortDir !== 'desc') params.set('sortDir', next.sortDir);
-                        else params.delete('sortDir');
-                        params.set('page', '1');
-                        return params;
-                      });
-                    }}
-                    options={viewMode === 'orders'
-                      ? [
-                          { value: 'sentAt', label: 'Sent date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
-                          { value: 'deliveredAt', label: 'Delivered date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
-                          { value: 'totalAmount', label: 'Amount', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
-                          { value: 'deliveryFee', label: 'Delivery fee', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
-                          { value: 'orderNumber', label: 'Order #', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
-                        ]
-                      : [
-                          { value: 'sentAt', label: 'Sent date', defaultDir: 'desc', ascLabel: 'Oldest first', descLabel: 'Newest first' },
-                          { value: 'orderCount', label: 'Order count', defaultDir: 'desc', ascLabel: 'Fewest first', descLabel: 'Most first' },
-                          { value: 'batchTotal', label: 'Batch total', defaultDir: 'desc', ascLabel: 'Lowest first', descLabel: 'Highest first' },
-                        ]
-                    }
-                    defaultValue={{ sortBy: 'sentAt', sortDir: 'desc' }}
-                  />
+                  {remittanceSortMenu}
                 </>
               }
               sheetFilterBody={null}
@@ -1740,11 +1754,12 @@ export function DeliveryRemittancesPage({
                 const statusLabel = r.remittanceStatus === 'SENT' ? 'Pending' : r.remittanceStatus === 'RECEIVED' ? 'Received' : r.remittanceStatus === 'DISPUTED' ? 'Disputed' : r.remittanceStatus;
                 const net = Number(r.totalAmount || 0) - Number(r.deliveryFee || 0);
                 return (
-                  <Link
-                    to={`/admin/finance/delivery-remittances/${r.remittanceId}`}
-                    prefetch="intent"
-                    className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5"
-                  >
+                  <div className="-mx-3 -my-2.5 w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5">
+                    <Link
+                      to={`/admin/finance/delivery-remittances/${r.remittanceId}`}
+                      prefetch="intent"
+                      className="block space-y-1.5"
+                    >
                     {r.isDuplicate && (
                       <span className="mb-1 inline-block rounded bg-warning-100 dark:bg-warning-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-warning-700 dark:text-warning-300">
                         Duplicate order
@@ -1770,7 +1785,25 @@ export function DeliveryRemittancesPage({
                       </div>
                     </div>
                     <StatusBadge status={r.remittanceStatus} label={statusLabel} />
-                  </Link>
+                    </Link>
+                    {/* Secondary actions sit OUTSIDE the Link — desktop rows expose
+                        Compare/Order/Edit/Batch, and the card tap alone reached only
+                        the batch page. Rendered as a wrapping row so the card stays
+                        tappable while the rest of the desktop actions stay reachable. */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                      {r.isDuplicate && (
+                        <CompactTableActionButton to={`/admin/finance/delivery-remittances/duplicates/${r.duplicateOfId ?? r.id}`}>
+                          Compare
+                        </CompactTableActionButton>
+                      )}
+                      <CompactTableActionButton to={`/admin/orders/${r.id}`}>
+                        Order
+                      </CompactTableActionButton>
+                      <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.remittanceId}/edit`}>
+                        Edit
+                      </CompactTableActionButton>
+                    </div>
+                  </div>
                 );
               }}
             />
@@ -1847,12 +1880,21 @@ export function DeliveryRemittancesPage({
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <StatusBadge status={status} label={STATUS_LABEL[status]} />
-                    <CompactTableActionButton
-                      to={`/admin/finance/delivery-remittances/${r.id}`}
-                      state={remittanceDetailLinkState}
-                    >
-                      {(r.outcomeStatus ?? r.status) === 'SENT' ? 'Review' : 'View'}
-                    </CompactTableActionButton>
+                    {/* Desktop rows expose Edit + View/Review; mobile was missing Edit. */}
+                    <div className="flex items-center gap-1.5">
+                      <CompactTableActionButton
+                        to={`/admin/finance/delivery-remittances/${r.id}/edit`}
+                        state={remittanceDetailLinkState}
+                      >
+                        Edit
+                      </CompactTableActionButton>
+                      <CompactTableActionButton
+                        to={`/admin/finance/delivery-remittances/${r.id}`}
+                        state={remittanceDetailLinkState}
+                      >
+                        {(r.outcomeStatus ?? r.status) === 'SENT' ? 'Review' : 'View'}
+                      </CompactTableActionButton>
+                    </div>
                   </div>
                 </div>
               );

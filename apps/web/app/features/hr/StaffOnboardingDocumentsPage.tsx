@@ -7,7 +7,7 @@ import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { InlineFilter } from '~/components/ui/inline-filter';
 import { FormSelect } from '~/components/ui/form-select';
-import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
+import { CompactTable, CompactTableActionButton, CompactTableActions, type CompactTableColumn } from '~/components/ui/compact-table';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -188,9 +188,20 @@ export function StaffOnboardingDocumentsPage({
       tight: true,
       hideable: false,
       render: (row) => (
-        <CompactTableActionButton to={`/hr/users/${row.userId}/onboarding`} tone="brand">
-          Open
-        </CompactTableActionButton>
+        <CompactTableActions>
+          {row.onboardingStatus === 'APPROVED' && (
+            <CompactTableActionButton
+              to={`/hr/users/${row.userId}/onboarding?action=revoke`}
+              tone="danger"
+              title={`Revoke ${row.name}'s onboarding approval`}
+            >
+              Revoke
+            </CompactTableActionButton>
+          )}
+          <CompactTableActionButton to={`/hr/users/${row.userId}/onboarding`} tone="brand">
+            Open
+          </CompactTableActionButton>
+        </CompactTableActions>
       ),
     },
   ];

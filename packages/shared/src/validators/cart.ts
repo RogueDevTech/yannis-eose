@@ -32,6 +32,13 @@ export const saveCartSchema = z.object({
   preferredDeliveryDate: z.string().trim().max(20).optional(),
   paymentMethod: z.string().trim().max(40).optional(),
   quantity: z.number().int().min(1).max(999).optional(),
+  /**
+   * Frozen currency the customer selected on the form. Mirrors orders.create's
+   * currencyCode EXACTLY (optional, trimmed, upper-cased, max 5). STAMP-never-
+   * reject: absent/blank is fine — the service defaults downstream to NGN. A
+   * cart is NEVER rejected for a missing currency (edge-form freeze — Pillar 1).
+   */
+  currencyCode: z.string().trim().toUpperCase().max(5).optional(),
   customFieldValues: z.record(z.string(), z.unknown()).optional(),
   /**
    * Form Analytics attribution key from the edge beacon. Persisted to

@@ -22,6 +22,13 @@ interface PayrollRuleBuilderPageProps {
   payRole: PayRole | null;
   plan: CommissionPlan | null;
   canWrite: boolean;
+  /**
+   * Create-mode prefill from an existing role ("Duplicate"). Seeds the name
+   * (suffixed "(Copy)"), category, tax/metric settings, and formula rules while
+   * staying in CREATE mode (payRole is null, so Save makes a NEW role). Ignored
+   * when `payRole` is set (edit mode).
+   */
+  duplicateSource?: { payRole: PayRole; plan: CommissionPlan | null } | null;
 }
 
 const CATEGORY_OPTIONS = [
@@ -50,21 +57,28 @@ const CATEGORY_OPTIONS = [
   { value: 'STOCK_MANAGEMENT', label: 'Stock Management (legacy)' },
 ];
 
-export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleBuilderPageProps) {
+export function PayrollRuleBuilderPage({ payRole, plan, canWrite, duplicateSource }: PayrollRuleBuilderPageProps) {
   const isCreate = !payRole;
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const previewFetcher = useFetcher<{ preview?: FormulaPreviewResult; error?: string }>();
   const surface = useFetcherActionSurface(fetcher);
-  const initialRules = (plan?.rules ?? {}) as PayrollFormula;
+  // In create mode we may be duplicating: seed defaults from the source role.
+  const seed = isCreate ? duplicateSource?.payRole ?? null : payRole;
+  const seedPlan = isCreate ? duplicateSource?.plan ?? plan : plan;
+  const initialRules = (seedPlan?.rules ?? {}) as PayrollFormula;
+  // On duplicate, default the new name to "<source> (Copy)" so it's unique.
+  const initialName = isCreate
+    ? (duplicateSource?.payRole ? `${duplicateSource.payRole.name} (Copy)` : '')
+    : payRole?.name ?? '';
 
   // Role metadata state
-  const [reportsToRequired, setReportsToRequired] = useState(payRole?.reportsToRequired ?? false);
-  const [category, setCategory] = useState(payRole?.category ?? '');
+  const [reportsToRequired, setReportsToRequired] = useState(seed?.reportsToRequired ?? false);
+  const [category, setCategory] = useState(seed?.category ?? '');
   const [defaultTaxStatus, setDefaultTaxStatus] = useState(
-    payRole?.defaultTaxStatus ?? 'STANDARD_PAYE',
+    seed?.defaultTaxStatus ?? 'STANDARD_PAYE',
   );
   const [deliveredMetricSource, setDeliveredMetricSource] = useState(
-    payRole?.deliveredMetricSource ?? 'FUNNEL',
+    seed?.deliveredMetricSource ?? 'FUNNEL',
   );
 
   useFetcherToast(fetcher.data, {
@@ -113,12 +127,20 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
   return (
     <div className="space-y-3">
       <PageHeader
-        title={isCreate ? 'Create pay role' : `Edit · ${payRole.name}`}
+        title={
+          isCreate
+            ? duplicateSource?.payRole
+              ? `Duplicate · ${duplicateSource.payRole.name}`
+              : 'Create pay role'
+            : `Edit · ${payRole.name}`
+        }
         backTo={backTo}
         mobileInlineActions
         description={
           isCreate
-            ? 'Define a pay role and its formula rules.'
+            ? duplicateSource?.payRole
+              ? 'Review the copied settings, rename, and save as a new pay role.'
+              : 'Define a pay role and its formula rules.'
             : effectiveLabel ?? undefined
         }
         actions={
@@ -154,7 +176,8 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite }: PayrollRuleB
                 required
                 minLength={2}
                 maxLength={200}
-                defaultValue={payRole?.name ?? ''}
+                key={initialName}
+                defaultValue={initialName}
                 placeholder="e.g. Sales Closer (CS)"
               />
               <FormSelect

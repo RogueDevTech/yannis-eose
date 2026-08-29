@@ -8,6 +8,8 @@ import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -25,6 +27,8 @@ interface RoutingRule {
   targetBranchName: string | null;
   teamId: string | null;
   teamName: string | null;
+  /** Multi-country: currency this rule targets. null = any country. */
+  currencyCode: string | null;
   priority: number;
   enabled: boolean;
 }
@@ -194,8 +198,26 @@ function RuleFormModal({
   const [sourceBranchId, setSourceBranchId] = useState<string | null>(rule?.sourceBranchId ?? null);
   const [targetBranchId, setTargetBranchId] = useState<string | null>(rule?.targetBranchId ?? null);
   const [teamId, setTeamId] = useState<string | null>(rule?.teamId ?? null);
+  const [currencyCode, setCurrencyCode] = useState<string>(rule?.currencyCode ?? '');
   const [priority, setPriority] = useState(String(rule?.priority ?? 0));
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
+
+  // Multi-country: only expose the country picker once the company runs 2+
+  // active currencies. Options deduped by code (catalog repeats per company).
+  const currencies = useCurrenciesCatalog();
+  const showCurrency = useHasMultipleCurrencies();
+  const currencyOptions = (() => {
+    const seen = new Set<string>();
+    const opts = [{ value: '', label: 'Any country' }];
+    for (const c of currencies) {
+      if (!c.active) continue;
+      const code = c.code.toUpperCase();
+      if (seen.has(code)) continue;
+      seen.add(code);
+      opts.push({ value: code, label: c.countryName ? `${c.countryName} (${code})` : code });
+    }
+    return opts;
+  })();
 
   const branchOptions = branches
     .filter((b) => !b.status || b.status === 'ACTIVE')
@@ -207,6 +229,8 @@ function RuleFormModal({
       sourceBranchId: sourceBranchId || null,
       targetBranchId: targetBranchId || null,
       teamId: teamId || null,
+      // '' = any country (null). Only meaningful with 2+ currencies.
+      currencyCode: currencyCode || null,
       priority: parseInt(priority, 10) || 0,
       enabled,
     };
@@ -254,6 +278,20 @@ function RuleFormModal({
         <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
           Route matching cart orders to this branch. Leave empty for round-robin.
         </p>
+
+        {showCurrency && currencyOptions.length > 1 && (
+          <>
+            <FormSelect
+              label="Country"
+              value={currencyCode}
+              onChange={(e) => setCurrencyCode(e.target.value)}
+              options={currencyOptions}
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+              Only route carts of this country's currency. A country-specific rule wins over an Any country rule.
+            </p>
+          </>
+        )}
 
         {teams.length > 0 && (
           <>
