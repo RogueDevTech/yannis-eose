@@ -41,14 +41,40 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     user.role === 'ADMIN' ||
     user.role === 'HR_MANAGER';
 
-  // Create mode — no existing role to fetch
+  // Create mode — no existing role to fetch. May carry ?duplicateFrom=<id> to
+  // prefill the form from an existing role ("Duplicate & edit").
   if (roleId === 'new') {
     if (!canWrite) throw redirect('/hr/payroll/config/roles');
+    const duplicateFrom = new URL(request.url).searchParams.get('duplicateFrom');
+
+    let duplicateSource: { payRole: PayRole; plan: CommissionPlan | null } | null = null;
+    if (duplicateFrom) {
+      const cookie = getSessionCookie(request);
+      const srcRes = await apiRequest<unknown>(
+        `/trpc/hr.getPayRoleWithFormula?input=${encodeURIComponent(JSON.stringify({ payRoleId: duplicateFrom }))}`,
+        { method: 'GET', cookie },
+      );
+      if (srcRes.ok) {
+        const src = (srcRes.data as {
+          result?: { data?: { payRole: PayRole; plan: CommissionPlan | null } };
+        })?.result?.data;
+        if (src?.payRole) {
+          duplicateSource = { payRole: src.payRole, plan: src.plan ?? null };
+        }
+      }
+      // A bad/inaccessible source id just falls through to a blank create form.
+    }
+
+    // NOTE: this create branch returns a sync object while the view branch below
+    // returns a promise; TS widens the union and mis-narrows `data.mode` (a
+    // long-standing quirk in this file, harmless at runtime). Kept as-is to
+    // avoid churning the deferred typing.
     return defer({
       pageData: {
         mode: 'create' as const,
         payRole: null,
         plan: null,
+        duplicateSource,
         assignedStaff: [],
         assignedContractors: [],
         canWrite,
@@ -82,6 +108,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       mode: 'view' as const,
       payRole: detail.payRole,
       plan: detail.plan ?? null,
+      duplicateSource: null as { payRole: PayRole; plan: CommissionPlan | null } | null,
       assignedStaff: detail.assignedStaff ?? [],
       assignedContractors: detail.assignedContractors ?? [],
       canWrite,
@@ -181,12 +208,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
     } catch {
       return json({ error: 'Invalid formula JSON' }, { status: 400 });
     }
-    const sampleDr = Number(formData.get('sampleDr') ?? 0);
-    const sampleTeamDr = Number(formData.get('sampleTeamDr') ?? 0);
-    const sampleCpa = Number(formData.get('sampleCpa') ?? 0);
-    const sampleDeliveredCount = Number(formData.get('sampleDeliveredCount') ?? 10);
-    const sampleReturnedCount = Number(formData.get('sampleReturnedCount') ?? 0);
-    const sampleQualifyingRevenue = Number(formData.get('sampleQualifyingRevenue') ?? 0);
+    // Strip thousands separators before Number() — a formatted "4,000,000" would
+    // otherwise become NaN and collapse to 0, silently flipping revenue tiers
+    // (the "< threshold" tier wins instead of "≥ threshold"). Defence in depth:
+    // the client already sends clean values, but never trust a formatted string.
+    const numField = (key: string, fallback: number): number => {
+      const raw = formData.get(key)?.toString();
+      if (raw == null || raw === '') return fallback;
+      const n = Number(raw.replace(/,/g, ''));
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const sampleDr = numField('sampleDr', 0);
+    const sampleTeamDr = numField('sampleTeamDr', 0);
+    const sampleCpa = numField('sampleCpa', 0);
+    const sampleDeliveredCount = numField('sampleDeliveredCount', 10);
+    const sampleReturnedCount = numField('sampleReturnedCount', 0);
+    const sampleQualifyingRevenue = numField('sampleQualifyingRevenue', 0);
     const sampleTargetMet = formData.get('sampleTargetMet')?.toString() === 'true';
     const delivered = Number.isFinite(sampleDeliveredCount) ? Math.max(0, Math.floor(sampleDeliveredCount)) : 10;
     const returned = Number.isFinite(sampleReturnedCount) ? Math.max(0, Math.floor(sampleReturnedCount)) : 0;
@@ -241,7 +278,12 @@ export default function PayrollPayRoleRoute() {
     <CachedAwait resolve={pageData} fallback={<PayrollConfigLoadingShell />} loaderShell={{}} deferredKey="pageData">
       {(data) =>
         data.mode === 'create' || !data.payRole ? (
-          <PayrollRuleBuilderPage payRole={null} plan={null} canWrite={data.canWrite} />
+          <PayrollRuleBuilderPage
+            payRole={null}
+            plan={null}
+            canWrite={data.canWrite}
+            duplicateSource={data.duplicateSource ?? null}
+          />
         ) : (
           <PayrollPayRoleViewPage
             payRole={data.payRole}

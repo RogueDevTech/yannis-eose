@@ -39,6 +39,10 @@ export const followUpRules = pgTable('follow_up_rules', {
   /** Optional target team: auto-assign follow-up orders only to closers in this team.
    *  NULL = any closer in the target branch. */
   teamId: uuid('team_id'),
+  /** Multi-country: only match orders whose currency equals this code.
+   *  NULL = any country (catch-all). A currency-specific rule wins over the
+   *  NULL catch-all at resolve time (mirrors cs_order_routing_rules). Mig 0337. */
+  currencyCode: text('currency_code'),
   /** Higher priority = evaluated first. */
   priority: integer('priority').notNull().default(0),
   /** Disabled rules are skipped during sync. */

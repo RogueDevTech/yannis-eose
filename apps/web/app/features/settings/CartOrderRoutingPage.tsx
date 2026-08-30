@@ -8,6 +8,8 @@ import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -25,6 +27,8 @@ interface RoutingRule {
   targetBranchName: string | null;
   teamId: string | null;
   teamName: string | null;
+  /** Multi-country: currency this rule targets. null = any country. */
+  currencyCode: string | null;
   priority: number;
   enabled: boolean;
 }
@@ -113,6 +117,19 @@ function RulesTab({
   onEdit: (r: RoutingRule) => void;
   onDelete: (r: RoutingRule) => void;
 }) {
+  // Multi-country: only surface the country once the company runs 2+ active
+  // currencies, matching the picker's visibility in the rule form.
+  const currencies = useCurrenciesCatalog();
+  const showCurrency = useHasMultipleCurrencies();
+
+  /** Country label for a rule: the country name for its currency, or "Any
+   *  country" for a NULL catch-all. */
+  const countryLabelForRule = (r: RoutingRule): string => {
+    if (!r.currencyCode) return 'Any country';
+    const code = r.currencyCode.toUpperCase();
+    return currencies.find((c) => c.code.toUpperCase() === code)?.countryName ?? code;
+  };
+
   if (rules.length === 0) {
     return (
       <EmptyState
@@ -137,8 +154,15 @@ function RulesTab({
               <span className="font-medium text-sm">{r.name}</span>
               <StatusBadge status={r.enabled ? 'ACTIVE' : 'INACTIVE'} />
             </div>
-            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {r.sourceBranchName ?? 'All branches'} → {r.targetBranchName ?? 'Round-robin'}
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+              <span>
+                {r.sourceBranchName ?? 'All branches'} → {r.targetBranchName ?? 'Round-robin'}
+              </span>
+              {showCurrency && (
+                <span className="shrink-0 rounded-full bg-app-hover px-1.5 py-0.5 text-[10px] font-medium text-app-fg">
+                  {countryLabelForRule(r)}
+                </span>
+              )}
             </div>
             <div className="mt-1 text-xs text-gray-400">Priority: {r.priority}</div>
           </button>
@@ -154,6 +178,9 @@ function RulesTab({
             { key: 'name', header: 'Rule Name', render: (r: RoutingRule) => <span className="font-medium text-sm">{r.name}</span> },
             { key: 'source', header: 'Source', render: (r: RoutingRule) => r.sourceBranchName ?? 'All branches' },
             { key: 'target', header: 'Target', render: (r: RoutingRule) => r.targetBranchName ?? 'Round-robin' },
+            ...(showCurrency
+              ? [{ key: 'country', header: 'Country', render: (r: RoutingRule) => countryLabelForRule(r) }]
+              : []),
             { key: 'enabled', header: '', render: (r: RoutingRule) => <StatusBadge status={r.enabled ? 'ACTIVE' : 'INACTIVE'} /> },
             {
               key: 'actions', header: '',
@@ -194,8 +221,26 @@ function RuleFormModal({
   const [sourceBranchId, setSourceBranchId] = useState<string | null>(rule?.sourceBranchId ?? null);
   const [targetBranchId, setTargetBranchId] = useState<string | null>(rule?.targetBranchId ?? null);
   const [teamId, setTeamId] = useState<string | null>(rule?.teamId ?? null);
+  const [currencyCode, setCurrencyCode] = useState<string>(rule?.currencyCode ?? '');
   const [priority, setPriority] = useState(String(rule?.priority ?? 0));
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
+
+  // Multi-country: only expose the country picker once the company runs 2+
+  // active currencies. Options deduped by code (catalog repeats per company).
+  const currencies = useCurrenciesCatalog();
+  const showCurrency = useHasMultipleCurrencies();
+  const currencyOptions = (() => {
+    const seen = new Set<string>();
+    const opts = [{ value: '', label: 'Any country' }];
+    for (const c of currencies) {
+      if (!c.active) continue;
+      const code = c.code.toUpperCase();
+      if (seen.has(code)) continue;
+      seen.add(code);
+      opts.push({ value: code, label: c.countryName ? `${c.countryName} (${code})` : code });
+    }
+    return opts;
+  })();
 
   const branchOptions = branches
     .filter((b) => !b.status || b.status === 'ACTIVE')
@@ -207,6 +252,8 @@ function RuleFormModal({
       sourceBranchId: sourceBranchId || null,
       targetBranchId: targetBranchId || null,
       teamId: teamId || null,
+      // '' = any country (null). Only meaningful with 2+ currencies.
+      currencyCode: currencyCode || null,
       priority: parseInt(priority, 10) || 0,
       enabled,
     };
@@ -254,6 +301,20 @@ function RuleFormModal({
         <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
           Route matching cart orders to this branch. Leave empty for round-robin.
         </p>
+
+        {showCurrency && currencyOptions.length > 1 && (
+          <>
+            <FormSelect
+              label="Country"
+              value={currencyCode}
+              onChange={(e) => setCurrencyCode(e.target.value)}
+              options={currencyOptions}
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+              Only route carts of this country's currency. A country-specific rule wins over an Any country rule.
+            </p>
+          </>
+        )}
 
         {teams.length > 0 && (
           <>
@@ -320,12 +381,25 @@ function DeleteConfirmModal({
   useFetcherToast(fetcher.data, { successMessage: 'Rule deleted' });
   useCloseOnFetcherSuccess(fetcher, onClose);
 
+  // Multi-country: name the country this rule covers so it is clear which
+  // scope stops routing. Other countries' rules are untouched.
+  const currencies = useCurrenciesCatalog();
+  const showCurrency = useHasMultipleCurrencies();
+  const countryLabel =
+    showCurrency && rule.currencyCode
+      ? currencies.find((c) => c.code.toUpperCase() === rule.currencyCode!.toUpperCase())?.countryName ??
+        rule.currencyCode
+      : null;
+
   return (
     <Modal open onClose={onClose} maxWidth="max-w-sm">
       <div className="p-4">
         <h2 className="text-lg font-semibold text-app-fg">Delete routing rule</h2>
         <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-          Delete rule <strong>{rule.name}</strong>? Cart orders will no longer be routed by this rule.
+          Delete rule <strong>{rule.name}</strong>?{' '}
+          {countryLabel
+            ? `${countryLabel} cart orders will no longer be routed by this rule. Other countries' rules stay in place.`
+            : 'Cart orders will no longer be routed by this rule.'}
         </p>
       </div>
       <div className="flex justify-end gap-2 border-t border-app-border px-4 py-3">

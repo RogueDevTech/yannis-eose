@@ -183,7 +183,11 @@ export const inventoryRouter = router({
       productId: z.string().uuid().optional(),
       locationId: z.string().uuid().optional(),
       page: z.number().int().min(1).default(1),
-      limit: z.number().int().min(1).max(200).default(40),
+      // Ceiling matches the `<Pagination>` per-page picker's largest option (1000).
+      // At max(200) a user picking 1000 sent an out-of-range limit, Zod rejected the
+      // whole call, and the loader's `!res.ok` fallback rendered an empty Activities
+      // tab instead of an error — see getLevelById below, which already allows 1000.
+      limit: z.number().int().min(1).max(1000).default(40),
       startDate: z.string().optional(),
       endDate: z.string().optional(),
     }))

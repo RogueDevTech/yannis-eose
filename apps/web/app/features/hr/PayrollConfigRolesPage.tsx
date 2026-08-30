@@ -11,6 +11,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import {
   CompactTable,
   CompactTableActionButton,
+  CompactTableActions,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { formatRoleLabel } from '~/components/ui/role-badge';
@@ -126,13 +127,24 @@ export function PayrollConfigRolesPage({ roles, canWrite, tabsSlot, hideRolesCon
         tight: true,
         hideable: false,
         render: (row) => (
-          <CompactTableActionButton to={`/hr/payroll/config/rules/${row.id}`} tone="brand">
-            View
-          </CompactTableActionButton>
+          <CompactTableActions>
+            {canWrite && (
+              <CompactTableActionButton
+                to={`/hr/payroll/config/rules/new?duplicateFrom=${row.id}`}
+                tone="brand"
+                title={`Duplicate ${row.name}`}
+              >
+                Duplicate
+              </CompactTableActionButton>
+            )}
+            <CompactTableActionButton to={`/hr/payroll/config/rules/${row.id}`} tone="brand">
+              View
+            </CompactTableActionButton>
+          </CompactTableActions>
         ),
       },
     ],
-    [],
+    [canWrite],
   );
 
   return (

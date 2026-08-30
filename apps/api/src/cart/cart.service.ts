@@ -114,6 +114,9 @@ export class CartService {
       paymentMethod?: string;
       quantity?: number;
       customFieldValues?: Record<string, unknown>;
+      /** Frozen currency the customer selected (optional). STAMP-never-reject —
+       *  absent defaults to NGN downstream. Drives country-scoped cart routing. */
+      currencyCode?: string;
       /** Form Analytics attribution key from the edge beacon (persisted to session_id). */
       sessionId?: string;
     },
@@ -211,6 +214,9 @@ export class CartService {
             paymentMethod: progressive.paymentMethod ?? existingRow.paymentMethod,
             quantity: progressive.quantity ?? existingRow.quantity,
             customFieldValues: progressive.customFieldValues ?? existingRow.customFieldValues,
+            // Progressive merge: keep a previously captured currency if this save
+            // omits it. Never rejects — absent stays absent (defaults to NGN downstream).
+            currencyCode: input.currencyCode ?? existingRow.currencyCode,
             // Attribution: keep the first session_id captured for this cart (a later
             // debounce shouldn't overwrite it), but backfill if it was missing before.
             sessionId: existingRow.sessionId ?? input.sessionId ?? null,
@@ -241,6 +247,9 @@ export class CartService {
           paymentMethod: progressive.paymentMethod ?? null,
           quantity: progressive.quantity ?? null,
           customFieldValues: progressive.customFieldValues ?? null,
+          // Frozen currency the customer selected (STAMP-never-reject; NULL is
+          // fine and defaults to NGN downstream).
+          currencyCode: input.currencyCode ?? null,
           // Form Analytics attribution: links this started cart to the form view.
           sessionId: input.sessionId ?? null,
         })

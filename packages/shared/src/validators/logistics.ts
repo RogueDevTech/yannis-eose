@@ -239,8 +239,12 @@ export const listDeliveryRemittancesSchema = z.object({
    * Applies on both the Awaiting and Remitted tabs. Finance reconciliation filter.
    */
   retracked: z.enum(['any']).optional(),
-  /** Sort field for the orders view. */
-  sortBy: z.enum(['sentAt', 'deliveredAt', 'totalAmount', 'deliveryFee', 'orderNumber']).optional(),
+  /** Sort field. 'deliveredAt'/'totalAmount'/'orderNumber' are orders-view only;
+   *  'orderCount'/'batchTotal'/'deliveryFee' sort the batches view by per-batch
+   *  aggregates. Unknown-for-the-view values fall back to sentAt. */
+  sortBy: z
+    .enum(['sentAt', 'deliveredAt', 'totalAmount', 'deliveryFee', 'orderNumber', 'orderCount', 'batchTotal'])
+    .optional(),
   sortDir: z.enum(['asc', 'desc']).optional(),
   page: z.number().int().min(1).default(1),
   // Up to 1000 for normal views; higher ceiling lets the "Generate report"

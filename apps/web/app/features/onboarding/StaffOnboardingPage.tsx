@@ -1,5 +1,5 @@
-import { useState, useMemo, type ReactNode } from 'react';
-import { Form, useFetcher, useNavigation } from '@remix-run/react';
+import { useState, useMemo, useEffect, type ReactNode } from 'react';
+import { Form, useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { DescriptionList } from '~/components/ui/description-list';
@@ -600,6 +600,21 @@ export function StaffOnboardingPage({
   const [requestChangesReason, setRequestChangesReason] = useState('');
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [revokeReason, setRevokeReason] = useState('');
+
+  // Deep-link: the onboarding list's per-row "Revoke" action links here with
+  // ?action=revoke, so HR lands straight on the reason modal instead of
+  // scrolling to the button. Only honoured when the revoke action is available.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('action') === 'revoke' && showHrRevokeAction) {
+      setRevokeOpen(true);
+      // Strip the param so a refresh / back doesn't reopen it.
+      const next = new URLSearchParams(searchParams);
+      next.delete('action');
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, showHrRevokeAction]);
 
   // Required-at-submit checklist, mirroring the server guard in
   // onboarding.service.submit(). Personal fields read from the saved record

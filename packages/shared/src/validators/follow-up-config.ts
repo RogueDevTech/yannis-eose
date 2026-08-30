@@ -35,6 +35,8 @@ export const createFollowUpRuleSchema = z
     targetBranchId: z.string().uuid().nullable().optional(),
     targetGroupId: z.string().uuid().nullable().optional(),
     teamId: z.string().uuid().nullable().optional(),
+    /** Multi-country: only match orders of this currency. null = any country. */
+    currencyCode: z.string().trim().toUpperCase().max(5).nullable().optional(),
     priority: z.number().int().min(0).max(1_000_000).optional(),
     enabled: z.boolean().optional(),
     freezeOriginal: z.boolean().optional(),
@@ -59,6 +61,8 @@ export const updateFollowUpRuleSchema = z
     targetBranchId: z.string().uuid().nullable().optional(),
     targetGroupId: z.string().uuid().nullable().optional(),
     teamId: z.string().uuid().nullable().optional(),
+    /** Multi-country: only match orders of this currency. null = any country. */
+    currencyCode: z.string().trim().toUpperCase().max(5).nullable().optional(),
     priority: z.number().int().min(0).max(1_000_000).optional(),
     enabled: z.boolean().optional(),
     freezeOriginal: z.boolean().optional(),

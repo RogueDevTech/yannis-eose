@@ -217,6 +217,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           targetBranchId: input.targetBranchId ?? null,
           targetGroupId: input.targetGroupId ?? null,
           teamId: input.teamId ?? null,
+          currencyCode: input.currencyCode ?? null,
           priority: input.priority ?? 0,
           enabled: input.enabled ?? true,
           freezeOriginal: input.freezeOriginal ?? true,
@@ -246,6 +247,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       if (input.targetBranchId !== undefined) set.targetBranchId = input.targetBranchId;
       if (input.targetGroupId !== undefined) set.targetGroupId = input.targetGroupId;
       if (input.teamId !== undefined) set.teamId = input.teamId;
+      if (input.currencyCode !== undefined) set.currencyCode = input.currencyCode;
       if (input.priority !== undefined) set.priority = input.priority;
       if (input.enabled !== undefined) set.enabled = input.enabled;
       if (input.freezeOriginal !== undefined) set.freezeOriginal = input.freezeOriginal;
@@ -330,7 +332,25 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         .select()
         .from(schema.followUpRules)
         .where(eq(schema.followUpRules.enabled, true))
-        .orderBy(desc(schema.followUpRules.priority), asc(schema.followUpRules.createdAt));
+        // Currency-specific rules first so a country-scoped rule claims its
+        // orders before a NULL catch-all does (the "NOT IN already-pulled" guard
+        // makes this the effective precedence). Then priority, then oldest.
+        .orderBy(
+          sql`(${schema.followUpRules.currencyCode} IS NOT NULL) DESC`,
+          desc(schema.followUpRules.priority),
+          asc(schema.followUpRules.createdAt),
+        );
+
+      // Currencies that have at least one currency-specific rule. NULL catch-all
+      // rules exclude these so a specific rule stays authoritative for its
+      // currency even under MAX_PER_RULE truncation (see pullOrdersForRule).
+      const specificCurrencies = [
+        ...new Set(
+          rules
+            .filter((r) => r.currencyCode)
+            .map((r) => r.currencyCode!.toUpperCase()),
+        ),
+      ];
 
       // Emit start
       emitProgress({ currentRuleIndex: 0, currentRuleName: 'Starting...', currentRulePulled: 0, status: 'running' });
@@ -360,7 +380,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           ruleResults.push({ ruleId: rule.id, ruleName: rule.name, pulled: 0 });
           continue;
         }
-        const pulled = await this.pullOrdersForRule(rule, actorId);
+        const pulled = await this.pullOrdersForRule(rule, actorId, specificCurrencies);
         ruleResults.push({ ruleId: rule.id, ruleName: rule.name, pulled });
         totalPulled += pulled;
 
@@ -445,7 +465,14 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     }
   }
 
-  private async pullOrdersForRule(rule: typeof schema.followUpRules.$inferSelect, _actorId?: string): Promise<number> {
+  private async pullOrdersForRule(
+    rule: typeof schema.followUpRules.$inferSelect,
+    _actorId?: string,
+    /** Currencies that have their OWN specific rule. A NULL catch-all rule must
+     *  NOT sweep orders of these currencies — otherwise, if a specific rule hit
+     *  its MAX_PER_RULE cap, the overflow would leak to the catch-all's branch. */
+    excludeCurrencies?: string[],
+  ): Promise<number> {
     const minCutoff = FollowUpConfigService.ageCutoff(rule.ageThresholdHours, rule.ageThresholdDays);
 
     // Determine which timestamp to measure age from, based on rule.ageRelativeTo:
@@ -485,6 +512,20 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     if (rule.sourceBranchId) {
       conditions.push(eq(schema.orders.servicingBranchId, rule.sourceBranchId));
+    }
+
+    // Multi-country: a currency-scoped rule only matches orders of that currency.
+    if (rule.currencyCode) {
+      conditions.push(sql`UPPER(${schema.orders.currencyCode}) = ${rule.currencyCode.toUpperCase()}`);
+    } else if (excludeCurrencies && excludeCurrencies.length > 0) {
+      // NULL catch-all rule: EXCLUDE any currency that has its own specific rule,
+      // so the catch-all never claims those orders (not even the overflow left
+      // by a specific rule that hit MAX_PER_RULE). This makes the specific rule
+      // authoritative for its currency regardless of caps or ordering.
+      const upper = excludeCurrencies.map((c) => c.toUpperCase());
+      conditions.push(
+        sql`UPPER(${schema.orders.currencyCode}) NOT IN (${sql.join(upper.map((c) => sql`${c}`), sql`, `)})`,
+      );
     }
 
     const matchingOrders = await this.db
@@ -693,6 +734,12 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       .where(eq(schema.followUpRules.enabled, true))
       .orderBy(desc(schema.followUpRules.priority), asc(schema.followUpRules.createdAt));
 
+    // Currencies with a specific rule — the NULL catch-all excludes these in the
+    // count too, so the preview matches what the sync will actually pull.
+    const specificCurrencies = [
+      ...new Set(rules.filter((r) => r.currencyCode).map((r) => r.currencyCode!.toUpperCase())),
+    ];
+
     const results: Array<{ ruleId: string; ruleName: string; eligible: number }> = [];
 
     for (const rule of rules) {
@@ -730,6 +777,15 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         }
         if (rule.sourceBranchId) {
           conditions.push(eq(schema.orders.servicingBranchId, rule.sourceBranchId));
+        }
+        // Mirror the sync's currency filter so the eligible-count preview matches
+        // what the sync will actually pull.
+        if (rule.currencyCode) {
+          conditions.push(sql`UPPER(${schema.orders.currencyCode}) = ${rule.currencyCode.toUpperCase()}`);
+        } else if (specificCurrencies.length > 0) {
+          conditions.push(
+            sql`UPPER(${schema.orders.currencyCode}) NOT IN (${sql.join(specificCurrencies.map((c) => sql`${c}`), sql`, `)})`,
+          );
         }
         const [row] = await this.db
           .select({ count: count() })
