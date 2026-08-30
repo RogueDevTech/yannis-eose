@@ -26,7 +26,16 @@ const CHECKBOX_STYLE = `
   background-position: center;
   background-size: 100% 100%;
 }
-.yannis-checkbox:checked:hover {
+.yannis-checkbox:indeterminate {
+  background-color: #1565C0;
+  border-color: #1565C0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M4 8h8'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+}
+.yannis-checkbox:checked:hover,
+.yannis-checkbox:indeterminate:hover {
   background-color: #0d47a1;
   border-color: #0d47a1;
 }

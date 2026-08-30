@@ -222,6 +222,14 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
     return opts;
   })();
 
+  /** Country label for a rule: the country name for its currency, or "Any
+   *  country" for a NULL catch-all. Only rendered when 2+ currencies are live. */
+  const countryLabelForRule = (r: Rule): string => {
+    if (!r.currencyCode) return 'Any country';
+    const code = r.currencyCode.toUpperCase();
+    return currencies.find((c) => c.code.toUpperCase() === code)?.countryName ?? code;
+  };
+
   const saveFetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(saveFetcher.data, { successMessage: editRule ? 'Rule updated' : 'Rule created' });
   useCloseOnFetcherSuccess(saveFetcher, () => { setModalOpen(false); setEditRule(null); rev.revalidate(); });
@@ -385,6 +393,11 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                       <span>{formatAge(r)}</span>
                       <span>from {r.sourceBranchName ?? 'All'}</span>
                       <span>→ {r.targetBranchName ?? r.targetGroupName ?? 'All branches'}</span>
+                      {showCurrency && (
+                        <span className="shrink-0 rounded-full bg-app-hover px-1.5 py-0.5 text-[10px] font-medium text-app-fg">
+                          {countryLabelForRule(r)}
+                        </span>
+                      )}
                       {r.freezeOriginal === false && (
                         <span className="inline-flex items-center rounded-full bg-cyan-100 dark:bg-cyan-900/30 px-2 py-0.5 text-micro font-medium text-cyan-700 dark:text-cyan-300">No freeze</span>
                       )}
@@ -413,6 +426,10 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                     { key: 'age', header: 'Age', render: (r: Rule) => formatAge(r) },
                     { key: 'sourceBranch', header: 'From', render: (r: Rule) => r.sourceBranchName ?? 'All' },
                     { key: 'target', header: 'Target', render: (r: Rule) => r.targetBranchName ?? r.targetGroupName ?? 'All branches' },
+                    // Multi-country: only a meaningful column once 2+ currencies run.
+                    ...(showCurrency
+                      ? [{ key: 'country', header: 'Country', render: (r: Rule) => countryLabelForRule(r) }]
+                      : []),
                     { key: 'freeze', header: 'Freeze', render: (r: Rule) => (
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-micro font-medium ${
                         r.freezeOriginal !== false
@@ -857,6 +874,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             )}
             <ViewRow label="Source Branch" value={viewRule.sourceBranchName ?? 'All branches'} />
             <ViewRow label="Target" value={viewRule.targetBranchName ?? viewRule.targetGroupName ?? 'All branches (round-robin)'} />
+            {showCurrency && <ViewRow label="Country" value={countryLabelForRule(viewRule)} />}
             <ViewRow label="Freeze Original" value={viewRule.freezeOriginal !== false ? 'Yes, original locked' : 'No, both compete'} />
             <ViewRow label="Priority" value={String(viewRule.priority)} />
           </div>
