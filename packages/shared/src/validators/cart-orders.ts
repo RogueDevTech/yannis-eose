@@ -74,6 +74,8 @@ export const createCartOrderRoutingRuleSchema = z.object({
   sourceBranchId: z.string().uuid().nullable().optional(),
   targetBranchId: z.string().uuid().nullable().optional(),
   teamId: z.string().uuid().nullable().optional(),
+  /** Multi-country: only route carts of this currency. null = any country. */
+  currencyCode: z.string().trim().toUpperCase().max(5).nullable().optional(),
   priority: z.number().int().min(0).max(1_000_000).optional(),
   enabled: z.boolean().optional(),
 });
@@ -84,6 +86,8 @@ export const updateCartOrderRoutingRuleSchema = z.object({
   sourceBranchId: z.string().uuid().nullable().optional(),
   targetBranchId: z.string().uuid().nullable().optional(),
   teamId: z.string().uuid().nullable().optional(),
+  /** Multi-country: only route carts of this currency. null = any country. */
+  currencyCode: z.string().trim().toUpperCase().max(5).nullable().optional(),
   priority: z.number().int().min(0).max(1_000_000).optional(),
   enabled: z.boolean().optional(),
 });

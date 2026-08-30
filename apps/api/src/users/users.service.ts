@@ -2355,13 +2355,39 @@ export class UsersService {
       const actorCodes = new Set(
         (actor.permissions ?? []).map((c) => canonicalPermissionCode(c)),
       );
+      // The user's CURRENT effective permissions (live snapshot). We must only
+      // block NEWLY-granted sensitive codes — a non-SuperAdmin editing a user
+      // for an unrelated reason (e.g. adding a branch) re-submits the full
+      // override set, including sensitive codes the user ALREADY holds. Blocking
+      // those would wrongly reject the whole save. Preserving an existing grant
+      // is not an escalation, so it's allowed; only a brand-new grant is gated.
+      const currentPermRows = await this.db
+        .select({ code: schema.permissions.code })
+        .from(schema.userPermissions)
+        .innerJoin(
+          schema.permissions,
+          eq(schema.userPermissions.permissionId, schema.permissions.id),
+        )
+        .where(
+          and(
+            eq(schema.userPermissions.userId, input.userId),
+            eq(schema.userPermissions.granted, true),
+            isNull(schema.userPermissions.validTo),
+          ),
+        );
+      const alreadyHeld = new Set(
+        currentPermRows.map((r) => canonicalPermissionCode(r.code)),
+      );
       const grantedSensitive = Object.entries(
         (input.permissionOverrides ?? {}) as Record<string, boolean>,
       )
         .filter(([, granted]) => granted === true)
         .map(([code]) => canonicalPermissionCode(code))
         .filter((code) => this.permissionsService.isSensitivePermission(code))
-        .filter((code) => !actorCodes.has(code));
+        .filter((code) => !actorCodes.has(code))
+        // Allow preserving a sensitive permission the user already has; only a
+        // genuinely NEW grant by a non-holder is blocked.
+        .filter((code) => !alreadyHeld.has(code));
       if (grantedSensitive.length > 0) {
         throw new TRPCError({
           code: 'FORBIDDEN',

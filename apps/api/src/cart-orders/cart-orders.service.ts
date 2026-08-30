@@ -112,21 +112,34 @@ export class CartOrdersService {
   private async seedDefaultRoutingRule() {
     const LAGOS_BRANCH_ID = '00000000-0000-0000-0000-000000000001';
     const RULE_ID = 'a0000000-0000-0000-0000-000000000001';
+    // Seed the default "carts → Lagos" rule. This runs in the CONSTRUCTOR, which
+    // executes BEFORE the OnApplicationBootstrap migration runner — so on the
+    // first boot after this feature deploys, the currency_code column may not
+    // exist yet. We therefore DON'T reference currency_code here: insert the base
+    // rule with the always-present columns, and let migration 0337 stamp the
+    // NGN scope + rename (it runs idempotently on boot). The currency-scoping of
+    // this rule is thus owned by 0337, not the seeder. `updated_at`/`created_at`
+    // default in-DB.
     await this.db.execute(sql`
       INSERT INTO cart_order_routing_rules (id, name, source_branch_id, target_branch_id, priority, enabled)
-      VALUES (${RULE_ID}, 'All carts → Lagos', NULL, ${LAGOS_BRANCH_ID}, 10, true)
+      VALUES (${RULE_ID}, 'NGN carts → Lagos', NULL, ${LAGOS_BRANCH_ID}, 10, true)
       ON CONFLICT (id) DO NOTHING
     `);
-    // Backfill all cart orders not on Lagos to Lagos (CEO directive: single CS branch for carts)
+    // NOTE: the previous per-boot backfill that force-moved EVERY cart order to
+    // Lagos was REMOVED — it would clobber the servicing branch of non-NGN carts
+    // (and any cart correctly routed by a country rule) on every restart. Cart
+    // servicing branch is now set once at pull time by resolveRoutingBranch,
+    // which honours currency-scoped rules. Only NULL (never-routed) carts are
+    // given the NGN default, and only when they are NGN.
     const result = await this.db.execute(sql`
       UPDATE cart_orders
       SET servicing_branch_id = ${LAGOS_BRANCH_ID}, updated_at = now()
       WHERE servicing_branch_id IS NULL
-         OR servicing_branch_id != ${LAGOS_BRANCH_ID}
+        AND COALESCE(currency_code, 'NGN') = 'NGN'
     `);
     const backfilled = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
     if (backfilled > 0) {
-      this.logger.log(`Backfilled ${backfilled} cart orders to Lagos branch`);
+      this.logger.log(`Set default Lagos branch on ${backfilled} unrouted NGN cart order(s)`);
     }
   }
 
@@ -1500,6 +1513,9 @@ export class CartOrdersService {
           customFields: co.customFields,
           branchId: co.branchId,
           servicingBranchId: co.servicingBranchId,
+          // Carry the cart's frozen currency onto the graduated order so it
+          // counts in the right country's metrics (mirrors follow-up graduation).
+          currencyCode: co.currencyCode ?? 'NGN',
           // Only link cart_id when the abandonment row still exists (FK-safe).
           cartId: safeCart?.id ?? null,
           deliveryProofUrl: co.deliveryProofUrl,
@@ -2023,15 +2039,51 @@ export class CartOrdersService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid branch ID format' });
     }
 
+    // Country-scoped routing: when the caller did NOT pin an explicit branch, the
+    // servicing branch is resolved from currency rules — which can differ per
+    // currency. A single pull batch may span currencies (e.g. an auto-pull cron
+    // sweeps all due carts), so resolving ONE branch from the first cart would
+    // misroute the rest. Split the batch by currency and process each group with
+    // its own resolved branch. (When targetBranchId IS set, the caller chose the
+    // branch explicitly — no per-currency split needed.)
+    if (!targetBranchId && cartIds.length > 1) {
+      const idListForGroup = cartIds.map((id) => `'${id}'`).join(', ');
+      const rows = await this.pg.unsafe<Array<{ id: string; currency_code: string | null }>>(`
+        SELECT ca.id, ca.currency_code FROM cart_abandonments ca
+        WHERE ca.id IN (${idListForGroup})
+      `);
+      const byCurrency = new Map<string, string[]>();
+      for (const id of cartIds) {
+        // Treat NULL currency as NGN so legacy carts match the NGN default rule.
+        const cc = (rows.find((r) => r.id === id)?.currency_code ?? 'NGN').toUpperCase();
+        const list = byCurrency.get(cc) ?? [];
+        list.push(id);
+        byCurrency.set(cc, list);
+      }
+      if (byCurrency.size > 1) {
+        let pulled = 0;
+        for (const group of byCurrency.values()) {
+          const res = await this.pullFromAbandonedCarts(group, null, _actor);
+          pulled += res.pulled;
+        }
+        return { pulled };
+      }
+      // Single currency in the batch — fall through to the normal single-resolve path.
+    }
+
     // ── 1. Resolve routing BEFORE the transaction (read-only, can use Drizzle) ──
     let resolvedBranchId = targetBranchId;
     let resolvedRuleId: string | null = null;
     let resolvedTeamId: string | null = null;
     if (!resolvedBranchId) {
-      // Look up the first cart's campaign branch to seed routing
+      // Look up the first cart's campaign branch + currency to seed routing. After
+      // the split above, every cart in this batch shares one currency, so the
+      // first cart's currency is representative. Currency (stamped at intake on
+      // cart_abandonments, mig 0338) drives country-scoped routing; NULL is
+      // treated as NGN so legacy carts match the NGN default rule.
       const idList = cartIds.map((id) => `'${id}'`).join(', ');
-      const [firstCart] = await this.pg.unsafe<Array<{ campaign_id: string | null }>>(`
-        SELECT ca.campaign_id FROM cart_abandonments ca
+      const [firstCart] = await this.pg.unsafe<Array<{ campaign_id: string | null; currency_code: string | null }>>(`
+        SELECT ca.campaign_id, ca.currency_code FROM cart_abandonments ca
         WHERE ca.id IN (${idList}) AND ca.campaign_id IS NOT NULL
         LIMIT 1
       `);
@@ -2044,7 +2096,7 @@ export class CartOrdersService {
           .limit(1);
         campaignBranchId = camp?.branchId ?? null;
       }
-      const routing = await this.resolveRoutingBranch(campaignBranchId);
+      const routing = await this.resolveRoutingBranch(campaignBranchId, firstCart?.currency_code ?? 'NGN');
       if (routing) {
         resolvedBranchId = routing.branchId;
         resolvedRuleId = routing.ruleId;
@@ -2086,7 +2138,7 @@ export class CartOrdersService {
         delivery_notes, delivery_state, customer_gender,
         preferred_delivery_date, payment_method, customer_email,
         order_source, branch_id, servicing_branch_id, routing_rule_id, routing_team_id,
-        custom_fields
+        currency_code, custom_fields
       )
       SELECT
         uuidv7(), ca.id, ca.campaign_id, ca.media_buyer_id,
@@ -2095,7 +2147,7 @@ export class CartOrdersService {
         ca.delivery_notes, ca.delivery_state, ca.customer_gender,
         ca.preferred_delivery_date, ca.payment_method, ca.customer_email,
         'online', camp.branch_id, ${branchLiteral}, ${ruleLiteral}, ${teamLiteral},
-        ca.custom_field_values
+        COALESCE(ca.currency_code, 'NGN'), ca.custom_field_values
       FROM cart_abandonments ca
       LEFT JOIN campaigns camp ON camp.id = ca.campaign_id
       LEFT JOIN products p ON p.id = ca.product_id
@@ -2355,6 +2407,8 @@ export class CartOrdersService {
         name: schema.cartOrderRoutingRules.name,
         sourceBranchId: schema.cartOrderRoutingRules.sourceBranchId,
         targetBranchId: schema.cartOrderRoutingRules.targetBranchId,
+        teamId: schema.cartOrderRoutingRules.teamId,
+        currencyCode: schema.cartOrderRoutingRules.currencyCode,
         priority: schema.cartOrderRoutingRules.priority,
         enabled: schema.cartOrderRoutingRules.enabled,
         createdAt: schema.cartOrderRoutingRules.createdAt,
@@ -2395,6 +2449,7 @@ export class CartOrdersService {
           sourceBranchId: input.sourceBranchId ?? null,
           targetBranchId: input.targetBranchId ?? null,
           teamId: input.teamId ?? null,
+          currencyCode: input.currencyCode ?? null,
           priority: input.priority ?? 0,
           enabled: input.enabled ?? true,
         })
@@ -2409,6 +2464,7 @@ export class CartOrdersService {
     if (input.sourceBranchId !== undefined) updateFields['sourceBranchId'] = input.sourceBranchId;
     if (input.targetBranchId !== undefined) updateFields['targetBranchId'] = input.targetBranchId;
     if (input.teamId !== undefined) updateFields['teamId'] = input.teamId;
+    if (input.currencyCode !== undefined) updateFields['currencyCode'] = input.currencyCode;
     if (input.priority !== undefined) updateFields['priority'] = input.priority;
     if (input.enabled !== undefined) updateFields['enabled'] = input.enabled;
 
@@ -2441,12 +2497,28 @@ export class CartOrdersService {
    */
   private async resolveRoutingBranch(
     campaignBranchId: string | null,
+    currencyCode?: string | null,
   ): Promise<{ branchId: string; ruleId: string; ruleName: string; teamId: string | null } | null> {
+    // Multi-country precedence: a currency-specific rule wins over the NULL
+    // catch-all (mirrors CsOrderRoutingService). We fetch enabled rules ordered
+    // so that, at equal priority, a rule whose currency_code is set sorts before
+    // a NULL one — then the first rule that also passes the source-branch +
+    // currency filters wins.
+    //
+    // A cart with no currency is treated as NGN (the base currency), so legacy
+    // carts (captured before mig 0338, currency_code NULL) still match the
+    // NGN-scoped default rule instead of falling through to no rule.
+    const cc = (currencyCode || 'NGN').toUpperCase();
     const rules = await this.db
       .select()
       .from(schema.cartOrderRoutingRules)
       .where(eq(schema.cartOrderRoutingRules.enabled, true))
-      .orderBy(desc(schema.cartOrderRoutingRules.priority), asc(schema.cartOrderRoutingRules.createdAt));
+      .orderBy(
+        // currency-specific first, then priority, then oldest
+        sql`(${schema.cartOrderRoutingRules.currencyCode} IS NOT NULL) DESC`,
+        desc(schema.cartOrderRoutingRules.priority),
+        asc(schema.cartOrderRoutingRules.createdAt),
+      );
 
     if (rules.length === 0) return null;
 
@@ -2454,6 +2526,11 @@ export class CartOrdersService {
       // sourceBranchId filter: if set, only match carts from this marketing branch
       if (rule.sourceBranchId && rule.sourceBranchId !== campaignBranchId) continue;
       // sourceBranchId=null matches everything (org-wide catch-all)
+
+      // currencyCode filter: a rule scoped to a currency only matches carts of
+      // that currency. A NULL rule matches any currency (catch-all). Because of
+      // the ORDER BY above, a matching currency-specific rule is seen first.
+      if (rule.currencyCode && rule.currencyCode.toUpperCase() !== cc) continue;
 
       if (rule.targetBranchId) {
         return { branchId: rule.targetBranchId, ruleId: rule.id, ruleName: rule.name, teamId: rule.teamId };

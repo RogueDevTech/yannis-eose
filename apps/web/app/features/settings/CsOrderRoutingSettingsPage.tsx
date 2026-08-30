@@ -264,6 +264,38 @@ export function CsOrderRoutingSettingsPage({
     return s;
   }, [rulesByProductId]);
 
+  /** Products in the visible (search-filtered) list that can actually be picked:
+   *  anything already routed for the selected country is disabled, so check-all
+   *  must ignore those or it would report "all selected" while nothing changed. */
+  const selectableVisibleProducts = useMemo(
+    () =>
+      filteredProductsForBulk.filter(
+        (p) => !assignedCountryKeys.has(`${p.id}::${ruleCurrencyCode}`),
+      ),
+    [filteredProductsForBulk, assignedCountryKeys, ruleCurrencyCode],
+  );
+  const selectedVisibleCount = useMemo(
+    () => selectableVisibleProducts.filter((p) => selectedProductIds.has(p.id)).length,
+    [selectableVisibleProducts, selectedProductIds],
+  );
+  const allVisibleSelected =
+    selectableVisibleProducts.length > 0 && selectedVisibleCount === selectableVisibleProducts.length;
+  const someVisibleSelected = selectedVisibleCount > 0 && !allVisibleSelected;
+
+  /** Check-all toggle: selects every selectable visible product, or clears just
+   *  those (selections made under a different search stay intact). */
+  const toggleAllVisible = () => {
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const p of selectableVisibleProducts) next.delete(p.id);
+      } else {
+        for (const p of selectableVisibleProducts) next.add(p.id);
+      }
+      return next;
+    });
+  };
+
   /** Click handler — validates inputs and opens the confirm modal. When the
    *  routing method is still an unsaved "By product" draft, we no longer block:
    *  the assign flow saves the method first, then assigns (see the mode-save
@@ -352,6 +384,7 @@ export function CsOrderRoutingSettingsPage({
       <PageHeader
         title="Sales Routing"
         description="Choose which Sales branch handles new marketing orders."
+        backTo="/admin/settings"
       />
 
       <Card>
@@ -482,26 +515,10 @@ export function CsOrderRoutingSettingsPage({
                   wrapperClassName="w-full"
                 />
               </form>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() =>
-                    setSelectedProductIds(
-                      new Set(
-                        filteredProductsForBulk
-                          .filter((p) => !assignedCountryKeys.has(`${p.id}::${ruleCurrencyCode}`))
-                          .map((p) => p.id),
-                      ),
-                    )
-                  }
-                  disabled={filteredProductsForBulk.every((p) =>
-                    assignedCountryKeys.has(`${p.id}::${ruleCurrencyCode}`),
-                  )}
-                >
-                  Select visible
-                </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-app-fg-muted">
+                  {selectedProductIds.size} selected
+                </span>
                 <Button
                   type="button"
                   variant="ghost"
@@ -518,6 +535,24 @@ export function CsOrderRoutingSettingsPage({
               <EmptyState title="No products" description="Add active products to the catalog first." />
             ) : (
               <div className="max-h-[min(28rem,60vh)] overflow-y-auto rounded-lg border border-app-border divide-y divide-app-border">
+                {/* Check all — toggles every selectable product currently visible. */}
+                <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-app-border bg-app-elevated px-3 py-2">
+                  <Checkbox
+                    ref={(el) => {
+                      if (el) el.indeterminate = someVisibleSelected;
+                    }}
+                    checked={allVisibleSelected}
+                    disabled={selectableVisibleProducts.length === 0}
+                    onChange={toggleAllVisible}
+                    aria-label={allVisibleSelected ? 'Clear all products' : 'Select all products'}
+                  />
+                  <span className="text-xs font-medium text-app-fg">
+                    {allVisibleSelected ? 'Clear all' : 'Select all'}
+                    {selectableVisibleProducts.length > 0
+                      ? ` (${selectedVisibleCount}/${selectableVisibleProducts.length})`
+                      : ''}
+                  </span>
+                </div>
                 {filteredProductsForBulk.map((p) => {
                   const productRules = rulesByProductId.get(p.id) ?? [];
                   // Blocked ONLY for the currently-selected country: a product

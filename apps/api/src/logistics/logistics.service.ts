@@ -2430,14 +2430,24 @@ export class LogisticsService implements OnModuleInit {
 
     // Text search — reaches into linked orders and location name via EXISTS subquery
     if (input.search) {
-      const term = `%${input.search}%`;
+      const trimmedSearch = input.search.trim();
+      const term = `%${trimmedSearch}%`;
+      // Parse "YNS-00123", "YNS00123", or bare "00123" → exact order_number match.
+      // Mirrors listDeliveryRemittanceEligibleOrders: order_number is stored as an
+      // int, so CAST(...) ILIKE '%YNS-90285%' can never match the ref users see.
+      const orderNumMatch = trimmedSearch.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
+      const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
+      const orderNumberClause =
+        !Number.isNaN(parsedOrderNum) && parsedOrderNum > 0
+          ? sql` OR o.order_number = ${parsedOrderNum}`
+          : sql``;
       conditions.push(
         sql`(
           EXISTS (
             SELECT 1 FROM delivery_remittance_orders dro
             JOIN orders o ON o.id = dro.order_id
             WHERE dro.delivery_remittance_id = ${schema.deliveryRemittances.id}
-              AND (o.customer_name ILIKE ${term} OR CAST(o.order_number AS text) ILIKE ${term})
+              AND (o.customer_name ILIKE ${term} OR CAST(o.order_number AS text) ILIKE ${term}${orderNumberClause})
           )
           OR EXISTS (
             SELECT 1 FROM logistics_locations ll
@@ -2465,12 +2475,37 @@ export class LogisticsService implements OnModuleInit {
     const outcomesByRemittance = new Map<string, Array<{ deliveryRemittanceId: string; status: string; amount: unknown; orderCount: unknown; reason: string | null; recordedAt: unknown }>>();
 
     if (!input.summaryOnly) {
+      // Batch-list sorting. orderCount/batchTotal/deliveryFee are per-batch
+      // aggregates over the linked orders, so they must be correlated subqueries
+      // here — the enrichment pass below runs AFTER LIMIT/OFFSET and so can only
+      // ever sort the current page. Aggregates mirror `orderSummaryRows` exactly
+      // (batchTotal = amount net of delivery fee) so the sort agrees with the
+      // numbers rendered in the row. Orders-view-only fields fall back to sentAt.
+      const batchAggSort = (expr: SQL) =>
+        sql`(SELECT ${expr} FROM delivery_remittance_orders dro
+             JOIN orders o ON o.id = dro.order_id
+             WHERE dro.delivery_remittance_id = ${schema.deliveryRemittances.id})`;
+      const batchSortExprMap: Record<string, SQL> = {
+        sentAt: sql`${schema.deliveryRemittances.sentAt}`,
+        orderCount: batchAggSort(sql`COUNT(*)`),
+        batchTotal: batchAggSort(
+          sql`COALESCE(SUM(o.total_amount - COALESCE(o.delivery_fee, 0)), 0)`,
+        ),
+        deliveryFee: batchAggSort(sql`COALESCE(SUM(COALESCE(o.delivery_fee, 0)), 0)`),
+      };
+      const batchSortExpr =
+        (input.sortBy ? batchSortExprMap[input.sortBy] : undefined) ??
+        sql`${schema.deliveryRemittances.sentAt}`;
+      const batchSortDir = input.sortDir === 'asc' ? 'ASC' : 'DESC';
+      // Tie-break on sent_at so paging is stable when the aggregate ties.
+      const batchOrderBy = sql`${batchSortExpr} ${sql.raw(batchSortDir)} NULLS LAST, ${schema.deliveryRemittances.sentAt} DESC`;
+
       const [recordsResult, totalRows] = await Promise.all([
         this.db
           .select()
           .from(schema.deliveryRemittances)
           .where(whereClause)
-          .orderBy(desc(schema.deliveryRemittances.sentAt))
+          .orderBy(batchOrderBy)
           .limit(input.limit)
           .offset(offset),
         this.db
@@ -3017,11 +3052,20 @@ export class LogisticsService implements OnModuleInit {
 
     // Text search — customer name, order number, or location name
     if (input.search) {
-      const term = `%${input.search}%`;
+      const trimmedSearch = input.search.trim();
+      const term = `%${trimmedSearch}%`;
+      // Parse "YNS-00123", "YNS00123", or bare "00123" → exact order_number match.
+      // Without this the visible YNS-prefixed ref never matches the int column.
+      const orderNumMatch = trimmedSearch.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
+      const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
+      const orderNumberClause =
+        !Number.isNaN(parsedOrderNum) && parsedOrderNum > 0
+          ? sql` OR ${schema.orders.orderNumber} = ${parsedOrderNum}`
+          : sql``;
       conditions.push(
         sql`(
           ${schema.orders.customerName} ILIKE ${term}
-          OR CAST(${schema.orders.orderNumber} AS text) ILIKE ${term}
+          OR CAST(${schema.orders.orderNumber} AS text) ILIKE ${term}${orderNumberClause}
         )`,
       );
     }

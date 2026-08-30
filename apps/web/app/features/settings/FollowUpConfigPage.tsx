@@ -11,6 +11,7 @@ import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
+import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { TableActionButton } from '~/components/ui/table-action-button';
@@ -37,6 +38,8 @@ interface Rule {
   targetBranchName: string | null;
   targetGroupId: string | null;
   targetGroupName: string | null;
+  /** Multi-country: currency this rule targets. null = any country. */
+  currencyCode: string | null;
   priority: number;
   enabled: boolean;
   freezeOriginal: boolean;
@@ -198,8 +201,34 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   const [targetBranchId, setTargetBranchId] = useState<string | null>(null);
   const [targetGroupId, setTargetGroupId] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
+  const [currencyCode, setCurrencyCode] = useState<string>('');
   const [enabled, setEnabled] = useState(true);
   const [freezeOriginal, setFreezeOriginal] = useState(true);
+
+  // Multi-country: only expose the country picker once the company runs 2+
+  // active currencies. Options deduped by code (catalog repeats per company).
+  const currencies = useCurrenciesCatalog();
+  const showCurrency = useHasMultipleCurrencies();
+  const currencyOptions = (() => {
+    const seen = new Set<string>();
+    const opts = [{ value: '', label: 'Any country' }];
+    for (const c of currencies) {
+      if (!c.active) continue;
+      const code = c.code.toUpperCase();
+      if (seen.has(code)) continue;
+      seen.add(code);
+      opts.push({ value: code, label: c.countryName ? `${c.countryName} (${code})` : code });
+    }
+    return opts;
+  })();
+
+  /** Country label for a rule: the country name for its currency, or "Any
+   *  country" for a NULL catch-all. Only rendered when 2+ currencies are live. */
+  const countryLabelForRule = (r: Rule): string => {
+    if (!r.currencyCode) return 'Any country';
+    const code = r.currencyCode.toUpperCase();
+    return currencies.find((c) => c.code.toUpperCase() === code)?.countryName ?? code;
+  };
 
   const saveFetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(saveFetcher.data, { successMessage: editRule ? 'Rule updated' : 'Rule created' });
@@ -221,7 +250,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
   const openCreate = () => {
     setEditRule(null); setName(''); setSourceStatus('CONFIRMED'); setAgeValue('7'); setMaxAgeDays(null);
     setAgeRelativeTo('STATUS_TIMESTAMP'); setSourceBranchId(null); setTargetType('all'); setTargetBranchId(null); setTargetGroupId(null);
-    setTeamId(null); setEnabled(true); setFreezeOriginal(true); setModalOpen(true);
+    setTeamId(null); setCurrencyCode(''); setEnabled(true); setFreezeOriginal(true); setModalOpen(true);
   };
   const openEdit = (rule: Rule) => {
     setEditRule(rule); setName(rule.name); setSourceStatus(rule.sourceStatus);
@@ -230,6 +259,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
     setTargetType(rule.targetBranchId ? 'branch' : rule.targetGroupId ? 'group' : 'all');
     setTargetBranchId(rule.targetBranchId); setTargetGroupId(rule.targetGroupId);
     setTeamId((rule as unknown as Record<string, unknown>).teamId as string | null ?? null);
+    setCurrencyCode(rule.currencyCode ?? '');
     setEnabled(rule.enabled); setFreezeOriginal(rule.freezeOriginal ?? true); setModalOpen(true);
   };
   const handleSave = () => {
@@ -240,6 +270,8 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
       targetGroupId: targetType === 'group' ? targetGroupId : null,
       targetAll: targetType === 'all',
       teamId: teamId || null,
+      // '' = any country (null). Only meaningful with 2+ currencies.
+      currencyCode: currencyCode || null,
       priority: 0, enabled, freezeOriginal,
     };
     if (editRule) payload.ruleId = editRule.id;
@@ -361,6 +393,11 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                       <span>{formatAge(r)}</span>
                       <span>from {r.sourceBranchName ?? 'All'}</span>
                       <span>→ {r.targetBranchName ?? r.targetGroupName ?? 'All branches'}</span>
+                      {showCurrency && (
+                        <span className="shrink-0 rounded-full bg-app-hover px-1.5 py-0.5 text-[10px] font-medium text-app-fg">
+                          {countryLabelForRule(r)}
+                        </span>
+                      )}
                       {r.freezeOriginal === false && (
                         <span className="inline-flex items-center rounded-full bg-cyan-100 dark:bg-cyan-900/30 px-2 py-0.5 text-micro font-medium text-cyan-700 dark:text-cyan-300">No freeze</span>
                       )}
@@ -389,6 +426,10 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
                     { key: 'age', header: 'Age', render: (r: Rule) => formatAge(r) },
                     { key: 'sourceBranch', header: 'From', render: (r: Rule) => r.sourceBranchName ?? 'All' },
                     { key: 'target', header: 'Target', render: (r: Rule) => r.targetBranchName ?? r.targetGroupName ?? 'All branches' },
+                    // Multi-country: only a meaningful column once 2+ currencies run.
+                    ...(showCurrency
+                      ? [{ key: 'country', header: 'Country', render: (r: Rule) => countryLabelForRule(r) }]
+                      : []),
                     { key: 'freeze', header: 'Freeze', render: (r: Rule) => (
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-micro font-medium ${
                         r.freezeOriginal !== false
@@ -739,6 +780,16 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             </div>
           )}
 
+          {showCurrency && currencyOptions.length > 1 && (
+            <div>
+              <label className="block text-xs font-medium text-app-fg-muted mb-1">Country</label>
+              <FormSelect value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value)} options={currencyOptions} />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Only match orders of this country's currency. A country-specific rule wins over an Any country rule.
+              </p>
+            </div>
+          )}
+
           <label className="flex items-center gap-2 text-sm text-app-fg">
             <input type="checkbox" checked={freezeOriginal} onChange={(e) => setFreezeOriginal(e.target.checked)} className="rounded border-app-border text-brand-600 focus:ring-brand-500" />
             Freeze original order
@@ -823,6 +874,7 @@ export function FollowUpConfigPage({ rules, branches, groups, syncLogs, followUp
             )}
             <ViewRow label="Source Branch" value={viewRule.sourceBranchName ?? 'All branches'} />
             <ViewRow label="Target" value={viewRule.targetBranchName ?? viewRule.targetGroupName ?? 'All branches (round-robin)'} />
+            {showCurrency && <ViewRow label="Country" value={countryLabelForRule(viewRule)} />}
             <ViewRow label="Freeze Original" value={viewRule.freezeOriginal !== false ? 'Yes, original locked' : 'No, both compete'} />
             <ViewRow label="Priority" value={String(viewRule.priority)} />
           </div>
