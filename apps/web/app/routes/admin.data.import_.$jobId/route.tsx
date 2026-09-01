@@ -14,6 +14,10 @@ export const meta: MetaFunction = () => [
  * nesting so it renders as its own full page. The job data itself is loaded
  * client-side (browser tRPC + polling) — the loader only gates the permission
  * and hands the id through.
+ *
+ * Back goes to the ORDERS IMPORTER, not the type picker: every route into this
+ * page is the "Recent imports" table on /admin/data/import/orders, so returning
+ * to the picker would drop the user a level further out than they came from.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requirePermission(request, 'data.import');
@@ -26,5 +30,5 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
 export default function ImportJobDetailRoute() {
   const { jobId } = useLoaderData<typeof loader>();
-  return <ImportJobDetailPage jobId={jobId} backHref="/admin/data/import" />;
+  return <ImportJobDetailPage jobId={jobId} backHref="/admin/data/import/orders" />;
 }

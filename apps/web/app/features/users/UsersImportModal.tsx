@@ -809,14 +809,17 @@ export function UsersImportModal({ open, onClose, onComplete }: UsersImportModal
           </div>
           <div className="max-h-[50vh] overflow-y-auto px-5 py-3">
             <table className="w-full text-xs">
-              <thead className="text-app-fg-muted border-b border-app-border">
+              {/* Pins to the `max-h-[50vh]` scroller above (top-0), not the
+                  page: that div is a deliberate internal scroll container.
+                  Same pattern as the inventory thresholds modal. */}
+              <thead className="text-app-fg-muted">
                 <tr>
-                  <th className="text-left py-2 pr-2">Row</th>
-                  <th className="text-left py-2 pr-2">Name</th>
-                  <th className="text-left py-2 pr-2">Email</th>
-                  <th className="text-left py-2 pr-2">Role</th>
-                  <th className="text-left py-2 pr-2">Branch</th>
-                  <th className="text-left py-2 pr-2">Status</th>
+                  <th className="sticky top-0 z-10 bg-app-elevated shadow-[inset_0_-1px_0_0_rgb(var(--app-border))] text-left py-2 pr-2">Row</th>
+                  <th className="sticky top-0 z-10 bg-app-elevated shadow-[inset_0_-1px_0_0_rgb(var(--app-border))] text-left py-2 pr-2">Name</th>
+                  <th className="sticky top-0 z-10 bg-app-elevated shadow-[inset_0_-1px_0_0_rgb(var(--app-border))] text-left py-2 pr-2">Email</th>
+                  <th className="sticky top-0 z-10 bg-app-elevated shadow-[inset_0_-1px_0_0_rgb(var(--app-border))] text-left py-2 pr-2">Role</th>
+                  <th className="sticky top-0 z-10 bg-app-elevated shadow-[inset_0_-1px_0_0_rgb(var(--app-border))] text-left py-2 pr-2">Branch</th>
+                  <th className="sticky top-0 z-10 bg-app-elevated shadow-[inset_0_-1px_0_0_rgb(var(--app-border))] text-left py-2 pr-2">Status</th>
                 </tr>
               </thead>
               <tbody>

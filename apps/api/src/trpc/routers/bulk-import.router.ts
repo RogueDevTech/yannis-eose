@@ -78,6 +78,12 @@ export const bulkImportRouter = router({
         page: z.number().int().min(1).optional(),
         limit: z.number().int().min(1).max(500).optional(),
         status: z.enum(['IMPORTED', 'WARNING', 'FAILED']).optional(),
+        /** Free text over external id, customer name, order number. */
+        search: z.string().max(120).optional(),
+        /** The imported order's own lifecycle status. */
+        orderStatus: z.string().max(40).optional(),
+        /** Failure-reason bucket (see REASON_KINDS). */
+        reasonKind: z.string().max(40).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -86,7 +92,67 @@ export const bulkImportRouter = router({
         page: input.page,
         limit: input.limit,
         status: input.status,
+        search: input.search,
+        orderStatus: input.orderStatus,
+        reasonKind: input.reasonKind,
       });
+    }),
+
+  /** Counts per import outcome / order status / failure reason, for the filters. */
+  rowFacets: authedProcedure
+    .input(importJobIdSchema)
+    .query(async ({ input, ctx }) => {
+      assertImporter(ctx.user.role);
+      return getBulkImportService().getRowFacets(input.jobId);
+    }),
+
+  /**
+   * One row plus the source cells kept when it FAILED, for the fix-and-resubmit
+   * form on the job page.
+   */
+  getRow: authedProcedure
+    .input(z.object({ jobId: z.string().uuid(), rowIndex: z.number().int().min(0) }))
+    .query(async ({ input, ctx }) => {
+      assertImporter(ctx.user.role);
+      const row = await getBulkImportService().getRow(input.jobId, input.rowIndex);
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Row not found' });
+      return row;
+    }),
+
+  /**
+   * Valid products / users / currencies / statuses for this job's company, so
+   * the fix form offers only values that will actually resolve.
+   */
+  getRowOptions: authedProcedure
+    .input(importJobIdSchema)
+    .query(async ({ input, ctx }) => {
+      assertImporter(ctx.user.role);
+      return getBulkImportService().getRowOptions(input.jobId);
+    }),
+
+  /**
+   * Re-import a single FAILED row after the user corrected it. Runs the SAME
+   * mapRow + upsert path as the worker, so a fixed row gets identical validation
+   * and an identical audit trail. Returns `{ ok: false, reason }` when the row
+   * still doesn't validate, so the form can show the next problem inline.
+   */
+  resubmitRow: authedProcedure
+    .input(
+      z.object({
+        jobId: z.string().uuid(),
+        rowIndex: z.number().int().min(0),
+        // Edited cells keyed by the file's own header names.
+        values: z.record(z.string()),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      assertImporter(ctx.user.role);
+      return getBulkImportService().resubmitRow(
+        input.jobId,
+        input.rowIndex,
+        input.values,
+        ctx.user.id,
+      );
     }),
 
   /** Delete an import job + its row records (does NOT delete imported orders). */
@@ -103,6 +169,17 @@ export const bulkImportRouter = router({
     .mutation(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
       return getBulkImportService().resume(input.jobId, ctx.user.id);
+    }),
+
+  /**
+   * Operator pause. A PROCESSING job stops at its next chunk boundary, so this
+   * returns `pending: true` to say the stop is requested but not yet in effect.
+   */
+  pause: authedProcedure
+    .input(importJobIdSchema)
+    .mutation(async ({ input, ctx }) => {
+      assertImporter(ctx.user.role);
+      return getBulkImportService().pause(input.jobId, ctx.user.id);
     }),
 
   /** Re-run only the failed rows (resets cursor to the first failure). */

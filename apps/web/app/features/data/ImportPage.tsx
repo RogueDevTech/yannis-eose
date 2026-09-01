@@ -1,18 +1,14 @@
-import { useState } from 'react';
+import { Link } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
-import { BulkImportPage } from '~/features/orders/BulkImportPage';
-
-interface UserOption { id: string; name: string }
-interface ProductOption { id: string; name: string }
 
 /* ── Import type card metadata ──────────────────────────────── */
 
-type ImportTypeKey = 'orders';
-
 interface ImportTypeDef {
-  key: ImportTypeKey;
+  key: string;
   label: string;
   description: string;
+  /** Dedicated page for this import type. */
+  href: string;
   icon: React.ReactNode;
 }
 
@@ -21,6 +17,7 @@ const IMPORT_TYPES: ImportTypeDef[] = [
     key: 'orders',
     label: 'Orders',
     description: 'Import funnel or offline orders from a CRM export spreadsheet.',
+    href: '/admin/data/import/orders',
     icon: <OrdersIcon />,
   },
 ];
@@ -37,45 +34,31 @@ function OrdersIcon() {
 
 /* ── Main component ──────────────────────────────────────────── */
 
-export interface ImportPageProps {
-  // Passed through to BulkImportPage for a future code-reference legend; the
-  // importer itself resolves everything from per-row codes.
-  mediaBuyers?: UserOption[];
-  csAgents?: UserOption[];
-  products?: ProductOption[];
-}
-
-export function ImportPage(props: ImportPageProps) {
-  const [selectedKey, setSelectedKey] = useState<ImportTypeKey | null>(null);
-
+/**
+ * Import type picker. Purely a menu: each card navigates to that type's own
+ * page. The orders importer used to expand inline here, which stacked two page
+ * headers ("Import" above "Bulk import orders") in a single view and left the
+ * importer with no URL of its own to link, bookmark or go Back from.
+ */
+export function ImportPage() {
   return (
     <div>
       <PageHeader
         title="Import"
-        description="Upload data across all domains."
+        description="Choose what to upload."
       />
 
       {/* Card grid */}
       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {IMPORT_TYPES.map((t) => (
-          <button
+          <Link
             key={t.key}
-            type="button"
-            onClick={() => setSelectedKey(selectedKey === t.key ? null : t.key)}
-            className={`text-left rounded-xl border p-4 transition-all duration-150 ${
-              selectedKey === t.key
-                ? 'border-brand-500 bg-brand-500/10 ring-1 ring-brand-500/30'
-                : 'border-app-border bg-app-elevated hover:border-brand-300 hover:bg-app-hover'
-            }`}
+            to={t.href}
+            prefetch="intent"
+            className="group text-left rounded-xl border border-app-border bg-app-elevated p-4 transition-all duration-150 hover:border-brand-300 hover:bg-app-hover"
           >
             <div className="flex items-start gap-3">
-              <div
-                className={`flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${
-                  selectedKey === t.key
-                    ? 'bg-brand-500/20 text-brand-600 dark:text-brand-400'
-                    : 'bg-app-hover text-app-fg-muted'
-                }`}
-              >
+              <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-app-hover text-app-fg-muted transition-colors duration-150 group-hover:bg-brand-500/20 group-hover:text-brand-600 dark:group-hover:text-brand-400">
                 {t.icon}
               </div>
               <div className="min-w-0">
@@ -83,21 +66,9 @@ export function ImportPage(props: ImportPageProps) {
                 <p className="text-xs text-app-fg-muted mt-0.5 line-clamp-2">{t.description}</p>
               </div>
             </div>
-          </button>
+          </Link>
         ))}
       </div>
-
-      {/* Expanded import content */}
-      {selectedKey === 'orders' && (
-        <div className="mt-6">
-          <BulkImportPage
-            products={props.products}
-            mediaBuyers={props.mediaBuyers}
-            csAgents={props.csAgents}
-            backHref="/admin/data/import"
-          />
-        </div>
-      )}
     </div>
   );
 }

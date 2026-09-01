@@ -32,6 +32,7 @@ import {
 } from '~/components/ui/compact-table';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { OrderSourceTag } from '~/components/ui/order-source-tag';
 import { Pagination } from '~/components/ui/pagination';
 import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
 import { ExportModal, type ExportModalPicklists } from '~/components/ui/export-modal';
@@ -434,6 +435,7 @@ export function MarketingOrdersPage({
                 {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
                   <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
+                <OrderSourceTag orderSource={order.orderSource} />
               </span>
             ),
       },
@@ -600,6 +602,7 @@ export function MarketingOrdersPage({
               {order.isDuplicate === 'POSSIBLY_DUPLICATE' && (
                 <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Possible dup</span>
               )}
+              <OrderSourceTag orderSource={order.orderSource} />
             </span>
             <OrderIdBadge id={order.id} orderNumber={order.orderNumber} currencyCode={order.currencyCode} textClassName="text-sm font-medium text-app-fg" />
           </div>

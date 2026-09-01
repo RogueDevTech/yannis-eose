@@ -12,6 +12,7 @@ import { NumberInput } from '~/components/ui/number-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherToast } from '~/components/ui/toast';
+import { STICKY_TABLE_HEADER_CELL_HOVER_CLASS } from '~/components/ui/_sticky-table-header';
 
 export interface OpeningBalancesPageProps {
   accounts: Array<{ id: string; code: string; name: string; isGroup: boolean; rootType: string }>;
@@ -218,7 +219,9 @@ export function OpeningBalancesPage({
           const isExpanded = expandedGroups.has(rootType);
           const entryCount = groupEntryCount(rootType);
           return (
-            <div key={rootType} className="card !p-0 overflow-hidden">
+            // No `overflow-hidden`: it would be the containing block for the
+            // table's sticky header and clip it out of view.
+            <div key={rootType} className="card !p-0">
               <button
                 type="button"
                 onClick={() => toggleGroup(rootType)}
@@ -250,11 +253,11 @@ export function OpeningBalancesPage({
                   {/* Desktop table */}
                   <div className="hidden md:block">
                     <table className="w-full text-sm">
-                      <thead className="bg-app-hover text-xs uppercase text-app-fg-muted">
+                      <thead className="text-xs uppercase text-app-fg-muted">
                         <tr>
-                          <th className="px-3 py-1.5 text-left">Account</th>
-                          <th className="px-3 py-1.5 text-right w-36">Debit</th>
-                          <th className="px-3 py-1.5 text-right w-36">Credit</th>
+                          <th className={`px-3 py-1.5 text-left ${STICKY_TABLE_HEADER_CELL_HOVER_CLASS}`}>Account</th>
+                          <th className={`px-3 py-1.5 text-right w-36 ${STICKY_TABLE_HEADER_CELL_HOVER_CLASS}`}>Debit</th>
+                          <th className={`px-3 py-1.5 text-right w-36 ${STICKY_TABLE_HEADER_CELL_HOVER_CLASS}`}>Credit</th>
                         </tr>
                       </thead>
                       <tbody>

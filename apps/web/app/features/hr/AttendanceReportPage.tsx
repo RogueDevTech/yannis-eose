@@ -5,6 +5,7 @@ import { RoleBadge } from '~/components/ui/role-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FormSelect } from '~/components/ui/form-select';
+import { STICKY_TABLE_HEADER_CELL_CLASS } from '~/components/ui/_sticky-table-header';
 import {
   type AttendanceGridData,
   type AttendanceGridRow,
@@ -316,7 +317,9 @@ export function AttendanceReportPage({ grid, mode, date, startDate, endDate, mon
             ) : (
               <>
                 {/* Desktop: ONE shared header, branch groups as tbody sections. */}
-                <div className="hidden overflow-x-auto rounded-lg border border-app-border md:block">
+                {/* No `overflow-x-auto`: it would pin the sticky header to this
+                    box instead of the page. `table-fixed` holds the columns. */}
+                <div className="hidden rounded-lg border border-app-border md:block">
                   <table className="w-full table-fixed border-collapse text-sm">
                     <colgroup>
                       <col style={{ width: '22%' }} />
@@ -340,23 +343,23 @@ export function AttendanceReportPage({ grid, mode, date, startDate, endDate, mon
                         </>
                       )}
                     </colgroup>
-                    <thead className="border-b border-app-border bg-app-elevated">
+                    <thead>
                       <tr>
-                        <th className="px-3 py-2.5 text-left font-medium text-app-fg-muted">Staff</th>
-                        <th className="px-3 py-2.5 text-left font-medium text-app-fg-muted">Role</th>
+                        <th className={`px-3 py-2.5 text-left font-medium text-app-fg-muted ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Staff</th>
+                        <th className={`px-3 py-2.5 text-left font-medium text-app-fg-muted ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Role</th>
                         {isRange ? (
                           <>
-                            <th className="px-3 py-2.5 text-center font-medium text-app-fg-muted">P</th>
-                            <th className="px-3 py-2.5 text-center font-medium text-app-fg-muted">A</th>
-                            <th className="px-3 py-2.5 text-center font-medium text-app-fg-muted">O</th>
-                            <th className="px-3 py-2.5 text-center font-medium text-app-fg-muted">S</th>
-                            <th className="px-3 py-2.5 text-center font-medium text-app-fg-muted">%</th>
+                            <th className={`px-3 py-2.5 text-center font-medium text-app-fg-muted ${STICKY_TABLE_HEADER_CELL_CLASS}`}>P</th>
+                            <th className={`px-3 py-2.5 text-center font-medium text-app-fg-muted ${STICKY_TABLE_HEADER_CELL_CLASS}`}>A</th>
+                            <th className={`px-3 py-2.5 text-center font-medium text-app-fg-muted ${STICKY_TABLE_HEADER_CELL_CLASS}`}>O</th>
+                            <th className={`px-3 py-2.5 text-center font-medium text-app-fg-muted ${STICKY_TABLE_HEADER_CELL_CLASS}`}>S</th>
+                            <th className={`px-3 py-2.5 text-center font-medium text-app-fg-muted ${STICKY_TABLE_HEADER_CELL_CLASS}`}>%</th>
                           </>
                         ) : (
                           <>
-                            <th className="px-3 py-2.5 text-left font-medium text-app-fg-muted">Status</th>
-                            <th className="px-3 py-2.5 text-left font-medium text-app-fg-muted">Marked at</th>
-                            <th className="px-3 py-2.5 text-left font-medium text-app-fg-muted">Remark</th>
+                            <th className={`px-3 py-2.5 text-left font-medium text-app-fg-muted ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Status</th>
+                            <th className={`px-3 py-2.5 text-left font-medium text-app-fg-muted ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Marked at</th>
+                            <th className={`px-3 py-2.5 text-left font-medium text-app-fg-muted ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Remark</th>
                           </>
                         )}
                       </tr>

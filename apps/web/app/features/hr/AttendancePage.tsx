@@ -20,6 +20,7 @@ import { useBranchesCatalog, useBranchGroupsCatalog } from '~/contexts/branches-
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { ROLE_OPTIONS, formatRole } from '~/features/users/types';
+import { STICKY_TABLE_HEADER_CELL_CLASS } from '~/components/ui/_sticky-table-header';
 import type { AttendancePolicyInput } from '@yannis/shared';
 import {
   type AttendanceGridData,
@@ -869,19 +870,22 @@ export function AttendancePage({ grid, policy, canManage, canConfigure, month, s
         <>
           {/* Desktop: ONE shared header (table-fixed so it never reflows when a
               branch expands/collapses); branch groups are tbody sections. */}
-          <div className="hidden overflow-x-auto rounded-lg border border-app-border md:block">
+          {/* No `overflow-x-auto`: it would become the scroll container and pin
+              the sticky header to this box instead of the page. `table-fixed`
+              already keeps columns from reflowing. */}
+          <div className="hidden rounded-lg border border-app-border md:block">
             <table className="w-full table-fixed border-collapse text-sm">
               <colgroup>
                 {columns.map((col) => (
                   <col key={col.key} style={colWidth(col)} />
                 ))}
               </colgroup>
-              <thead className="border-b border-app-border bg-app-elevated">
+              <thead>
                 <tr>
                   {columns.map((col) => (
                     <th
                       key={col.key}
-                      className={`px-3 py-1.5 font-medium text-app-fg-muted ${
+                      className={`px-3 py-1.5 font-medium text-app-fg-muted ${STICKY_TABLE_HEADER_CELL_CLASS} ${
                         col.key === 'select' ? 'text-left' : col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'
                       }`}
                     >
