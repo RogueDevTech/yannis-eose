@@ -4,6 +4,7 @@ import { NavLink } from '@remix-run/react';
 import { getAppLogoSrc } from '~/lib/theme';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { useResolveFilterHref } from '~/hooks/useFilterPreferences';
+import { CONTROL_HEIGHT_CLASS } from '~/components/ui/_control-heights';
 
 /**
  * Order list pages whose URL carries filter params. Clicking their sidebar
@@ -117,6 +118,44 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
 
   const isExpanded = collapsed && !mobileOpen;
 
+  /* ── Menu search ──────────────────────────────────────────────
+   * SuperAdmin sees 14 groups / ~70 items, so finding a page meant
+   * remembering which accordion it lived under. Typing filters the whole
+   * tree to matching items, flattened (group headers become plain captions)
+   * so results are visible without expanding anything.
+   *
+   * Distinct from the header's `SearchModal`, which is a server-backed search
+   * over orders/products/users. This one is purely a local nav filter.
+   */
+  const [menuQuery, setMenuQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const trimmedQuery = menuQuery.trim().toLowerCase();
+  const isSearching = trimmedQuery.length > 0;
+
+  // Clear the query whenever the rail collapses to icons or the mobile drawer
+  // closes — a hidden filter still applied on reopen would look like missing
+  // menu items.
+  useEffect(() => {
+    if (isExpanded) setMenuQuery('');
+  }, [isExpanded]);
+  useEffect(() => {
+    if (!mobileOpen) setMenuQuery('');
+  }, [mobileOpen]);
+
+  // Match on the item label AND its group name, so "hr" surfaces everything
+  // under the HR group even when a label alone wouldn't match.
+  const searchResults = isSearching
+    ? groups.flatMap((g) =>
+        g.items
+          .filter(
+            (item) =>
+              item.label.toLowerCase().includes(trimmedQuery) ||
+              (g.group ?? '').toLowerCase().includes(trimmedQuery),
+          )
+          .map((item) => ({ item, group: g.group })),
+      )
+    : [];
+
   return (
     <>
       {/* Mobile overlay */}
@@ -149,9 +188,110 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
         </div>
 
 
+        {/* Menu search — hidden in icon-only mode, where there is no room for a
+            field and every item is already one hover away. */}
+        {!isExpanded && (
+          <div className="flex-shrink-0 px-3 pt-3">
+            <div className="relative">
+              <svg
+                className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-app-fg-muted"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+              </svg>
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={menuQuery}
+                onChange={(e) => setMenuQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setMenuQuery('');
+                    searchInputRef.current?.blur();
+                  }
+                }}
+                placeholder="Search menu"
+                aria-label="Search menu"
+                /* Themed to the sidebar, not to page forms: the rail is
+                   `bg-app-elevated`, so a `bg-app-surface` field read as a
+                   foreign control pasted on top. `bg-app-hover` is the same
+                   tone the nav items use on hover, so the field sits as a
+                   subtle inset in every theme (light, sepia, dark, midnight)
+                   and borrows the sidebar's own visual language. */
+                className={`w-full rounded-lg border border-app-border/60 bg-app-hover pl-8 ${
+                  menuQuery ? 'pr-8' : 'pr-2.5'
+                } text-sm text-app-fg placeholder:text-app-fg-muted transition-colors duration-150 hover:border-app-border focus:border-brand-500 focus:bg-app-elevated focus:outline-none focus:ring-1 focus:ring-brand-500/40 ${CONTROL_HEIGHT_CLASS}`}
+              />
+              {menuQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuQuery('');
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label="Clear menu search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-app-fg-muted hover:text-app-fg"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Navigation — overflow-x-visible when collapsed so icon tooltips can show to the right */}
         <nav className={`flex-1 overflow-y-auto py-3 px-3 ${isExpanded ? 'overflow-x-visible' : ''}`}>
-          {groups.map((group, gi) => {
+          {/* Search results replace the accordion tree entirely: a flat, already
+              visible list of every match, each captioned with its group so the
+              user still knows where the page lives. */}
+          {isSearching ? (
+            searchResults.length === 0 ? (
+              <p className="px-3 py-6 text-center text-sm text-app-fg-muted">
+                No menu matches &ldquo;{menuQuery.trim()}&rdquo;
+              </p>
+            ) : (
+              <div className="space-y-0.5">
+                {searchResults.map(({ item, group }, i) => (
+                  <div key={item.href}>
+                    {/* Caption only on the first hit of each group — results are
+                        already ordered by group, so repeating it per item would
+                        just be noise. */}
+                    {group && group !== searchResults[i - 1]?.group && (
+                      <p
+                        className={`select-none px-3 py-1 text-mini font-semibold uppercase tracking-wider text-app-fg-muted ${
+                          i === 0 ? '' : 'mt-2'
+                        }`}
+                      >
+                        {group}
+                      </p>
+                    )}
+                    <SidebarNavLink
+                      item={item}
+                      isExpanded={false}
+                      onMobileClose={() => {
+                        setMenuQuery('');
+                        onMobileClose();
+                      }}
+                      activePathname={activePathname}
+                      resolvedActiveHref={resolvedActiveHref}
+                      badge={
+                        item.href === '/admin/notifications' && (notificationCount ?? 0) > 0
+                          ? notificationCount
+                          : undefined
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+          groups.map((group, gi) => {
             // Skip groups with no items — no point showing an empty accordion
             if (group.items.length === 0) return null;
 
@@ -246,7 +386,8 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
                 </div>
               </div>
             );
-          })}
+          })
+          )}
 
         </nav>
 

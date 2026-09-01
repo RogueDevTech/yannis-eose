@@ -44,6 +44,12 @@ export interface Order {
   lastCsComment?: { comment: string; actorName: string | null; at: string } | null;
   /** Offline order category — 'website_order' | 'referrals' | null */
   offlineOrderCategory?: string | null;
+  /**
+   * How the order entered the system: 'edge-form' | 'offline' | 'import' |
+   * 'online' | 'delivered_follow_up' | null. `'import'` marks a historical order
+   * migrated from the old CRM — surfaced as an "Imported" tag on list rows.
+   */
+  orderSource?: string | null;
   /** Marketing branch (campaign attribution). */
   branchId?: string | null;
 }

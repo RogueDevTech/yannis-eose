@@ -4,6 +4,7 @@ import { TRPCError } from '@trpc/server';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { Readable } from 'node:stream';
+import { createHash } from 'node:crypto';
 import { db as schema, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type { ImportOrderInput } from '@yannis/shared';
 
@@ -27,6 +28,20 @@ const CHUNK_SIZE = 500;
 
 /** Cap on stored per-row failures so error_log can't grow unbounded on a bad file. */
 const MAX_ERROR_LOG = 1000;
+
+/**
+ * Caps on the source cells we retain for a FAILED row (import_job_rows.raw_data),
+ * so a pathological file (hundreds of columns, or a cell holding an essay) can't
+ * bloat the table. Only failed rows store this at all — a clean import writes none.
+ */
+const MAX_RAW_DATA_CELLS = 60;
+
+/**
+ * Cap on how many snapshot-less rows one page load will recover from the source
+ * file, so a page of legacy failures can't turn into an unbounded read.
+ */
+const MAX_RECOVERED_ROWS = 200;
+const MAX_RAW_DATA_VALUE_LEN = 500;
 
 /**
  * Mid-chunk progress heartbeat: flush accumulated row records + the running
@@ -150,25 +165,190 @@ function normalizeNumericCode(raw: string): string | null {
 }
 
 /**
- * Map a source CRM status label (e.g. "Confirmed", "Delivered", "No Response")
- * to an order status. Mirrors the row-by-row importer's parser
- * (orders-import-shared.parseStatus) so both import paths agree. Returns null
- * for a blank/unknown label — the caller falls back to the job default.
+ * The EXACT status labels the import accepts, and the order status each becomes.
+ *
+ * STRICT BY DIRECTIVE (CEO, 2026-09-01): "the status must match what we have on
+ * our app". A sheet label must equal one of these keys exactly (ignoring case
+ * and surrounding whitespace) — there is NO substring or fuzzy matching. A label
+ * that is not on this list, or a blank cell, HARD-FAILS the row so nothing is
+ * ever guessed.
+ *
+ * Why exact: the previous substring matcher read "Not Delivered" and "Delivery
+ * Failed" as DELIVERED — the opposite meaning — silently inflating delivered
+ * counts, which feed FIFO COGS and remittance. Loose matching on a status is a
+ * financial-truth hazard, not a convenience.
+ *
+ * Note "Cancelled" maps to DELETED: per CLAUDE.md, CANCELLED is legacy-only and
+ * must not be minted by new writes. DELETED is excluded from ALL metrics.
+ */
+const IMPORT_STATUS_LABELS: Record<string, ImportOrderInput['targetStatus']> = {
+  // Unprocessed / new
+  unprocessed: 'UNPROCESSED',
+  new: 'UNPROCESSED',
+  // Assigned to a CS agent, not yet worked
+  pending: 'CS_ASSIGNED',
+  assigned: 'CS_ASSIGNED',
+  'cs assigned': 'CS_ASSIGNED',
+  // Engaged: contacted but not yet confirmed
+  'no response': 'CS_ENGAGED',
+  no_response: 'CS_ENGAGED',
+  'no answer': 'CS_ENGAGED',
+  rescheduled: 'CS_ENGAGED',
+  'cs engaged': 'CS_ENGAGED',
+  engaged: 'CS_ENGAGED',
+  unconfirmed: 'CS_ENGAGED',
+  // Confirmed by the customer
+  confirmed: 'CONFIRMED',
+  // Delivered to the customer
+  delivered: 'DELIVERED',
+  // Delivered AND cash remitted to finance
+  remitted: 'REMITTED',
+  'delivered and cash remitted': 'REMITTED',
+  'delivered & cash remitted': 'REMITTED',
+  'cash remitted': 'REMITTED',
+  // Returned by the customer
+  returned: 'RETURNED',
+  // Soft-removed. CANCELLED is legacy-only (CLAUDE.md), so a cancelled source
+  // row imports as DELETED and is excluded from every metric.
+  cancelled: 'DELETED',
+  canceled: 'DELETED',
+  deleted: 'DELETED',
+};
+
+/** The accepted labels, de-duplicated by target status, for error messages + the UI. */
+export const IMPORT_STATUS_OPTIONS: Array<{
+  label: string;
+  status: ImportOrderInput['targetStatus'];
+}> = [
+  { label: 'Unprocessed', status: 'UNPROCESSED' },
+  { label: 'Pending', status: 'CS_ASSIGNED' },
+  { label: 'No Response', status: 'CS_ENGAGED' },
+  { label: 'Rescheduled', status: 'CS_ENGAGED' },
+  { label: 'Confirmed', status: 'CONFIRMED' },
+  { label: 'Delivered', status: 'DELIVERED' },
+  { label: 'Delivered and Cash Remitted', status: 'REMITTED' },
+  { label: 'Returned', status: 'RETURNED' },
+  { label: 'Cancelled', status: 'DELETED' },
+];
+
+/**
+ * Resolve a source CRM status label to an order status, EXACTLY.
+ *
+ * Returns null for a blank cell or any label not in IMPORT_STATUS_LABELS — the
+ * caller hard-fails the row in both cases. Normalisation is deliberately limited
+ * to case, surrounding whitespace, collapsed inner whitespace, and separator
+ * punctuation (so "No_Response", "no-response" and "No Response" agree). It does
+ * NOT strip words, so "Not Delivered" can never resolve to "Delivered".
  */
 function parseRowStatus(raw: string): ImportOrderInput['targetStatus'] | null {
-  const lower = raw.toLowerCase().trim();
-  if (!lower) return null;
-  if (lower.includes('delivered') && (lower.includes('remitted') || lower.includes('cash'))) return 'REMITTED';
-  if (lower.includes('pending')) return 'CS_ASSIGNED';
-  if (lower.includes('no response') || lower.includes('no_response')) return 'CS_ENGAGED';
-  if (lower.includes('rescheduled')) return 'CS_ENGAGED';
-  if (lower.includes('confirmed')) return 'CONFIRMED';
-  if (lower.includes('delivered')) return 'DELIVERED';
-  if (lower.includes('returned')) return 'RETURNED';
-  if (lower.includes('cancelled') || lower.includes('canceled')) return 'CANCELLED';
-  if (lower.includes('remitted')) return 'REMITTED';
-  if (lower.includes('deleted')) return 'DELETED';
-  return null;
+  const key = raw
+    .toLowerCase()
+    .trim()
+    .replace(/[_\-]+/g, ' ')
+    .replace(/\s+/g, ' ');
+  if (!key) return null;
+  return IMPORT_STATUS_LABELS[key] ?? null;
+}
+
+/**
+ * Flatten one raw spreadsheet record into the small string map we retain for a
+ * FAILED row (import_job_rows.raw_data), so the job page can render it in an
+ * editable form. Bounded on both axes (MAX_RAW_DATA_CELLS columns,
+ * MAX_RAW_DATA_VALUE_LEN chars per cell) so a pathological file can't bloat the
+ * table. Blank cells are kept — an EMPTY required field is exactly the thing the
+ * user needs to see in order to fix it.
+ */
+function snapshotRawRow(record: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  let n = 0;
+  for (const [key, value] of Object.entries(record)) {
+    if (n >= MAX_RAW_DATA_CELLS) break;
+    let str: string;
+    if (value == null) str = '';
+    else if (typeof value === 'string') str = value;
+    else if (
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint'
+    ) {
+      str = String(value);
+    } else {
+      try {
+        str = JSON.stringify(value) ?? '';
+      } catch {
+        str = '';
+      }
+    }
+    out[key] = str.length > MAX_RAW_DATA_VALUE_LEN ? str.slice(0, MAX_RAW_DATA_VALUE_LEN) : str;
+    n += 1;
+  }
+  return out;
+}
+
+/**
+ * Failure-reason buckets for the job page's filter. `match` is an ILIKE pattern
+ * against the stored reason text, so triaging a large import means picking a
+ * CAUSE ("show me every row that failed on Cost") instead of scrolling.
+ * Kept in one place so the filter and its dropdown can never drift apart.
+ */
+export const REASON_KINDS: Array<{ value: string; label: string; match: string }> = [
+  { value: 'status', label: 'Status problem', match: '%status%' },
+  { value: 'product', label: 'Product code', match: '%product%' },
+  { value: 'media_buyer', label: 'Media buyer code', match: '%media buyer%' },
+  { value: 'cs', label: 'CS code', match: '%CS code%' },
+  { value: 'currency', label: 'Currency / country', match: '%currenc%' },
+  { value: 'amount', label: 'Cost / amount', match: '%totalamount%' },
+  { value: 'quantity', label: 'Quantity', match: '%quantity%' },
+  { value: 'name', label: 'Customer name', match: '%name%' },
+  { value: 'phone', label: 'Phone', match: '%phone%' },
+  { value: 'email', label: 'Email', match: '%email%' },
+  { value: 'external_id', label: 'Missing Order ID', match: '%external id%' },
+  { value: 'branch', label: 'Branch', match: '%branch%' },
+];
+
+/**
+ * Content fingerprint for an imported order: sha256(phone | product | date).
+ *
+ * This is the FALLBACK identity used when the source file's Order ID is absent
+ * or was regenerated between exports, so a re-import repairs the existing order
+ * rather than duplicating it.
+ *
+ * Why all three parts, and not just the phone: repeat customers are normal. In a
+ * 1,000-row sample, 34 orders shared 12 phone numbers, and one line carried
+ * THREE genuinely different orders. A phone identifies a CUSTOMER; only the
+ * combination of who, what and when identifies an ORDER.
+ *
+ * Normalisation is what makes it survive a real CRM export:
+ *  - phone   → digits only, last 10, so 08068880766 / +2348068880766 /
+ *              080-6888-0766 / (080) 6888 0766 all collapse to one key.
+ *  - product → the resolved product UUID, never the sheet's code text.
+ *  - date    → calendar day only; the time-of-day a CRM stamps is noise here.
+ *
+ * Returns null when any part is missing — an unkeyable row simply falls back to
+ * external-id-only behaviour rather than matching something arbitrary.
+ */
+function buildImportIdentityKey(args: {
+  phone: string | undefined;
+  productId: string | undefined;
+  createdAtOverride: string | undefined;
+}): string | null {
+  const digits = (args.phone ?? '').replace(/\D/g, '');
+  // Require a plausible line: shorter than 10 digits is junk ("CALL SHOP", a
+  // truncated Excel number) and must never key an order.
+  if (digits.length < 10) return null;
+  const phone = digits.slice(-10);
+
+  if (!args.productId) return null;
+
+  const raw = (args.createdAtOverride ?? '').trim();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  // Calendar day in UTC. Both sides of a comparison are built the same way, so
+  // the choice of zone only has to be CONSISTENT, not correct-per-locale.
+  const day = parsed.toISOString().slice(0, 10);
+
+  return createHash('sha256').update(`${phone}|${args.productId}|${day}`).digest('hex');
 }
 
 export interface CreateImportJobInput {
@@ -267,13 +447,45 @@ export class BulkImportService {
    */
   async listRows(
     jobId: string,
-    opts?: { page?: number; limit?: number; status?: schema.ImportRowStatus },
+    opts?: {
+      page?: number;
+      limit?: number;
+      status?: schema.ImportRowStatus;
+      /** Free text over external id, customer name, and order number. */
+      search?: string;
+      /** The IMPORTED order's own lifecycle status (CONFIRMED, DELIVERED…). */
+      orderStatus?: string;
+      /**
+       * Failure-reason bucket, so a big import can be triaged by CAUSE rather
+       * than scrolling. Matches the reason text the worker stored.
+       */
+      reasonKind?: string;
+    },
   ) {
     const page = Math.max(1, opts?.page ?? 1);
     const limit = Math.min(Math.max(1, opts?.limit ?? 100), 500);
     const offset = (page - 1) * limit;
     const conditions = [eq(schema.importJobRows.jobId, jobId)];
     if (opts?.status) conditions.push(eq(schema.importJobRows.status, opts.status));
+    if (opts?.orderStatus) {
+      conditions.push(eq(schema.orders.status, opts.orderStatus as never));
+    }
+    const search = opts?.search?.trim();
+    if (search) {
+      // Raw customer phone is deliberately NOT searchable here (Pillar 2).
+      const like = `%${search.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+      const numeric = /^\d+$/.test(search) ? Number(search) : null;
+      const parts = [
+        sql`${schema.importJobRows.externalId} ILIKE ${like}`,
+        sql`${schema.orders.customerName} ILIKE ${like}`,
+        ...(numeric != null ? [sql`${schema.orders.orderNumber} = ${numeric}`] : []),
+      ];
+      conditions.push(sql`(${sql.join(parts, sql` OR `)})`);
+    }
+    if (opts?.reasonKind) {
+      const kind = REASON_KINDS.find((k) => k.value === opts.reasonKind);
+      if (kind) conditions.push(sql`${schema.importJobRows.reason} ILIKE ${kind.match}`);
+    }
     const where = and(...conditions);
 
     const [rows, countRows] = await Promise.all([
@@ -288,6 +500,14 @@ export class BulkImportService {
           status: schema.importJobRows.status,
           externalId: schema.importJobRows.externalId,
           reason: schema.importJobRows.reason,
+          // Present only for FAILED rows — the UI uses it to decide whether the
+          // row can be opened for fix-and-resubmit.
+          hasRawData: sql<boolean>`(${schema.importJobRows.rawData} is not null)`,
+          // The FAILED row's own source cells. A failed row has no joined order,
+          // so without these every column below renders as a dash even though the
+          // sheet had a perfectly good name, date and product on that row. The UI
+          // falls back to these so the user can SEE what the row contained.
+          rawData: schema.importJobRows.rawData,
           orderId: schema.orders.id,
           orderNumber: schema.orders.orderNumber,
           customerName: schema.orders.customerName,
@@ -311,6 +531,13 @@ export class BulkImportService {
       this.db
         .select({ count: sql<number>`count(*)::int` })
         .from(schema.importJobRows)
+        // Same LEFT JOIN as the page query: the search / order-status filters
+        // reference orders columns, so the count must see them too or the
+        // "Showing X of Y" total disagrees with the rows actually listed.
+        .leftJoin(
+          schema.orders,
+          eq(schema.orders.importExternalId, schema.importJobRows.externalId),
+        )
         .where(where),
     ]);
 
@@ -332,13 +559,485 @@ export class BulkImportService {
       }
     }
 
-    const enriched = rows.map((r) => ({
-      ...r,
-      productName: r.orderId ? productByOrder.get(r.orderId) ?? null : null,
-    }));
+    // A FAILED row has no joined order, so every display column would be a dash
+    // even when the sheet's own cells were perfectly readable. Fall back to the
+    // row's stored source cells (mapped through the job's column map) so the user
+    // sees WHAT the row contained and can spot the bad field at a glance.
+    // Only fetch the job's column map when this page actually contains a row
+    // needing the fallback — a page of clean imports skips the extra query.
+    const needsSourceFallback = rows.some((r) => !r.orderId);
+    const jobRow = needsSourceFallback ? await this.getStatus(jobId) : null;
+
+    // Rows that failed BEFORE per-row values were captured have no snapshot, so
+    // every column on them would render as a dash. Recover their cells from the
+    // uploaded file — ONE pass for the whole page, collecting every missing row
+    // index at once, never a scan per row (a 100-row page would otherwise mean
+    // 100 full file reads). Best-effort: if the file is gone the rows simply
+    // stay blank, exactly as before.
+    const missingIndexes = rows
+      .filter((r) => !r.orderId && r.rawData == null)
+      .map((r) => r.rowIndex);
+    const recoveredByIndex = new Map<number, Record<string, string>>();
+    if (missingIndexes.length > 0 && jobRow?.fileKey) {
+      const found = await this.readRowsFromSourceFile(
+        jobRow.fileKey,
+        (jobRow.fileType as 'xlsx' | 'csv') ?? 'xlsx',
+        missingIndexes,
+      );
+      for (const [idx, rec] of found) recoveredByIndex.set(idx, rec);
+    }
+    const cfg = (jobRow?.config ?? null) as ImportJobConfig | null;
+    const cm = cfg?.columnMap;
+    const pick = (raw: Record<string, string> | null, header?: string): string | null => {
+      if (!raw || !header) return null;
+      const v = raw[header];
+      return v != null && v.trim() !== '' ? v.trim() : null;
+    };
+
+    const enriched = rows.map((r) => {
+      const raw = ((r.rawData ?? recoveredByIndex.get(r.rowIndex)) ?? null) as
+        | Record<string, string>
+        | null;
+      // Only fall back for rows that produced no order — never override real
+      // imported values with the (possibly stale) source snapshot.
+      const useRaw = !r.orderId && raw != null;
+      return {
+        ...r,
+        rawData: undefined, // not sent to the client; the fix modal fetches it per row
+        productName: r.orderId ? productByOrder.get(r.orderId) ?? null : null,
+        customerName: r.customerName ?? (useRaw ? pick(raw, cm?.customerName) : null),
+        deliveryState: r.deliveryState ?? (useRaw ? pick(raw, cm?.deliveryState) : null),
+        totalAmount: r.totalAmount ?? (useRaw ? pick(raw, cm?.totalAmount) : null),
+        // Source cells for the columns that have no order to read from. The UI
+        // renders these in a muted style to signal "from the file, not imported".
+        //
+        // These are populated for EVERY failed row that has a snapshot, whatever
+        // the failure reason. mapRow throws on the FIRST bad field, so a row
+        // blocked by (say) a bad product code still had a perfectly good name,
+        // date and status — the user needs to see those to judge the row, and to
+        // recognise it as theirs. Showing only the field that broke, and dashes
+        // everywhere else, hides the 90% that was fine.
+        sourceProduct: useRaw ? pick(raw, cm?.productCode) : null,
+        sourceDate: useRaw ? pick(raw, cm?.createdAt) : null,
+        sourceStatus: useRaw ? pick(raw, cm?.status) : null,
+        // The sheet's own Order ID cell. `externalId` is NULL on a row that
+        // failed BECAUSE the id was missing/blank, but the cell may still hold
+        // something (e.g. whitespace) worth showing rather than a bare dash.
+        sourceExternalId:
+          useRaw && !r.externalId ? pick(raw, cfg?.externalIdColumn) : null,
+        /** True when the visible values came from the file rather than an order. */
+        fromSource: useRaw,
+      };
+    });
 
     const total = countRows[0]?.count ?? 0;
     return { rows: enriched, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)) };
+  }
+
+  /**
+   * Option lists for the fix-a-failed-row form: the products, media buyers, CS
+   * closers and currencies this job could actually resolve, plus the accepted
+   * status labels. Scoped to the job's OWN company + country scope, so the form
+   * can only offer values that will pass `mapRow` — the user cannot re-enter an
+   * invalid code, which is what caused most failures in the first place.
+   */
+  async getRowOptions(jobId: string) {
+    const job = await this.getStatus(jobId);
+    if (!job) throw new TRPCError({ code: 'NOT_FOUND', message: 'Import job not found' });
+    const config = job.config as ImportJobConfig;
+    const groupId = config?.groupId ?? null;
+
+    const [products, users, currencies] = await Promise.all([
+      this.db
+        .select({
+          code: schema.products.productNumber,
+          name: schema.products.name,
+        })
+        .from(schema.products)
+        .where(groupId ? eq(schema.products.groupId, groupId) : isNull(schema.products.groupId))
+        .orderBy(schema.products.productNumber),
+      groupId
+        ? this.db
+            .selectDistinct({
+              code: schema.users.userNumber,
+              name: schema.users.name,
+              role: schema.users.role,
+            })
+            .from(schema.users)
+            .innerJoin(schema.userBranches, eq(schema.userBranches.userId, schema.users.id))
+            .innerJoin(schema.branches, eq(schema.branches.id, schema.userBranches.branchId))
+            .where(eq(schema.branches.groupId, groupId))
+            .orderBy(schema.users.userNumber)
+        : this.db
+            .select({
+              code: schema.users.userNumber,
+              name: schema.users.name,
+              role: schema.users.role,
+            })
+            .from(schema.users)
+            .orderBy(schema.users.userNumber),
+      this.db
+        .select({ code: schema.currencies.code, countryName: schema.currencies.countryName })
+        .from(schema.currencies)
+        .where(
+          groupId
+            ? and(eq(schema.currencies.groupId, groupId), eq(schema.currencies.active, true))
+            : eq(schema.currencies.active, true),
+        ),
+    ]);
+
+    // Honour the job's country scope: never offer a currency the import would
+    // then hard-fail on.
+    const allowed = config?.allowedCurrencyCodes;
+    const scopedCurrencies =
+      allowed && allowed.length > 0
+        ? currencies.filter((c) => allowed.includes(c.code.toUpperCase()))
+        : currencies;
+
+    return {
+      products: products
+        .filter((p) => p.code != null)
+        .map((p) => ({ code: `PDT-${p.code}`, name: p.name })),
+      users: users
+        .filter((u) => u.code != null)
+        .map((u) => ({
+          code: `USR-${u.code}`,
+          name: u.name,
+          role: u.role,
+        })),
+      currencies: scopedCurrencies.map((c) => ({ code: c.code, countryName: c.countryName })),
+      statuses: IMPORT_STATUS_OPTIONS,
+    };
+  }
+
+  /**
+   * Fetch ONE row of a job together with the original source cells we kept when
+   * it failed, so the job page can render it in an editable form.
+   *
+   * Returns `rawData: null` when the row imported cleanly (nothing to fix) or
+   * when it failed before this feature existed (migration 0339 added the
+   * column — older jobs have no snapshot and can only be fixed by re-uploading).
+   */
+  async getRow(jobId: string, rowIndex: number) {
+    const rows = await this.db
+      .select({
+        rowIndex: schema.importJobRows.rowIndex,
+        status: schema.importJobRows.status,
+        externalId: schema.importJobRows.externalId,
+        reason: schema.importJobRows.reason,
+        rawData: schema.importJobRows.rawData,
+      })
+      .from(schema.importJobRows)
+      .where(
+        and(
+          eq(schema.importJobRows.jobId, jobId),
+          eq(schema.importJobRows.rowIndex, rowIndex),
+        ),
+      )
+      .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+
+    const job = await this.getStatus(jobId);
+    const config = (job?.config ?? null) as ImportJobConfig | null;
+
+    // No stored snapshot? Recover the cells from the uploaded file, which is
+    // still in object storage. This covers rows that failed BEFORE migration
+    // 0339 added raw_data — without it those rows could only be fixed by
+    // re-running the whole import. Best-effort: if the file is gone or
+    // unreadable, we return rawData:null and the UI explains the fallback.
+    let rawData = row.rawData;
+    let recoveredFromFile = false;
+    if (!rawData && row.status !== 'IMPORTED' && job?.fileKey) {
+      const recovered = await this.readRowFromSourceFile(
+        job.fileKey,
+        (job.fileType as 'xlsx' | 'csv') ?? 'xlsx',
+        rowIndex,
+      );
+      if (recovered) {
+        rawData = recovered;
+        recoveredFromFile = true;
+      }
+    }
+
+    return {
+      ...row,
+      rawData,
+      /** True when the values came from the file rather than a stored snapshot. */
+      recoveredFromFile,
+      /** The header→field mapping, so the UI knows which cell is which field. */
+      columnMap: config?.columnMap ?? null,
+      externalIdColumn: config?.externalIdColumn ?? null,
+    };
+  }
+
+  /**
+   * Read ONE data row back out of the original uploaded file.
+   *
+   * Used to recover the cells of a failed row that has no stored snapshot. The
+   * file streams from object storage and we stop as soon as the wanted row is
+   * reached, so we never hold more than one row in memory — but it IS a full
+   * scan up to that index, so this is strictly an on-demand, single-row path
+   * (the import worker still uses chunked streaming).
+   *
+   * Returns null when the file is missing, unreadable, or shorter than the
+   * requested index; the caller degrades to "no values available".
+   */
+  /**
+   * Read MANY data rows back out of the original uploaded file in ONE pass.
+   *
+   * The single-row helper is fine for opening one row in the fix modal, but the
+   * job page renders up to 100 rows at a time — scanning the file once per row
+   * would be pathological. This walks the file a single time, collecting every
+   * requested index, and stops as soon as the last one is found.
+   *
+   * Bounded on purpose: at most MAX_RECOVERED_ROWS rows are recovered per call,
+   * so a page full of snapshot-less rows can't hold the stream open indefinitely.
+   * Best-effort — a missing/unreadable file yields an empty map and the caller
+   * simply renders blanks.
+   */
+  private async readRowsFromSourceFile(
+    fileKey: string,
+    fileType: 'xlsx' | 'csv',
+    indexes: number[],
+  ): Promise<Map<number, Record<string, string>>> {
+    const out = new Map<number, Record<string, string>>();
+    const wanted = new Set(indexes.slice(0, MAX_RECOVERED_ROWS));
+    if (wanted.size === 0) return out;
+    const lastWanted = Math.max(...wanted);
+
+    let stream: Readable | null = null;
+    try {
+      stream = await getObjectStreamFromStorage(fileKey);
+      if (!stream) return out;
+      for await (const { rowIndex: idx, record } of streamImportRows(stream, fileType)) {
+        if (wanted.has(idx)) {
+          out.set(idx, snapshotRawRow(record));
+          wanted.delete(idx);
+        }
+        // Nothing further to find — stop reading the rest of the file.
+        if (wanted.size === 0 || idx >= lastWanted) break;
+      }
+      return out;
+    } catch (err) {
+      this.logger.warn(
+        `Could not recover rows from ${fileKey}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return out;
+    } finally {
+      stream?.destroy();
+    }
+  }
+
+  private async readRowFromSourceFile(
+    fileKey: string,
+    fileType: 'xlsx' | 'csv',
+    rowIndex: number,
+  ): Promise<Record<string, string> | null> {
+    let stream: Readable | null = null;
+    try {
+      stream = await getObjectStreamFromStorage(fileKey);
+      if (!stream) return null;
+      for await (const { rowIndex: idx, record } of streamImportRows(stream, fileType)) {
+        if (idx < rowIndex) continue;
+        if (idx > rowIndex) break;
+        return snapshotRawRow(record);
+      }
+      return null;
+    } catch (err) {
+      this.logger.warn(
+        `Could not recover row ${rowIndex} from ${fileKey}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    } finally {
+      stream?.destroy();
+    }
+  }
+
+  /**
+   * Re-import a single FAILED row after the user corrected it on the job page.
+   *
+   * The edited cells arrive keyed by the SAME source header names as the
+   * original file, so they go through the EXACT same `mapRow` + upsert path as a
+   * normal import row. That is deliberate: a fixed row gets identical validation,
+   * identical branch/currency derivation, identical audit trail. There is no
+   * second, laxer code path that could let a bad row in.
+   *
+   * On success the row flips to IMPORTED and its raw snapshot is cleared; the
+   * job's failure counters are decremented and its error_log entry dropped, so
+   * the page's counts stay truthful. On failure the row stays FAILED with the
+   * NEW reason (and the newly-edited cells retained), so the user can keep
+   * iterating on it.
+   */
+  async resubmitRow(
+    jobId: string,
+    rowIndex: number,
+    edited: Record<string, string>,
+    actorId: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const job = await this.getStatus(jobId);
+    if (!job) throw new TRPCError({ code: 'NOT_FOUND', message: 'Import job not found' });
+    // A row the worker may still be touching must not be edited underneath it.
+    if (job.status === 'PROCESSING' || job.status === 'PENDING') {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'This import is still running. Wait for it to finish before fixing rows.',
+      });
+    }
+
+    const existing = await this.db
+      .select({
+        status: schema.importJobRows.status,
+        rawData: schema.importJobRows.rawData,
+      })
+      .from(schema.importJobRows)
+      .where(
+        and(
+          eq(schema.importJobRows.jobId, jobId),
+          eq(schema.importJobRows.rowIndex, rowIndex),
+        ),
+      )
+      .limit(1);
+    const row = existing[0];
+    if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Row not found' });
+    if (row.status === 'IMPORTED') {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'This row already imported. Nothing to fix.',
+      });
+    }
+
+    const config = job.config as ImportJobConfig;
+    // Base cells to merge the edits onto. Prefer the stored snapshot; if the row
+    // predates raw_data, recover them from the uploaded file so the UNMAPPED
+    // columns (WhatsApp number, comments, delivery agent…) survive the resubmit
+    // instead of being silently dropped.
+    let base = row.rawData as Record<string, string> | null;
+    if (!base && job.fileKey) {
+      base = await this.readRowFromSourceFile(
+        job.fileKey,
+        (job.fileType as 'xlsx' | 'csv') ?? 'xlsx',
+        rowIndex,
+      );
+    }
+
+    // Merge the edits over the base so untouched cells keep their original
+    // values (the UI only sends the mapped fields).
+    const record: Record<string, unknown> = { ...(base ?? {}), ...edited };
+
+    const codeMaps = await this.loadCodeMaps(config);
+
+    let externalId: string | null = null;
+    try {
+      const { input } = this.mapRow(record, config, codeMaps);
+      externalId = input.importExternalId;
+      await this.ordersService.upsertImportOrderByExternalId(input, actorId);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      // Keep the row FAILED, but store the user's edits + the new reason so the
+      // next attempt starts from where they left off.
+      await this.flushRowRecords(jobId, [
+        {
+          rowIndex,
+          status: 'FAILED',
+          externalId: this.readCell(record, config.externalIdColumn) ?? null,
+          reason,
+          rawData: snapshotRawRow(record),
+        },
+      ]);
+      return { ok: false, reason };
+    }
+
+    // Imported. Flip the row and clear its snapshot.
+    await this.flushRowRecords(jobId, [
+      { rowIndex, status: 'IMPORTED', externalId, reason: null, rawData: null },
+    ]);
+
+    // Keep the job's counters honest: one fewer failure, one more processed,
+    // and drop this row's entry from the error log.
+    const remainingLog = (job.errorLog ?? []).filter((f) => f.row !== rowIndex);
+    await withActor(this.db, { id: actorId }, async (tx) => {
+      await tx
+        .update(schema.importJobs)
+        .set({
+          failedRows: sql`greatest(${schema.importJobs.failedRows} - 1, 0)`,
+          processedRows: sql`${schema.importJobs.processedRows} + 1`,
+          errorLog: remainingLog,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(schema.importJobs.id, jobId));
+    });
+
+    this.logger.log(`Job ${jobId} row ${rowIndex} fixed and imported by ${actorId}`);
+    return { ok: true };
+  }
+
+  /**
+   * Counts for the job page's filter chrome: how many rows sit in each import
+   * outcome, and how many failures fall into each reason bucket. Lets the page
+   * show "Failed (133)" and hide reason buckets that have no rows, so the CEO
+   * sees at a glance what actually went wrong rather than guessing.
+   */
+  async getRowFacets(jobId: string) {
+    const [byStatus, byReason, byOrderStatus] = await Promise.all([
+      this.db
+        .select({ status: schema.importJobRows.status, count: sql<number>`count(*)::int` })
+        .from(schema.importJobRows)
+        .where(eq(schema.importJobRows.jobId, jobId))
+        .groupBy(schema.importJobRows.status),
+      // One pass over the failed rows, bucketed in SQL by the same patterns the
+      // filter uses. A row matching two buckets counts in both — the buckets are
+      // a triage aid, not a partition.
+      this.db
+        .select({
+          reason: schema.importJobRows.reason,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(schema.importJobRows)
+        .where(
+          and(
+            eq(schema.importJobRows.jobId, jobId),
+            eq(schema.importJobRows.status, 'FAILED'),
+          ),
+        )
+        .groupBy(schema.importJobRows.reason),
+      this.db
+        .select({ status: schema.orders.status, count: sql<number>`count(*)::int` })
+        .from(schema.importJobRows)
+        .innerJoin(
+          schema.orders,
+          eq(schema.orders.importExternalId, schema.importJobRows.externalId),
+        )
+        .where(eq(schema.importJobRows.jobId, jobId))
+        .groupBy(schema.orders.status),
+    ]);
+
+    // Bucket the distinct reason strings in app code (there are few of them —
+    // one per failure mode, not per row).
+    const reasonCounts = new Map<string, number>();
+    for (const r of byReason) {
+      const text = (r.reason ?? '').toLowerCase();
+      for (const k of REASON_KINDS) {
+        const needle = k.match.replace(/%/g, '').toLowerCase();
+        if (needle && text.includes(needle)) {
+          reasonCounts.set(k.value, (reasonCounts.get(k.value) ?? 0) + r.count);
+        }
+      }
+    }
+
+    return {
+      byStatus: Object.fromEntries(byStatus.map((r) => [r.status, r.count])),
+      byOrderStatus: Object.fromEntries(byOrderStatus.map((r) => [r.status, r.count])),
+      reasons: REASON_KINDS.filter((k) => (reasonCounts.get(k.value) ?? 0) > 0).map((k) => ({
+        value: k.value,
+        label: k.label,
+        count: reasonCounts.get(k.value) ?? 0,
+      })),
+    };
   }
 
   /**
@@ -376,11 +1075,60 @@ export class BulkImportService {
     await withActor(this.db, { id: actorId }, async (tx) => {
       await tx
         .update(schema.importJobs)
-        .set({ status: 'PENDING', lastError: null, updatedAt: sql`now()` })
+        // Clearing pauseRequested is essential: a job paused by the operator
+        // still carries the flag, and the worker would stop again at the very
+        // next chunk boundary if we left it set.
+        .set({
+          status: 'PENDING',
+          lastError: null,
+          pauseRequested: false,
+          updatedAt: sql`now()`,
+        })
         .where(eq(schema.importJobs.id, jobId));
     });
     void this.tick();
     return { ok: true };
+  }
+
+  /**
+   * Operator-requested pause.
+   *
+   * PENDING (queued, no chunk in flight) → PAUSED immediately.
+   * PROCESSING (a chunk is draining) → record the request and let the worker
+   *   stop itself at the next chunk boundary, where the cursor and per-row
+   *   records are already consistent. Writing PAUSED here instead would just be
+   *   overwritten by the in-flight chunk's own boundary write.
+   * Anything else (PAUSED / COMPLETED / FAILED) → nothing to do.
+   */
+  async pause(jobId: string, actorId: string): Promise<{ ok: boolean; pending: boolean }> {
+    const job = await this.getStatus(jobId);
+    if (!job) return { ok: false, pending: false };
+
+    if (job.status === 'PENDING') {
+      await withActor(this.db, { id: actorId }, async (tx) => {
+        await tx
+          .update(schema.importJobs)
+          .set({ status: 'PAUSED', pauseRequested: false, updatedAt: sql`now()` })
+          .where(
+            and(eq(schema.importJobs.id, jobId), eq(schema.importJobs.status, 'PENDING')),
+          );
+      });
+      return { ok: true, pending: false };
+    }
+
+    if (job.status === 'PROCESSING') {
+      await withActor(this.db, { id: actorId }, async (tx) => {
+        await tx
+          .update(schema.importJobs)
+          .set({ pauseRequested: true, updatedAt: sql`now()` })
+          .where(eq(schema.importJobs.id, jobId));
+      });
+      // `pending` tells the UI the stop is requested but not yet in effect, so
+      // it can show "Pausing…" rather than claiming the job is already stopped.
+      return { ok: true, pending: true };
+    }
+
+    return { ok: false, pending: false };
   }
 
   /**
@@ -535,6 +1283,7 @@ export class BulkImportService {
       status: schema.ImportRowStatus;
       externalId: string | null;
       reason: string | null;
+      rawData?: Record<string, string> | null;
     }> = [];
     // How many of rowRecords have already been written by a mid-chunk heartbeat,
     // so the boundary/error flush only writes the remainder (ON CONFLICT makes a
@@ -545,6 +1294,10 @@ export class BulkImportService {
     // must add only the delta SINCE the last heartbeat, or it would double-count.
     let heartbeatProcessed = 0;
     let heartbeatFailed = 0;
+    // Set when an operator pause is observed MID-chunk, so we stop at the next
+    // row instead of running to the 500-row boundary (or, on the final chunk,
+    // never checking at all). See the heartbeat block below.
+    let pausedMidChunk = false;
 
     let stream: Readable | null;
     try {
@@ -589,9 +1342,9 @@ export class BulkImportService {
                 reason: warnReason,
               });
             }
-            rowRecords.push({ rowIndex, status: 'WARNING', externalId: input.importExternalId, reason: warnReason });
+            rowRecords.push({ rowIndex, status: 'WARNING', externalId: input.importExternalId, reason: warnReason, rawData: null });
           } else {
-            rowRecords.push({ rowIndex, status: 'IMPORTED', externalId: input.importExternalId, reason: null });
+            rowRecords.push({ rowIndex, status: 'IMPORTED', externalId: input.importExternalId, reason: null, rawData: null });
           }
         } catch (rowErr) {
           newFailures += 1;
@@ -605,7 +1358,15 @@ export class BulkImportService {
               reason: failReason,
             });
           }
-          rowRecords.push({ rowIndex, status: 'FAILED', externalId: failExternalId, reason: failReason });
+          rowRecords.push({
+            rowIndex,
+            status: 'FAILED',
+            externalId: failExternalId,
+            reason: failReason,
+            // Keep the source cells so the job page can show this row and let
+            // the user fix + resubmit it without re-uploading the file.
+            rawData: snapshotRawRow(record),
+          });
         }
         processedInChunk += 1;
 
@@ -626,6 +1387,22 @@ export class BulkImportService {
           });
           heartbeatProcessed = newProcessed;
           heartbeatFailed = newFailures;
+
+          // Honour an operator pause HERE, mid-chunk, not only at the 500-row
+          // boundary. Two reasons this must live inside the loop:
+          //   1. The boundary check is on the "more rows remain" path only, so a
+          //      pause during the FINAL chunk was never honoured — the job ran to
+          //      COMPLETED and the button sat on "Pausing…" forever.
+          //   2. Every chunk re-streams the file from row 0 and skips to the
+          //      cursor, so late chunks of a big file take a long time to reach
+          //      their boundary. Waiting for it makes Pause look broken.
+          // We've just flushed rows + progress, so stopping now loses nothing and
+          // Continue resumes from exactly this cursor.
+          if (await this.isPauseRequested(jobId)) {
+            pausedMidChunk = true;
+            reachedEnd = false;
+            break;
+          }
         }
       }
     } catch (streamErr) {
@@ -666,6 +1443,23 @@ export class BulkImportService {
     await this.flushRowRecords(jobId, rowRecords.slice(flushedUpTo));
     flushedUpTo = rowRecords.length;
 
+    // A pause observed mid-chunk stops the job right here. This runs BEFORE the
+    // reachedEnd branch on purpose: we broke out of the loop early, so the file
+    // is not finished and the job must not be marked COMPLETED.
+    if (pausedMidChunk) {
+      await this.persistProgress(jobId, {
+        status: 'PAUSED',
+        cursor: lastRowSeen + 1,
+        addProcessed: newProcessed - heartbeatProcessed,
+        addFailed: newFailures - heartbeatFailed,
+        errorLog: failures,
+      });
+      // Consume the request so Continue doesn't immediately re-pause.
+      await this.clearPauseRequest(jobId);
+      this.logger.log(`Job ${jobId} PAUSED by operator at row ${lastRowSeen + 1}`);
+      return;
+    }
+
     const nextCursor = reachedEnd ? lastRowSeen + 1 : endRowExclusive;
 
     if (reachedEnd) {
@@ -680,6 +1474,9 @@ export class BulkImportService {
         totalRows: lastRowSeen + 1,
         finished: true,
       });
+      // A pause requested in the final moments loses the race with completion.
+      // Clear it, or the finished job keeps reporting "Pausing…" forever.
+      await this.clearPauseRequest(jobId);
       const warningTotal = failures.filter((f) => f.severity === 'warning').length;
       const errorTotal = failures.length - warningTotal;
       this.logger.log(
@@ -689,9 +1486,16 @@ export class BulkImportService {
       return;
     }
 
-    // More rows remain — persist cursor, flip back to PENDING, self-kick.
+    // More rows remain. Honour an operator pause request HERE, at the chunk
+    // boundary: the cursor and the per-row records for this chunk are already
+    // flushed, so stopping now loses nothing and Continue picks up exactly
+    // where we left off. Re-read the flag rather than trusting the snapshot
+    // taken at the top of the chunk, since the request usually arrives while
+    // this chunk was draining.
+    const pauseRequested = await this.isPauseRequested(jobId);
+
     await this.persistProgress(jobId, {
-      status: 'PENDING',
+      status: pauseRequested ? 'PAUSED' : 'PENDING',
       cursor: nextCursor,
       // Only the delta since the last heartbeat (which already wrote its share).
       addProcessed: newProcessed - heartbeatProcessed,
@@ -700,6 +1504,12 @@ export class BulkImportService {
     });
     if (newWarnings > 0) {
       this.logger.log(`Job ${jobId} chunk: ${newWarnings} row(s) imported with unresolved refs`);
+    }
+    if (pauseRequested) {
+      // Consume the request so Continue doesn't immediately re-pause.
+      await this.clearPauseRequest(jobId);
+      this.logger.log(`Job ${jobId} PAUSED by operator at row ${nextCursor}`);
+      return;
     }
     // Continue draining without waiting for the next 30s tick.
     if (processedInChunk > 0) void this.tick();
@@ -712,6 +1522,42 @@ export class BulkImportService {
    * list is a convenience view, not the source of truth), so we log and move on.
    * Batched in one INSERT ... ON CONFLICT to keep it to a single round-trip.
    */
+  /**
+   * Has the operator asked to stop this job? Read at the chunk boundary only —
+   * a fresh read, because the request typically lands while the chunk drains.
+   * Best-effort: on a read failure we keep going (the next boundary re-checks)
+   * rather than stalling an import on a transient DB blip.
+   */
+  private async isPauseRequested(jobId: string): Promise<boolean> {
+    try {
+      const rows = await this.db
+        .select({ pauseRequested: schema.importJobs.pauseRequested })
+        .from(schema.importJobs)
+        .where(eq(schema.importJobs.id, jobId))
+        .limit(1);
+      return rows[0]?.pauseRequested === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Consume a honoured pause request so Continue starts cleanly. */
+  private async clearPauseRequest(jobId: string): Promise<void> {
+    try {
+      await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+        await tx
+          .update(schema.importJobs)
+          .set({ pauseRequested: false, updatedAt: sql`now()` })
+          .where(eq(schema.importJobs.id, jobId));
+      });
+    } catch (err) {
+      // Non-fatal: resume() also clears the flag, so a miss here self-heals.
+      this.logger.warn(
+        `Job ${jobId}: failed to clear pause flag: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   /**
    * Lightweight mid-chunk progress heartbeat. Writes ABSOLUTE processed/failed
    * counts + cursor directly (the boundary persistProgress is add-based and
@@ -748,6 +1594,8 @@ export class BulkImportService {
       status: schema.ImportRowStatus;
       externalId: string | null;
       reason: string | null;
+      /** Source cells, FAILED rows only — powers fix-and-resubmit on the job page. */
+      rawData?: Record<string, string> | null;
     }>,
   ): Promise<void> {
     if (rows.length === 0) return;
@@ -761,6 +1609,7 @@ export class BulkImportService {
             status: r.status,
             externalId: r.externalId,
             reason: r.reason,
+            rawData: r.rawData ?? null,
           })),
         )
         .onConflictDoUpdate({
@@ -769,6 +1618,8 @@ export class BulkImportService {
             status: sql`excluded.status`,
             externalId: sql`excluded.external_id`,
             reason: sql`excluded.reason`,
+            // A row that now IMPORTS clears its stale failure snapshot.
+            rawData: sql`excluded.raw_data`,
           },
         });
     } catch (err) {
@@ -987,23 +1838,62 @@ export class BulkImportService {
 
     const quantity =
       (m.quantity && Number(this.readCell(record, m.quantity))) || config.defaultQuantity || 1;
-    const unitPriceRaw = m.unitPrice ? this.readCell(record, m.unitPrice) : undefined;
-    const unitPrice = unitPriceRaw != null ? Number(unitPriceRaw) : config.defaultUnitPrice ?? 0;
     const offerLabel = m.offerLabel ? this.readCell(record, m.offerLabel) : undefined;
 
     const totalAmountRaw = m.totalAmount ? this.readCell(record, m.totalAmount) : undefined;
     const totalAmount = totalAmountRaw != null && totalAmountRaw !== '' ? Number(totalAmountRaw) : undefined;
 
+    // Line price. NOTE `unitPrice` is the OFFER/LINE TOTAL, not a per-unit rate
+    // (see orders.service.ts: the order total sums line unitPrices directly, and
+    // MEMORY offer_price_is_line_total). So it must NOT be multiplied by qty.
+    //
+    // Precedence:
+    //   1. an explicit unit-price column, when the file has one;
+    //   2. the order's Cost column — the usual case. A typical CRM export has a
+    //      single money column ("Cost") and no per-unit column, so without this
+    //      the line stored at 0 while the order total was stamped from Cost:
+    //      the order read ₦175,000 but its item and invoice both read ₦0,
+    //      because the invoice is built from the LINE ITEMS, not the header total;
+    //   3. the job's configured default;
+    //   4. 0 — only when the file carries no money at all.
+    const unitPriceRaw = m.unitPrice ? this.readCell(record, m.unitPrice) : undefined;
+    let unitPrice: number;
+    if (unitPriceRaw != null && unitPriceRaw !== '') {
+      unitPrice = Number(unitPriceRaw);
+    } else if (totalAmount != null && Number.isFinite(totalAmount)) {
+      unitPrice = totalAmount;
+    } else {
+      unitPrice = config.defaultUnitPrice ?? 0;
+    }
+
     const createdAtOverride = m.createdAt ? this.readCell(record, m.createdAt) : undefined;
 
-    // Per-row status from the sheet's Status column (Confirmed / Delivered /
-    // Returned / Pending / No Response…). Blank or unknown → the job default.
-    // An unknown non-blank label hard-fails the row so it isn't silently wrong.
+    // Per-row status from the sheet's Status column.
+    //
+    // STRICT BY DIRECTIVE (CEO, 2026-09-01): the sheet's status must match a
+    // status the app actually has. So when a Status column is mapped, the cell
+    // must resolve EXACTLY (see IMPORT_STATUS_LABELS) — a blank cell and an
+    // unrecognised label both HARD-FAIL the row. Nothing is inferred: a blank no
+    // longer silently inherits the job's default status.
+    //
+    // The job default (config.targetStatus) now applies ONLY when the file has
+    // no Status column mapped at all, i.e. the user explicitly chose one status
+    // for the whole import.
     let rowStatus = config.targetStatus;
-    const statusRaw = m.status ? this.readCell(record, m.status) : undefined;
-    if (statusRaw && statusRaw.trim()) {
+    if (m.status) {
+      const statusRaw = this.readCell(record, m.status);
+      if (!statusRaw || !statusRaw.trim()) {
+        throw new Error(
+          `Status is required. Accepted: ${IMPORT_STATUS_OPTIONS.map((o) => o.label).join(', ')}`,
+        );
+      }
       const parsed = parseRowStatus(statusRaw);
-      if (!parsed) throw new Error(`Unknown status "${statusRaw}"`);
+      if (!parsed) {
+        throw new Error(
+          `Status "${statusRaw}" does not match a status in the app. ` +
+            `Accepted: ${IMPORT_STATUS_OPTIONS.map((o) => o.label).join(', ')}`,
+        );
+      }
       rowStatus = parsed;
     }
 
@@ -1112,6 +2002,13 @@ export class BulkImportService {
         branchId,
         currencyCode,
         importExternalId: externalId,
+        // Content fingerprint, so a re-import whose Order IDs changed still
+        // matches this order instead of creating a second one.
+        importIdentityKey: buildImportIdentityKey({
+          phone: customerPhone,
+          productId,
+          createdAtOverride,
+        }),
       },
       unresolved,
     };
@@ -1155,7 +2052,14 @@ export class BulkImportService {
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
       await tx
         .update(schema.importJobs)
-        .set({ status: 'FAILED', lastError: reason, updatedAt: sql`now()` })
+        .set({
+          status: 'FAILED',
+          lastError: reason,
+          // A job that dies while a pause was pending must not keep reporting
+          // "Pausing…" — the request can never be honoured now.
+          pauseRequested: false,
+          updatedAt: sql`now()`,
+        })
         .where(eq(schema.importJobs.id, jobId));
     });
   }

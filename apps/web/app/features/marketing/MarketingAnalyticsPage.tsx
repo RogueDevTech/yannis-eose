@@ -30,6 +30,7 @@ import { PageSearchControl } from '~/components/ui/page-search-control';
 import { ChartCard } from '~/components/ui/chart-card';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { useIsMobile } from '~/hooks/useIsMobile';
+import { STICKY_TABLE_HEADER_CELL_CLASS } from '~/components/ui/_sticky-table-header';
 import type { FormAnalytics } from './types';
 
 const TOP_FORMS_LIMIT = 6;
@@ -447,14 +448,16 @@ function FunnelDataTables({
       </div>
 
       {/* Top forms table */}
-      <div className="card overflow-x-auto">
+      {/* No `overflow-x-auto`: it would pin the sticky header to this card
+          instead of the page. This list grows with the form count. */}
+      <div className="card">
         <h3 className="text-sm font-semibold text-app-fg mb-3">Top forms by traffic</h3>
         <table className="min-w-full">
           <thead>
             <tr>
-              <th className={th}>Form</th>
-              <th className={th}>Unique form views</th>
-              <th className={th} title="This form's unique views as a percent of your total unique form views across all forms.">
+              <th className={`${th} ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Form</th>
+              <th className={`${th} ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Unique form views</th>
+              <th className={`${th} ${STICKY_TABLE_HEADER_CELL_CLASS}`} title="This form's unique views as a percent of your total unique form views across all forms.">
                 % of total views
               </th>
             </tr>
