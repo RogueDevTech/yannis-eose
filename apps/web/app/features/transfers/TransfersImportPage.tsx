@@ -9,6 +9,7 @@ import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { useToast } from '~/components/ui/toast';
+import { STICKY_TABLE_HEADER_CELL_HOVER_CLASS } from '~/components/ui/_sticky-table-header';
 import type { Location, Product } from './types';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -518,15 +519,17 @@ export function TransfersImportPage({ locations, products }: TransfersImportPage
           </div>
 
           {/* Desktop table */}
-          <div className="overflow-x-auto -mx-4 px-4 hidden sm:block">
+          {/* No `overflow-x-auto`: it would pin the sticky header to this box
+              rather than the page. */}
+          <div className="-mx-4 px-4 hidden sm:block">
             <table className="w-full text-sm border-separate border-spacing-0">
               <thead>
                 <tr className="text-xs text-app-fg-muted uppercase tracking-wider">
-                  <th className="text-left font-medium px-3 py-2 bg-app-hover rounded-tl-lg">#</th>
-                  <th className="text-left font-medium px-3 py-2 bg-app-hover min-w-[10rem]">Agent</th>
-                  <th className="text-left font-medium px-3 py-2 bg-app-hover min-w-[10rem]">Destination</th>
-                  <th className="text-left font-medium px-3 py-2 bg-app-hover min-w-[16rem]">Products</th>
-                  <th className="text-center font-medium px-3 py-2 bg-app-hover rounded-tr-lg min-w-[6rem]">Status</th>
+                  <th className={`text-left font-medium px-3 py-2 rounded-tl-lg ${STICKY_TABLE_HEADER_CELL_HOVER_CLASS}`}>#</th>
+                  <th className={`text-left font-medium px-3 py-2 min-w-[10rem] ${STICKY_TABLE_HEADER_CELL_HOVER_CLASS}`}>Agent</th>
+                  <th className={`text-left font-medium px-3 py-2 min-w-[10rem] ${STICKY_TABLE_HEADER_CELL_HOVER_CLASS}`}>Destination</th>
+                  <th className={`text-left font-medium px-3 py-2 min-w-[16rem] ${STICKY_TABLE_HEADER_CELL_HOVER_CLASS}`}>Products</th>
+                  <th className={`text-center font-medium px-3 py-2 rounded-tr-lg min-w-[6rem] ${STICKY_TABLE_HEADER_CELL_HOVER_CLASS}`}>Status</th>
                 </tr>
               </thead>
               <tbody>

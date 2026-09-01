@@ -131,6 +131,17 @@ export const orders = pgTable('orders', {
    * duplicate. NULL for every order not created via the resumable bulk importer.
    */
   importExternalId: text('import_external_id'),
+  /**
+   * Content fingerprint of an imported order: sha256(normalised phone | product
+   * | order date). The FALLBACK identity when `importExternalId` is absent or the
+   * source system regenerated its ids between exports — a re-import then repairs
+   * the existing order instead of duplicating it. See migration 0340.
+   *
+   * Deliberately NOT phone alone: repeat customers share a phone, so phone
+   * identifies a customer, never an order. Hashed so no second plaintext phone
+   * column exists (Pillar 2).
+   */
+  importIdentityKey: text('import_identity_key'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),

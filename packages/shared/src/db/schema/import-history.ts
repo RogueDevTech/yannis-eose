@@ -5,6 +5,7 @@ import {
   integer,
   jsonb,
   timestamp,
+  boolean,
 } from 'drizzle-orm/pg-core';
 import { uuidv7Pk, temporalColumns } from './helpers';
 import { users } from './users';
@@ -94,6 +95,17 @@ export const importJobRows = pgTable('import_job_rows', {
   externalId: text('external_id'),
   /** Reason for WARNING/FAILED; NULL for a clean IMPORTED row. */
   reason: text('reason'),
+  /**
+   * The row's ORIGINAL source cells, kept only when the row FAILED, so the job
+   * page can show what was on that row and let the user fix + resubmit it
+   * without re-uploading the file. NULL for IMPORTED/WARNING rows (a clean
+   * import stores no extra bytes). Capped in app code. See migration 0339.
+   *
+   * Pillar 2: this holds the phone exactly as typed in the source file. It is
+   * served ONLY to the SuperAdmin/Support importer, only for failed rows — data
+   * they already hold in their own spreadsheet — and never on an order surface.
+   */
+  rawData: jsonb('raw_data').$type<Record<string, string>>(),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -127,6 +139,12 @@ export const importJobs = pgTable('import_jobs', {
   errorLog: jsonb('error_log').$type<ImportRowFailure[]>(),
   /** Last fatal/pause reason for the UI banner. */
   lastError: text('last_error'),
+  /**
+   * Cooperative stop flag. The operator can pause a draining import; the worker
+   * honours this at the next CHUNK BOUNDARY (never mid-row) and flips the job to
+   * PAUSED. Cleared on resume. See migration 0340.
+   */
+  pauseRequested: boolean('pause_requested').notNull().default(false),
   startedAt: timestamp('started_at', { withTimezone: true }),
   finishedAt: timestamp('finished_at', { withTimezone: true }),
   createdBy: uuid('created_by')

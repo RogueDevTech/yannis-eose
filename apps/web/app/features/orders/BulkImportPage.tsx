@@ -29,6 +29,7 @@ import {
   createImportJob,
   getImportJobStatus,
   listImportJobs,
+  pauseImportJob,
   resumeImportJob,
   retryFailedImportRows,
   deleteImportJob,
@@ -36,6 +37,10 @@ import {
   type ImportJobConfig,
 } from './bulk-import-api';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { useImportJobPoll } from '~/hooks/useImportJobPoll';
+import { STICKY_TABLE_HEADER_CELL_CLASS } from '~/components/ui/_sticky-table-header';
+import { Spinner } from '~/components/ui/spinner';
+import { TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 
 interface UserOption {
   id: string;
@@ -56,7 +61,15 @@ interface BulkImportPageProps {
   mediaBuyers?: UserOption[];
   csAgents?: UserOption[];
   products?: ProductOption[];
+  /** Where the header's back arrow returns (the import type picker). */
   backHref: string;
+  /**
+   * Root the per-job status pages hang off: a job link is `${basePath}/${jobId}`.
+   * Separate from `backHref` because the importer now lives one level deeper
+   * (/admin/data/import/orders) than the job routes (/admin/data/import/:jobId).
+   * Defaults to `backHref` for callers where the two coincide.
+   */
+  basePath?: string;
 }
 
 const TERMINAL_STATUSES = ['COMPLETED', 'FAILED', 'PAUSED'] as const;
@@ -180,7 +193,8 @@ const REQUIRED_FIELDS: Array<{ field: MapField; label: string }> = [
   { field: 'productCode', label: 'Product code' },
 ];
 
-export function BulkImportPage({ backHref }: BulkImportPageProps) {
+export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
+  const jobBasePath = basePath ?? backHref;
   // Multi-country: the import is scoped to the caller's active country (enforced
   // server-side against ctx.effectiveCurrencyCodes — a row whose currency is out
   // of scope hard-fails). We only surface the notice when >1 currency is active;
@@ -225,7 +239,6 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<ImportJob | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Columns currently claimed by a mapping. Used to hide an already-used column
@@ -430,44 +443,23 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
     missingRequired, unknownColumnFields, duplicateColumns,
   ]);
 
-  // Poll while a job is active (not terminal).
-  useEffect(() => {
-    if (!job) return;
-    if (TERMINAL_STATUSES.includes(job.status as (typeof TERMINAL_STATUSES)[number])) {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      return;
-    }
-    if (pollRef.current) return; // already polling
-    pollRef.current = setInterval(async () => {
-      try {
-        const next = await getImportJobStatus(job.id);
-        setJob(next);
-      } catch {
-        // transient — keep polling
-      }
-    }, 2500);
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-  }, [job]);
+  // Poll while a job is active (not terminal). The timer lives in
+  // `useImportJobPoll` so replacing `job` on each tick can't tear it down.
+  const jobId = job?.id ?? null;
+  const isPolling =
+    !!job && !TERMINAL_STATUSES.includes(job.status as (typeof TERMINAL_STATUSES)[number]);
 
-  const onContinue = useCallback(async () => {
-    if (!job) return;
-    setError(null);
+  const pollTick = useCallback(async () => {
+    if (!jobId) return;
     try {
-      await resumeImportJob(job.id);
-      const next = await getImportJobStatus(job.id);
+      const next = await getImportJobStatus(jobId);
       setJob(next);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to continue.');
+    } catch {
+      // transient — keep polling
     }
-  }, [job]);
+  }, [jobId]);
+
+  useImportJobPoll(isPolling, pollTick);
 
   const onRetryFailed = useCallback(async () => {
     if (!job) return;
@@ -490,12 +482,19 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
   // ── Import history table ────────────────────────────────────────────────────
   const [history, setHistory] = useState<ImportJob[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  // True only until the FIRST load settles, so the table shows skeleton rows on
+  // arrival instead of flashing "No imports yet." Background refreshes (the poll
+  // + manual Refresh) must not re-trigger it, or the list would blink away every
+  // few seconds while a job is running.
+  const [historyLoading, setHistoryLoading] = useState(true);
   const loadHistory = useCallback(async () => {
     try {
       setHistory(await listImportJobs(20));
       setHistoryError(null);
     } catch (err) {
       setHistoryError(err instanceof Error ? err.message : 'Failed to load import history.');
+    } finally {
+      setHistoryLoading(false);
     }
   }, []);
 
@@ -520,11 +519,85 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
       setDeletingHistory(false);
     }
   }, [deleteHistoryJob, job, loadHistory]);
+  // Pause / Continue straight from the history row, so a long import can be
+  // managed without opening its detail page. `busyJobId` disables just that
+  // row's buttons while its mutation is in flight.
+  const [rowBusyJobId, setRowBusyJobId] = useState<string | null>(null);
+
+  // Pause asks first. Stopping a running import mid-file is disruptive enough to
+  // deserve a beat: the worker keeps going until its next chunk boundary, so the
+  // click doesn't stop it instantly, and the operator should know that before
+  // committing. It IS reversible (Continue resumes from the saved cursor), hence
+  // the `warning` variant rather than `danger`.
+  const [pauseJobTarget, setPauseJobTarget] = useState<ImportJob | null>(null);
+  const [pausingJob, setPausingJob] = useState(false);
+  const [pauseJobError, setPauseJobError] = useState<string | null>(null);
+
+  const confirmPauseJob = useCallback(async () => {
+    const target = pauseJobTarget;
+    if (!target) return;
+    setPausingJob(true);
+    setPauseJobError(null);
+    setRowBusyJobId(target.id);
+    setHistoryError(null);
+    try {
+      await pauseImportJob(target.id);
+      // A PROCESSING job only stops at its next chunk boundary; refreshing
+      // now shows "Pausing…" and the poll flips it to Paused when it lands.
+      if (job?.id === target.id) setJob(await getImportJobStatus(target.id));
+      await loadHistory();
+      setPauseJobTarget(null);
+    } catch (err) {
+      setPauseJobError(err instanceof Error ? err.message : 'Failed to pause this import.');
+    } finally {
+      setPausingJob(false);
+      setRowBusyJobId(null);
+    }
+  }, [pauseJobTarget, job, loadHistory]);
+
+  // Continue restarts the worker from the saved cursor. Forward-only (nothing is
+  // re-processed), but it starts writing orders again, so it confirms first —
+  // same treatment as Pause. Shared by the progress panel and the history rows.
+  const [continueJobTarget, setContinueJobTarget] = useState<ImportJob | null>(null);
+  const [continuingJob, setContinuingJob] = useState(false);
+  const [continueJobError, setContinueJobError] = useState<string | null>(null);
+
+  const confirmContinueJob = useCallback(async () => {
+    const target = continueJobTarget;
+    if (!target) return;
+    setContinuingJob(true);
+    setContinueJobError(null);
+    setRowBusyJobId(target.id);
+    setHistoryError(null);
+    try {
+      await resumeImportJob(target.id);
+      if (job?.id === target.id) setJob(await getImportJobStatus(target.id));
+      await loadHistory();
+      setContinueJobTarget(null);
+    } catch (err) {
+      setContinueJobError(
+        err instanceof Error ? err.message : 'Failed to continue this import.',
+      );
+    } finally {
+      setContinuingJob(false);
+      setRowBusyJobId(null);
+    }
+  }, [continueJobTarget, job, loadHistory]);
+
   // Load on mount, and refresh whenever the active job reaches a terminal state
   // (so a just-finished import appears in the list) or is cleared.
   useEffect(() => {
     void loadHistory();
   }, [loadHistory, job?.status, job === null]);
+
+  // Keep the history table live while ANY listed job is still moving. Without
+  // this the table only refreshed on the *active* job's transitions, so a job
+  // started elsewhere (or resumed from a row button) sat frozen at its old
+  // counters until a manual Refresh.
+  const historyHasActiveJob = history.some(
+    (j) => j.status === 'PROCESSING' || j.status === 'PENDING',
+  );
+  useImportJobPoll(historyHasActiveJob, loadHistory);
 
   return (
     <div className="space-y-4">
@@ -558,7 +631,7 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
       {job ? (
         <ImportProgress
           job={job}
-          onContinue={onContinue}
+          onContinue={() => job && setContinueJobTarget(job)}
           onRetryFailed={onRetryFailed}
           onNewImport={resetForNewImport}
         />
@@ -719,9 +792,65 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
 
       <ImportHistory
         jobs={history}
+        loading={historyLoading}
         error={historyError}
-        basePath={backHref}
+        basePath={jobBasePath}
+        busyJobId={rowBusyJobId}
+        onPause={(j) => setPauseJobTarget(j)}
+        onResume={(j) => setContinueJobTarget(j)}
         onDelete={(j) => setDeleteHistoryJob(j)}
+      />
+
+      <ConfirmActionModal
+        open={!!continueJobTarget}
+        onClose={() => {
+          if (continuingJob) return;
+          setContinueJobTarget(null);
+          setContinueJobError(null);
+        }}
+        title="Continue this import?"
+        description={
+          continueJobTarget
+            ? `"${continueJobTarget.fileName ?? 'This import'}" restarts from row ${continueJobTarget.cursor.toLocaleString()} and works through the rest of the file.`
+            : ''
+        }
+        details={
+          <ul className="list-disc space-y-1 pl-4">
+            <li>Rows already imported are not touched: it only moves forward.</li>
+            <li>New orders start being created again as soon as it resumes.</li>
+          </ul>
+        }
+        confirmLabel="Continue import"
+        variant="warning"
+        loading={continuingJob}
+        error={continueJobError}
+        onConfirm={confirmContinueJob}
+      />
+
+      <ConfirmActionModal
+        open={!!pauseJobTarget}
+        onClose={() => {
+          if (pausingJob) return;
+          setPauseJobTarget(null);
+          setPauseJobError(null);
+        }}
+        title="Pause this import?"
+        description={
+          pauseJobTarget
+            ? `"${pauseJobTarget.fileName ?? 'This import'}" will stop at the end of the row it is currently working on, not instantly.`
+            : ''
+        }
+        details={
+          <ul className="list-disc space-y-1 pl-4">
+            <li>Rows already imported stay imported. Nothing is rolled back.</li>
+            <li>Continue picks up from the exact row it stopped on, with no duplicates.</li>
+          </ul>
+        }
+        confirmLabel="Pause import"
+        variant="warning"
+        loading={pausingJob}
+        error={pauseJobError}
+        onConfirm={confirmPauseJob}
       />
 
       <ConfirmActionModal
@@ -750,34 +879,48 @@ export function BulkImportPage({ backHref }: BulkImportPageProps) {
 /** Recent imports table — "View" opens the job's dedicated status page. */
 function ImportHistory({
   jobs,
+  loading,
   error,
   basePath,
+  busyJobId,
+  onPause,
+  onResume,
   onDelete,
 }: {
   jobs: ImportJob[];
+  /** First load still in flight — render skeleton rows, not the empty state. */
+  loading: boolean;
   error: string | null;
   /** Base import path; the job page lives at `${basePath}/${jobId}`. */
   basePath: string;
+  /** Row whose pause/continue mutation is in flight, if any. */
+  busyJobId: string | null;
+  onPause: (job: ImportJob) => void;
+  onResume: (job: ImportJob) => void;
   onDelete: (job: ImportJob) => void;
 }) {
   return (
     <div className="rounded-lg border border-app-border bg-app-surface p-4">
       <h3 className="mb-3 text-sm font-semibold text-app-fg">Recent imports</h3>
       {error && <InlineNotification variant="danger" message={error} />}
-      {jobs.length === 0 ? (
+      {loading ? (
+        <ImportHistorySkeleton />
+      ) : jobs.length === 0 ? (
         <p className="py-6 text-center text-sm text-app-fg-muted">No imports yet.</p>
       ) : (
-        <div className="overflow-x-auto">
+        // No `overflow-x-auto` wrapper: it would become the scroll container
+        // and defeat the sticky header (see _sticky-table-header).
+        <div>
           <table className="w-full min-w-[640px] text-sm">
             <thead>
-              <tr className="border-b border-app-border text-left text-xs uppercase tracking-wide text-app-fg-muted">
-                <th className="px-2 py-2 font-medium">File</th>
-                <th className="px-2 py-2 font-medium">Uploaded</th>
-                <th className="px-2 py-2 font-medium">Status</th>
-                <th className="px-2 py-2 text-right font-medium">Imported</th>
-                <th className="px-2 py-2 text-right font-medium">Failed</th>
-                <th className="px-2 py-2 text-right font-medium">Total</th>
-                <th className="px-2 py-2"></th>
+              <tr className="text-left text-xs uppercase tracking-wide text-app-fg-muted">
+                <th className={`px-2 py-2 font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>File</th>
+                <th className={`px-2 py-2 font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Uploaded</th>
+                <th className={`px-2 py-2 font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Status</th>
+                <th className={`px-2 py-2 text-right font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Imported</th>
+                <th className={`px-2 py-2 text-right font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Failed</th>
+                <th className={`px-2 py-2 text-right font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Total</th>
+                <th className={`px-2 py-2 ${STICKY_TABLE_HEADER_CELL_CLASS}`}></th>
               </tr>
             </thead>
             <tbody>
@@ -806,6 +949,31 @@ function ImportHistory({
                       >
                         View
                       </Link>
+                      {/* Pause a job that's still moving; Continue one that's
+                          stopped but not finished. A pause already requested
+                          shows "Pausing…" until the worker honours it — still
+                          clickable, so a request that got lost can be re-sent
+                          rather than leaving the row stuck. */}
+                      {(j.status === 'PROCESSING' || j.status === 'PENDING') && (
+                        <button
+                          type="button"
+                          onClick={() => onPause(j)}
+                          disabled={busyJobId === j.id}
+                          className="text-xs font-medium text-app-fg-muted hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {j.pauseRequested ? 'Pausing…' : 'Pause'}
+                        </button>
+                      )}
+                      {(j.status === 'PAUSED' || j.status === 'FAILED') && (
+                        <button
+                          type="button"
+                          onClick={() => onResume(j)}
+                          disabled={busyJobId === j.id}
+                          className="text-xs font-medium text-app-accent hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Continue
+                        </button>
+                      )}
                       {j.status !== 'PROCESSING' && (
                         <button
                           type="button"
@@ -823,6 +991,46 @@ function ImportHistory({
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Loading shell for the Recent imports table. Mirrors the real column set and
+ * alignment so nothing shifts when the rows arrive.
+ */
+function ImportHistorySkeleton() {
+  return (
+    // No scroll wrapper, matching the loaded table so the sticky header pins
+    // to the page in both states and nothing shifts on arrival.
+    <div>
+      <table className="w-full min-w-[640px] text-sm">
+        <thead>
+          <tr className="text-left text-xs uppercase tracking-wide text-app-fg-muted">
+            <th className={`px-2 py-2 font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>File</th>
+            <th className={`px-2 py-2 font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Uploaded</th>
+            <th className={`px-2 py-2 font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Status</th>
+            <th className={`px-2 py-2 text-right font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Imported</th>
+            <th className={`px-2 py-2 text-right font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Failed</th>
+            <th className={`px-2 py-2 text-right font-medium ${STICKY_TABLE_HEADER_CELL_CLASS}`}>Total</th>
+            <th className={`px-2 py-2 ${STICKY_TABLE_HEADER_CELL_CLASS}`}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: 4 }, (_, i) => (
+            <tr key={i} className="border-b border-app-border/60 last:border-0">
+              <td className="px-2 py-2"><TableCellTextPulse className="w-40" /></td>
+              <td className="px-2 py-2"><TableCellTextPulse className="w-28" /></td>
+              <td className="px-2 py-2"><TableCellTextPulse className="w-20 rounded-full" /></td>
+              <td className="px-2 py-2 text-right"><TableCellTextPulse className="w-8" /></td>
+              <td className="px-2 py-2 text-right"><TableCellTextPulse className="w-8" /></td>
+              <td className="px-2 py-2 text-right"><TableCellTextPulse className="w-10" /></td>
+              <td className="px-2 py-2 text-right"><TableCellTextPulse className="w-12" /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <span className="sr-only" role="status">Loading recent imports</span>
     </div>
   );
 }
@@ -854,11 +1062,29 @@ const IMPORT_STATUS_STYLES: Record<ImportJob['status'], { label: string; cls: st
   FAILED: { label: 'Failed', cls: 'bg-danger-500/15 text-danger-600 dark:text-danger-400' },
 };
 
-function ImportStatusPill({ status }: { status: ImportJob['status'] }) {
+function ImportStatusPill({
+  status,
+  pauseRequested,
+}: {
+  status: ImportJob['status'];
+  /** Stop requested but not yet honoured — the job is still draining a chunk. */
+  pauseRequested?: boolean;
+}) {
   const s = IMPORT_STATUS_STYLES[status] ?? IMPORT_STATUS_STYLES.PENDING;
+  // A pause only lands at the next chunk boundary, so the job keeps running for
+  // a moment after the click. Show "Pausing…" so the operator can see their
+  // request was registered rather than wondering if it was ignored.
+  const pausing = pauseRequested === true && (status === 'PROCESSING' || status === 'PENDING');
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}>
-      {s.label}
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
+        pausing ? IMPORT_STATUS_STYLES.PAUSED.cls : s.cls
+      }`}
+    >
+      {/* Only PROCESSING is actively advancing; PENDING/PAUSED are waiting on the
+          worker or the user, so a spinner there would overstate progress. */}
+      {status === 'PROCESSING' && <Spinner size="sm" className="shrink-0" />}
+      {pausing ? 'Pausing…' : s.label}
     </span>
   );
 }
@@ -900,12 +1126,20 @@ export function ImportProgress({
   onContinue,
   onRetryFailed,
   onNewImport,
+  onPause,
 }: {
   job: ImportJob;
   onContinue: () => void;
   onRetryFailed: () => void;
   /** Optional — omitted on the standalone job page where "New import" isn't shown. */
   onNewImport?: () => void;
+  /**
+   * Optional — pause a still-running import. Supplied by the standalone job
+   * page so a long import can be stopped from the page you're watching it on,
+   * without going back to the history table. The caller is expected to confirm
+   * first (see the pause ConfirmActionModal).
+   */
+  onPause?: () => void;
 }) {
   const total = job.totalRows || 0;
   const done = job.processedRows + job.failedRows;
@@ -975,6 +1209,14 @@ export function ImportProgress({
       )}
 
       <div className="flex flex-wrap gap-2">
+        {/* Pause is only meaningful while the job is still moving. A pause
+            already requested keeps the button visible but disabled, so the
+            operator can see it landed ("Pausing…" until the next chunk ends). */}
+        {onPause && running && (
+          <Button variant="secondary" onClick={onPause}>
+            {job.pauseRequested ? 'Pausing…' : 'Pause'}
+          </Button>
+        )}
         {(job.status === 'PAUSED' || job.status === 'FAILED') && (
           <Button onClick={onContinue}>Continue from row {job.cursor.toLocaleString()}</Button>
         )}

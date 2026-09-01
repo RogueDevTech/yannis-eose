@@ -27,6 +27,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { useToast } from '~/components/ui/toast';
+import { STICKY_TABLE_HEADER_CELL_CLASS } from '~/components/ui/_sticky-table-header';
 
 /** Down-arrow-into-tray glyph for the Download template button. */
 function DownloadIcon() {
@@ -519,7 +520,10 @@ export function ImportBulkData<
 
       {/* ── Editable preview / editor ─────────────────────────────────── */}
       {parsed.length > 0 ? (
-        <div className="card space-y-3 p-0 overflow-hidden">
+        // No `overflow-hidden`: it makes this a containing block for the
+        // table's sticky header, so the header would clip/scroll away.
+        // Rounded corners still read fine for a table that fits.
+        <div className="card space-y-3 p-0">
           <div className="px-4 py-3 border-b border-app-border space-y-2.5">
             <div>
               <h2 className="text-sm font-semibold text-app-fg">2. Preview &amp; edit</h2>
@@ -561,15 +565,17 @@ export function ImportBulkData<
           </div>
 
           {/* ── Desktop: horizontal table ─────────────────────────────── */}
-          <div className="hidden sm:block overflow-x-auto">
+          {/* No `overflow-x-auto`: it would pin the sticky header to this box
+              instead of the page. */}
+          <div className="hidden sm:block">
             <table className="w-full text-xs">
-              <thead className="text-app-fg-muted bg-app-hover/30 border-b border-app-border">
+              <thead className="text-app-fg-muted">
                 <tr>
-                  <th className="text-left px-2 py-2 w-14">#</th>
+                  <th className={`text-left px-2 py-2 w-14 ${STICKY_TABLE_HEADER_CELL_CLASS}`}>#</th>
                   {columns.map((col) => (
                     <th
                       key={col.header}
-                      className={`text-left px-2 py-2 ${col.headerClassName ?? ''}`}
+                      className={`text-left px-2 py-2 ${STICKY_TABLE_HEADER_CELL_CLASS} ${col.headerClassName ?? ''}`}
                     >
                       {col.header}
                     </th>

@@ -183,6 +183,13 @@ export const importOrderSchema = z.object({
    * Omit for single-currency installs (defaults to the base currency).
    */
   currencyCode: z.string().trim().toUpperCase().max(5).optional(),
+  /**
+   * Content fingerprint (sha256 of normalised phone|product|date), used as the
+   * FALLBACK identity when the source file's Order ID is absent or was
+   * regenerated between exports. Computed server-side by the importer; never
+   * supplied by a client. See migration 0340.
+   */
+  importIdentityKey: z.string().length(64).nullable().optional(),
   /** Ad-hoc fields from the CRM export (whatsappNumber, unit, deliveryTime, importMediaBuyer, importCS, etc.) */
   customFields: z
     .record(z.union([z.string(), z.number(), z.boolean(), z.array(z.string()).max(50), z.object({ label: z.string(), value: z.string() })]))

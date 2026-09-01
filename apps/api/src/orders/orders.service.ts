@@ -3154,6 +3154,41 @@ export class OrdersService {
     }
 
     const result = await withActor(this.db, { id: actorId }, async (tx) => {
+      // ── Identity resolution ────────────────────────────────────────────────
+      // The external id stays the PRIMARY key: when the file carries one and it
+      // matches an existing order, that order is updated (unchanged behaviour).
+      //
+      // The identity key is the FALLBACK, for the case that used to silently
+      // duplicate: a corrected file re-exported with NEW Order IDs. Same phone,
+      // same product, same day = the same order, so we update it in place and
+      // adopt the new external id rather than inserting a second row.
+      //
+      // Matching is deliberately NOT phone-only: repeat customers share a phone,
+      // so phone identifies a customer, not an order.
+      let existingIdByIdentity: string | null = null;
+      if (input.importIdentityKey) {
+        const byExternal = await tx
+          .select({ id: schema.orders.id })
+          .from(schema.orders)
+          .where(eq(schema.orders.importExternalId, input.importExternalId))
+          .limit(1);
+        // Only look up the fingerprint when the external id does NOT already
+        // resolve — the external id always wins when it matches.
+        if (byExternal.length === 0) {
+          const byIdentity = await tx
+            .select({ id: schema.orders.id })
+            .from(schema.orders)
+            .where(eq(schema.orders.importIdentityKey, input.importIdentityKey))
+            // Deterministic when several orders share a fingerprint (a customer
+            // genuinely ordering the same item twice in one day): always the
+            // oldest, so repeated runs converge on the same row instead of
+            // ping-ponging between them.
+            .orderBy(schema.orders.createdAt, schema.orders.id)
+            .limit(1);
+          existingIdByIdentity = byIdentity[0]?.id ?? null;
+        }
+      }
+
       const values = {
         mediaBuyerId: input.mediaBuyerId ?? null,
         branchId: input.branchId,
@@ -3174,6 +3209,7 @@ export class OrdersService {
         status: input.targetStatus,
         orderSource: 'import',
         importExternalId: input.importExternalId,
+        importIdentityKey: input.importIdentityKey ?? null,
         customFields: input.customFields ?? null,
         // Multi-country: stamp the order currency when the importer resolved one.
         // Omitted → column default (base currency), so single-currency imports
@@ -3182,6 +3218,56 @@ export class OrdersService {
         ...(createdAtDate ? { createdAt: createdAtDate } : {}),
         ...statusTimestamps,
       };
+
+      // Fingerprint matched an order whose external id differs (the file was
+      // re-exported with new ids): UPDATE that row by id and adopt the new
+      // external id, instead of inserting a duplicate.
+      if (existingIdByIdentity) {
+        const updated = await tx
+          .update(schema.orders)
+          .set({
+            mediaBuyerId: values.mediaBuyerId,
+            branchId: values.branchId,
+            servicingBranchId: values.servicingBranchId,
+            assignedCsId: values.assignedCsId,
+            customerName: values.customerName,
+            customerPhoneHash: values.customerPhoneHash,
+            customerPhone: values.customerPhone,
+            customerAddress: values.customerAddress,
+            deliveryAddress: values.deliveryAddress,
+            deliveryNotes: values.deliveryNotes,
+            deliveryState: values.deliveryState,
+            customerGender: values.customerGender,
+            customerEmail: values.customerEmail,
+            items: values.items,
+            totalAmount: values.totalAmount,
+            status: values.status,
+            customFields: values.customFields,
+            importExternalId: values.importExternalId,
+            importIdentityKey: values.importIdentityKey,
+            ...(input.currencyCode ? { currencyCode: input.currencyCode } : {}),
+            ...(createdAtDate ? { createdAt: createdAtDate } : {}),
+            ...statusTimestamps,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(schema.orders.id, existingIdByIdentity))
+          .returning({ id: schema.orders.id });
+        const row = updated[0];
+        if (row) {
+          await tx.delete(schema.orderItems).where(eq(schema.orderItems.orderId, row.id));
+          await tx.insert(schema.orderItems).values(
+            input.items.map((item) => ({
+              orderId: row.id,
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: sql`${item.unitPrice}::numeric`,
+              offerLabel: item.offerLabel ?? null,
+            })),
+          );
+          // created:false — this repaired an existing order, it did not add one.
+          return { id: row.id, created: false };
+        }
+      }
 
       const rows = await tx
         .insert(schema.orders)
@@ -3207,6 +3293,7 @@ export class OrdersService {
             totalAmount: values.totalAmount,
             status: values.status,
             customFields: values.customFields,
+            importIdentityKey: values.importIdentityKey,
             // Re-import back-fills/updates currency when one was resolved. Not
             // spread when absent, so a re-import without a currency doesn't wipe
             // an existing one back to default.
@@ -5419,6 +5506,10 @@ export class OrdersService {
       deliveryAddress: schema.orders.deliveryAddress,
       // Offline order category — shown on the Offline Orders list table.
       offlineOrderCategory: schema.orders.offlineOrderCategory,
+      // How the order entered the system (edge-form / offline / import / online /
+      // delivered_follow_up). Drives the "Imported" tag on list rows so a
+      // migrated historical order is never mistaken for a live one.
+      orderSource: schema.orders.orderSource,
     } as const;
 
     const [orders, totalRows] = await Promise.all([
