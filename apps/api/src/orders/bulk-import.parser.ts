@@ -210,12 +210,18 @@ export function excelSerialToDate(serial: number): Date | null {
  * Returns null when the value is absent or cannot be read as a sane date, so
  * callers fail the row with a clear message instead of writing a bogus year.
  *
- * Slash/dash dates are read MONTH-FIRST (M/D/YYYY), matching the sheets this
- * importer consumes. Where the day is unambiguous (>12) the order is inferred
- * from the value itself, so a stray day-first cell still lands on the right
- * calendar day rather than being silently shifted.
+ * For a TEXT date, `format` says which of M/D/YYYY and D/M/YYYY the file uses:
+ * the two are indistinguishable whenever both parts are <= 12 (05/06 is 5 June
+ * or 6 May), so the operator confirms it at upload rather than us guessing.
+ * Where one part is > 12 it can only be the day, and the value decides on its
+ * own — a mis-set format still lands on the right calendar day.
+ *
+ * Excel SERIAL dates carry no format and ignore `format` entirely.
  */
-export function normalizeImportDate(value: unknown): string | null {
+export function normalizeImportDate(
+  value: unknown,
+  format: 'MDY' | 'DMY' = 'MDY',
+): string | null {
   if (value == null) return null;
   if (value instanceof Date) {
     return Number.isNaN(value.getTime()) ? null : sanifyYear(value);
@@ -230,19 +236,22 @@ export function normalizeImportDate(value: unknown): string | null {
     return asDate ? sanifyYear(asDate) : null;
   }
 
-  // M/D/YYYY (or M-D-YYYY). Month-first by default; a first part >12 can only
-  // be a day, so that case is read day-first instead of rejected.
+  // Two-part numeric date. Which part is the month comes from `format`, except
+  // where a part > 12 settles it on its own.
   const slash = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
   if (slash) {
     const [, aRaw, bRaw, yRaw] = slash;
     const a = Number(aRaw);
     const b = Number(bRaw);
-    // Default month-first; swap only when the first part cannot be a month.
-    let month = a;
-    let day = b;
+    let month = format === 'DMY' ? b : a;
+    let day = format === 'DMY' ? a : b;
+    // A part > 12 can only be the day: trust the value over the declared format.
     if (a > 12 && b <= 12) {
       month = b;
       day = a;
+    } else if (b > 12 && a <= 12) {
+      month = a;
+      day = b;
     }
     if (month < 1 || month > 12 || day < 1 || day > 31) return null;
     const parsed = new Date(Date.UTC(Number(yRaw), month - 1, day));

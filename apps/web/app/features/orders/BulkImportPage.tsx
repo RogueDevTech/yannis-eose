@@ -17,6 +17,7 @@ import { Link } from '@remix-run/react';
 import * as XLSX from 'xlsx';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
+import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import {
@@ -267,6 +268,11 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
   const [colState, setColState] = useState('');
   const [colTotal, setColTotal] = useState('');
   const [colCreatedAt, setColCreatedAt] = useState('');
+  // How to read a TEXT date cell. No safe default exists: Nigerian sheets are
+  // usually day-first, but a US-locale CRM export forces month-first, and the
+  // two disagree silently for every day <= 12. So the operator confirms it.
+  // (Excel serial dates are unambiguous and ignore this.)
+  const [dateFormat, setDateFormat] = useState<'MDY' | 'DMY'>('MDY');
   const [colQty, setColQty] = useState('');
   const [colUnitPrice, setColUnitPrice] = useState('');
   // Per-row status column (Confirmed / Delivered / Pending…). Blank falls back
@@ -449,6 +455,7 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
       const config: ImportJobConfig = {
         targetStatus,
         externalIdColumn,
+        ...(colCreatedAt ? { dateFormat } : {}),
         columnMap: {
           customerName: colName,
           customerPhone: colPhone,
@@ -482,7 +489,7 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
     }
   }, [
     file, targetStatus, externalIdColumn,
-    colName, colPhone, colAddress, colState, colTotal, colCreatedAt,
+    colName, colPhone, colAddress, colState, colTotal, colCreatedAt, dateFormat,
     colQty, colUnitPrice, colStatus,
     colProductCode, colMediaBuyerCode, colCloserCode, colCurrency,
     missingRequired, unknownColumnFields, duplicateColumns,
@@ -791,6 +798,20 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
                 <Field label="Order date" mapped={!!colCreatedAt}>
                   <SearchableSelect value={colCreatedAt} onChange={setColCreatedAt} options={optionsFor(colCreatedAt, true)} placeholder="None" />
                 </Field>
+                {/* Only worth asking once a date column is actually mapped. */}
+                {colCreatedAt && (
+                  <Field label="Date format" mapped>
+                    <FormSelect
+                      value={dateFormat}
+                      onChange={(e) => setDateFormat(e.target.value as 'MDY' | 'DMY')}
+                      options={[
+                        { value: 'MDY', label: 'Month first: 05/06/2026 is 6 May' },
+                        { value: 'DMY', label: 'Day first: 05/06/2026 is 5 June' },
+                      ]}
+                      controlSize="sm"
+                    />
+                  </Field>
+                )}
                 <Field label="Quantity" mapped={!!colQty}>
                   <SearchableSelect value={colQty} onChange={setColQty} options={optionsFor(colQty, true)} placeholder="None (defaults to 1)" />
                 </Field>

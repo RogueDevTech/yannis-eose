@@ -348,6 +348,24 @@ export function ImportJobDetailPage({ jobId, backHref }: ImportJobDetailPageProp
     [facets],
   );
 
+  // Failure causes, largest first, with each cause's share of the failures.
+  // Buckets can overlap (a reason matching two patterns counts in both), so the
+  // percentage is of failed rows and is not expected to total exactly 100.
+  const failureSummary = useMemo(() => {
+    const failed = job?.failedRows ?? 0;
+    if (failed <= 0) return [];
+    return (facets?.reasons ?? [])
+      .filter((r) => r.count > 0)
+      .slice()
+      .sort((a, b) => b.count - a.count)
+      .map((r) => ({
+        value: r.value,
+        label: r.label,
+        count: r.count,
+        pct: Math.round((r.count / failed) * 100),
+      }));
+  }, [facets, job?.failedRows]);
+
   const activeFilterCount =
     (rowStatusFilter ? 1 : 0) +
     (orderStatusFilter ? 1 : 0) +
@@ -579,6 +597,55 @@ export function ImportJobDetailPage({ jobId, backHref }: ImportJobDetailPageProp
             onPause={() => setPauseOpen(true)}
           />
 
+          {/* Failure summary. "Failed: 350" alone doesn't tell the admin whether
+              that's one fixable cause or 350 separate problems, so break it down
+              by cause, largest first. Each cause filters the table below it, so
+              the summary is triage rather than just a readout. */}
+          {job.failedRows > 0 && failureSummary.length > 0 && (
+            <div className="rounded-lg border border-app-border bg-app-surface p-4">
+              <div className="mb-3">
+                <h3 className="text-sm font-semibold text-app-fg">Why rows failed</h3>
+                <p className="text-xs text-app-fg-muted">
+                  {job.failedRows.toLocaleString()} of {job.totalRows.toLocaleString()} rows.
+                  Tap a cause to see just those rows.
+                </p>
+              </div>
+              <ul className="flex flex-col gap-1.5">
+                {failureSummary.map((f) => {
+                  const active = reasonFilter === f.value;
+                  return (
+                    <li key={f.value}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Toggle: tapping the active cause clears the filter.
+                          setReasonFilter(active ? '' : f.value);
+                          setRowStatusFilter(active ? '' : 'FAILED');
+                        }}
+                        aria-pressed={active}
+                        className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition-colors ${
+                          active
+                            ? 'border-brand-500 bg-brand-500/10'
+                            : 'border-app-border bg-app-elevated hover:bg-app-hover'
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1 truncate text-sm text-app-fg">
+                          {f.label}
+                        </span>
+                        <span className="shrink-0 text-sm font-semibold tabular-nums text-app-fg">
+                          {f.count.toLocaleString()}
+                        </span>
+                        <span className="w-12 shrink-0 text-right text-xs tabular-nums text-app-fg-muted">
+                          {f.pct}%
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
           {/* Per-row listing */}
           <div className="rounded-lg border border-app-border bg-app-surface p-4">
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -594,6 +661,22 @@ export function ImportJobDetailPage({ jobId, backHref }: ImportJobDetailPageProp
                       : `${rowTotal.toLocaleString()} row${rowTotal === 1 ? '' : 's'} recorded so far.`}
                 </p>
               </div>
+              {/* Retry lives here as well as on the summary card: on a large
+                  import the operator is scrolled deep into the row table when
+                  they decide to re-run the failures, and the card is far out of
+                  reach above. Same action, same gating as the card's button. */}
+              {job &&
+                job.failedRows > 0 &&
+                (job.status === 'COMPLETED' || job.status === 'PAUSED' || job.status === 'FAILED') && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setRetryOpen(true)}
+                    className="shrink-0"
+                  >
+                    Retry {job.failedRows.toLocaleString()} failed row{job.failedRows === 1 ? '' : 's'}
+                  </Button>
+                )}
             </div>
 
             {/* Filters. Applied server-side so they search the WHOLE import, not

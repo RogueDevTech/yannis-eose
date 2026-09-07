@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
@@ -74,6 +74,16 @@ export interface ImportJobConfig {
   mediaBuyerId?: string | null;
   assignedCsId?: string | null;
   targetStatus: ImportOrderInput['targetStatus'];
+  /**
+   * How to read a TEXT date cell like "05/06/2026". Excel SERIAL dates (46141)
+   * are unambiguous and ignore this entirely.
+   *
+   * There is no safe default: Nigerian sheets are usually day-first, but an
+   * export from a US-locale CRM forces month-first, and the two silently
+   * disagree for every day <= 12 (05/06 is 5 June or 6 May). Guessing wrong
+   * mis-dates orders without any error, so the operator CONFIRMS this at upload.
+   */
+  dateFormat?: 'MDY' | 'DMY';
   /** Header name (or 0-based column index as string) holding the unique external id. */
   externalIdColumn: string;
   /** Map of order field → source header name. */
@@ -199,6 +209,10 @@ const IMPORT_STATUS_LABELS: Record<string, ImportOrderInput['targetStatus']> = {
   unconfirmed: 'CS_ENGAGED',
   // Confirmed by the customer
   confirmed: 'CONFIRMED',
+  // The legacy CRM's "Scheduled" = customer confirmed and a delivery was booked,
+  // so it lands on CONFIRMED (CEO decision, 2026-09-07). Note this DOES stamp
+  // confirmedAt and counts toward confirmation rate: deliberate, not incidental.
+  scheduled: 'CONFIRMED',
   // Delivered to the customer
   delivered: 'DELIVERED',
   // Delivered AND cash remitted to finance
@@ -291,8 +305,23 @@ function snapshotRawRow(record: Record<string, unknown>): Record<string, string>
  * CAUSE ("show me every row that failed on Cost") instead of scrolling.
  * Kept in one place so the filter and its dropdown can never drift apart.
  */
-export const REASON_KINDS: Array<{ value: string; label: string; match: string }> = [
+export const REASON_KINDS: Array<{
+  value: string;
+  label: string;
+  match: string;
+  /** Extra ILIKE patterns folded into the same bucket. */
+  alsoMatch?: string[];
+}> = [
   { value: 'status', label: 'Status problem', match: '%status%' },
+  // Unreadable date cell. `alsoMatch` catches the raw Postgres error an
+  // out-of-range timestamp surfaced as before the serial fix ("time zone
+  // displacement out of range"), so historical jobs bucket correctly too.
+  {
+    value: 'date',
+    label: 'Date problem',
+    match: '%date%',
+    alsoMatch: ['%time zone displacement%'],
+  },
   { value: 'product', label: 'Product code', match: '%product%' },
   { value: 'media_buyer', label: 'Media buyer code', match: '%media buyer%' },
   { value: 'cs', label: 'CS code', match: '%CS code%' },
@@ -523,7 +552,12 @@ export class BulkImportService {
     }
     if (opts?.reasonKind) {
       const kind = REASON_KINDS.find((k) => k.value === opts.reasonKind);
-      if (kind) conditions.push(sql`${schema.importJobRows.reason} ILIKE ${kind.match}`);
+      if (kind) {
+        const patterns = [kind.match, ...(kind.alsoMatch ?? [])];
+        conditions.push(
+          or(...patterns.map((p) => sql`${schema.importJobRows.reason} ILIKE ${p}`))!,
+        );
+      }
     }
     const where = and(...conditions);
 
@@ -1061,8 +1095,10 @@ export class BulkImportService {
     for (const r of byReason) {
       const text = (r.reason ?? '').toLowerCase();
       for (const k of REASON_KINDS) {
-        const needle = k.match.replace(/%/g, '').toLowerCase();
-        if (needle && text.includes(needle)) {
+        const needles = [k.match, ...(k.alsoMatch ?? [])]
+          .map((m) => m.replace(/%/g, '').toLowerCase())
+          .filter(Boolean);
+        if (needles.some((n) => text.includes(n))) {
           reasonCounts.set(k.value, (reasonCounts.get(k.value) ?? 0) + r.count);
         }
       }
@@ -1919,7 +1955,7 @@ export class BulkImportService {
     if (m.createdAt) {
       const dateRaw = this.readCell(record, m.createdAt);
       if (dateRaw != null && dateRaw !== '') {
-        const normalized = normalizeImportDate(dateRaw);
+        const normalized = normalizeImportDate(dateRaw, config.dateFormat);
         if (!normalized) {
           throw new Error(
             `Unreadable date "${dateRaw}" (column "${m.createdAt}"). Expected a date cell, or MM/DD/YYYY.`,
