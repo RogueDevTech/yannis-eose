@@ -69,10 +69,23 @@ export const userCountries = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id),
+    /**
+     * Company this grant applies to (migration 0342). Country access is PER
+     * COMPANY: currencies are company-scoped, so a global grant was meaningless
+     * in a company that lacks that currency, and a user whose global list
+     * omitted a company's base currency was locked out of it entirely.
+     */
+    groupId: uuid('group_id')
+      .notNull()
+      .references(() => branchGroups.id),
     /** ISO-ish currency code matching currencies.code (e.g. 'NGN', 'GHS'). */
     currencyCode: text('currency_code').notNull(),
   },
   (t) => ({
-    uniq: uniqueIndex('user_countries_user_currency_uniq').on(t.userId, t.currencyCode),
+    uniq: uniqueIndex('user_countries_user_group_currency_uniq').on(
+      t.userId,
+      t.groupId,
+      t.currencyCode,
+    ),
   }),
 );

@@ -172,6 +172,27 @@ const DELIVERY_OVERDUE_EXCLUDED_STATUSES = [
   'PARTIALLY_DELIVERED',
 ] as const;
 
+/**
+ * Parse a caller-supplied createdAt override, rejecting anything outside a
+ * plausible order window.
+ *
+ * An isNaN check alone is NOT enough. `new Date("46141")` — an Excel date
+ * serial arriving as a bare numeric string — parses as the YEAR 46141 and is a
+ * perfectly valid Date, so it slips past isNaN and only dies at the Postgres
+ * timestamp boundary with "time zone displacement out of range", failing the
+ * write. Bounding the year turns that into a clean "ignore the override".
+ *
+ * Returns undefined (never throws) so callers fall back to their default
+ * timestamp, matching the previous behaviour for an unparseable value.
+ */
+function parsePlausibleOrderDate(value: string): Date | undefined {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  const year = parsed.getUTCFullYear();
+  if (year < 2000 || year > 2100) return undefined;
+  return parsed;
+}
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -3031,8 +3052,7 @@ export class OrdersService {
     // Parse createdAt override — fall back to now if not provided or invalid
     let createdAtDate: Date | undefined;
     if (input.createdAtOverride) {
-      const parsed = new Date(input.createdAtOverride);
-      if (!isNaN(parsed.getTime())) createdAtDate = parsed;
+      createdAtDate = parsePlausibleOrderDate(input.createdAtOverride);
     }
 
     // Build timestamp overrides based on how far along the target status is
@@ -3136,8 +3156,7 @@ export class OrdersService {
 
     let createdAtDate: Date | undefined;
     if (input.createdAtOverride) {
-      const parsed = new Date(input.createdAtOverride);
-      if (!isNaN(parsed.getTime())) createdAtDate = parsed;
+      createdAtDate = parsePlausibleOrderDate(input.createdAtOverride);
     }
 
     const statusTimestamps: Record<string, Date | undefined> = {};

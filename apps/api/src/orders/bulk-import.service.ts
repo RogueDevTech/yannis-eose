@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
@@ -16,7 +16,7 @@ import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { getObjectStreamFromStorage } from '../common/storage/object-storage';
 import { OrdersService } from './orders.service';
-import { streamImportRows } from './bulk-import.parser';
+import { streamImportRows, normalizeImportDate } from './bulk-import.parser';
 
 /**
  * Rows upserted per worker tick. A bounded chunk keeps each tick short so the
@@ -74,6 +74,16 @@ export interface ImportJobConfig {
   mediaBuyerId?: string | null;
   assignedCsId?: string | null;
   targetStatus: ImportOrderInput['targetStatus'];
+  /**
+   * How to read a TEXT date cell like "05/06/2026". Excel SERIAL dates (46141)
+   * are unambiguous and ignore this entirely.
+   *
+   * There is no safe default: Nigerian sheets are usually day-first, but an
+   * export from a US-locale CRM forces month-first, and the two silently
+   * disagree for every day <= 12 (05/06 is 5 June or 6 May). Guessing wrong
+   * mis-dates orders without any error, so the operator CONFIRMS this at upload.
+   */
+  dateFormat?: 'MDY' | 'DMY';
   /** Header name (or 0-based column index as string) holding the unique external id. */
   externalIdColumn: string;
   /** Map of order field → source header name. */
@@ -199,6 +209,10 @@ const IMPORT_STATUS_LABELS: Record<string, ImportOrderInput['targetStatus']> = {
   unconfirmed: 'CS_ENGAGED',
   // Confirmed by the customer
   confirmed: 'CONFIRMED',
+  // The legacy CRM's "Scheduled" = customer confirmed and a delivery was booked,
+  // so it lands on CONFIRMED (CEO decision, 2026-09-07). Note this DOES stamp
+  // confirmedAt and counts toward confirmation rate: deliberate, not incidental.
+  scheduled: 'CONFIRMED',
   // Delivered to the customer
   delivered: 'DELIVERED',
   // Delivered AND cash remitted to finance
@@ -291,8 +305,23 @@ function snapshotRawRow(record: Record<string, unknown>): Record<string, string>
  * CAUSE ("show me every row that failed on Cost") instead of scrolling.
  * Kept in one place so the filter and its dropdown can never drift apart.
  */
-export const REASON_KINDS: Array<{ value: string; label: string; match: string }> = [
+export const REASON_KINDS: Array<{
+  value: string;
+  label: string;
+  match: string;
+  /** Extra ILIKE patterns folded into the same bucket. */
+  alsoMatch?: string[];
+}> = [
   { value: 'status', label: 'Status problem', match: '%status%' },
+  // Unreadable date cell. `alsoMatch` catches the raw Postgres error an
+  // out-of-range timestamp surfaced as before the serial fix ("time zone
+  // displacement out of range"), so historical jobs bucket correctly too.
+  {
+    value: 'date',
+    label: 'Date problem',
+    match: '%date%',
+    alsoMatch: ['%time zone displacement%'],
+  },
   { value: 'product', label: 'Product code', match: '%product%' },
   { value: 'media_buyer', label: 'Media buyer code', match: '%media buyer%' },
   { value: 'cs', label: 'CS code', match: '%CS code%' },
@@ -342,7 +371,11 @@ function buildImportIdentityKey(args: {
 
   const raw = (args.createdAtOverride ?? '').trim();
   if (!raw) return null;
-  const parsed = new Date(raw);
+  // Normalise first: a raw Excel serial would otherwise parse as a YEAR and key
+  // the dedup hash off a nonsense day, so a retry could never match the row.
+  const normalized = normalizeImportDate(raw);
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) return null;
   // Calendar day in UTC. Both sides of a comparison are built the same way, so
   // the choice of zone only has to be CONSISTENT, not correct-per-locale.
@@ -519,7 +552,12 @@ export class BulkImportService {
     }
     if (opts?.reasonKind) {
       const kind = REASON_KINDS.find((k) => k.value === opts.reasonKind);
-      if (kind) conditions.push(sql`${schema.importJobRows.reason} ILIKE ${kind.match}`);
+      if (kind) {
+        const patterns = [kind.match, ...(kind.alsoMatch ?? [])];
+        conditions.push(
+          or(...patterns.map((p) => sql`${schema.importJobRows.reason} ILIKE ${p}`))!,
+        );
+      }
     }
     const where = and(...conditions);
 
@@ -1057,8 +1095,10 @@ export class BulkImportService {
     for (const r of byReason) {
       const text = (r.reason ?? '').toLowerCase();
       for (const k of REASON_KINDS) {
-        const needle = k.match.replace(/%/g, '').toLowerCase();
-        if (needle && text.includes(needle)) {
+        const needles = [k.match, ...(k.alsoMatch ?? [])]
+          .map((m) => m.replace(/%/g, '').toLowerCase())
+          .filter(Boolean);
+        if (needles.some((n) => text.includes(n))) {
           reasonCounts.set(k.value, (reasonCounts.get(k.value) ?? 0) + r.count);
         }
       }
@@ -1733,6 +1773,10 @@ export class BulkImportService {
 
     // Per-user assigned countries (user_countries) for the currency fallback.
     {
+      // Country access is PER COMPANY (0342): filter on user_countries.group_id
+      // directly. The old join through user_branches → branches selected users
+      // who merely had A branch in this company, and then took ALL their grants,
+      // including those belonging to another company.
       const rows = groupId
         ? await this.db
             .selectDistinct({
@@ -1740,9 +1784,7 @@ export class BulkImportService {
               currencyCode: schema.userCountries.currencyCode,
             })
             .from(schema.userCountries)
-            .innerJoin(schema.userBranches, eq(schema.userBranches.userId, schema.userCountries.userId))
-            .innerJoin(schema.branches, eq(schema.branches.id, schema.userBranches.branchId))
-            .where(eq(schema.branches.groupId, groupId))
+            .where(eq(schema.userCountries.groupId, groupId))
         : await this.db
             .select({
               userId: schema.userCountries.userId,
@@ -1905,7 +1947,23 @@ export class BulkImportService {
       unitPrice = config.defaultUnitPrice ?? 0;
     }
 
-    const createdAtOverride = m.createdAt ? this.readCell(record, m.createdAt) : undefined;
+    // Date cells arrive in several shapes — an Excel SERIAL number (46141), an
+    // ISO string, or a typed "25/05/2026". normalizeImportDate resolves all of
+    // them to ISO and rejects anything absurd, so a serial can never reach
+    // Postgres as year 46141 ("time zone displacement out of range").
+    let createdAtOverride: string | undefined;
+    if (m.createdAt) {
+      const dateRaw = this.readCell(record, m.createdAt);
+      if (dateRaw != null && dateRaw !== '') {
+        const normalized = normalizeImportDate(dateRaw, config.dateFormat);
+        if (!normalized) {
+          throw new Error(
+            `Unreadable date "${dateRaw}" (column "${m.createdAt}"). Expected a date cell, or MM/DD/YYYY.`,
+          );
+        }
+        createdAtOverride = normalized;
+      }
+    }
 
     // Per-row status from the sheet's Status column.
     //

@@ -531,14 +531,56 @@ export function UserCreatePage({
   // active, the admin can scope this user to specific countries; empty = base
   // country only. Media Buyers and Admins always see all countries server-side.
   const currenciesCatalog = useCurrenciesCatalog();
-  const showCurrencyScope = useHasMultipleCurrencies();
   const activeCurrencies = useMemo(
     () => currenciesCatalog.filter((c) => c.active),
     [currenciesCatalog],
   );
+  /**
+   * Show the country picker whenever the company runs 2+ currencies OR the user
+   * being edited already HAS country access (possibly granted from a different
+   * company's view).
+   *
+   * Why the second clause: the catalog comes from `currencies.listActive`, which
+   * is scoped to the EDITOR's active company. A Kenya CS closer edited while the
+   * admin sat in a single-currency company rendered no picker at all, so their
+   * KES access could neither be seen nor granted — the admin had no way to know
+   * the control existed. Keeping the section visible whenever the user already
+   * holds codes means their access is always at least visible.
+   */
+  const showCurrencyScope =
+    useHasMultipleCurrencies() || (editingUser?.currencyCodes?.length ?? 0) > 0;
   const [selectedCurrencyCodes, setSelectedCurrencyCodes] = useState<string[]>(
     editingUser?.currencyCodes ?? [],
   );
+  /**
+   * The rows to render: the editor's company catalog PLUS any code this user
+   * already holds that the catalog doesn't cover (a country granted under a
+   * different company). Without this the checkbox for an existing grant simply
+   * would not exist, so the admin could not see or revoke it, and a save would
+   * silently drop it.
+   */
+  const currencyOptions = useMemo(() => {
+    const known = new Set(activeCurrencies.map((c) => c.code));
+    const extras = (editingUser?.currencyCodes ?? [])
+      .filter((code) => !known.has(code))
+      .map((code) => {
+        const fromCatalog = currenciesCatalog.find((c) => c.code === code);
+        return {
+          code,
+          countryName: fromCatalog?.countryName ?? code,
+          /** Granted in another company: shown, but flagged so it reads as unusual. */
+          foreign: true,
+        };
+      });
+    return [
+      ...activeCurrencies.map((c) => ({
+        code: c.code,
+        countryName: c.countryName || c.code,
+        foreign: false,
+      })),
+      ...extras,
+    ];
+  }, [activeCurrencies, currenciesCatalog, editingUser?.currencyCodes]);
   const toggleCurrencyCode = (code: string) => {
     setSelectedCurrencyCodes((prev) =>
       prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code],
@@ -765,14 +807,27 @@ export function UserCreatePage({
     if (el) el.indeterminate = someBranchesSelected;
   }, [someBranchesSelected]);
 
+  /**
+   * Memberships the form cannot show, because `branches` is scoped to the
+   * EDITOR's active company. A user can belong to branches in another company,
+   * and those ids must survive every bulk operation here: select-all and
+   * clear-all previously replaced the whole selection, silently REVOKING an
+   * invisible membership the admin never saw and never intended to touch.
+   */
+  const hiddenBranchIds = useMemo(() => {
+    const visible = new Set(branches.map((b: UserCreateBranch) => b.id));
+    return selectedBranchIds.filter((id) => !visible.has(id));
+  }, [branches, selectedBranchIds]);
+
   const toggleSelectAllBranches = () => {
     if (allBranchesSelected) {
-      setSelectedBranchIds([]);
+      // Clear only what is visible; keep other companies' memberships.
+      setSelectedBranchIds(hiddenBranchIds);
       setPrimaryBranchByGroup({});
       return;
     }
     const ids = activeBranches.map((b) => b.id);
-    setSelectedBranchIds(ids);
+    setSelectedBranchIds([...new Set([...hiddenBranchIds, ...ids])]);
     // Auto-assign primaries will be handled by the useEffect above.
   };
 
@@ -1229,14 +1284,14 @@ export function UserCreatePage({
             {/* Country / currency scope — only when the company runs 2+ active
                 currencies. Single-currency installs render nothing and default
                 to base (NGN) server-side. */}
-            {showCurrencyScope && selectedRole && activeCurrencies.length > 0 ? (
+            {showCurrencyScope && selectedRole && currencyOptions.length > 0 ? (
               <div className="sm:col-span-2 space-y-2">
                 <label className="block text-sm font-medium text-app-fg-muted">
                   Countries this user can access
                 </label>
                 <div className="border border-app-border rounded-lg overflow-hidden">
                   <div className="max-h-48 overflow-y-auto">
-                    {activeCurrencies.map((c) => (
+                    {currencyOptions.map((c) => (
                       <label
                         key={c.code}
                         className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
@@ -1245,7 +1300,12 @@ export function UserCreatePage({
                           checked={selectedCurrencyCodes.includes(c.code)}
                           onChange={() => toggleCurrencyCode(c.code)}
                         />
-                        <span className="text-sm text-app-fg">{c.countryName || c.code}</span>
+                        <span className="text-sm text-app-fg">{c.countryName}</span>
+                        {c.foreign && (
+                          <span className="ml-auto text-[10px] uppercase tracking-wide text-app-fg-muted">
+                            other company
+                          </span>
+                        )}
                       </label>
                     ))}
                   </div>
