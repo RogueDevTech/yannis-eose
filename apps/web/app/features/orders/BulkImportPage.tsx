@@ -74,23 +74,68 @@ interface BulkImportPageProps {
 
 const TERMINAL_STATUSES = ['COMPLETED', 'FAILED', 'PAUSED'] as const;
 
+/** Blank/duplicate-safe header labels: an empty cell becomes `col_<index>`. */
+function normaliseHeaderCells(cells: unknown[]): string[] {
+  return cells.map((h, i) =>
+    h == null || String(h).trim() === '' ? `col_${i}` : String(h).trim(),
+  );
+}
+
 /**
- * Read the header row + count data rows, in-browser. We parse the whole first
- * sheet once so we can report how many orders the file targets before upload.
+ * Split one CSV line into cells, honouring quoted fields (a quoted cell may
+ * contain commas, and `""` is an escaped quote). Only ever run on the HEADER
+ * line, so it stays a few hundred bytes of work.
  */
-async function readHeaderAndRowCount(file: File): Promise<{ headers: string[]; rowCount: number }> {
+function splitCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i += 1; } else { inQuotes = false; }
+      } else cur += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === ',') { cells.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  cells.push(cur);
+  return cells.map((c) => c.trim().replace(/^"|"$/g, ''));
+}
+
+/**
+ * Read ONLY the header row, without materialising the file's data rows.
+ *
+ * Why this is deliberately header-only: the previous implementation parsed the
+ * ENTIRE workbook synchronously on the main thread purely to show a row count
+ * before upload. On a 100k-row CRM export that froze the tab for a minute or
+ * more with no spinner — the user saw a dead page, assumed the upload had
+ * failed, and refreshed (losing the parse). The count was never load-bearing:
+ * the worker recomputes `total_rows` itself while streaming the file.
+ *
+ * XLSX: `sheetRows: 1` stops the parser after the header row.
+ * CSV:  we slice only the first chunk of bytes and read its first line, so a
+ *       500 MB CSV costs the same as a 5 KB one.
+ */
+async function readHeaderRow(file: File): Promise<string[]> {
+  if (fileTypeOf(file) === 'csv') {
+    // 1 MB is far more than any single header line, and cheap to decode.
+    const head = await file.slice(0, 1024 * 1024).text();
+    const firstLine = head.split(/\r\n|\n|\r/).find((l) => l.trim() !== '');
+    if (!firstLine) return [];
+    return normaliseHeaderCells(splitCsvLine(firstLine));
+  }
+
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array' });
+  // sheetRows:1 → parse the header row only. Everything below it is skipped.
+  const wb = XLSX.read(buf, { type: 'array', sheetRows: 1 });
   const firstSheet = wb.SheetNames[0];
-  if (!firstSheet) return { headers: [], rowCount: 0 };
+  if (!firstSheet) return [];
   const sheet = wb.Sheets[firstSheet];
-  if (!sheet) return { headers: [], rowCount: 0 };
+  if (!sheet) return [];
   const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false });
-  const header = (rows[0] as unknown[] | undefined) ?? [];
-  const headers = header.map((h, i) => (h == null || String(h).trim() === '' ? `col_${i}` : String(h).trim()));
-  // Data rows = everything after the header row (blank rows already dropped).
-  const rowCount = Math.max(0, rows.length - 1);
-  return { headers, rowCount };
+  return normaliseHeaderCells((rows[0] as unknown[] | undefined) ?? []);
 }
 
 function fileTypeOf(file: File): 'xlsx' | 'csv' | null {
@@ -205,8 +250,11 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
 
   const [file, setFile] = useState<File | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
-  const [rowCount, setRowCount] = useState<number | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  // True while the picked file's header row is being read. Without this the page
+  // sat completely silent during the parse and looked broken (the CEO's "nothing
+  // is happening, no confirmation, no progress bar").
+  const [readingFile, setReadingFile] = useState(false);
 
   // Config
   // Imported orders land as CS_ASSIGNED (Pending). Fixed — no longer surfaced in
@@ -278,7 +326,6 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
     setParseError(null);
     setFile(f);
     setHeaders([]);
-    setRowCount(null);
     setAutoMatched(null);
     clearMapping();
     if (!f) return;
@@ -286,14 +333,16 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
       setParseError('Unsupported file. Upload a .xlsx, .xls, or .csv file.');
       return;
     }
+    setReadingFile(true);
     try {
-      const { headers: h, rowCount: n } = await readHeaderAndRowCount(f);
+      // Header row only. The worker counts the data rows itself while streaming,
+      // so we never parse the body here (see readHeaderRow).
+      const h = await readHeaderRow(f);
       if (h.length === 0) {
         setParseError('Could not read a header row from this file.');
         return;
       }
       setHeaders(h);
-      setRowCount(n);
       // Prefill the mapping dropdowns from the detected headers.
       const { map, matchedCount } = autoMapHeaders(h);
       setExternalIdColumn(map.externalId);
@@ -313,6 +362,8 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
       setAutoMatched(matchedCount);
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Failed to read file headers.');
+    } finally {
+      setReadingFile(false);
     }
   }, [clearMapping]);
 
@@ -360,13 +411,8 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
   const mappingComplete =
     allRequiredMapped && unknownColumnFields.length === 0 && duplicateColumns.length === 0;
 
-  const canStart = !!file && headers.length > 0 && mappingComplete && !busy;
+  const canStart = !!file && headers.length > 0 && mappingComplete && !busy && !readingFile;
 
-  // " and N rows to import" fragment for the banner (omitted if unknown/empty).
-  const rowCountPhrase =
-    rowCount != null && rowCount > 0
-      ? ` and ${rowCount.toLocaleString()} ${rowCount === 1 ? 'row' : 'rows'} to import`
-      : '';
 
   const startImport = useCallback(async () => {
     if (!file) return;
@@ -424,7 +470,6 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
         fileKey: key,
         fileName: file.name,
         fileType: ft,
-        ...(rowCount != null ? { totalRows: rowCount } : {}),
         config,
       });
       const initial = await getImportJobStatus(id);
@@ -436,7 +481,7 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
       setUploadPct(null);
     }
   }, [
-    file, rowCount, targetStatus, externalIdColumn,
+    file, targetStatus, externalIdColumn,
     colName, colPhone, colAddress, colState, colTotal, colCreatedAt,
     colQty, colUnitPrice, colStatus,
     colProductCode, colMediaBuyerCode, colCloserCode, colCurrency,
@@ -449,15 +494,25 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
   const isPolling =
     !!job && !TERMINAL_STATUSES.includes(job.status as (typeof TERMINAL_STATUSES)[number]);
 
+  // Consecutive failed polls. A single miss is genuinely transient (the dev DB
+  // serves 1-3s queries and the tab may have been backgrounded), but a run of
+  // them means the progress on screen is stale — the API is down, the session
+  // expired, or the job was deleted. Silently swallowing every error made a dead
+  // API look exactly like a healthy import frozen at N%.
+  const [staleSince, setStaleSince] = useState(0);
   const pollTick = useCallback(async () => {
     if (!jobId) return;
     try {
       const next = await getImportJobStatus(jobId);
       setJob(next);
+      setStaleSince(0);
     } catch {
-      // transient — keep polling
+      // Keep polling — it may recover — but start counting so the UI can warn.
+      setStaleSince((n) => n + 1);
     }
   }, [jobId]);
+  // ~3 misses at the 2.5s interval before we say anything, to avoid flapping.
+  const pollStale = staleSince >= 3;
 
   useImportJobPoll(isPolling, pollTick);
 
@@ -634,6 +689,7 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
           onContinue={() => job && setContinueJobTarget(job)}
           onRetryFailed={onRetryFailed}
           onNewImport={resetForNewImport}
+          pollStale={pollStale}
         />
       ) : (
         <div className="space-y-5 rounded-lg border border-app-border bg-app-surface p-4">
@@ -648,15 +704,21 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
               className="hidden"
             />
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={readingFile}
+                onClick={() => fileInputRef.current?.click()}
+              >
                 {file ? 'Replace file' : 'Choose file'}
               </Button>
               <span className="min-w-0 truncate text-sm text-app-fg-muted" title={file?.name ?? undefined}>
                 {file?.name ?? 'No file chosen'}
               </span>
-              {rowCount != null && (
-                <span className="shrink-0 rounded-full bg-app-hover px-2 py-0.5 text-xs font-medium text-app-fg tabular-nums">
-                  {rowCount.toLocaleString()} {rowCount === 1 ? 'row' : 'rows'}
+              {readingFile && (
+                <span className="flex shrink-0 items-center gap-2 text-sm text-app-fg-muted">
+                  <Spinner size="sm" />
+                  Reading file...
                 </span>
               )}
             </div>
@@ -672,12 +734,12 @@ export function BulkImportPage({ backHref, basePath }: BulkImportPageProps) {
               {mappingComplete ? (
                 <InlineNotification
                   variant="success"
-                  message={`Detected ${headers.length} columns${rowCountPhrase}. All required columns matched automatically. Review the mapping below, then start the import.`}
+                  message={`Detected ${headers.length} columns. All required columns matched automatically. Review the mapping below, then start the import.`}
                 />
               ) : (
                 <InlineNotification
                   variant="warning"
-                  message={`Detected ${headers.length} columns${rowCountPhrase}. ${
+                  message={`Detected ${headers.length} columns. ${
                     missingRequired.length > 0
                       ? `Select a column for: ${missingRequired.map((m) => m.label).join(', ')}.`
                       : unknownColumnFields.length > 0
@@ -1127,10 +1189,18 @@ export function ImportProgress({
   onRetryFailed,
   onNewImport,
   onPause,
+  pollStale = false,
 }: {
   job: ImportJob;
   onContinue: () => void;
   onRetryFailed: () => void;
+  /**
+   * The status poll has been failing for several ticks, so the numbers below are
+   * stale. Shown as a warning rather than an error because the import itself is
+   * almost certainly still running server-side: it is the browser's view that
+   * is broken, not the job.
+   */
+  pollStale?: boolean;
   /** Optional — omitted on the standalone job page where "New import" isn't shown. */
   onNewImport?: () => void;
   /**
@@ -1200,6 +1270,13 @@ export function ImportProgress({
           {running && <span>Resumes from row {job.cursor.toLocaleString()}</span>}
         </div>
       </div>
+
+      {pollStale && (
+        <InlineNotification
+          variant="warning"
+          message="Cannot reach the server for live progress, so these numbers may be out of date. The import keeps running in the background: reload the page to get the current status."
+        />
+      )}
 
       {job.lastError && (
         <InlineNotification

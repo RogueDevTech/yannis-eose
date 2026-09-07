@@ -3,6 +3,17 @@ import { ASSET_FOLDERS, type AssetFolder, sanitizeAssetFileName } from '@yannis/
 export { ASSET_FOLDERS };
 export type { AssetFolder };
 
+/**
+ * Wall-clock ceiling for the direct-to-storage PUT, so a stalled upload fails
+ * loudly instead of hanging forever.
+ *
+ * NOTE this is TOTAL duration, not idle time — XHR has no inactivity timeout.
+ * It is therefore set generously: a 100 MB import (the cap for the `imports`
+ * folder) needs ~30 min on a slow 0.5 Mbps uplink, and killing a genuinely
+ * progressing upload would be worse than the hang this fixes.
+ */
+const UPLOAD_TIMEOUT_MS = 45 * 60 * 1000;
+
 interface UploadUrlResponse {
   uploadUrl: string;
   fileUrl: string;
@@ -67,6 +78,12 @@ export async function uploadAssetDetailed(
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', uploadUrl);
     xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    // Without a timeout a stalled PUT (dropped connection, proxy black-hole)
+    // never settles this promise: the progress bar parks forever and the caller
+    // shows neither success nor error.
+    xhr.timeout = UPLOAD_TIMEOUT_MS;
+    xhr.ontimeout = () =>
+      reject(new Error('Upload timed out. Check your connection and try again.'));
     xhr.upload.onprogress = (e) => {
       if (!e.lengthComputable) return;
       // Map bytes 0..100% onto the 5..100% band (presign already used 0..5%).
