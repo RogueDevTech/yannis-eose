@@ -4,7 +4,7 @@ import { useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/r
 import { useEffect, useState } from 'react';
 import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { DashboardLayout } from '~/components/layout/dashboard-layout';
-import { getCurrentUser, apiRequest, getSessionCookie } from '~/lib/api.server';
+import { getCurrentUser, apiRequest, getSessionCookie, sessionCookieHeaders } from '~/lib/api.server';
 import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
 import { normalizeRouteErrorData } from '~/lib/network-error';
 import { ALL_BRANCHES_ROLES } from '~/components/layout/header-branch-scope';
@@ -138,7 +138,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : Promise.resolve({ missingDates: [], isBlocked: false });
 
   // Stream branches like notifications — avoids blocking the document on branches.list
-  return defer({ user, notifications: notificationsPromise, branches: branchesPromise, branchGroups: branchGroupsPromise, currencies: currenciesPromise, adSpendBacklog: adSpendBacklogPromise });
+  // Forward the API's rolled `yannis_session` + refreshed bundle cookie. This
+  // shell loader runs on every authenticated page, so it is where the sliding
+  // expiry actually reaches the browser.
+  return defer(
+    { user, notifications: notificationsPromise, branches: branchesPromise, branchGroups: branchGroupsPromise, currencies: currenciesPromise, adSpendBacklog: adSpendBacklogPromise },
+    { headers: sessionCookieHeaders(request) },
+  );
 }
 
 /**

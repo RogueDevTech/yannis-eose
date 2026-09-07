@@ -51,7 +51,7 @@ const RESET_TOKEN_TTL = 1800; // 30 minutes
  * Floor of 60s so a login at 23:59:30 still creates a usable session (it just
  * rolls over very soon after).
  */
-function secondsUntilEndOfLocalDay(): number {
+export function secondsUntilEndOfLocalDay(): number {
   const offsetHours = parseFloat(process.env['SESSION_DAILY_EXPIRY_TZ_OFFSET_HOURS'] ?? '1');
   const offsetMs = offsetHours * 3_600_000;
   const nowMs = Date.now();
@@ -72,15 +72,31 @@ function secondsUntilEndOfLocalDay(): number {
   return Math.max(60, Math.ceil((eodUtcMs - nowMs) / 1000));
 }
 
+/**
+ * The authoritative session lifetime, in seconds, for a session being created or
+ * refreshed RIGHT NOW. Under the daily-expiry directive this shrinks through the
+ * day toward 23:59 local; with `SESSION_DAILY_EXPIRY_DISABLED=true` it is the
+ * flat rolling TTL.
+ *
+ * Every place that writes a session lifetime MUST use this — the login handler,
+ * the sliding refresh in AuthGuard, and the cookie re-stamp in `/auth/me`.
+ * They previously disagreed: login set the cookie to expire at 23:59 while the
+ * guard refreshed Redis to a flat 86400s and never re-stamped the cookie, so the
+ * browser silently dropped `yannis_session` at end of day even for an actively
+ * working user, who was then bounced to the login screen on their next request.
+ */
+export function resolveSessionTtlSeconds(rememberMe = false): number {
+  if (process.env['SESSION_DAILY_EXPIRY_DISABLED'] === 'true') {
+    const flat = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10);
+    const remember = parseInt(process.env['SESSION_TTL_REMEMBER_SECONDS'] ?? '2592000', 10);
+    return rememberMe ? remember : flat;
+  }
+  return secondsUntilEndOfLocalDay();
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private readonly sessionTtl: number;
-  /**
-   * Extended session TTL used when the user opts into "Remember me" at sign-in.
-   * Defaults to 30 days; override with SESSION_TTL_REMEMBER_SECONDS.
-   */
-  private readonly sessionTtlRemember: number;
   private readonly maxLoginAttempts: number;
   private readonly rateLimitWindow: number;
 
@@ -92,11 +108,6 @@ export class AuthService {
     private readonly branchTeams: BranchTeamsService,
     private readonly permissions: PermissionsService,
   ) {
-    this.sessionTtl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10); // 24 hours
-    this.sessionTtlRemember = parseInt(
-      process.env['SESSION_TTL_REMEMBER_SECONDS'] ?? '2592000', // 30 days
-      10,
-    );
     this.maxLoginAttempts = 5;
     this.rateLimitWindow = 900; // 15 minutes in seconds
   }
@@ -307,16 +318,11 @@ export class AuthService {
     // CEO directive: sessions ALWAYS expire at 23:59 local time on the calendar day
     // the user signed in, regardless of remember-me. The remember-me flag is now
     // strictly a hint to the client to remember the email locally — it does NOT
-    // extend session TTL beyond today. The `rememberMe` parameter and
-    // `sessionTtlRemember` config are kept for backwards compatibility with older
-    // tenants that may still want extended sessions; flip the env
-    // `SESSION_DAILY_EXPIRY_DISABLED=true` to fall back to the old rolling TTL.
-    const dailyExpiryDisabled = process.env['SESSION_DAILY_EXPIRY_DISABLED'] === 'true';
-    const ttlSeconds = dailyExpiryDisabled
-      ? rememberMe
-        ? this.sessionTtlRemember
-        : this.sessionTtl
-      : secondsUntilEndOfLocalDay();
+    // extend session TTL beyond today. The `rememberMe` parameter is kept for
+    // backwards compatibility with older tenants that may still want extended
+    // sessions; flip the env `SESSION_DAILY_EXPIRY_DISABLED=true` to fall back
+    // to the old rolling TTL (see resolveSessionTtlSeconds).
+    const ttlSeconds = resolveSessionTtlSeconds(rememberMe);
 
     // Bump login_count + last_login_at as the signing-in user; first login also moves
     // PENDING → ACTIVE in the same transaction so temporal audit records modified_by (never bare pool writes → "System").
@@ -556,7 +562,7 @@ export class AuthService {
       mirrorSessionId,
     };
 
-    await this.sessionStore.updateSession(sessionToken, mirroredSession, this.sessionTtl);
+    await this.sessionStore.updateSession(sessionToken, mirroredSession, resolveSessionTtlSeconds());
     // Flush the per-viewer branches list cache so the mirrored session gets
     // the target user's actual branch memberships instead of a stale entry
     // from a previous session (15-min TTL). Uses SCAN to avoid blocking Redis.
@@ -680,7 +686,7 @@ export class AuthService {
       mirrorSessionId: null,
     };
 
-    await this.sessionStore.updateSession(sessionToken, restored, this.sessionTtl);
+    await this.sessionStore.updateSession(sessionToken, restored, resolveSessionTtlSeconds());
     this.logger.log(`mirror_stopped actor=${actor.id} target=${currentSession.id}`);
     return restored;
   }
@@ -864,7 +870,7 @@ export class AuthService {
     // Clearing the view is always allowed.
     if (!code) {
       const cleared: SessionUser = { ...user, currentCurrencyCode: null };
-      await this.sessionStore.updateSession(sessionToken, cleared, this.sessionTtl);
+      await this.sessionStore.updateSession(sessionToken, cleared, resolveSessionTtlSeconds());
       return cleared;
     }
 
@@ -896,7 +902,7 @@ export class AuthService {
     }
 
     const updated: SessionUser = { ...user, currentCurrencyCode: wanted };
-    await this.sessionStore.updateSession(sessionToken, updated, this.sessionTtl);
+    await this.sessionStore.updateSession(sessionToken, updated, resolveSessionTtlSeconds());
     return updated;
   }
 
@@ -1045,7 +1051,7 @@ export class AuthService {
       selectedBranchIds: groupBranchIds,
       activeGroupId,
     };
-    await this.sessionStore.updateSession(sessionToken, updated, this.sessionTtl);
+    await this.sessionStore.updateSession(sessionToken, updated, resolveSessionTtlSeconds());
 
     return updated;
   }

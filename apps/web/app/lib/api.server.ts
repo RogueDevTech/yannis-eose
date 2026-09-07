@@ -501,6 +501,41 @@ const currentUserCache = new WeakMap<
 >();
 
 /**
+ * `Set-Cookie` headers the API returned during this request's `/auth/me` call,
+ * waiting to be forwarded to the browser.
+ *
+ * The API re-stamps `yannis_session` (rolling its Max-Age) and re-issues the
+ * bundle cookie on every `/auth/me`. Loaders, unlike actions, were dropping
+ * those headers entirely — so the rolled expiry never reached the browser and
+ * the cookie still died at its original time. Loaders now drain this and attach
+ * the results to their response (see `sessionCookieHeaders`).
+ */
+const pendingSetCookies = new WeakMap<Request, string[]>();
+
+function recordSetCookies(request: Request, cookies: string[]): void {
+  if (cookies.length === 0) return;
+  const existing = pendingSetCookies.get(request) ?? [];
+  pendingSetCookies.set(request, [...existing, ...cookies]);
+}
+
+/**
+ * Drain the `Set-Cookie` headers accumulated for this request into a `Headers`
+ * object a loader can return. Safe to call when none were recorded (yields an
+ * empty `Headers`), and safe to call more than once.
+ *
+ * Usage in a loader:
+ *   return defer({ ... }, { headers: sessionCookieHeaders(request) });
+ */
+export function sessionCookieHeaders(request: Request): Headers {
+  const headers = new Headers();
+  const cookies = pendingSetCookies.get(request);
+  if (!cookies) return headers;
+  for (const c of cookies) headers.append('Set-Cookie', c);
+  pendingSetCookies.delete(request);
+  return headers;
+}
+
+/**
  * Map a verified session bundle to the `getCurrentUser` return shape. Shared by
  * the fresh fast-path and the stale last-known-good fallback so the two never
  * drift. Optional/flag fields are spread conditionally to preserve the exact
@@ -625,6 +660,10 @@ async function getCurrentUserUncached(request: Request, options?: GetCurrentUser
   });
 
   if (res.ok) {
+    // Capture the rolled session cookie + fresh bundle so the loader can pass
+    // them on. Without this the API's re-stamped Max-Age never reaches the
+    // browser and the cookie still expires at its original time.
+    recordSetCookies(request, res.setCookies);
     const u = res.data.user;
     return u ?? null;
   }
