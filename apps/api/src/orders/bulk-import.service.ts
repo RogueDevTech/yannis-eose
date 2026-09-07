@@ -16,7 +16,7 @@ import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { getObjectStreamFromStorage } from '../common/storage/object-storage';
 import { OrdersService } from './orders.service';
-import { streamImportRows } from './bulk-import.parser';
+import { streamImportRows, normalizeImportDate } from './bulk-import.parser';
 
 /**
  * Rows upserted per worker tick. A bounded chunk keeps each tick short so the
@@ -342,7 +342,11 @@ function buildImportIdentityKey(args: {
 
   const raw = (args.createdAtOverride ?? '').trim();
   if (!raw) return null;
-  const parsed = new Date(raw);
+  // Normalise first: a raw Excel serial would otherwise parse as a YEAR and key
+  // the dedup hash off a nonsense day, so a retry could never match the row.
+  const normalized = normalizeImportDate(raw);
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) return null;
   // Calendar day in UTC. Both sides of a comparison are built the same way, so
   // the choice of zone only has to be CONSISTENT, not correct-per-locale.
@@ -1733,6 +1737,10 @@ export class BulkImportService {
 
     // Per-user assigned countries (user_countries) for the currency fallback.
     {
+      // Country access is PER COMPANY (0342): filter on user_countries.group_id
+      // directly. The old join through user_branches → branches selected users
+      // who merely had A branch in this company, and then took ALL their grants,
+      // including those belonging to another company.
       const rows = groupId
         ? await this.db
             .selectDistinct({
@@ -1740,9 +1748,7 @@ export class BulkImportService {
               currencyCode: schema.userCountries.currencyCode,
             })
             .from(schema.userCountries)
-            .innerJoin(schema.userBranches, eq(schema.userBranches.userId, schema.userCountries.userId))
-            .innerJoin(schema.branches, eq(schema.branches.id, schema.userBranches.branchId))
-            .where(eq(schema.branches.groupId, groupId))
+            .where(eq(schema.userCountries.groupId, groupId))
         : await this.db
             .select({
               userId: schema.userCountries.userId,
@@ -1905,7 +1911,23 @@ export class BulkImportService {
       unitPrice = config.defaultUnitPrice ?? 0;
     }
 
-    const createdAtOverride = m.createdAt ? this.readCell(record, m.createdAt) : undefined;
+    // Date cells arrive in several shapes — an Excel SERIAL number (46141), an
+    // ISO string, or a typed "25/05/2026". normalizeImportDate resolves all of
+    // them to ISO and rejects anything absurd, so a serial can never reach
+    // Postgres as year 46141 ("time zone displacement out of range").
+    let createdAtOverride: string | undefined;
+    if (m.createdAt) {
+      const dateRaw = this.readCell(record, m.createdAt);
+      if (dateRaw != null && dateRaw !== '') {
+        const normalized = normalizeImportDate(dateRaw);
+        if (!normalized) {
+          throw new Error(
+            `Unreadable date "${dateRaw}" (column "${m.createdAt}"). Expected a date cell, or MM/DD/YYYY.`,
+          );
+        }
+        createdAtOverride = normalized;
+      }
+    }
 
     // Per-row status from the sheet's Status column.
     //

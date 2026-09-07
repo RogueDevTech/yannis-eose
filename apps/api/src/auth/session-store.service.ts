@@ -230,15 +230,33 @@ export class SessionStoreService {
       );
     if (rows.length === 0) return 0;
 
+    // Country access is PER COMPANY (0342), so fetch the grants WITH their
+    // company and give each live session only the codes for the company that
+    // session is currently in. Stamping one flat list across every session would
+    // hand a session access belonging to a different company.
     const countryRows = await this.db
-      .select({ currencyCode: schema.userCountries.currencyCode })
+      .select({
+        currencyCode: schema.userCountries.currencyCode,
+        groupId: schema.userCountries.groupId,
+      })
       .from(schema.userCountries)
       .where(eq(schema.userCountries.userId, userId));
-    const currencyCodes = countryRows.map((r) => r.currencyCode);
+    const codesByGroup = new Map<string, string[]>();
+    for (const r of countryRows) {
+      const list = codesByGroup.get(r.groupId) ?? [];
+      list.push(r.currencyCode);
+      codesByGroup.set(r.groupId, list);
+    }
+    // Sessions with no active company (global "All Branches" views) keep the
+    // union, matching how they resolve elsewhere.
+    const allCodes = [...new Set(countryRows.map((r) => r.currencyCode))];
 
     let updated = 0;
     for (const row of rows) {
       const session = row.sessionData as unknown as SessionUser;
+      const currencyCodes = session.activeGroupId
+        ? (codesByGroup.get(session.activeGroupId) ?? [])
+        : allCodes;
       const nextSession: SessionUser = { ...session, currencyCodes };
       const ttlSeconds = await this.remainingTtlSeconds(row.token, row.expiresAt);
       await this.updateSession(row.token, nextSession, ttlSeconds);

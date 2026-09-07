@@ -174,3 +174,94 @@ function stringifyScalar(value: unknown): string {
     return '';
   }
 }
+
+/**
+ * Excel stores a date as a SERIAL NUMBER: days since 1899-12-30. A column that
+ * is text- or general-formatted comes back from ExcelJS as that bare number
+ * (only a recognised date format yields a real `Date`), so the sheet shows
+ * "25/05/2026" while the cell value is 46141.
+ *
+ * Passing that straight to `new Date()` is the trap: JS parses a bare numeric
+ * STRING as a YEAR, so "46141" becomes +046141-01-01 — a valid Date object, so
+ * an isNaN guard waves it through, and Postgres then rejects it with
+ * "time zone displacement out of range". That failed every row of an import.
+ *
+ * Accepts serials in [MIN_EXCEL_SERIAL, MAX_EXCEL_SERIAL] (~1954-2064). Outside
+ * that window a number is far likelier to be a stray figure than a date, so we
+ * decline it rather than invent a timestamp.
+ */
+const MIN_EXCEL_SERIAL = 20000; // ~1954-10-03
+const MAX_EXCEL_SERIAL = 60000; // ~2064-04-04
+const EXCEL_EPOCH_UTC_MS = Date.UTC(1899, 11, 30);
+
+export function excelSerialToDate(serial: number): Date | null {
+  if (!Number.isFinite(serial)) return null;
+  if (serial < MIN_EXCEL_SERIAL || serial > MAX_EXCEL_SERIAL) return null;
+  // Whole days + fractional time-of-day. Rounded to the minute: Excel serials
+  // carry float noise that would otherwise yield 23:59:59.9997.
+  const ms = EXCEL_EPOCH_UTC_MS + Math.round(serial * 24 * 60) * 60 * 1000;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Normalise a date cell to an ISO string, whatever shape it arrived in:
+ * an Excel serial, an ISO string, or a human date ("25/05/2026", "2026-05-25").
+ * Returns null when the value is absent or cannot be read as a sane date, so
+ * callers fail the row with a clear message instead of writing a bogus year.
+ *
+ * Slash/dash dates are read MONTH-FIRST (M/D/YYYY), matching the sheets this
+ * importer consumes. Where the day is unambiguous (>12) the order is inferred
+ * from the value itself, so a stray day-first cell still lands on the right
+ * calendar day rather than being silently shifted.
+ */
+export function normalizeImportDate(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : sanifyYear(value);
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  // A bare number (or numeric string) is an Excel serial, never a year.
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const asDate = excelSerialToDate(Number(raw));
+    return asDate ? sanifyYear(asDate) : null;
+  }
+
+  // M/D/YYYY (or M-D-YYYY). Month-first by default; a first part >12 can only
+  // be a day, so that case is read day-first instead of rejected.
+  const slash = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (slash) {
+    const [, aRaw, bRaw, yRaw] = slash;
+    const a = Number(aRaw);
+    const b = Number(bRaw);
+    // Default month-first; swap only when the first part cannot be a month.
+    let month = a;
+    let day = b;
+    if (a > 12 && b <= 12) {
+      month = b;
+      day = a;
+    }
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const parsed = new Date(Date.UTC(Number(yRaw), month - 1, day));
+    // Reject a rolled-over date (e.g. 02/31/2026 becoming 3 March).
+    if (parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return null;
+    return Number.isNaN(parsed.getTime()) ? null : sanifyYear(parsed);
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : sanifyYear(parsed);
+}
+
+/**
+ * Final backstop: reject a date that parsed cleanly but lands outside any year
+ * an order could plausibly carry. This is what stops a year-46141 value from
+ * reaching Postgres.
+ */
+function sanifyYear(d: Date): string | null {
+  const year = d.getUTCFullYear();
+  if (year < 2000 || year > 2100) return null;
+  return d.toISOString();
+}

@@ -310,7 +310,9 @@ export class AuthService {
       // sole branch for single-branch org-wide heads instead of throwing.
       branchIds: memberships.map((m) => m.branchId as string),
       // Multi-country data-scope — resolved into effectiveCurrencyCodes on ctx.
-      currencyCodes: await this.getUserCurrencyCodes(user.id),
+      // Scoped to the company being entered (0342): country access is per
+      // company, so a grant in one never widens or narrows another.
+      currencyCodes: await this.getUserCurrencyCodes(user.id, activeGroupId),
       appTheme: user.appTheme ?? null,
       fontScale: user.fontScale ?? null,
     };
@@ -551,8 +553,9 @@ export class AuthService {
       activeGroupId: mirrorActiveGroupId,
       selectedBranchIds: mirrorSelectedBranchIds,
       branchIds: targetMemberships.map((m) => m.branchId as string),
-      // Mirror sees exactly the target's country scope (read-only walkthrough).
-      currencyCodes: await this.getUserCurrencyCodes(target.id),
+      // Mirror sees exactly the target's country scope (read-only walkthrough),
+      // within the company the mirror session lands in.
+      currencyCodes: await this.getUserCurrencyCodes(target.id, mirrorActiveGroupId),
       // Surface the target's appearance so the admin sees the app exactly as the
       // user would. The green border makes Mirror Mode obvious; the theme is part
       // of the read-only "live walkthrough".
@@ -678,7 +681,13 @@ export class AuthService {
       logisticsLocationId: actor.logisticsLocationId,
       currentBranchId,
       branchIds: memberships.map((m) => m.branchId as string),
-      // Restore the actor's own country scope on mirror-stop.
+      // Restore the actor's own country scope on mirror-stop. Deliberately
+      // UNSCOPED by company: `restored` sets no activeGroupId (it goes back to
+      // the actor's own default context, resolved on their next request), so
+      // there is no company to scope by yet. Returning every grant they hold is
+      // the safe restore — the per-company narrowing happens when their session
+      // next resolves a company, and mirror-exit must never leave the actor with
+      // LESS access than they started with.
       currencyCodes: await this.getUserCurrencyCodes(actor.id),
       appTheme: actor.appTheme ?? null,
       fontScale: actor.fontScale ?? null,
@@ -1045,11 +1054,27 @@ export class AuthService {
       groupBranchIds = permittedGroupIds ?? null;
     }
 
+    // Country access is PER COMPANY (0342), so switching company must re-resolve
+    // it. Carrying `...user` forward alone kept the OLD company's grants, and
+    // kept `currentCurrencyCode` pointing at a currency that may not exist in
+    // the new company — currencies are group-scoped, and ctx.effectiveCurrency-
+    // Codes then narrows hard to that stale code, emptying every list.
+    const nextCurrencyCodes = await this.getUserCurrencyCodes(user.id, activeGroupId);
+    // Keep the selected country only if it is still one the user holds HERE;
+    // otherwise clear it and fall back to this company's full allowed set.
+    const stillValid =
+      user.currentCurrencyCode &&
+      nextCurrencyCodes.some(
+        (c) => c.toUpperCase() === user.currentCurrencyCode!.toUpperCase(),
+      );
+
     const updated: SessionUser = {
       ...user,
       currentBranchId: branchId,
       selectedBranchIds: groupBranchIds,
       activeGroupId,
+      currencyCodes: nextCurrencyCodes,
+      currentCurrencyCode: stillValid ? user.currentCurrencyCode : null,
     };
     await this.sessionStore.updateSession(sessionToken, updated, resolveSessionTtlSeconds());
 
@@ -1086,11 +1111,27 @@ export class AuthService {
    * tRPC context. Empty for a user with no assignment (context then falls back to
    * base country NGN for non-view_all users). Ignored for MB/admin/view_all.
    */
-  async getUserCurrencyCodes(userId: string): Promise<string[]> {
+  /**
+   * A user's country access WITHIN ONE COMPANY (migration 0342).
+   *
+   * Country access is per company: currencies are company-scoped, so the same
+   * user can legitimately hold different countries in each company they belong
+   * to, and a grant in one must never affect the other. Callers pass the
+   * session's active company; omitting it returns every grant the user holds
+   * across all companies, which is only correct for cross-company admin views.
+   */
+  async getUserCurrencyCodes(userId: string, groupId?: string | null): Promise<string[]> {
     const rows = await this.db
       .select({ currencyCode: schema.userCountries.currencyCode })
       .from(schema.userCountries)
-      .where(eq(schema.userCountries.userId, userId));
+      .where(
+        groupId
+          ? and(
+              eq(schema.userCountries.userId, userId),
+              eq(schema.userCountries.groupId, groupId),
+            )
+          : eq(schema.userCountries.userId, userId),
+      );
     return rows.map((r) => r.currencyCode);
   }
 

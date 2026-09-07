@@ -993,9 +993,15 @@ export class UsersService {
             ).map((c) => c.trim().toUpperCase()).filter(Boolean),
           ),
         ];
-        if (codes.length > 0) {
+        // Stamp the creating company — country access is per company (0342).
+        const createCountryGroupId = actor.activeGroupId ?? null;
+        if (codes.length > 0 && createCountryGroupId) {
           await tx.insert(schema.userCountries).values(
-            codes.map((currencyCode) => ({ userId: createdUser.id, currencyCode })),
+            codes.map((currencyCode) => ({
+              userId: createdUser.id,
+              groupId: createCountryGroupId,
+              currencyCode,
+            })),
           );
         }
       }
@@ -1171,10 +1177,29 @@ export class UsersService {
 
     // Multi-country: the user's assigned country/currency codes, so the edit form
     // can pre-populate the country picker.
+    //
+    // Scoped to the VIEWING company (0342): country access is per company, and
+    // `update()` replaces only the acting company's grants. Returning every
+    // company's codes here would make the form show grants it cannot save,
+    // and unticking one would appear to do nothing.
+    const viewingGroupIds = effectiveBranchIds?.length
+      ? await this.db
+          .selectDistinct({ groupId: schema.branches.groupId })
+          .from(schema.branches)
+          .where(inArray(schema.branches.id, effectiveBranchIds))
+          .then((rows) => rows.map((r) => r.groupId).filter(Boolean) as string[])
+      : [];
     const countryRows = await this.db
       .select({ currencyCode: schema.userCountries.currencyCode })
       .from(schema.userCountries)
-      .where(eq(schema.userCountries.userId, user.id));
+      .where(
+        viewingGroupIds.length > 0
+          ? and(
+              eq(schema.userCountries.userId, user.id),
+              inArray(schema.userCountries.groupId, viewingGroupIds),
+            )
+          : eq(schema.userCountries.userId, user.id),
+      );
     const assignedCurrencyCodes = [...new Set(countryRows.map((r) => r.currencyCode))];
 
     return {
@@ -2542,11 +2567,28 @@ export class UsersService {
               .filter(Boolean),
           ),
         ];
-        await tx.delete(schema.userCountries).where(eq(schema.userCountries.userId, input.userId));
-        if (codes.length > 0) {
-          await tx.insert(schema.userCountries).values(
-            codes.map((currencyCode) => ({ userId: input.userId, currencyCode })),
-          );
+        // Country access is PER COMPANY (0342). Scope the replace to the acting
+        // company: an unscoped delete would wipe this user's grants in EVERY
+        // other company, which the editing admin can neither see nor intend.
+        const countryGroupId = actor.activeGroupId ?? null;
+        if (countryGroupId) {
+          await tx
+            .delete(schema.userCountries)
+            .where(
+              and(
+                eq(schema.userCountries.userId, input.userId),
+                eq(schema.userCountries.groupId, countryGroupId),
+              ),
+            );
+          if (codes.length > 0) {
+            await tx.insert(schema.userCountries).values(
+              codes.map((currencyCode) => ({
+                userId: input.userId,
+                groupId: countryGroupId,
+                currencyCode,
+              })),
+            );
+          }
         }
       }
 
