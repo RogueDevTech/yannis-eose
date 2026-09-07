@@ -1001,7 +1001,17 @@ function ImportHistory({
                   <td className="px-2 py-2 text-right tabular-nums text-danger-600 dark:text-danger-400">
                     {j.failedRows || 0}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-app-fg-muted">{j.totalRows || '—'}</td>
+                  {/* Mid-run the total is a floor (rows read so far), so mark it
+                      with a trailing "+" rather than implying a final count. */}
+                  <td className="px-2 py-2 text-right tabular-nums text-app-fg-muted">
+                    {j.totalRows
+                      ? `${j.totalRows.toLocaleString()}${
+                          TERMINAL_STATUSES.includes(j.status as (typeof TERMINAL_STATUSES)[number])
+                            ? ''
+                            : '+'
+                        }`
+                      : '—'}
+                  </td>
                   <td className="px-2 py-2 text-right">
                     <div className="flex items-center justify-end gap-3">
                       <Link
@@ -1213,7 +1223,20 @@ export function ImportProgress({
 }) {
   const total = job.totalRows || 0;
   const done = job.processedRows + job.failedRows;
-  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : job.status === 'COMPLETED' ? 100 : 0;
+  const terminal = TERMINAL_STATUSES.includes(job.status as (typeof TERMINAL_STATUSES)[number]);
+  // While the job is still draining, `total` is only a FLOOR (rows the worker
+  // has read so far), not the file's real length — it climbs alongside `done`.
+  // Rendering a percentage against it would sit misleadingly near 100% for the
+  // whole run, so we show an indeterminate bar and a live row count instead,
+  // and switch to a true percentage once the file has been fully read.
+  const totalIsExact = terminal;
+  const pct = totalIsExact
+    ? total > 0
+      ? Math.min(100, Math.round((done / total) * 100))
+      : job.status === 'COMPLETED'
+        ? 100
+        : 0
+    : null;
   const failures = job.errorLog ?? [];
 
   const statusLabel: Record<ImportJob['status'], string> = {
@@ -1248,25 +1271,37 @@ export function ImportProgress({
 
       <div className="space-y-1.5">
         <div className="h-2.5 w-full overflow-hidden rounded-full bg-app-border">
-          <div
-            className={[
-              'h-full transition-all',
-              job.status === 'FAILED'
-                ? 'bg-danger-500'
-                : job.status === 'COMPLETED'
-                  ? 'bg-success-500'
-                  : 'bg-brand-500',
-            ].join(' ')}
-            style={{ width: `${pct}%` }}
-          />
+          {pct == null ? (
+            // Indeterminate: the file's true length isn't known until the worker
+            // finishes reading it, so a filled bar would be a fabricated number.
+            <div className="h-full w-1/3 animate-pulse rounded-full bg-brand-500" />
+          ) : (
+            <div
+              className={[
+                'h-full transition-all',
+                job.status === 'FAILED'
+                  ? 'bg-danger-500'
+                  : job.status === 'COMPLETED'
+                    ? 'bg-success-500'
+                    : 'bg-brand-500',
+              ].join(' ')}
+              style={{ width: `${pct}%` }}
+            />
+          )}
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-app-fg-muted">
-          <span>{pct}%</span>
+          {pct != null && <span>{pct}%</span>}
           <span>Imported: <strong className="text-app-fg">{job.processedRows.toLocaleString()}</strong></span>
           {job.failedRows > 0 && (
             <span>Failed: <strong className="text-app-danger">{job.failedRows.toLocaleString()}</strong></span>
           )}
-          {total > 0 && <span>Total rows seen: {total.toLocaleString()}</span>}
+          {total > 0 && (
+            <span>
+              {pct == null ? 'Rows read so far: ' : 'Total rows: '}
+              {total.toLocaleString()}
+              {pct == null ? '+' : ''}
+            </span>
+          )}
           {running && <span>Resumes from row {job.cursor.toLocaleString()}</span>}
         </div>
       </div>

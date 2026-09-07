@@ -430,13 +430,48 @@ export class BulkImportService {
     return rows[0] ?? null;
   }
 
-  /** List recent jobs for the import history panel. */
-  async listJobs(limit = 20) {
+  /**
+   * List recent jobs for the import history panel, scoped to ONE company.
+   *
+   * The company lives in `config.groupId` (stamped server-side at createJob);
+   * import_jobs has no group_id column of its own, so the filter is a JSONB
+   * lookup. A legacy job written before company scoping has no `groupId` in its
+   * config and is therefore invisible to every company rather than visible to
+   * all of them, which is the safe direction.
+   *
+   * `activeGroupId` is NEVER accepted from the client — it comes from ctx.
+   */
+  async listJobs(limit = 20, activeGroupId?: string | null) {
     return this.db
       .select()
       .from(schema.importJobs)
+      .where(
+        activeGroupId
+          ? sql`${schema.importJobs.config}->>'groupId' = ${activeGroupId}`
+          : sql`${schema.importJobs.config}->>'groupId' IS NULL`,
+      )
       .orderBy(desc(schema.importJobs.createdAt))
       .limit(limit);
+  }
+
+  /**
+   * Assert a job belongs to the caller's company, then return it.
+   *
+   * Every by-id procedure (status, rows, delete, resume, pause, retry, and the
+   * raw-cell reads) MUST go through this. Without it a job id from another
+   * company could be read, mutated, or deleted by anyone with the importer
+   * role: the ~"by-id leak" class called out in CLAUDE.md, where a query filters
+   * on `WHERE id = ?` and forgets the company predicate.
+   *
+   * Kept separate from `getStatus` on purpose: the background worker calls
+   * `getStatus` with no user context and must still see every job.
+   */
+  async getStatusForGroup(jobId: string, activeGroupId?: string | null) {
+    const job = await this.getStatus(jobId);
+    if (!job) return null;
+    const jobGroupId = (job.config as ImportJobConfig | null)?.groupId ?? null;
+    if ((jobGroupId ?? null) !== (activeGroupId ?? null)) return null;
+    return job;
   }
 
   /**
@@ -1501,6 +1536,10 @@ export class BulkImportService {
       addProcessed: newProcessed - heartbeatProcessed,
       addFailed: newFailures - heartbeatFailed,
       errorLog: failures,
+      // We know the file has AT LEAST this many rows (we just read past them),
+      // so publish it as a floor. The exact count replaces it on the final
+      // chunk. Without this the UI has no denominator and sits at 0%.
+      totalRowsFloor: nextCursor,
     });
     if (newWarnings > 0) {
       this.logger.log(`Job ${jobId} chunk: ${newWarnings} row(s) imported with unresolved refs`);
@@ -2024,7 +2063,21 @@ export class BulkImportService {
       addProcessed: number;
       addFailed: number;
       errorLog: ImportRowFailure[];
+      /** The EXACT row count, known only once the whole file has been read. */
       totalRows?: number;
+      /**
+       * A lower bound on the row count, written at a chunk boundary while the
+       * file is still draining. Applied as GREATEST(total_rows, floor) so it
+       * only ever grows and can never shrink the exact total.
+       *
+       * Why this exists: the browser used to send a client-counted total at
+       * createJob time, which required parsing the entire workbook up front —
+       * the very thing that froze the tab on large files. With that removed,
+       * total_rows sat at 0 until the worker finished, so the UI could not
+       * compute a percentage and showed "0%" with an empty TOTAL for the whole
+       * run. Publishing the floor gives an honest, climbing denominator.
+       */
+      totalRowsFloor?: number;
       lastError?: string;
       finished?: boolean;
     },
@@ -2039,6 +2092,11 @@ export class BulkImportService {
           failedRows: sql`${schema.importJobs.failedRows} + ${args.addFailed}`,
           errorLog: args.errorLog,
           ...(args.totalRows != null ? { totalRows: args.totalRows } : {}),
+          ...(args.totalRows == null && args.totalRowsFloor != null
+            ? {
+                totalRows: sql`GREATEST(${schema.importJobs.totalRows}, ${args.totalRowsFloor})`,
+              }
+            : {}),
           ...(args.lastError != null ? { lastError: args.lastError } : {}),
           ...(args.finished ? { finishedAt: sql`now()` } : {}),
           updatedAt: sql`now()`,
