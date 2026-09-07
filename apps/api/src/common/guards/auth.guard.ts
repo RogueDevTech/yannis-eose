@@ -9,6 +9,7 @@ import type { Request } from 'express';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import type { SessionUser } from '../decorators/current-user.decorator';
 import { SessionStoreService } from '../../auth/session-store.service';
+import { resolveSessionTtlSeconds } from '../../auth/auth.service';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -39,9 +40,12 @@ export class AuthGuard implements CanActivate {
 
     (request as Request & { user: SessionUser }).user = user;
 
-    // Refresh session TTL on each valid request (sliding expiry)
-    const ttl = parseInt(process.env['SESSION_TTL_SECONDS'] ?? '86400', 10);
-    await this.sessionStore.touchSession(sessionToken, ttl);
+    // Refresh session TTL on each valid request (sliding expiry).
+    // MUST use the same resolver as login and the `/auth/me` cookie re-stamp:
+    // refreshing Redis to a flat 86400s while the browser cookie was minted to
+    // expire at 23:59 local made the server think a session was alive long after
+    // the browser had discarded its cookie.
+    await this.sessionStore.touchSession(sessionToken, resolveSessionTtlSeconds());
 
     return true;
   }

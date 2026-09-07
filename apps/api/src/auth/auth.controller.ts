@@ -13,7 +13,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { AuthService } from './auth.service';
+import { AuthService, resolveSessionTtlSeconds } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { UserBundleCacheService } from './user-bundle-cache.service';
 import { Public } from '../common/decorators/public.decorator';
@@ -671,6 +671,28 @@ export class AuthController {
           void this.authService.patchSessionGroupScope(sessionToken, merged.activeGroupId, merged.selectedBranchIds).catch(() => {});
         }
       }
+    }
+
+    // Roll the session cookie's Max-Age forward, in step with the sliding TTL
+    // AuthGuard just wrote to Redis.
+    //
+    // Why this is here: login was the ONLY place that ever set `yannis_session`,
+    // so the browser's copy kept its original Max-Age for the session's whole
+    // life. Under the daily-expiry directive that Max-Age is "23:59 today", so
+    // the browser discarded the cookie at end of day no matter how active the
+    // user was, and the next request arrived with no cookie at all — an instant
+    // logout that looked random and was widely reported as "it logged me out
+    // when I refreshed". The server-side session was still perfectly valid.
+    //
+    // Re-stamping on `/auth/me` (which every authenticated page load reaches)
+    // keeps the browser's expiry aligned with the server's.
+    const sessionToken = this.extractSessionToken(req);
+    if (sessionToken) {
+      res.cookie(
+        'yannis_session',
+        sessionToken,
+        sessionCookieOpts(resolveSessionTtlSeconds() * 1000),
+      );
     }
 
     // Re-issue the lazy bundle cookie so subsequent Remix loaders can decode
