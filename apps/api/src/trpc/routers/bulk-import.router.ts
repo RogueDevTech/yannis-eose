@@ -32,6 +32,23 @@ function assertImporter(role: string) {
   }
 }
 
+/**
+ * Company gate for every by-id procedure.
+ *
+ * An import job carries its company in `config.groupId`, stamped server-side at
+ * createJob. A job belonging to a different company must be indistinguishable
+ * from one that does not exist, so this raises the same NOT_FOUND either way and
+ * never discloses that the job is real.
+ *
+ * `activeGroupId` always comes from ctx, never from client input.
+ */
+async function assertJobInGroup(jobId: string, activeGroupId: string | null): Promise<void> {
+  const job = await getBulkImportService().getStatusForGroup(jobId, activeGroupId);
+  if (!job) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Import job not found' });
+  }
+}
+
 export const bulkImportRouter = router({
   /**
    * Create a resumable import job. The file is already uploaded to object
@@ -57,7 +74,10 @@ export const bulkImportRouter = router({
     .input(importJobIdSchema)
     .query(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
-      const job = await getBulkImportService().getStatus(input.jobId);
+      const job = await getBulkImportService().getStatusForGroup(
+        input.jobId,
+        ctx.activeGroupId ?? null,
+      );
       if (!job) throw new TRPCError({ code: 'NOT_FOUND', message: 'Import job not found' });
       return job;
     }),
@@ -67,7 +87,7 @@ export const bulkImportRouter = router({
     .input(z.object({ limit: z.number().int().min(1).max(50).optional() }).optional())
     .query(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
-      return getBulkImportService().listJobs(input?.limit ?? 20);
+      return getBulkImportService().listJobs(input?.limit ?? 20, ctx.activeGroupId ?? null);
     }),
 
   /** Paginated per-row outcomes (IMPORTED / WARNING / FAILED) for a job. */
@@ -88,6 +108,11 @@ export const bulkImportRouter = router({
     )
     .query(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
+      // Company gate: a job id from another company must be indistinguishable
+      // from one that does not exist. Without this, every by-id procedure below
+      // (including delete/resume/pause and the raw-cell reads) would act on any
+      // job in the platform - the "by-id leak" class called out in CLAUDE.md.
+      await assertJobInGroup(input.jobId, ctx.activeGroupId ?? null);
       return getBulkImportService().listRows(input.jobId, {
         page: input.page,
         limit: input.limit,
@@ -103,6 +128,11 @@ export const bulkImportRouter = router({
     .input(importJobIdSchema)
     .query(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
+      // Company gate: a job id from another company must be indistinguishable
+      // from one that does not exist. Without this, every by-id procedure below
+      // (including delete/resume/pause and the raw-cell reads) would act on any
+      // job in the platform - the "by-id leak" class called out in CLAUDE.md.
+      await assertJobInGroup(input.jobId, ctx.activeGroupId ?? null);
       return getBulkImportService().getRowFacets(input.jobId);
     }),
 
@@ -114,6 +144,11 @@ export const bulkImportRouter = router({
     .input(z.object({ jobId: z.string().uuid(), rowIndex: z.number().int().min(0) }))
     .query(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
+      // Company gate: a job id from another company must be indistinguishable
+      // from one that does not exist. Without this, every by-id procedure below
+      // (including delete/resume/pause and the raw-cell reads) would act on any
+      // job in the platform - the "by-id leak" class called out in CLAUDE.md.
+      await assertJobInGroup(input.jobId, ctx.activeGroupId ?? null);
       const row = await getBulkImportService().getRow(input.jobId, input.rowIndex);
       if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Row not found' });
       return row;
@@ -127,6 +162,11 @@ export const bulkImportRouter = router({
     .input(importJobIdSchema)
     .query(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
+      // Company gate: a job id from another company must be indistinguishable
+      // from one that does not exist. Without this, every by-id procedure below
+      // (including delete/resume/pause and the raw-cell reads) would act on any
+      // job in the platform - the "by-id leak" class called out in CLAUDE.md.
+      await assertJobInGroup(input.jobId, ctx.activeGroupId ?? null);
       return getBulkImportService().getRowOptions(input.jobId);
     }),
 
@@ -147,6 +187,11 @@ export const bulkImportRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
+      // Company gate: a job id from another company must be indistinguishable
+      // from one that does not exist. Without this, every by-id procedure below
+      // (including delete/resume/pause and the raw-cell reads) would act on any
+      // job in the platform - the "by-id leak" class called out in CLAUDE.md.
+      await assertJobInGroup(input.jobId, ctx.activeGroupId ?? null);
       return getBulkImportService().resubmitRow(
         input.jobId,
         input.rowIndex,
@@ -160,6 +205,11 @@ export const bulkImportRouter = router({
     .input(importJobIdSchema)
     .mutation(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
+      // Company gate: a job id from another company must be indistinguishable
+      // from one that does not exist. Without this, every by-id procedure below
+      // (including delete/resume/pause and the raw-cell reads) would act on any
+      // job in the platform - the "by-id leak" class called out in CLAUDE.md.
+      await assertJobInGroup(input.jobId, ctx.activeGroupId ?? null);
       return getBulkImportService().deleteJob(input.jobId, ctx.user.id);
     }),
 
@@ -168,6 +218,11 @@ export const bulkImportRouter = router({
     .input(importJobIdSchema)
     .mutation(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
+      // Company gate: a job id from another company must be indistinguishable
+      // from one that does not exist. Without this, every by-id procedure below
+      // (including delete/resume/pause and the raw-cell reads) would act on any
+      // job in the platform - the "by-id leak" class called out in CLAUDE.md.
+      await assertJobInGroup(input.jobId, ctx.activeGroupId ?? null);
       return getBulkImportService().resume(input.jobId, ctx.user.id);
     }),
 
@@ -179,6 +234,11 @@ export const bulkImportRouter = router({
     .input(importJobIdSchema)
     .mutation(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
+      // Company gate: a job id from another company must be indistinguishable
+      // from one that does not exist. Without this, every by-id procedure below
+      // (including delete/resume/pause and the raw-cell reads) would act on any
+      // job in the platform - the "by-id leak" class called out in CLAUDE.md.
+      await assertJobInGroup(input.jobId, ctx.activeGroupId ?? null);
       return getBulkImportService().pause(input.jobId, ctx.user.id);
     }),
 
@@ -187,6 +247,11 @@ export const bulkImportRouter = router({
     .input(importJobIdSchema)
     .mutation(async ({ input, ctx }) => {
       assertImporter(ctx.user.role);
+      // Company gate: a job id from another company must be indistinguishable
+      // from one that does not exist. Without this, every by-id procedure below
+      // (including delete/resume/pause and the raw-cell reads) would act on any
+      // job in the platform - the "by-id leak" class called out in CLAUDE.md.
+      await assertJobInGroup(input.jobId, ctx.activeGroupId ?? null);
       return getBulkImportService().retryFailed(input.jobId, ctx.user.id);
     }),
 });
