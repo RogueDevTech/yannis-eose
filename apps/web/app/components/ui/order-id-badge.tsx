@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from '@remix-run/react';
 import { formatOrderNumber } from '@yannis/shared';
 import { useCurrencyColor } from '~/contexts/currencies-catalog-context';
-import { useOrderPrefix } from '~/contexts/branches-catalog-context';
+import { useOrderPrefix, useActiveCompanyOrderPrefix } from '~/contexts/branches-catalog-context';
 
 export interface OrderIdBadgeProps {
   /**
@@ -78,7 +78,12 @@ export function OrderIdBadge({
 }: OrderIdBadgeProps) {
   const accent = useCurrencyColor(currencyCode);
   const accentStyle = accent ? { color: accent } : undefined;
-  const orderPrefix = useOrderPrefix(branchId);
+  // Prefer the order's own branch; fall back to the company selected in the
+  // header switcher, since these tables are already scoped to one company and
+  // most call sites have no branch field to pass.
+  const branchPrefix = useOrderPrefix(branchId);
+  const companyPrefix = useActiveCompanyOrderPrefix();
+  const orderPrefix = branchPrefix ?? companyPrefix;
   const visible = orderNumber != null
     ? formatOrderNumber(orderNumber, orderPrefix)
     : uppercase

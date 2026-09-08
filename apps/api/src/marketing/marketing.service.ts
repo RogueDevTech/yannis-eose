@@ -6165,6 +6165,7 @@ export class MarketingService {
     },
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    activeGroupId?: string | null,
   ) {
     const page = Math.max(1, input.page ?? 1);
     const limit = Math.min(100, Math.max(1, input.limit ?? 20));
@@ -6189,6 +6190,18 @@ export class MarketingService {
       conditions.push(eq(schema.crossFunnelAttempts.mediaBuyerId, caller.id));
     } else {
       return { rows: [], total: 0, page, limit, totalPages: 0 };
+    }
+
+    // Company isolation: a row with NO branch belongs to NO company, because a
+    // company is derived via `branches.group_id`. Historically these rows were
+    // harmless (single company), but once a second company exists an unscoped
+    // row would surface under whichever company the viewer has selected — a
+    // global viewer (SuperAdmin / SUPPORT) gets `null` from branchScopeCondition
+    // (no filter at all), so NULL-branch rows leaked across the boundary.
+    // Whenever a company IS selected, exclude them; only a truly org-wide view
+    // (no activeGroupId) may see branchless legacy rows.
+    if (activeGroupId) {
+      conditions.push(isNotNull(schema.crossFunnelAttempts.branchId));
     }
 
     if (input.startDate) {
@@ -6329,6 +6342,7 @@ export class MarketingService {
     input: { startDate?: string; endDate?: string },
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
+    activeGroupId?: string | null,
   ) {
     const conditions: SQL[] = [];
     const callerPerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
@@ -6345,6 +6359,18 @@ export class MarketingService {
       conditions.push(eq(schema.crossFunnelAttempts.mediaBuyerId, caller.id));
     } else {
       return { totalAttempts: 0, uniqueCustomers: 0, perProduct: [] };
+    }
+
+    // Company isolation: a row with NO branch belongs to NO company, because a
+    // company is derived via `branches.group_id`. Historically these rows were
+    // harmless (single company), but once a second company exists an unscoped
+    // row would surface under whichever company the viewer has selected — a
+    // global viewer (SuperAdmin / SUPPORT) gets `null` from branchScopeCondition
+    // (no filter at all), so NULL-branch rows leaked across the boundary.
+    // Whenever a company IS selected, exclude them; only a truly org-wide view
+    // (no activeGroupId) may see branchless legacy rows.
+    if (activeGroupId) {
+      conditions.push(isNotNull(schema.crossFunnelAttempts.branchId));
     }
 
     if (input.startDate) {
