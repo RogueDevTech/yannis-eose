@@ -24,7 +24,7 @@ import { isNotificationSoundEnabled } from '~/lib/notification-sound-preference'
 import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 import { BranchScopeGuardProvider } from '~/contexts/branch-scope-action-guard';
-import { BranchesCatalogProvider, BranchGroupsCatalogProvider } from '~/contexts/branches-catalog-context';
+import { ActiveGroupIdProvider, BranchesCatalogProvider, BranchGroupsCatalogProvider } from '~/contexts/branches-catalog-context';
 import { CurrenciesCatalogProvider } from '~/contexts/currencies-catalog-context';
 import { NGN } from '@yannis/shared';
 import { OnboardingNudge } from './onboarding-nudge';
@@ -1630,6 +1630,7 @@ function DashboardLayoutInner({
           >
             <BranchesCatalogProvider value={catalogBranches}>
             <BranchGroupsCatalogProvider value={branchGroups ?? []}>
+            <ActiveGroupIdProvider value={activeGroupId ?? null}>
             <CurrenciesCatalogProvider value={currencies && currencies.length > 0 ? currencies : [NGN]}>
               {/* Cross-route nav swap — when the user clicks a sidebar link, render the
                   destination route's own loading shell (matched by pathname against the
@@ -1650,6 +1651,7 @@ function DashboardLayoutInner({
                   ) ?? <Outlet />)
                 : <Outlet />}
             </CurrenciesCatalogProvider>
+            </ActiveGroupIdProvider>
             </BranchGroupsCatalogProvider>
             </BranchesCatalogProvider>
           </div>

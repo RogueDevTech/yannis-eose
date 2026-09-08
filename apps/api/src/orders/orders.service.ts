@@ -2851,6 +2851,9 @@ export class OrdersService {
     // DedupBlock (rolling the tx back before any INSERT); the catch below records
     // the cross-funnel attempt and surfaces a user-facing duplicate error.
     const productIds = input.items.map((i) => i.productId);
+    // Declared outside the try so the DedupBlock catch below can stamp the
+    // cross-funnel attempt with the same marketing branch as the order.
+    let branchId: string | null = null;
     try {
 
     // When recovering from a cart, pull attribution (MB + campaign) from the
@@ -2872,7 +2875,7 @@ export class OrdersService {
     }
 
     // MARKETING branch — attribution. Set once, never changes.
-    const branchId = await this.resolveBranchIdForNewOrder({
+    branchId = await this.resolveBranchIdForNewOrder({
       campaignId: input.campaignId ?? null,
       mediaBuyerId: input.mediaBuyerId ?? null,
       fallbackBranchId: sessionBranchId ?? null,
@@ -3027,7 +3030,11 @@ export class OrdersService {
           productIds,
           mediaBuyerId: input.mediaBuyerId ?? actorId,
           campaignId: input.campaignId ?? null,
-          branchId: null,
+          // MARKETING branch — must match the branch stamped on the order itself.
+          // Was hardcoded null, which produced cross-funnel rows belonging to no
+          // company (company is derived via branches.group_id) that then surfaced
+          // under whichever company a global viewer had selected.
+          branchId: branchId ?? null,
           winner: {
             id: w.id,
             mediaBuyerId: w.mediaBuyerId ?? actorId,
@@ -3490,6 +3497,9 @@ export class OrdersService {
     // concurrent delivered-follow-up creates for the same phone are serialized
     // and the check-then-insert race is closed.
     const productIds = input.items.map((i) => i.productId);
+    // Declared outside the try so the DedupBlock catch below can stamp the
+    // cross-funnel attempt with the same marketing branch as the order.
+    let branchId: string | null = null;
     try {
 
     // Cart attribution pull (if recovering from cart)
@@ -3510,7 +3520,7 @@ export class OrdersService {
     }
 
     // Branch resolution
-    const branchId = await this.resolveBranchIdForNewOrder({
+    branchId = await this.resolveBranchIdForNewOrder({
       campaignId: input.campaignId ?? null,
       mediaBuyerId: input.mediaBuyerId ?? null,
       fallbackBranchId: sessionBranchId ?? null,
@@ -3647,7 +3657,11 @@ export class OrdersService {
           productIds,
           mediaBuyerId: input.mediaBuyerId ?? actorId,
           campaignId: input.campaignId ?? null,
-          branchId: null,
+          // MARKETING branch — must match the branch stamped on the order itself.
+          // Was hardcoded null, which produced cross-funnel rows belonging to no
+          // company (company is derived via branches.group_id) that then surfaced
+          // under whichever company a global viewer had selected.
+          branchId: branchId ?? null,
           winner: {
             id: w.id,
             mediaBuyerId: w.mediaBuyerId ?? actorId,
