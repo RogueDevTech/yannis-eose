@@ -1,3 +1,4 @@
+import { formatOrderNumber } from '@yannis/shared';
 /**
  * Placeholder rendering for automation messages. Mirrors the CS-messaging
  * substitution set (`messaging.router.ts`) so a template authored for agent
@@ -15,13 +16,15 @@ export interface AutomationOrderContext {
   preferredDeliveryDate?: string | null;
   productName?: string | null;
   quantity?: number | null;
+  /** Company order prefix (branch_groups.order_prefix). Defaults to YNS. */
+  orderPrefix?: string | null;
 }
 
 /** Substitute {{placeholder}} tokens from an order context. Unknown tokens are left as-is. */
 export function renderAutomationBody(body: string, order: AutomationOrderContext): string {
   const orderDisplay =
     order.orderNumber != null
-      ? `YNS-${String(order.orderNumber).padStart(5, '0')}`
+      ? formatOrderNumber(order.orderNumber, order.orderPrefix)
       : order.id.slice(0, 8).toUpperCase();
   const totalAmount = order.totalAmount != null ? String(order.totalAmount) : '';
   const quantity = order.quantity != null ? String(order.quantity) : '';

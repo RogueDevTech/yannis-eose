@@ -14,6 +14,8 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useOrderPrefixResolver } from '~/contexts/branches-catalog-context';
+import { formatOrderNumber } from '@yannis/shared';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -84,10 +86,6 @@ const STATUS_LABELS: Record<string, string> = {
   DELETED: 'Deleted',
 };
 
-function formatOrderId(n: number) {
-  return `YNS-${String(n).padStart(5, '0')}`;
-}
-
 function formatDate(d: string | null) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-NG', { day: '2-digit', month: 'short' });
@@ -107,6 +105,7 @@ export function FollowUpOrdersPage({
   searchFilter = '',
   deferredLoading,
 }: Props) {
+  const prefixFor = useOrderPrefixResolver();
   const [searchParams, setSearchParams] = useSearchParams();
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
@@ -245,7 +244,7 @@ export function FollowUpOrdersPage({
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium text-app-fg truncate">{o.customerName}</span>
-                  <span className="shrink-0 text-xs font-mono text-app-fg-muted">{formatOrderId(o.orderNumber)}</span>
+                  <span className="shrink-0 text-xs font-mono text-app-fg-muted">{formatOrderNumber(o.orderNumber, prefixFor(o.servicingBranchId))}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <StatusBadge status={o.status} />
@@ -293,7 +292,7 @@ export function FollowUpOrdersPage({
                   hideable: false,
                   render: (o) => (
                     <Link to={detailLink(o)} className="text-sm font-medium text-brand-600 dark:text-brand-400 hover:underline font-mono">
-                      {formatOrderId(o.orderNumber)}
+                      {formatOrderNumber(o.orderNumber, prefixFor(o.servicingBranchId))}
                     </Link>
                   ),
                 },

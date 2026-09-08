@@ -21,6 +21,7 @@ import { db as schema, canonicalPermissionCode } from '@yannis/shared';
 import { CacheService } from '../../common/cache/cache.service';
 import { withActor } from '../../common/db/with-actor';
 import { assertEntityInScopeAny } from '../../common/db/assert-entity-in-scope';
+import { formatOrderNumber } from '@yannis/shared';
 
 /** Injected from {@link TrpcModule}; Redis cache for {@link messagingRouter}.templates.list */
 let messagingCacheService: CacheService | null = null;
@@ -115,6 +116,8 @@ function resolvePlaceholders(body: string, order: {
   paymentStatus?: string | null;
   preferredDeliveryDate?: string | null;
   items?: Array<{ productName?: string | null; quantity?: number | null }>;
+  /** Company order prefix (branch_groups.order_prefix). Defaults to YNS. */
+  orderPrefix?: string | null;
 }): string {
   const firstItem = order.items?.[0];
   const productName = firstItem?.productName ?? '';
@@ -122,7 +125,7 @@ function resolvePlaceholders(body: string, order: {
   const totalAmount = order.totalAmount != null ? String(order.totalAmount) : '';
   const paymentStatus = order.paymentStatus ?? '';
   const orderDisplay = order.orderNumber != null
-    ? `YNS-${String(order.orderNumber).padStart(5, '0')}`
+    ? formatOrderNumber(order.orderNumber, order.orderPrefix)
     : order.id.slice(0, 8).toUpperCase();
   return body
     .replace(/\{\{customer_name\}\}/g, order.customerName ?? '')

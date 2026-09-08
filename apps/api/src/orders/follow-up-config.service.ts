@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, notInArray, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared';
+import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay, formatOrderNumber } from '@yannis/shared';
 import type {
   CreateFollowUpRuleInput,
   UpdateFollowUpRuleInput,
@@ -49,6 +49,25 @@ const SYNC_PROGRESS_TTL = 300; // 5 minutes
 
 @Injectable()
 export class FollowUpConfigService implements OnApplicationBootstrap {
+
+  /**
+   * Company order prefix for a record, via its branch. Labels written into
+   * timeline text carry the company (ZAR-113037) rather than a shared YNS-.
+   */
+  private async resolveOrderPrefix(rec: {
+    servicingBranchId?: string | null;
+    branchId?: string | null;
+  }): Promise<string | null> {
+    const branchId = rec.servicingBranchId ?? rec.branchId;
+    if (!branchId) return null;
+    const [row] = await this.db
+      .select({ orderPrefix: schema.branchGroups.orderPrefix })
+      .from(schema.branches)
+      .innerJoin(schema.branchGroups, eq(schema.branchGroups.id, schema.branches.groupId))
+      .where(eq(schema.branches.id, branchId))
+      .limit(1);
+    return row?.orderPrefix ?? null;
+  }
   private readonly logger = new Logger(FollowUpConfigService.name);
 
   constructor(
@@ -727,7 +746,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
               eventType: 'ORDER_RECEIVED',
               actorId: null,
               actorName: 'System',
-              description: `Follow-up order created from ${orig.orderNumber ? `YNS-${String(orig.orderNumber).padStart(5, '0')}` : 'original order'}.`,
+              description: `Follow-up order created from ${orig.orderNumber ? formatOrderNumber(orig.orderNumber, await this.resolveOrderPrefix(orig)) : 'original order'}.`,
               metadata: { sourceOrderId: orig.id, sourceOrderNumber: orig.orderNumber, ruleId: rule.id },
               branchId: assignedBranch,
             });
@@ -1840,7 +1859,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       if (origDelivered) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: `Cannot mark as delivered. Original order YNS-${origDelivered.orderNumber} has already been delivered for this customer.`,
+          message: `Cannot mark as delivered. Original order ${formatOrderNumber(origDelivered.orderNumber, await this.resolveOrderPrefix(order))} has already been delivered for this customer.`,
         });
       }
     }
@@ -1873,7 +1892,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         if (existing) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
-            message: `Cannot mark as delivered: order YNS-${existing.orderNumber ?? existing.id.slice(0, 8)} for this customer and product was already delivered. This appears to be a duplicate.`,
+            message: `Cannot mark as delivered: order ${existing.orderNumber ? formatOrderNumber(existing.orderNumber, await this.resolveOrderPrefix(order)) : existing.id.slice(0, 8)} for this customer and product was already delivered. This appears to be a duplicate.`,
           });
         }
       }
@@ -2422,7 +2441,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           eventType: 'ORDER_DELIVERED' as const,
           actorId: null,
           actorName: 'System',
-          description: `Order graduated from follow-up (YNS-${String(fuOrder.orderNumber).padStart(5, '0')}).`,
+          description: `Order graduated from follow-up (${formatOrderNumber(fuOrder.orderNumber, await this.resolveOrderPrefix(fuOrder))}).`,
           metadata: { followUpOrderId, sourceOrderId: fuOrder.sourceOrderId },
           branchId: fuOrder.servicingBranchId,
         });

@@ -24,7 +24,7 @@ import {
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema, canonicalPermissionCode, SYSTEM_ACTOR_ID } from '@yannis/shared';
+import { db as schema, canonicalPermissionCode, formatOrderNumber, SYSTEM_ACTOR_ID } from '@yannis/shared';
 import type {
   CreateProviderInput,
   UpdateProviderInput,
@@ -4032,8 +4032,10 @@ export class LogisticsService implements OnModuleInit {
       const n = Number(v ?? 0);
       return Number.isFinite(n) ? n : 0;
     };
-    const orderRef = (orderNumber: number | null) =>
-      orderNumber != null ? `YNS-${String(orderNumber).padStart(5, '0')}` : '';
+    // Prefix is resolved per company where available; these rows are already
+    // scoped to one company, so the default covers the single-company case.
+    const orderRef = (orderNumber: number | null, orderPrefix?: string | null) =>
+      orderNumber != null ? formatOrderNumber(orderNumber, orderPrefix) : '';
 
     type LocRow = {
       id: string;

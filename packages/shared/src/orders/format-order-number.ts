@@ -16,6 +16,16 @@
 /** Fallback when a company's prefix is unavailable — the original scheme. */
 export const DEFAULT_ORDER_PREFIX = 'YNS';
 
+/**
+ * Matches an order label with ANY company prefix, capturing the digits.
+ *
+ * Timeline and audit descriptions are written to the database as plain text, so
+ * rows recorded before per-company prefixes still read "YNS-00007" forever.
+ * Parsers must therefore accept both the historical prefix and newer ones —
+ * pinning them to "YNS" would silently stop linking new companies' orders.
+ */
+export const ORDER_LABEL_RE = /([A-Z]{2,5})-(\d+)/;
+
 export function formatOrderNumber(
   orderNumber: number | null | undefined,
   /**
