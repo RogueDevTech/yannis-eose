@@ -256,6 +256,53 @@ export class NotificationsService {
       ? [role, 'SUPPORT' as typeof role]
       : [role];
 
+    // BRANCH-LEVEL SCOPE — a user is notified about the branches they are
+    // assigned to, not about every branch of a company they happen to hold one
+    // branch in. Company-level scoping was too coarse: a user with a single
+    // branch in a company received that company's entire order flow.
+    //
+    // Users legitimately span companies (deliberate, per the CEO), so company
+    // membership cannot be the unit of scope — the branch must be.
+    const notificationBranchId = await this.resolveBranchId(
+      (input.data as Record<string, unknown> | null | undefined) ?? null,
+    );
+    if (notificationBranchId) {
+      const branchRows = await this.db
+        .selectDistinct({ id: schema.users.id })
+        .from(schema.users)
+        .innerJoin(schema.userBranches, eq(schema.userBranches.userId, schema.users.id))
+        .where(
+          and(
+            inArray(schema.users.role, roles),
+            eq(schema.users.status, 'ACTIVE'),
+            eq(schema.userBranches.branchId, notificationBranchId),
+          ),
+        );
+
+      // Stamp the company too, so the list filter still isolates per-company.
+      const [bRow] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, notificationBranchId))
+        .limit(1);
+      const stampGroupId = groupId ?? bRow?.groupId ?? null;
+
+      const branchScopedInput = stampGroupId
+        ? { ...input, data: { ...(input.data as Record<string, unknown> ?? {}), groupId: stampGroupId } }
+        : input;
+
+      await Promise.all(
+        branchRows.map(async (row) => {
+          try {
+            await this.create({ ...branchScopedInput, userId: row.id });
+          } catch (err) {
+            this.logger.warn(`Failed to create notification for user ${row.id}: ${err}`);
+          }
+        }),
+      );
+      return;
+    }
+
     let rows: { id: string }[];
 
     if (groupId) {
