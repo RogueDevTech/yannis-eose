@@ -138,6 +138,8 @@ export class AdSpendComplianceService {
           ? `You still haven't recorded your ad spend for ${today}. Log it now to avoid being locked out.`
           : `You haven't recorded your ad spend for today (${today}). Please log it now.`,
         data: { date: today },
+        // One reminder per MB per day, not one per 10-minute sweep.
+        dedupeKey: `ad_spend_reminder:${today}`,
       });
     }
 
@@ -153,6 +155,8 @@ export class AdSpendComplianceService {
       title: `${unfilledMBs.length} MBs missing ad spend`,
       body: `${unfilledNames}${moreCount} haven't logged ad spend for ${today}.`,
       data: { date: today, unfilledCount: String(unfilledMBs.length) },
+      // One summary per HoM per day, not one per 10-minute sweep.
+      dedupeKey: `ad_spend_compliance_summary:${today}`,
     });
   }
 }
