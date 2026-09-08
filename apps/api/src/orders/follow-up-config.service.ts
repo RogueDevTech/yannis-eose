@@ -138,8 +138,16 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       .where(and(...conditions));
   }
 
-  /** Returns branch IDs that have an active CS department — used for follow-up distribution. */
-  private async getActiveCsBranchIds(): Promise<string[]> {
+  /**
+   * Returns branch IDs that have an active CS department — used for follow-up
+   * distribution.
+   *
+   * `withinBranchId` confines the result to that branch's company. Round-robin
+   * distribution MUST pass it: without a company filter this returned every
+   * active CS branch org-wide, so a rule with no explicit target dealt one
+   * company's orders out to another company's closers.
+   */
+  private async getActiveCsBranchIds(withinBranchId?: string | null): Promise<string[]> {
     const rows = await this.db
       .select({ branchId: schema.branchDepartments.branchId })
       .from(schema.branchDepartments)
@@ -149,6 +157,9 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         eq(schema.branchDepartments.status, 'ACTIVE'),
         eq(schema.branches.status, 'ACTIVE'),
         sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`,
+        ...(withinBranchId
+          ? [sql`${schema.branches.groupId} IS NOT DISTINCT FROM (SELECT group_id FROM branches WHERE id = ${withinBranchId}::uuid)`]
+          : []),
       ));
     return rows.map((r) => r.branchId);
   }
@@ -514,6 +525,30 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       conditions.push(eq(schema.orders.servicingBranchId, rule.sourceBranchId));
     }
 
+    // COMPANY BOUNDARY — a rule may only ever pull orders from its OWN company.
+    //
+    // Without this a rule scanned the entire orders table: status + age were the
+    // only filters, so a Yannis rule vacuumed up freshly imported Zarvon orders
+    // and deposited them in a Yannis branch, where Yannis closers saw another
+    // company's customers. `sourceBranchId` did not save us — every rule in prod
+    // had it NULL, which is the intended "sweep my whole company" setting.
+    //
+    // Scope by the company of the rule's own branch (target preferred, source as
+    // fallback). Orders with no branch at all are excluded: a branchless order
+    // belongs to no company, so no company's rule may claim it.
+    const ruleBranchId = rule.targetBranchId ?? rule.sourceBranchId;
+    if (ruleBranchId) {
+      conditions.push(sql`
+        EXISTS (
+          SELECT 1
+          FROM branches ob
+          JOIN branches rb ON rb.id = ${ruleBranchId}::uuid
+          WHERE ob.id = COALESCE(${schema.orders.servicingBranchId}, ${schema.orders.branchId})
+            AND ob.group_id IS NOT DISTINCT FROM rb.group_id
+        )
+      `);
+    }
+
     // Multi-country: a currency-scoped rule only matches orders of that currency.
     if (rule.currencyCode) {
       conditions.push(sql`UPPER(${schema.orders.currencyCode}) = ${rule.currencyCode.toUpperCase()}`);
@@ -567,7 +602,9 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (rule.targetBranchId) {
       activeBranches = excludedIds.has(rule.targetBranchId) ? [] : [rule.targetBranchId];
     } else {
-      const csIds = await this.getActiveCsBranchIds();
+      // Confine round-robin to the rule's own company (anchored on its source
+      // branch) so orders are never dealt to another company's closers.
+      const csIds = await this.getActiveCsBranchIds(rule.sourceBranchId);
       activeBranches = csIds.filter((id) => !excludedIds.has(id));
     }
 
@@ -778,6 +815,20 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         if (rule.sourceBranchId) {
           conditions.push(eq(schema.orders.servicingBranchId, rule.sourceBranchId));
         }
+        // Mirror the sync's company boundary, or the preview would promise
+        // orders from other companies that the sync now correctly refuses.
+        const previewBranchId = rule.targetBranchId ?? rule.sourceBranchId;
+        if (previewBranchId) {
+          conditions.push(sql`
+            EXISTS (
+              SELECT 1
+              FROM branches ob
+              JOIN branches rb ON rb.id = ${previewBranchId}::uuid
+              WHERE ob.id = COALESCE(${schema.orders.servicingBranchId}, ${schema.orders.branchId})
+                AND ob.group_id IS NOT DISTINCT FROM rb.group_id
+            )
+          `);
+        }
         // Mirror the sync's currency filter so the eligible-count preview matches
         // what the sync will actually pull.
         if (rule.currencyCode) {
@@ -803,6 +854,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
   async pullAbandonedCarts(rule: typeof schema.followUpRules.$inferSelect): Promise<number> {
     const cutoff = FollowUpConfigService.ageCutoff(rule.ageThresholdHours, rule.ageThresholdDays);
+    const cartRuleBranchId = rule.targetBranchId ?? rule.sourceBranchId;
 
     const carts = await this.db
       .select()
@@ -815,6 +867,23 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           lte(schema.cartAbandonments.createdAt, cutoff),
           // Not already pulled into follow-up
           sql`${schema.cartAbandonments.id} NOT IN (SELECT cart_id FROM follow_up_orders WHERE cart_id IS NOT NULL)`,
+          // COMPANY BOUNDARY — same rule as pullOrdersForRule. cart_abandonments
+          // has no branch column, so a cart's company is resolved through its
+          // media buyer's branch memberships. A cart whose owner shares no
+          // company with this rule is never pulled.
+          ...(cartRuleBranchId
+            ? [sql`
+                EXISTS (
+                  SELECT 1
+                  FROM user_branches ub
+                  JOIN branches ob ON ob.id = ub.branch_id
+                  WHERE ub.user_id = ${schema.cartAbandonments.mediaBuyerId}
+                    AND ob.group_id IS NOT DISTINCT FROM (
+                      SELECT group_id FROM branches WHERE id = ${cartRuleBranchId}::uuid
+                    )
+                )
+              `]
+            : []),
         ),
       )
       .limit(MAX_PER_RULE);
@@ -829,7 +898,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (rule.targetBranchId) {
       activeBranches = cartExcludedIds.has(rule.targetBranchId) ? [] : [rule.targetBranchId];
     } else {
-      activeBranches = (await this.getActiveCsBranchIds())
+      activeBranches = (await this.getActiveCsBranchIds(rule.sourceBranchId))
         .filter((id) => !cartExcludedIds.has(id));
     }
 
