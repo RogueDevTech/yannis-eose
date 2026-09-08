@@ -601,10 +601,33 @@ export class NotificationsService {
       return null;
     }
 
+    // Recurring reminders: skip when an identical one already exists for this
+    // user. The ad-spend sweep re-fires every 10 minutes for four hours, so
+    // without this it wrote 30 duplicate rows per media buyer per night.
+    if (input.dedupeKey) {
+      const [dupe] = await this.db
+        .select({ id: schema.notifications.id })
+        .from(schema.notifications)
+        .where(
+          and(
+            eq(schema.notifications.userId, input.userId),
+            eq(schema.notifications.type, input.type),
+            sql`${schema.notifications.data}->>'dedupeKey' = ${input.dedupeKey}`,
+          ),
+        )
+        .limit(1);
+      if (dupe) return null;
+    }
+
     // Auto-resolve branch_id for company scoping
     const branchId = await this.resolveBranchId(
       (input.data as Record<string, unknown> | null | undefined) ?? null,
     );
+
+    // Persist the key alongside the payload so the check above can see it.
+    const dataWithKey = input.dedupeKey
+      ? { ...(input.data as Record<string, unknown> ?? {}), dedupeKey: input.dedupeKey }
+      : input.data ?? null;
 
     const rows = await this.db
       .insert(schema.notifications)
@@ -613,7 +636,7 @@ export class NotificationsService {
         type: input.type,
         title: input.title,
         body: input.body ?? null,
-        data: input.data ?? null,
+        data: dataWithKey,
         branchId,
       })
       .returning();

@@ -32,6 +32,17 @@ export const createNotificationSchema = z.object({
   title: z.string().min(1).max(200),
   body: z.string().max(1000).optional(),
   data: z.record(z.unknown()).optional(),
+  /**
+   * Suppress this notification when one with the same key already exists for
+   * the user. For recurring reminders that re-fire on a cron: the ad-spend
+   * sweep runs every 10 minutes for four hours, so without a key it wrote 30
+   * identical rows per media buyer per night (~70k rows, the largest single
+   * source of notification volume).
+   *
+   * Convention: `<type>:<the thing being reminded about>`, e.g.
+   * `ad_spend_reminder:2026-09-08`. Scoped per user.
+   */
+  dedupeKey: z.string().max(200).optional(),
 });
 
 export type CreateNotificationInput = z.infer<typeof createNotificationSchema>;
