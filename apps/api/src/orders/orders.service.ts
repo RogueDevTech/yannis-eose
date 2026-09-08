@@ -23,7 +23,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch, type Tx } from '../common/db/with-actor';
 
@@ -2623,7 +2623,12 @@ export class OrdersService {
 
     // Notify Head of CS + Head of Marketing only on new order (not every Sales closer — they get
     // order:assigned when Hot Swap / auto-dispatch / claim assigns them). SuperAdmin excluded (volume).
-    const orderLabel = `YNS-${String(order.orderNumber).padStart(5, '0')}`;
+    // Company-prefixed so the recipient can tell at a glance which company an
+    // order belongs to (ZAR-… vs YNS-…) instead of reading the campaign name.
+    const orderLabel = formatOrderNumber(
+      order.orderNumber,
+      await this.resolveOrderPrefix(order),
+    );
     const customerLabel = (order.customerName ?? '').trim() || 'A customer';
     const campaignName = order.campaignId
       ? (
@@ -6645,7 +6650,10 @@ export class OrdersService {
 
     // Notify HoCS and the assigned CS closer when an order is retracked
     if (isRetrack) {
-      const orderLabel = `YNS-${String(updated.orderNumber).padStart(5, '0')}`;
+      const orderLabel = formatOrderNumber(
+        updated.orderNumber,
+        await this.resolveOrderPrefix(updated),
+      );
       const actorName = await this.resolveUserNameById(actor.id).catch(() => null) ?? 'Someone';
       const categoryLabel = retrackCategoryLabel(input.metadata?.retrackCategory);
       const categorySuffix = categoryLabel ? ` Reason: ${categoryLabel}.` : '';
@@ -7073,7 +7081,10 @@ export class OrdersService {
         servicingBranchId: paystackServicingBranchId ?? null,
         mediaBuyerId: order.mediaBuyerId ?? null,
       });
-      const orderLabelPay = `YNS-${String(order.orderNumber).padStart(5, '0')}`;
+      const orderLabelPay = formatOrderNumber(
+        order.orderNumber,
+        await this.resolveOrderPrefix(order),
+      );
       const customerLabelPay = (order.customerName ?? '').trim() || 'A customer';
       const campaignNamePay = order.campaignId
         ? (
@@ -11932,6 +11943,28 @@ export class OrdersService {
       .where(eq(schema.users.id, userId))
       .limit(1);
     return row[0]?.name ?? null;
+  }
+
+  /**
+   * The order's company order prefix, via its branch. Used so a notification
+   * reads "ZAR-113037" rather than "YNS-113037" — with one shared prefix,
+   * nothing on the face of a notification said which company an order belonged
+   * to. Returns null when the order has no branch, in which case the formatter
+   * keeps the default rather than guessing a company.
+   */
+  private async resolveOrderPrefix(order: {
+    servicingBranchId?: string | null;
+    branchId?: string | null;
+  }): Promise<string | null> {
+    const branchId = order.servicingBranchId ?? order.branchId;
+    if (!branchId) return null;
+    const [row] = await this.db
+      .select({ orderPrefix: schema.branchGroups.orderPrefix })
+      .from(schema.branches)
+      .innerJoin(schema.branchGroups, eq(schema.branchGroups.id, schema.branches.groupId))
+      .where(eq(schema.branches.id, branchId))
+      .limit(1);
+    return row?.orderPrefix ?? null;
   }
 
   /**
