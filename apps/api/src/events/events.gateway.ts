@@ -151,34 +151,39 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
         void client.join('marketing-all');
         void client.join('hr');
         break;
+      // COMPANY BOUNDARY — non-admin roles join ONLY their branch-scoped room.
+      //
+      // These roles used to join the unscoped room (`cs-all`, `finance`, …) as
+      // well as the branch-scoped one. safeEmit deliberately emits to BOTH the
+      // branch room and the unscoped room (so admins, who only hold the latter,
+      // still receive branch-scoped events) — which meant every order event in
+      // every company was broadcast live to every holder of these roles.
+      //
+      // Admin-class roles above keep the unscoped rooms; they are org-wide by
+      // design. Everyone else is confined to their own branch. A user with no
+      // current branch joins no shared room at all: fail closed, since an
+      // unscoped join is exactly the leak being closed here.
       case 'HEAD_OF_CS':
-        void client.join('cs-all');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:cs-all`);
         break;
       case 'CS_CLOSER':
         void client.join(`cs-${user.id}`);
-        void client.join('cs-all');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:cs-all`);
         break;
       case 'FINANCE_OFFICER':
-        void client.join('finance');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:finance`);
         break;
       case 'HEAD_OF_LOGISTICS':
-        void client.join('logistics');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:logistics`);
         break;
       case 'STOCK_MANAGER':
-        void client.join('logistics');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:logistics`);
         break;
       case 'HEAD_OF_MARKETING':
-        void client.join('marketing-all');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:marketing-all`);
         break;
       case 'MEDIA_BUYER':
         void client.join(`marketing-${user.id}`);
-        void client.join('marketing-all');
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:marketing-all`);
         break;
       case 'TPL_MANAGER':

@@ -2522,10 +2522,46 @@ export class CartOrdersService {
 
     if (rules.length === 0) return null;
 
+    // COMPANY BOUNDARY — resolve the cart's own company once, so a rule can
+    // never route it into a different one. A NULL sourceBranchId means "any
+    // branch in MY company", not "any branch anywhere": without this, one
+    // company's catch-all rule claimed another company's carts, exactly as
+    // follow-up rules did before they were scoped.
+    let cartGroupId: string | null = null;
+    if (campaignBranchId) {
+      const [row] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, campaignBranchId))
+        .limit(1);
+      cartGroupId = row?.groupId ?? null;
+    }
+
+    const ruleBranchGroup = new Map<string, string | null>();
+    const groupOfBranch = async (branchId: string): Promise<string | null> => {
+      if (ruleBranchGroup.has(branchId)) return ruleBranchGroup.get(branchId) ?? null;
+      const [row] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, branchId))
+        .limit(1);
+      const g = row?.groupId ?? null;
+      ruleBranchGroup.set(branchId, g);
+      return g;
+    };
+
     for (const rule of rules) {
       // sourceBranchId filter: if set, only match carts from this marketing branch
       if (rule.sourceBranchId && rule.sourceBranchId !== campaignBranchId) continue;
-      // sourceBranchId=null matches everything (org-wide catch-all)
+      // sourceBranchId=null matches any branch WITHIN the cart's own company.
+
+      // Never let a rule pull a cart across a company line. Anchored on the
+      // rule's own branch (target preferred, source as fallback).
+      const ruleAnchor = rule.targetBranchId ?? rule.sourceBranchId;
+      if (ruleAnchor) {
+        const ruleGroupId = await groupOfBranch(ruleAnchor);
+        if (ruleGroupId !== cartGroupId) continue;
+      }
 
       // currencyCode filter: a rule scoped to a currency only matches carts of
       // that currency. A NULL rule matches any currency (catch-all). Because of
@@ -2596,13 +2632,20 @@ export class CartOrdersService {
     // Find all ABANDONED carts not yet pulled into cart_orders.
     // Use pg.unsafe() (simple protocol) — Drizzle extended protocol has caused
     // silent failures with NOT IN subqueries on this table.
-    const carts = await this.pg.unsafe<Array<{ id: string }>>(`
-      SELECT ca.id
+    // Ordered by company so each pull batch below holds carts from ONE company.
+    // pullFromAbandonedCarts seeds routing from the FIRST cart in the batch and
+    // applies it to every cart in it, so a batch spanning two companies routed
+    // all of them into whichever company happened to sort first.
+    const carts = await this.pg.unsafe<Array<{ id: string; group_id: string | null }>>(`
+      SELECT ca.id, b.group_id
       FROM cart_abandonments ca
+      LEFT JOIN campaigns c ON c.id = ca.campaign_id
+      LEFT JOIN branches b ON b.id = c.branch_id
       WHERE ca.status = 'ABANDONED'
         AND ca.product_id IS NOT NULL
         AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
         AND ca.skip_reason IS NULL
+      ORDER BY b.group_id NULLS FIRST, ca.id
       LIMIT 5000
     `);
 
@@ -2621,20 +2664,35 @@ export class CartOrdersService {
     // Pull in batches of 100 to limit blast radius — if one batch fails,
     // the rest still get pulled on the next cron run.
     const BATCH_SIZE = 100;
-    const cartIds = carts.map((c) => c.id);
     let totalPulled = 0;
     let errorMessage: string | null = null;
 
-    for (let i = 0; i < cartIds.length; i += BATCH_SIZE) {
-      const batch = cartIds.slice(i, i + BATCH_SIZE);
-      try {
-        const result = await this.pullFromAbandonedCarts(batch, null, actor);
-        totalPulled += result.pulled;
-      } catch (err) {
-        const msg = err instanceof Error ? (err as Error).stack ?? err.message : String(err);
-        this.logger.error(`[runAutoSync] Batch ${i / BATCH_SIZE + 1} failed (${batch.length} carts): ${msg}`);
-        errorMessage = errorMessage ? `${errorMessage}; ${msg}` : msg;
-        // Continue with next batch — don't let one bad batch block everything
+    // Group by company FIRST, then slice. Ordering alone is not enough: a
+    // fixed-size slice can straddle two companies, and the batch's routing is
+    // seeded from its first cart — which would route the tail of the batch into
+    // the wrong company.
+    const cartsByGroup = new Map<string, string[]>();
+    for (const c of carts) {
+      const key = c.group_id ?? '__nogroup__';
+      const list = cartsByGroup.get(key) ?? [];
+      list.push(c.id);
+      cartsByGroup.set(key, list);
+    }
+
+    let batchNo = 0;
+    for (const [groupKey, groupCartIds] of cartsByGroup) {
+      for (let i = 0; i < groupCartIds.length; i += BATCH_SIZE) {
+        const batch = groupCartIds.slice(i, i + BATCH_SIZE);
+        batchNo++;
+        try {
+          const result = await this.pullFromAbandonedCarts(batch, null, actor);
+          totalPulled += result.pulled;
+        } catch (err) {
+          const msg = err instanceof Error ? (err as Error).stack ?? err.message : String(err);
+          this.logger.error(`[runAutoSync] Batch ${batchNo} (company ${groupKey}, ${batch.length} carts) failed: ${msg}`);
+          errorMessage = errorMessage ? `${errorMessage}; ${msg}` : msg;
+          // Continue with next batch — don't let one bad batch block everything
+        }
       }
     }
 
@@ -2652,7 +2710,7 @@ export class CartOrdersService {
       this.logger.warn(`[runAutoSync] Failed to write sync log: ${logErr instanceof Error ? logErr.message : logErr}`);
     }
 
-    this.logger.log(`[runAutoSync] Done: pulled ${totalPulled} of ${cartIds.length} cart(s)${errorMessage ? ` (errors: ${errorMessage})` : ''}`);
+    this.logger.log(`[runAutoSync] Done: pulled ${totalPulled} of ${carts.length} cart(s) across ${cartsByGroup.size} company/companies${errorMessage ? ` (errors: ${errorMessage})` : ''}`);
     return { totalPulled };
   }
 }
