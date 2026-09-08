@@ -3,10 +3,15 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { CompactTableActionButton } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { useOrderPrefix } from '~/contexts/branches-catalog-context';
+import { formatOrderNumber } from '@yannis/shared';
 
 interface DuplicateOrder {
   id: string;
   orderNumber: number | null;
+  /** Branches resolve the company order prefix (YNS-… vs ZAR-…). */
+  branchId?: string | null;
+  servicingBranchId?: string | null;
   customerName: string;
   totalAmount: string;
   /** Order currency (default NGN) for money display. */
@@ -75,8 +80,9 @@ const REMITTANCE_STATUS_LABEL: Record<string, string> = {
 };
 
 function OrderCard({ order, isFirst }: { order: DuplicateOrder; isFirst: boolean }) {
+  const orderPrefix = useOrderPrefix(order.servicingBranchId ?? order.branchId);
   const net = Number(order.totalAmount || 0) - Number(order.deliveryFee || 0);
-  const orderLabel = order.orderNumber ? `YNS-${order.orderNumber}` : order.id.slice(0, 12);
+  const orderLabel = order.orderNumber ? formatOrderNumber(order.orderNumber, orderPrefix) : order.id.slice(0, 12);
   const source = sourceLabel(order.orderSource, order.isFollowUp);
 
   return (

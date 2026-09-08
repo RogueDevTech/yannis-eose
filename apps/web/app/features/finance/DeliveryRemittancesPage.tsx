@@ -41,6 +41,7 @@ import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
 import type { EligibleOrder } from './eligible-order';
 import { CashStatementExportModal } from './CashStatementExportModal';
+import { useActiveCompanyOrderPrefix } from '~/contexts/branches-catalog-context';
 
 export interface DeliveryRemittanceListItem {
   id: string;
@@ -234,6 +235,7 @@ export function DeliveryRemittancesPage({
   remittanceOrders = [],
   remittanceOrdersPagination,
 }: DeliveryRemittancesPageProps) {
+  const companyPrefix = useActiveCompanyOrderPrefix();
   const [searchParams, setSearchParams] = useSearchParams();
   const baseCurrency = useBaseCurrency();
   // The currency all stat totals + summary amounts display in. The active
@@ -601,7 +603,7 @@ export function DeliveryRemittancesPage({
         nowrap: true,
         render: (o) => (
           <span className="font-mono text-sm text-app-fg">
-            {o.orderNumber ? `YNS-${String(o.orderNumber).padStart(5, '0')}` : '—'}
+            {o.orderNumber ? formatOrderNumber(o.orderNumber, companyPrefix) : '—'}
           </span>
         ),
       },
@@ -1076,7 +1078,7 @@ export function DeliveryRemittancesPage({
         )}
         rows={viewMode === 'orders'
           ? remittanceOrders.map((r) => ({
-              orderNumber: r.orderNumber ? `YNS-${String(r.orderNumber).padStart(5, '0')}` : '',
+              orderNumber: r.orderNumber ? formatOrderNumber(Number(r.orderNumber), companyPrefix) : '',
               category: r.category,
               customerName: r.customerName,
               totalAmount: Number(r.totalAmount || 0),
@@ -1124,7 +1126,7 @@ export function DeliveryRemittancesPage({
               const json = await res.json();
               const allOrders: RemittanceOrderRow[] = json?.result?.data?.orders ?? [];
               return allOrders.map((r) => ({
-                orderNumber: r.orderNumber ? `YNS-${String(r.orderNumber).padStart(5, '0')}` : '',
+                orderNumber: r.orderNumber ? formatOrderNumber(Number(r.orderNumber), companyPrefix) : '',
                 category: r.category,
                 customerName: r.customerName,
                 totalAmount: Number(r.totalAmount || 0),
@@ -1610,7 +1612,7 @@ export function DeliveryRemittancesPage({
                   header: 'Order',
                   render: (r) => (
                     <span className="text-xs font-mono text-app-fg-muted">
-                      {r.orderNumber ? formatOrderNumber(Number(r.orderNumber)) : `${r.id.slice(0, 10)}…`}
+                      {r.orderNumber ? formatOrderNumber(Number(r.orderNumber), companyPrefix) : `${r.id.slice(0, 10)}…`}
                     </span>
                   ),
                 },
@@ -1769,7 +1771,7 @@ export function DeliveryRemittancesPage({
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-app-fg truncate">{r.customerName}</p>
                         <p className="text-xs text-app-fg-muted truncate">
-                          {r.orderNumber ? formatOrderNumber(Number(r.orderNumber)) : `${r.id.slice(0, 10)}…`} ·{' '}
+                          {r.orderNumber ? formatOrderNumber(Number(r.orderNumber), companyPrefix) : `${r.id.slice(0, 10)}…`} ·{' '}
                           {r.locationName
                             ? r.providerName
                               ? `${r.locationName}: ${r.providerName}`

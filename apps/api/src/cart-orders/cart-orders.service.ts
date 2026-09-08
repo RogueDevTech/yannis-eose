@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, ne, notInArray, or, sql, asc } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay, type OrderStatus } from '@yannis/shared';
+import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay, formatOrderNumber, type OrderStatus } from '@yannis/shared';
 import type { ListCartOrdersInput, UpdateCartOrderInput, CreateCartOrderRoutingRuleInput, UpdateCartOrderRoutingRuleInput } from '@yannis/shared';
 import { DRIZZLE, PG_CLIENT_RAW } from '../database/database.module';
 import type postgres from 'postgres';
@@ -39,6 +39,25 @@ const VALID_TIMELINE_EVENT_TYPES = new Set([
 
 @Injectable()
 export class CartOrdersService {
+
+  /**
+   * Company order prefix for a record, via its branch. Labels written into
+   * timeline text carry the company (ZAR-113037) rather than a shared YNS-.
+   */
+  private async resolveOrderPrefix(rec: {
+    servicingBranchId?: string | null;
+    branchId?: string | null;
+  }): Promise<string | null> {
+    const branchId = rec.servicingBranchId ?? rec.branchId;
+    if (!branchId) return null;
+    const [row] = await this.db
+      .select({ orderPrefix: schema.branchGroups.orderPrefix })
+      .from(schema.branches)
+      .innerJoin(schema.branchGroups, eq(schema.branchGroups.id, schema.branches.groupId))
+      .where(eq(schema.branches.id, branchId))
+      .limit(1);
+    return row?.orderPrefix ?? null;
+  }
   private readonly logger = new Logger(CartOrdersService.name);
 
   constructor(
@@ -250,6 +269,11 @@ export class CartOrdersService {
         .update(schema.cartOrders)
         .set({ status: 'DELETED', deletedAt: now, updatedAt: now })
         .where(inArray(schema.cartOrders.id, ids));
+      // Resolve each row's company prefix up front — the map below is sync.
+      const prefixByRow = new Map<string, string | null>();
+      for (const r of rows) {
+        prefixByRow.set(r.id, await this.resolveOrderPrefix({ branchId: r.branch_id ?? null }));
+      }
       await tx.insert(schema.cartOrderTimelineEvents).values(
         rows.map((r) => ({
           cartOrderId: r.id,
@@ -257,7 +281,7 @@ export class CartOrdersService {
           actorId: null,
           actorName: 'System',
           description: r.dup_order_number
-            ? `Cart order deleted: customer already has a live order (YNS-${r.dup_order_number}) for the same product. Reconciled duplicate.`
+            ? `Cart order deleted: customer already has a live order (${formatOrderNumber(Number(r.dup_order_number), prefixByRow.get(r.id))}) for the same product. Reconciled duplicate.`
             : `Cart order deleted: customer already has a live order for the same product. Reconciled duplicate.`,
           metadata: { reason: 'RECONCILED_DUPLICATE_OF_ORDER' },
           branchId: r.branch_id ?? null,
@@ -1613,7 +1637,7 @@ export class CartOrdersService {
           eventType: 'ORDER_DELIVERED' as const,
           actorId: null,
           actorName: 'System',
-          description: `Order graduated from cart recovery (YNS-${String(co.orderNumber).padStart(5, '0')}).`,
+          description: `Order graduated from cart recovery (${formatOrderNumber(co.orderNumber, await this.resolveOrderPrefix(co))}).`,
           metadata: { cartOrderId, sourceCartId: co.sourceCartId },
           branchId: co.servicingBranchId,
         });

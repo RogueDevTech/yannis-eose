@@ -1,5 +1,6 @@
 import { Link } from '@remix-run/react';
-import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, ORDER_LABEL_RE, formatOrderNumber } from '@yannis/shared';
+import { useActiveCompanyOrderPrefix } from '~/contexts/branches-catalog-context';
 import type { ReactNode } from 'react';
 import { DotSeparator } from '~/components/ui/dot-separator';
 import type { TimelineEvent } from '~/features/orders/types';
@@ -98,7 +99,7 @@ function formatEventType(type: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function renderTimelineDescription(event: TimelineEvent): ReactNode {
+function renderTimelineDescription(event: TimelineEvent, companyPrefix?: string): ReactNode {
   const m = event.metadata;
   const mbId = strMeta(m, 'mediaBuyerId');
   const mbName = strMeta(m, 'mediaBuyerName');
@@ -124,11 +125,13 @@ function renderTimelineDescription(event: TimelineEvent): ReactNode {
   if (event.eventType === 'ORDER_RECEIVED') {
     const sourceOrderId = strMeta(m, 'sourceOrderId');
     if (sourceOrderId && isUuid(sourceOrderId)) {
-      // Try metadata first, then extract from description text (e.g. "... from YNS-00007 ...")
+      // Try metadata first, then extract from description text (e.g. "... from YNS-00007 ...").
+      // ORDER_LABEL_RE matches any company prefix so historical "YNS-" text and
+      // newer per-company labels both parse.
       const sourceOrderNumber = m?.sourceOrderNumber as number | undefined;
-      const descMatch = /YNS-(\d+)/.exec(event.description);
+      const descMatch = ORDER_LABEL_RE.exec(event.description);
       const orderLabel = sourceOrderNumber
-        ? `YNS-${String(sourceOrderNumber).padStart(5, '0')}`
+        ? formatOrderNumber(sourceOrderNumber, companyPrefix)
         : descMatch
           ? descMatch[0]
           : sourceOrderId.slice(0, 8);
@@ -224,9 +227,9 @@ function renderTimelineDescription(event: TimelineEvent): ReactNode {
     const winnerId = strMeta(m, 'winnerId');
     if (winnerId && isUuid(winnerId)) {
       // Extract the YNS-XXXXX label from the description, or fall back.
-      const ynsMatch = /winner:\s*(YNS-\d+)/.exec(event.description);
+      const ynsMatch = /winner:\s*([A-Z]{2,5}-\d+)/.exec(event.description);
       const label = ynsMatch?.[1] ?? winnerId.slice(0, 8);
-      const prefix = event.description.replace(/winner:\s*(?:YNS-\d+|[0-9a-f]{8}).*$/, 'winner: ');
+      const prefix = event.description.replace(/winner:\s*(?:[A-Z]{2,5}-\d+|[0-9a-f]{8}).*$/, 'winner: ');
       return (
         <>
           {prefix}
@@ -240,7 +243,7 @@ function renderTimelineDescription(event: TimelineEvent): ReactNode {
   // Graduation event — make the follow-up order number a clickable link
   if (event.eventType === 'ORDER_DELIVERED' || event.eventType === 'ORDER_RECEIVED') {
     const fuOrderId = strMeta(m, 'followUpOrderId');
-    const ynsMatch = /YNS-(\d+)/.exec(event.description);
+    const ynsMatch = ORDER_LABEL_RE.exec(event.description);
     if (fuOrderId && isUuid(fuOrderId) && ynsMatch) {
       const prefix = event.description.slice(0, event.description.indexOf(ynsMatch[0]));
       const suffix = event.description.slice(event.description.indexOf(ynsMatch[0]) + ynsMatch[0].length);
@@ -296,6 +299,7 @@ interface OrderTimelineProps {
 }
 
 export function OrderTimeline({ events }: OrderTimelineProps) {
+  const companyPrefix = useActiveCompanyOrderPrefix();
   if (events.length === 0) {
     return (
       <div className="py-8 text-center text-sm text-app-fg-muted">
@@ -359,7 +363,7 @@ export function OrderTimeline({ events }: OrderTimelineProps) {
           );
         }
 
-        const description = renderTimelineDescription(event);
+        const description = renderTimelineDescription(event, companyPrefix);
         // Description already names the actor, or actor equals assignee/claimer.
         const showActorLine =
           actorLabel &&

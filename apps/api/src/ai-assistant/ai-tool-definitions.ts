@@ -169,7 +169,7 @@ const traceOrder: ToolDef = {
     properties: {
       orderNumber: {
         type: 'number',
-        description: 'The numeric YNS order number, e.g. 68366 for YNS-68366 (digits only).',
+        description: 'The numeric order number, e.g. 68366 for YNS-68366 or ZAR-68366 (digits only, no company prefix).',
       },
     },
     required: ['orderNumber'],

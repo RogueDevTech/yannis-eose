@@ -1,8 +1,8 @@
 import { Injectable, Inject, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, gte, inArray, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema } from '@yannis/shared';
+import { db as schema, formatOrderNumber } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
@@ -64,6 +64,22 @@ const TEST_NAME_MATCH_FU = sql`btrim(${schema.followUpOrders.customerName}) ~* '
  */
 @Injectable()
 export class TestOrderPurgeService implements OnApplicationBootstrap {
+
+  /** Company order prefix for a record, via its branch. */
+  private async resolveOrderPrefix(rec: {
+    servicingBranchId?: string | null;
+    branchId?: string | null;
+  }): Promise<string | null> {
+    const branchId = rec.servicingBranchId ?? rec.branchId;
+    if (!branchId) return null;
+    const [row] = await this.db
+      .select({ orderPrefix: schema.branchGroups.orderPrefix })
+      .from(schema.branches)
+      .innerJoin(schema.branchGroups, eq(schema.branchGroups.id, schema.branches.groupId))
+      .where(eq(schema.branches.id, branchId))
+      .limit(1);
+    return row?.orderPrefix ?? null;
+  }
   private readonly logger = new Logger('TestOrderPurge');
 
   constructor(
@@ -694,10 +710,15 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       }
 
       // 2. Timeline events for audit trail
+      // Resolve company prefixes up front — the map below is sync.
+      const prefixByLoser = new Map<string, string | null>();
+      for (const e of loserEntries) {
+        prefixByLoser.set(e.loserId, await this.resolveOrderPrefix({ branchId: e.branchId ?? null }));
+      }
       await tx.insert(schema.orderTimelineEvents).values(
         loserEntries.map((e) => {
           const winnerLabel = e.winnerOrderNumber
-            ? `YNS-${e.winnerOrderNumber}`
+            ? formatOrderNumber(e.winnerOrderNumber, prefixByLoser.get(e.loserId))
             : e.winnerId.slice(0, 8);
           const wasSoftDeleted = SAFE_TO_DELETE_STATUSES.includes(e.status);
           return {

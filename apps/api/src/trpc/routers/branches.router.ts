@@ -1604,7 +1604,7 @@ export const branchesRouter = router({
         const groupIds = [...new Set(userBranches.map((b) => b.groupId).filter(Boolean))] as string[];
         if (groupIds.length === 0) return [];
         const groups = await db
-          .select({ id: schema.branchGroups.id, name: schema.branchGroups.name, status: schema.branchGroups.status, createdAt: schema.branchGroups.createdAt })
+          .select({ id: schema.branchGroups.id, name: schema.branchGroups.name, status: schema.branchGroups.status, orderPrefix: schema.branchGroups.orderPrefix, createdAt: schema.branchGroups.createdAt })
           .from(schema.branchGroups)
           .where(inArray(schema.branchGroups.id, groupIds))
           .orderBy(asc(schema.branchGroups.createdAt));
@@ -1616,6 +1616,7 @@ export const branchesRouter = router({
           id: schema.branchGroups.id,
           name: schema.branchGroups.name,
           status: schema.branchGroups.status,
+          orderPrefix: schema.branchGroups.orderPrefix,
           createdAt: schema.branchGroups.createdAt,
         })
         .from(schema.branchGroups)

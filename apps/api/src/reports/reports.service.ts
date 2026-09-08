@@ -54,6 +54,64 @@ function toCsv(data: CsvRow[], columns: Array<{ key: string; label: string }>): 
   return [header, ...rows].join('\n');
 }
 
+/**
+ * Per-line items of an order, normalised across the two list shapes that feed
+ * exports: `orders.list()` returns `productItems` ({ name, qty }), while
+ * `listFollowUpOrders()` returns `items` ({ productName, quantity, offerLabel }).
+ */
+type ExportOrderLines = {
+  productItems?: Array<{ name: string | null; qty: number }>;
+  items?: Array<{ productName: string | null; quantity: number; offerLabel?: string | null }>;
+  primaryQuantity?: number | null;
+};
+
+export function orderLines(order: ExportOrderLines): Array<{ name: string | null; qty: number; variant?: string | null }> {
+  if (order.productItems?.length) return order.productItems;
+  if (order.items?.length) {
+    return order.items.map((i) => ({ name: i.productName, qty: i.quantity, variant: i.offerLabel ?? null }));
+  }
+  return [];
+}
+
+/**
+ * "Products Ordered" cell: every line item with its quantity, and the offer
+ * label (variant) where the source provides one.
+ *   "Vitamin C (3 pack) x2; Collagen x1"
+ */
+export function formatProductsOrdered(order: ExportOrderLines & { productLines?: string; primaryProductName?: string | null }): string {
+  const lines = orderLines(order);
+  if (lines.length > 0) {
+    return lines.map((l) => `${l.name ?? 'Unknown'}${l.variant ? ` (${l.variant})` : ''} x${l.qty}`).join('; ');
+  }
+  return order.productLines || order.primaryProductName || '—';
+}
+
+/**
+ * Total units across every line item. `primaryQuantity` covers only the FIRST
+ * line, so it under-reports any multi-product order; sum the lines instead and
+ * fall back to the primary line only when no breakdown is available.
+ */
+export function totalOrderQuantity(order: ExportOrderLines): number | '' {
+  const lines = orderLines(order);
+  if (lines.length > 0) {
+    return lines.reduce((sum, l) => sum + (Number.isFinite(l.qty) ? l.qty : 0), 0);
+  }
+  return order.primaryQuantity ?? '';
+}
+
+/**
+ * The Sales Orders list collapses several statuses into one pill (see
+ * `admin.sales.orders._index`): Confirmed covers the whole dispatch chain, and
+ * Delivered rolls up REMITTED. An export filtered by one of those pills has to
+ * expand the same way or it returns fewer rows than the screen it came from.
+ */
+export function expandExportStatusFilter(status?: string): { status?: ListOrdersInput['status'] } | { statuses: ListOrdersInput['statuses'] } {
+  if (!status) return {};
+  if (status === 'DELIVERED') return { statuses: ['DELIVERED', 'REMITTED'] };
+  if (status === 'CONFIRMED') return { statuses: ['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'] };
+  return { status: status as ListOrdersInput['status'] };
+}
+
 function todayISODate() {
   return new Date().toISOString().split('T')[0] ?? '';
 }
@@ -223,7 +281,10 @@ export class ReportsService {
       {
         sortBy: 'createdAt',
         sortOrder: 'desc',
-        ...(input.filters?.status ? { status: input.filters.status as ListOrdersInput['status'] } : {}),
+        // The Sales Orders list rolls REMITTED into its Delivered pill (see
+        // admin.sales.orders._index). Mirror that here so an export of
+        // "Delivered" doesn't silently drop every already-remitted order.
+        ...expandExportStatusFilter(input.filters?.status),
         ...(input.filters?.search ? { search: input.filters.search } : {}),
         ...(input.filters?.assignedCsId ? { assignedCsId: input.filters.assignedCsId } : {}),
         ...(startDate ? { startDate } : {}),
@@ -240,6 +301,11 @@ export class ReportsService {
       phone: (o as unknown as { customerPhone?: string }).customerPhone ?? o.customerPhoneDisplay ?? '',
       status: o.status,
       amount: o.totalAmount ?? '',
+      // Every line item on the order, e.g. "Vitamin C x2; Collagen x1", so
+      // multi-product orders no longer collapse to a single product name.
+      product: formatProductsOrdered(o),
+      quantity: totalOrderQuantity(o),
+      address: o.deliveryAddress ?? '',
       created: new Date(o.createdAt).toLocaleDateString(),
     }));
     const filteredRows = rows.filter((row) => {
@@ -253,6 +319,9 @@ export class ReportsService {
       { key: 'phone', label: 'Phone' },
       { key: 'status', label: 'Status' },
       { key: 'amount', label: 'Amount' },
+      { key: 'product', label: 'Products Ordered' },
+      { key: 'quantity', label: 'Quantity' },
+      { key: 'address', label: 'Delivery Address' },
       { key: 'created', label: 'Created' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
     return { filename: `cs-orders-${date}.csv`, csvContent: toCsv(filteredRows, columns) };
@@ -945,7 +1014,10 @@ export class ReportsService {
       customer: o.customerName ?? '',
       status: o.status,
       amount: o.totalAmount ?? '',
-      product: o.primaryProductName ?? '—',
+      // All line items, not just the first — a multi-product order used to
+      // export only its primary product name with no quantity.
+      product: formatProductsOrdered(o),
+      quantity: totalOrderQuantity(o),
       assignedCs: o.assignedCsName ?? '—',
       mediaBuyer: o.mediaBuyerName ?? '—',
       campaign: o.campaignName ?? '—',
