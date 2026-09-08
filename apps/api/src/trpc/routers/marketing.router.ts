@@ -820,6 +820,7 @@ export const marketingRouter = router({
           { startDate: input.startDate, endDate: input.endDate },
           ctx.currentBranchId,
           ctx.effectiveBranchIds,
+          ctx.activeGroupId,
         ),
       ]);
 
@@ -2252,6 +2253,7 @@ export const marketingRouter = router({
         input,
         ctx.currentBranchId,
         ctx.effectiveBranchIds,
+        ctx.activeGroupId,
       );
     }),
 
@@ -2272,6 +2274,7 @@ export const marketingRouter = router({
         input,
         ctx.currentBranchId,
         ctx.effectiveBranchIds,
+        ctx.activeGroupId,
       );
     }),
 

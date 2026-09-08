@@ -70,8 +70,26 @@ export function useOrderPrefix(branchId: string | null | undefined): string | un
  */
 export function useActiveCompanyOrderPrefix(): string | undefined {
   const groups = useBranchGroupsCatalog();
-  if (groups.length !== 1) return undefined;
-  return groups[0]?.orderPrefix ?? undefined;
+  const activeGroupId = useActiveGroupId();
+  // Company selected in the switcher — every order on the page belongs to it.
+  if (activeGroupId) {
+    const active = groups.find((g) => g.id === activeGroupId);
+    if (active) return active.orderPrefix ?? undefined;
+  }
+  // No switcher selection but only one company exists — unambiguous.
+  if (groups.length === 1) return groups[0]?.orderPrefix ?? undefined;
+  return undefined;
+}
+
+const ActiveGroupIdContext = createContext<string | null>(null);
+
+export function ActiveGroupIdProvider({ value, children }: { value: string | null; children: ReactNode }) {
+  return <ActiveGroupIdContext.Provider value={value}>{children}</ActiveGroupIdContext.Provider>;
+}
+
+/** Company currently selected in the header switcher, or null for all-companies. */
+export function useActiveGroupId(): string | null {
+  return useContext(ActiveGroupIdContext);
 }
 
 /**
