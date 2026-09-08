@@ -12,7 +12,7 @@
  * if (cond) conditions.push(cond);
  * ```
  */
-import { eq, inArray, isNull, or, sql, type SQL, type Column } from 'drizzle-orm';
+import { eq, inArray, sql, type SQL, type Column } from 'drizzle-orm';
 
 /**
  * Branch scope context — passed from routers to services as a single object.
@@ -67,13 +67,16 @@ export function branchScopeCondition(
   if (branchId) return eq(column, branchId);
 
   // "All branches" for a non-global user → IN their assigned branches.
-  // Also include rows with NULL branch (e.g. offline orders created without
-  // a branch context) so they don't vanish from company-scoped views.
+  //
+  // NULL branch rows are deliberately EXCLUDED. A row with no branch has no
+  // company either (company is derived via branches.company_id), so admitting
+  // NULLs here made every unrouted row — imported orders awaiting CS routing,
+  // follow-up copies that inherited a NULL servicing branch — visible to every
+  // company at once. That is a cross-company leak, not a convenience: a
+  // branchless row belongs to no company, so only a truly global user (eIds ===
+  // null, handled below) may see it.
   if (eIds && eIds.length > 0) {
-    const inBranch = eIds.length === 1
-      ? eq(column, eIds[0]!)
-      : inArray(column, eIds);
-    return or(inBranch, isNull(column))!;
+    return eIds.length === 1 ? eq(column, eIds[0]!) : inArray(column, eIds);
   }
 
   // Empty array = company selected but no branches resolved yet (stale session,
