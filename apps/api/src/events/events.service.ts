@@ -183,9 +183,11 @@ export class EventsService {
     currentRoute: string;
     currentOrderId?: string | null;
     currentPanel?: string | null;
+    /** Agent's branch — scopes `cs-all` so other companies never see them. */
+    branchId?: string | null;
   }) {
     const payload = { ...data, lastActionAt: new Date().toISOString() };
-    this.safeEmit('cs-all', 'agent:state_update', payload);
+    this.safeEmit('cs-all', 'agent:state_update', payload, data.branchId ?? null);
   }
 
   // ── Follow-Up Sync Progress ──────────────────────────────────────

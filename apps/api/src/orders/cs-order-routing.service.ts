@@ -150,7 +150,7 @@ export class CsOrderRoutingService {
 
     await this.assertRuleProductMatchesRelationshipMode(input.ownerBranchId, input.productId ?? null);
 
-    await this.assertRoutingTargets(input.targets);
+    await this.assertRoutingTargets(input.targets, input.ownerBranchId);
 
     const strategy = input.strategy ?? 'EQUAL';
     if (strategy === 'WEIGHTED') {
@@ -209,7 +209,8 @@ export class CsOrderRoutingService {
     await this.assertRuleProductMatchesRelationshipMode(existing.ownerBranchId, effectiveProductId);
 
     if (input.targets?.length) {
-      await this.assertRoutingTargets(input.targets);
+      // Owner comes from the stored rule — an update payload does not carry it.
+      await this.assertRoutingTargets(input.targets, existing.ownerBranchId);
     }
 
     const strategy = input.strategy ?? existing.strategy;
@@ -530,9 +531,32 @@ export class CsOrderRoutingService {
 
   private async assertRoutingTargets(
     targets: Array<{ servicingBranchId: string; teamId?: string | null }>,
+    ownerBranchId?: string,
   ): Promise<void> {
     if (targets.length === 0) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'At least one routing target is required' });
+    }
+
+    // COMPANY BOUNDARY — a rule may only target branches in its own company.
+    // Nothing previously checked this, so a rule could be saved pointing one
+    // company's orders at another company's branch, handing live orders (and
+    // the customers on them) to the wrong company's closers.
+    if (ownerBranchId) {
+      const branchIds = [...new Set([ownerBranchId, ...targets.map((t) => t.servicingBranchId)])];
+      const branchRows = await this.db
+        .select({ id: schema.branches.id, groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(inArray(schema.branches.id, branchIds));
+      const groupOf = new Map(branchRows.map((b) => [b.id, b.groupId]));
+      const ownerGroupId = groupOf.get(ownerBranchId) ?? null;
+      for (const t of targets) {
+        if ((groupOf.get(t.servicingBranchId) ?? null) !== ownerGroupId) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Routing targets must be branches in the same company as the owning branch',
+          });
+        }
+      }
     }
 
     const teamIds = targets.map((t) => t.teamId).filter((id): id is string => !!id);

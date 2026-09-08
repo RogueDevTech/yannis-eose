@@ -9569,7 +9569,25 @@ export class OrdersService {
     const servicingBranchId: string | null = routing
       ? routing.servicingBranchId
       : (branchId ?? null);
-    const workloads = await this.getCSCloserWorkloads(servicingBranchId ?? undefined, null, {
+
+    // COMPANY BOUNDARY — a null servicingBranchId means "org-wide pool"
+    // (SPLIT_ALL_BRANCHES). Left unscoped, getCSCloserWorkloads falls through to
+    // every active CS_CLOSER in the system, so an order in one company could be
+    // auto-assigned to a closer in another — who then works it and calls that
+    // customer. Confine the pool to the order's own company; "all branches"
+    // means all branches WITHIN the company, never across.
+    let companyBranchIds: string[] | null = null;
+    if (servicingBranchId == null && branchId) {
+      const rows = await this.db
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(
+          sql`${schema.branches.groupId} IS NOT DISTINCT FROM (SELECT group_id FROM branches WHERE id = ${branchId})`,
+        );
+      companyBranchIds = rows.map((r) => r.id);
+    }
+
+    const workloads = await this.getCSCloserWorkloads(servicingBranchId ?? undefined, companyBranchIds, {
       pendingCountsAcrossAllBranches: routing?.crossBranchServicing === true,
     });
     let available = [...workloads];
