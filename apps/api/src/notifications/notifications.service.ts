@@ -273,15 +273,46 @@ export class NotificationsService {
           ),
         );
     } else {
-      rows = await this.db
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(
-          and(
-            inArray(schema.users.role, roles),
-            eq(schema.users.status, 'ACTIVE'),
-          ),
-        );
+      // No explicit groupId — derive the company from the payload rather than
+      // fanning out org-wide. 29 of 31 call sites omit the argument, so an
+      // unscoped fan-out here notified EVERY holder of a role in EVERY company:
+      // a Head of CS in one company was pushed every new order from all of them.
+      //
+      // The read-side filter does not save us. Socket emit and web push both
+      // fire inside create(), before any list filter runs, so the wrong
+      // company's phone buzzes regardless of what the in-app list later hides.
+      const derivedGroupId = await this.resolveGroupId(
+        (input.data as Record<string, unknown> | null | undefined) ?? null,
+      );
+
+      if (derivedGroupId) {
+        rows = await this.db
+          .selectDistinct({ id: schema.users.id })
+          .from(schema.users)
+          .innerJoin(schema.userBranches, eq(schema.userBranches.userId, schema.users.id))
+          .innerJoin(schema.branches, eq(schema.branches.id, schema.userBranches.branchId))
+          .where(
+            and(
+              inArray(schema.users.role, roles),
+              eq(schema.users.status, 'ACTIVE'),
+              eq(schema.branches.groupId, derivedGroupId),
+            ),
+          );
+        // Stamp it so the list filter isolates this row too.
+        groupId = derivedGroupId;
+      } else {
+        // Genuinely company-less (account/security alerts, system notices).
+        // These stay org-wide by design.
+        rows = await this.db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(
+            and(
+              inArray(schema.users.role, roles),
+              eq(schema.users.status, 'ACTIVE'),
+            ),
+          );
+      }
     }
 
     // Auto-stamp groupId into notification data so the list filter can isolate.
@@ -639,6 +670,60 @@ export class NotificationsService {
       );
     }
     return clauses;
+  }
+
+  /**
+   * Resolve the company (branch_groups.id) a notification belongs to, from its
+   * payload. Used to scope role fan-outs when the caller passed no groupId.
+   *
+   * Falls back through every company-bearing id a payload may carry: an
+   * explicit groupId, the branch (own or via an order), then the actors that
+   * carry company through their branch memberships (media buyer, user). That
+   * last hop matters because marketing and inventory payloads carry no branch
+   * at all, which is why ~127k notifications sat with a NULL branch_id and so
+   * slipped past the branch-based list filter entirely.
+   *
+   * Returns null only when nothing in the payload identifies a company — a
+   * genuinely global notice, which stays org-wide.
+   */
+  private async resolveGroupId(data: Record<string, unknown> | null | undefined): Promise<string | null> {
+    if (!data) return null;
+
+    const explicitGroup = data['groupId'];
+    if (typeof explicitGroup === 'string' && explicitGroup.length > 0) return explicitGroup;
+
+    try {
+      // Branch (explicit, or resolved from an order) → its company.
+      const branchId = await this.resolveBranchId(data);
+      if (branchId) {
+        const [row] = await this.db
+          .select({ groupId: schema.branches.groupId })
+          .from(schema.branches)
+          .where(eq(schema.branches.id, branchId))
+          .limit(1);
+        if (row?.groupId) return row.groupId;
+      }
+
+      // No branch anywhere — fall back to a user in the payload and take the
+      // company from their branch memberships. Covers ad-spend, funding, HR and
+      // inventory payloads, which name a person but never a branch.
+      for (const key of ['mediaBuyerId', 'userId', 'requesterId', 'actorId'] as const) {
+        const uid = data[key];
+        if (typeof uid !== 'string' || uid.length === 0) continue;
+        const [row] = await this.db
+          .selectDistinct({ groupId: schema.branches.groupId })
+          .from(schema.userBranches)
+          .innerJoin(schema.branches, eq(schema.branches.id, schema.userBranches.branchId))
+          .where(eq(schema.userBranches.userId, uid))
+          .limit(1);
+        if (row?.groupId) return row.groupId;
+      }
+    } catch {
+      // Best-effort — never break notification creation over scoping.
+      return null;
+    }
+
+    return null;
   }
 
   /**
