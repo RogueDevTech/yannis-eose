@@ -23,7 +23,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch, type Tx } from '../common/db/with-actor';
 
@@ -719,7 +719,7 @@ export class OrdersService {
     excludeUserId: string;
   }): Promise<void> {
     const orderLabel = params.orderNo != null
-      ? `YNS-${params.orderNo}`
+      ? formatOrderNumber(params.orderNo, await this.resolveOrderPrefix(params))
       : params.orderId.slice(0, 8).toUpperCase();
     const title = 'Order retrack — approval needed';
     const body = `${params.requesterName ?? 'A teammate'} requested to retrack order ${orderLabel} from ${params.currentStatus} to ${params.targetStatus}. Review under Permission Requests.`;
@@ -1048,6 +1048,10 @@ export class OrdersService {
     orderId: string,
     order: typeof schema.orders.$inferSelect,
   ): Promise<void> {
+    // Counterpart orders are always in the same company as this one, so its
+    // prefix labels them correctly.
+    const orderPrefixForMessages = await this.resolveOrderPrefix(order);
+
     // Case 1: This is an original order — check if any follow-up already delivered.
     // Check follow_up_orders table (not yet graduated)
     const [fuDelivered] = await this.db
@@ -1064,7 +1068,7 @@ export class OrdersService {
     if (fuDelivered) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: `Cannot mark as delivered — follow-up order FU-${fuDelivered.orderNumber} has already been delivered for this customer.`,
+        message: `Cannot mark as delivered — follow-up order ${formatOrderNumber(fuDelivered.orderNumber, orderPrefixForMessages)} has already been delivered for this customer.`,
       });
     }
 
@@ -1084,7 +1088,7 @@ export class OrdersService {
     if (graduatedFu) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: `Cannot mark as delivered — follow-up order YNS-${graduatedFu.orderNumber} has already been delivered for this customer.`,
+        message: `Cannot mark as delivered — follow-up order ${formatOrderNumber(graduatedFu.orderNumber, orderPrefixForMessages)} has already been delivered for this customer.`,
       });
     }
 
@@ -1104,7 +1108,7 @@ export class OrdersService {
       if (origDelivered) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: `Cannot mark as delivered — original order YNS-${origDelivered.orderNumber} has already been delivered for this customer.`,
+          message: `Cannot mark as delivered — original order ${formatOrderNumber(origDelivered.orderNumber, orderPrefixForMessages)} has already been delivered for this customer.`,
         });
       }
     }
@@ -2623,7 +2627,12 @@ export class OrdersService {
 
     // Notify Head of CS + Head of Marketing only on new order (not every Sales closer — they get
     // order:assigned when Hot Swap / auto-dispatch / claim assigns them). SuperAdmin excluded (volume).
-    const orderLabel = `YNS-${String(order.orderNumber).padStart(5, '0')}`;
+    // Company-prefixed so the recipient can tell at a glance which company an
+    // order belongs to (ZAR-… vs YNS-…) instead of reading the campaign name.
+    const orderLabel = formatOrderNumber(
+      order.orderNumber,
+      await this.resolveOrderPrefix(order),
+    );
     const customerLabel = (order.customerName ?? '').trim() || 'A customer';
     const campaignName = order.campaignId
       ? (
@@ -2754,13 +2763,17 @@ export class OrdersService {
                 .where(inArray(schema.cartOrders.id, cartOrderIds));
               // Detailed deletion comment on each superseded cart order so its
               // activity log explains it was replaced by the real form order.
+              const supersededByLabel = formatOrderNumber(
+                order.orderNumber,
+                await this.resolveOrderPrefix(order),
+              );
               await tx.insert(schema.cartOrderTimelineEvents).values(
                 cartOrderIds.map((cid) => ({
                   cartOrderId: cid,
                   eventType: 'ORDER_DELETED',
                   actorId: null,
                   actorName: 'System',
-                  description: `Order deleted because it was superseded by a real order (YNS-${order.orderNumber}) submitted for the same customer and product.`,
+                  description: `Order deleted because it was superseded by a real order (${supersededByLabel}) submitted for the same customer and product.`,
                   metadata: { reason: 'GRADUATION_SUPERSEDED', supersededByOrderId: order.id },
                   branchId: order.branchId ?? null,
                 })),
@@ -3739,7 +3752,7 @@ export class OrdersService {
       }
       throw new TRPCError({
         code: 'CONFLICT',
-        message: `This customer already has a live order (YNS-${existing.orderNumber}) for this product. The cart was linked to it instead of creating a duplicate.`,
+        message: `This customer already has a live order (${formatOrderNumber(existing.orderNumber, await this.resolveOrderPrefixByOrderId(existing.id))}) for this product. The cart was linked to it instead of creating a duplicate.`,
       });
     }
 
@@ -5686,6 +5699,10 @@ export class OrdersService {
           primaryQuantity: primary?.items[0]?.qty ?? null,
           itemCount: primary?.itemCount ?? 0,
           productLines: primary?.items.map((i) => `${i.name ?? 'Unknown'} x${i.qty}`).join('; ') ?? '',
+          // Structured twin of `productLines`. Exports need per-line quantities
+          // to sum total units; parsing them back out of the display string
+          // would break the moment that format changes.
+          productItems: primary?.items.map((i) => ({ name: i.name, qty: i.qty })) ?? [],
           campaignName: order.campaignId ? campaignNames.get(order.campaignId) ?? null : null,
           lastCsComment: lastComment,
         };
@@ -6645,7 +6662,10 @@ export class OrdersService {
 
     // Notify HoCS and the assigned CS closer when an order is retracked
     if (isRetrack) {
-      const orderLabel = `YNS-${String(updated.orderNumber).padStart(5, '0')}`;
+      const orderLabel = formatOrderNumber(
+        updated.orderNumber,
+        await this.resolveOrderPrefix(updated),
+      );
       const actorName = await this.resolveUserNameById(actor.id).catch(() => null) ?? 'Someone';
       const categoryLabel = retrackCategoryLabel(input.metadata?.retrackCategory);
       const categorySuffix = categoryLabel ? ` Reason: ${categoryLabel}.` : '';
@@ -7073,7 +7093,10 @@ export class OrdersService {
         servicingBranchId: paystackServicingBranchId ?? null,
         mediaBuyerId: order.mediaBuyerId ?? null,
       });
-      const orderLabelPay = `YNS-${String(order.orderNumber).padStart(5, '0')}`;
+      const orderLabelPay = formatOrderNumber(
+        order.orderNumber,
+        await this.resolveOrderPrefix(order),
+      );
       const customerLabelPay = (order.customerName ?? '').trim() || 'A customer';
       const campaignNamePay = order.campaignId
         ? (
@@ -11935,6 +11958,41 @@ export class OrdersService {
   }
 
   /**
+   * The order's company order prefix, via its branch. Used so a notification
+   * reads "ZAR-113037" rather than "YNS-113037" — with one shared prefix,
+   * nothing on the face of a notification said which company an order belonged
+   * to. Returns null when the order has no branch, in which case the formatter
+   * keeps the default rather than guessing a company.
+   */
+  /** resolveOrderPrefix for callers that hold only an order id. */
+  private async resolveOrderPrefixByOrderId(orderId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({
+        branchId: schema.orders.branchId,
+        servicingBranchId: schema.orders.servicingBranchId,
+      })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    return row ? this.resolveOrderPrefix(row) : null;
+  }
+
+  private async resolveOrderPrefix(order: {
+    servicingBranchId?: string | null;
+    branchId?: string | null;
+  }): Promise<string | null> {
+    const branchId = order.servicingBranchId ?? order.branchId;
+    if (!branchId) return null;
+    const [row] = await this.db
+      .select({ orderPrefix: schema.branchGroups.orderPrefix })
+      .from(schema.branches)
+      .innerJoin(schema.branchGroups, eq(schema.branchGroups.id, schema.branches.groupId))
+      .where(eq(schema.branches.id, branchId))
+      .limit(1);
+    return row?.orderPrefix ?? null;
+  }
+
+  /**
    * DIAGNOSTIC: trace an order by its human YNS number, including DELETED rows.
    *
    * The normal order search/list tools apply `deleted_at IS NULL` + graduation
@@ -12039,12 +12097,15 @@ export class OrdersService {
       let winnerOrderNumber: number | null = null;
       let winnerStatus: string | null = null;
       let winnerDeliveredAt: Date | null = null;
+      let dupWinnerPrefix: string | null = null;
       if (typeof winnerId === 'string') {
         const [winner] = await this.db
           .select({
             orderNumber: schema.orders.orderNumber,
             status: schema.orders.status,
             deliveredAt: schema.orders.deliveredAt,
+            branchId: schema.orders.branchId,
+            servicingBranchId: schema.orders.servicingBranchId,
           })
           .from(schema.orders)
           .where(eq(schema.orders.id, winnerId))
@@ -12053,6 +12114,7 @@ export class OrdersService {
           winnerOrderNumber = winner.orderNumber;
           winnerStatus = winner.status;
           winnerDeliveredAt = winner.deliveredAt;
+          dupWinnerPrefix = await this.resolveOrderPrefix(winner);
         }
       }
       const likelyFalsePositive =
@@ -12066,8 +12128,8 @@ export class OrdersService {
         winnerDeliveredAt,
         likelyFalsePositive,
         explanation: likelyFalsePositive
-          ? `Auto-deleted as a duplicate of YNS-${winnerOrderNumber}, but that order was already ${winnerStatus} before this one was created. This is a legitimate repeat purchase, not a duplicate — it should be restored.`
-          : `Auto-deleted as a duplicate of YNS-${winnerOrderNumber ?? '(unknown)'} by the duplicate-detection rules (same customer + product within the dedup window).`,
+          ? `Auto-deleted as a duplicate of ${formatOrderNumber(winnerOrderNumber, dupWinnerPrefix)}, but that order was already ${winnerStatus} before this one was created. This is a legitimate repeat purchase, not a duplicate — it should be restored.`
+          : `Auto-deleted as a duplicate of ${winnerOrderNumber != null ? formatOrderNumber(winnerOrderNumber, dupWinnerPrefix) : '(unknown)'} by the duplicate-detection rules (same customer + product within the dedup window).`,
       };
     } else if (order.status === 'DELETED') {
       deletion = {
@@ -12562,7 +12624,7 @@ export class OrdersService {
               eventType: 'ORDER_RECEIVED' as const,
               actorId: actor.id,
               actorName: actor.name ?? null,
-              description: `Follow-up order created from original YNS-${String(orig.orderNumber).padStart(5, '0')}. Original status: ${orig.status}.`,
+              description: `Follow-up order created from original ${formatOrderNumber(orig.orderNumber, await this.resolveOrderPrefix(orig))}. Original status: ${orig.status}.`,
               metadata: {
                 sourceOrderId: sourceId,
                 sourceOrderNumber: orig.orderNumber,

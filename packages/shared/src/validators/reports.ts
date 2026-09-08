@@ -164,6 +164,7 @@ export const reportColumnsByKey = {
     'status',
     'amount',
     'product',
+    'quantity',
     'assignedCs',
     'mediaBuyer',
     'campaign',

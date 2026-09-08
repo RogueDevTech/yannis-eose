@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from '@remix-run/react';
 import { formatOrderNumber } from '@yannis/shared';
 import { useCurrencyColor } from '~/contexts/currencies-catalog-context';
+import { useOrderPrefix } from '~/contexts/branches-catalog-context';
 
 export interface OrderIdBadgeProps {
   /**
@@ -9,8 +10,14 @@ export interface OrderIdBadgeProps {
    * truncated display text.
    */
   id: string;
-  /** Sequential order number — when present, shown as YNS-XXXXX instead of UUID prefix. */
+  /** Sequential order number — when present, shown as PREFIX-XXXXX instead of UUID prefix. */
   orderNumber?: number | null;
+  /**
+   * Branch the order belongs to. Resolves the company's order prefix so the
+   * label reads ZAR-113037 rather than YNS-113037. Omit and it falls back to
+   * the default prefix.
+   */
+  branchId?: string | null;
   /** Visible characters from the start of the ID. Default 8. */
   length?: number;
   /** Uppercase the visible characters. Default false. */
@@ -58,6 +65,7 @@ export interface OrderIdBadgeProps {
 export function OrderIdBadge({
   id,
   orderNumber,
+  branchId,
   length = 8,
   uppercase = false,
   ellipsis = '...',
@@ -70,8 +78,9 @@ export function OrderIdBadge({
 }: OrderIdBadgeProps) {
   const accent = useCurrencyColor(currencyCode);
   const accentStyle = accent ? { color: accent } : undefined;
+  const orderPrefix = useOrderPrefix(branchId);
   const visible = orderNumber != null
-    ? formatOrderNumber(orderNumber)
+    ? formatOrderNumber(orderNumber, orderPrefix)
     : uppercase
       ? `${id.slice(0, length)}${ellipsis}`.toUpperCase()
       : `${id.slice(0, length)}${ellipsis}`;
@@ -92,7 +101,7 @@ export function OrderIdBadge({
   return (
     <span className={`inline-flex items-center gap-1 ${className ?? ''}`}>
       {text}
-      {!hideCopy && <CopyButton value={orderNumber != null ? formatOrderNumber(orderNumber) : id} />}
+      {!hideCopy && <CopyButton value={orderNumber != null ? formatOrderNumber(orderNumber, orderPrefix) : id} />}
     </span>
   );
 }

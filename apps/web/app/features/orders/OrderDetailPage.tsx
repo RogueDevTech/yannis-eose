@@ -3,7 +3,7 @@ import { Link, useFetcher, useNavigate, useRevalidator, useSearchParams } from '
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
-import { EDGE_FORM_ACTOR_ID, RETRACK_CATEGORY_OPTIONS, isPriceAffectingRetrackCategory, retrackCategoryLabel, RETRACK_CATEGORY_META, formatMoney, symbolForCurrencyCode } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, formatOrderNumber, RETRACK_CATEGORY_OPTIONS, isPriceAffectingRetrackCategory, retrackCategoryLabel, RETRACK_CATEGORY_META, formatMoney, symbolForCurrencyCode } from '@yannis/shared';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
 import { Spinner } from '~/components/ui/spinner';
@@ -46,6 +46,7 @@ import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard'
 import { STATUS_LABELS, formatStatus } from '~/features/shared/order-status';
 import { ordersListPathForDetailFrom } from '~/lib/order-detail-return';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps, OrderInvoice } from './types';
+import { useOrderPrefix } from '~/contexts/branches-catalog-context';
 
 /** Matches `orders.scheduleCallback` / Remix action validation (minutes). */
 const CALLBACK_DELAY_MIN_MINUTES = 5;
@@ -288,7 +289,7 @@ interface DetailFieldConfig {
   alwaysShow?: boolean;
   /** When true, hide this row once the order is confirmed — shown prominently under Order Progress instead */
   suppressAfterConfirm?: boolean;
-  getValue: (order: OrderDetail) => unknown;
+  getValue: (order: OrderDetail, orderPrefix?: string) => unknown;
   format: (value: unknown, order: OrderDetail) => string;
   ddClassName?: DetailValueClass;
   /** Optional: accent border on the row (e.g. 'border-l-4 border-l-success-500') */
@@ -528,7 +529,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   {
     label: 'Order No',
     alwaysShow: true,
-    getValue: (o) => (o.orderNumber != null ? `YNS-${String(o.orderNumber).padStart(5, '0')}` : o.id),
+    getValue: (o, orderPrefix) => (o.orderNumber != null ? formatOrderNumber(o.orderNumber, orderPrefix) : o.id),
     format: (v) => (v ? String(v) : ''),
     ddClassName: DETAIL_ID_CLASS,
     rowAccent: 'border-l-4 border-l-surface-200 dark:border-l-surface-700',
@@ -546,7 +547,8 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
 const DETAIL_PREVIEW_COUNT = 4;
 
 function DetailFieldRow({ field, order }: { field: DetailFieldConfig; order: OrderDetail }) {
-  const value = field.getValue(order);
+  const orderPrefix = useOrderPrefix(order.branchId);
+  const value = field.getValue(order, orderPrefix);
   const formatted = field.format(value, order);
   const valueClass =
     typeof field.ddClassName === 'function'
@@ -564,11 +566,12 @@ function DetailFieldRow({ field, order }: { field: DetailFieldConfig; order: Ord
 
 function OrderDetailsCard({ order }: { order: OrderDetail }) {
   const [expanded, setExpanded] = useState(false);
+  const orderPrefix = useOrderPrefix(order.branchId);
 
   // Filter to only visible fields
   const visibleFields = ORDER_DETAIL_FIELDS.filter((field) => {
     if (field.suppressAfterConfirm && order.confirmedAt) return false;
-    const value = field.getValue(order);
+    const value = field.getValue(order, orderPrefix);
     if (!field.alwaysShow && !hasValue(value)) return false;
     return true;
   });
@@ -940,6 +943,7 @@ export function OrderDetailPage({
   isCartOrder = false,
   isMirroring = false,
 }: OrderDetailStreamData & OrderDetailPageExtraProps & { isMirroring?: boolean }) {
+  const orderPrefix = useOrderPrefix(serverOrder.branchId);
   const fetcher = useFetcher();
   const recordCallFetcher = useFetcher();
   const scheduleFetcher = useFetcher();
@@ -2231,15 +2235,15 @@ export function OrderDetailPage({
               <p className="font-semibold">Duplicate delivery detected</p>
               <p className="mt-0.5 text-danger-800 dark:text-danger-200/90">
                 {order.duplicateDeliveryWarning.isFollowUp
-                  ? `A follow-up order (YNS-${order.duplicateDeliveryWarning.counterpartOrderNo}) has already been delivered for this customer. This order should not be delivered again.`
-                  : `The original order (YNS-${order.duplicateDeliveryWarning.counterpartOrderNo}) has already been delivered for this customer. This follow-up should not be delivered again.`
+                  ? `A follow-up order (${formatOrderNumber(order.duplicateDeliveryWarning.counterpartOrderNo, orderPrefix)}) has already been delivered for this customer. This order should not be delivered again.`
+                  : `The original order (${formatOrderNumber(order.duplicateDeliveryWarning.counterpartOrderNo, orderPrefix)}) has already been delivered for this customer. This follow-up should not be delivered again.`
                 }
               </p>
               <Link
                 to={`/admin/orders/${order.duplicateDeliveryWarning.counterpartId}`}
                 className="inline-block mt-1.5 text-sm font-medium text-danger-700 dark:text-danger-300 underline underline-offset-2 hover:text-danger-900 dark:hover:text-danger-100"
               >
-                View YNS-{order.duplicateDeliveryWarning.counterpartOrderNo}
+                View {formatOrderNumber(order.duplicateDeliveryWarning.counterpartOrderNo, orderPrefix)}
               </Link>
             </div>
           </div>

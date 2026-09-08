@@ -28,6 +28,8 @@ import {
   type ImportRowFacets,
 } from './bulk-import-api';
 import { useImportJobPoll } from '~/hooks/useImportJobPoll';
+import { useActiveCompanyOrderPrefix } from '~/contexts/branches-catalog-context';
+import { formatOrderNumber } from '@yannis/shared';
 
 /** Statuses that stop the poll — nothing more will change without user action. */
 const TERMINAL_STATUSES: ImportJob['status'][] = ['COMPLETED', 'FAILED'];
@@ -116,6 +118,7 @@ interface ImportJobDetailPageProps {
  * exposes Continue / Retry-failed / Delete.
  */
 export function ImportJobDetailPage({ jobId, backHref }: ImportJobDetailPageProps) {
+  const companyPrefix = useActiveCompanyOrderPrefix();
   const navigate = useNavigate();
   const [job, setJob] = useState<ImportJob | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -431,7 +434,7 @@ export function ImportJobDetailPage({ jobId, backHref }: ImportJobDetailPageProp
       render: (r) =>
         r.orderId
           ? r.orderNumber != null
-            ? <span className="tabular-nums text-app-fg">{`YNS-${r.orderNumber}`}</span>
+            ? <span className="tabular-nums text-app-fg">{formatOrderNumber(r.orderNumber, companyPrefix)}</span>
             : '\u2014'
           : <span className="text-app-fg-muted">{'\u2014'}</span>,
     },
@@ -938,6 +941,7 @@ function RowReasonModal({ row, onClose }: { row: ImportJobRow | null; onClose: (
 }
 
 function OrderPeekModal({ row, onClose }: { row: ImportJobRow | null; onClose: () => void }) {
+  const companyPrefix = useActiveCompanyOrderPrefix();
   const open = !!row?.orderId;
   const amount =
     row?.totalAmount != null
@@ -952,7 +956,7 @@ function OrderPeekModal({ row, onClose }: { row: ImportJobRow | null; onClose: (
             <div className="min-w-0">
               <p className="text-xs uppercase tracking-wide text-app-fg-muted">Imported order</p>
               <h2 id="order-peek-title" className="text-lg font-semibold text-app-fg tabular-nums">
-                {row.orderNumber != null ? `YNS-${row.orderNumber}` : 'Order'}
+                {row.orderNumber != null ? formatOrderNumber(row.orderNumber, companyPrefix) : 'Order'}
               </h2>
             </div>
             {row.orderStatus && <OrderStatusBadge status={row.orderStatus} />}
