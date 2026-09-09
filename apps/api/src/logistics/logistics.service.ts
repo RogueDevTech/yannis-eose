@@ -1748,8 +1748,29 @@ export class LogisticsService implements OnModuleInit {
   /**
    * List remittances. TPL_MANAGER sees own location's; HEAD_OF_LOGISTICS sees all (optional locationId filter).
    */
-  async listRemittances(input: ListRemittancesInput, actor: SessionUser) {
+  async listRemittances(
+    input: ListRemittancesInput,
+    actor: SessionUser,
+    /**
+     * COMPANY BOUNDARY. `logistics.scope.global` is a branch-level Head of
+     * Logistics permission, not an admin bypass, but it short-circuited all
+     * filtering — so a HoL in one company received every company's transfer
+     * remittances. The delivery-remittance list next to this one has always
+     * taken groupId + effectiveBranchIds.
+     */
+    effectiveBranchIds?: string[] | null,
+  ) {
     const conditions = [];
+    if (effectiveBranchIds?.length && !isAdminLevel(actor)) {
+      conditions.push(
+        sql`${schema.transferRemittances.toLocationId} IN (
+          SELECT id FROM logistics_locations WHERE branch_id IN (${sql.join(
+            effectiveBranchIds.map((id) => sql`${id}`),
+            sql`, `,
+          )})
+        )`,
+      );
+    }
 
     const listPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const has = (code: string) =>
@@ -1919,7 +1940,20 @@ export class LogisticsService implements OnModuleInit {
    * TPL_MANAGER creates a delivery remittance: select delivered orders + payment receipt URLs.
    * Orders must be DELIVERED, belong to actor's location, and not already in another remittance.
    */
-  async createDeliveryRemittance(input: CreateDeliveryRemittanceInput, actor: SessionUser) {
+  async createDeliveryRemittance(
+    input: CreateDeliveryRemittanceInput,
+    actor: SessionUser,
+    /**
+     * COMPANY BOUNDARY. This batches orders into a remittance and, with
+     * markReceivedNow, flips them DELIVERED -> REMITTED and posts GL
+     * settlement. Unscoped it could settle another company's revenue —
+     * irreversible financial corruption, not just a read leak.
+     *
+     * listDeliveryRemittanceEligibleOrders, the read that feeds this UI,
+     * has always taken effectiveBranchIds. The write never did.
+     */
+    effectiveBranchIds?: string[] | null,
+  ) {
     // Phase 18 (CEO directive 2026-04-29): the 3PL partners aren't on-platform yet,
     // so the accountant records remittances directly. The legacy TPL_MANAGER path
     // stays alive for when a 3PL actually onboards. Finance roles include the
@@ -1953,8 +1987,18 @@ export class LogisticsService implements OnModuleInit {
           currencyCode: schema.orders.currencyCode,
         })
         .from(schema.orders)
-        .where(inArray(schema.orders.id, input.orderIds));
+        .where(
+          and(
+            inArray(schema.orders.id, input.orderIds),
+            ...(effectiveBranchIds?.length
+              ? [inArray(schema.orders.servicingBranchId, effectiveBranchIds)]
+              : []),
+          ),
+        );
 
+      // Any id filtered out by the company predicate simply will not appear in
+      // foundIds, so the existing "order not found" guard below rejects the
+      // whole batch rather than silently settling a subset.
       const foundIds = new Set(orderRows.map((r) => r.id));
       for (const id of input.orderIds) {
         if (!foundIds.has(id)) {
@@ -2270,7 +2314,40 @@ export class LogisticsService implements OnModuleInit {
    * Update a delivery remittance batch's editable fields (costs, notes, receipts,
    * per-order delivery fees). Only allowed while the batch is still SENT (pending).
    */
-  async updateDeliveryRemittance(input: UpdateDeliveryRemittanceInput, actor: SessionUser) {
+
+  /**
+   * COMPANY BOUNDARY for delivery-remittance by-id mutations.
+   *
+   * A remittance reaches a company through its logistics location's branch.
+   * The read siblings (listDeliveryRemittances, getDeliveryRemittance) are
+   * scoped; the lifecycle writes were not, and they cascade — marking one
+   * received flips its orders DELIVERED -> REMITTED and posts GL settlement.
+   *
+   * A null scope keeps the previous behaviour for org-wide callers.
+   */
+  private async assertDeliveryRemittanceInCompany(
+    remittanceId: string,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<void> {
+    if (!effectiveBranchIds?.length) return;
+    const [row] = await this.db
+      .select({ branchId: schema.logisticsLocations.branchId })
+      .from(schema.deliveryRemittances)
+      .innerJoin(
+        schema.logisticsLocations,
+        eq(schema.logisticsLocations.id, schema.deliveryRemittances.logisticsLocationId),
+      )
+      .where(eq(schema.deliveryRemittances.id, remittanceId))
+      .limit(1);
+    // A location with no branch predates multi-company; leave it to the
+    // existing role checks rather than hard-failing a legacy record.
+    if (row?.branchId && !effectiveBranchIds.includes(row.branchId)) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Remittance not found' });
+    }
+  }
+
+  async updateDeliveryRemittance(input: UpdateDeliveryRemittanceInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertDeliveryRemittanceInCompany(input.id, effectiveBranchIds);
     const isTplCaller =
       this.actorHasAnyPermission(actor, 'logistics.remit') && !!actor.logisticsLocationId && (actor.role === 'TPL_MANAGER');
     const isFinanceCaller =
@@ -3426,7 +3503,8 @@ export class LogisticsService implements OnModuleInit {
   /**
    * Finance marks a delivery remittance as received (payment confirmed). Notifies 3PL location.
    */
-  async markDeliveryRemittanceReceived(input: MarkDeliveryRemittanceReceivedInput, actor: SessionUser) {
+  async markDeliveryRemittanceReceived(input: MarkDeliveryRemittanceReceivedInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertDeliveryRemittanceInCompany(input.deliveryRemittanceId, effectiveBranchIds);
     // Phase 18: Finance / admin / Finance-hat holders can mark received.
     // Phase 20: also accept the explicit `finance.cashRemittance.markReceived`
     // permission so custom role templates can grant just this capability.
@@ -3585,7 +3663,8 @@ export class LogisticsService implements OnModuleInit {
   /**
    * Finance disputes a delivery remittance (payment not received / receipt invalid). Notifies 3PL location.
    */
-  async disputeDeliveryRemittance(input: DisputeDeliveryRemittanceInput, actor: SessionUser) {
+  async disputeDeliveryRemittance(input: DisputeDeliveryRemittanceInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertDeliveryRemittanceInCompany(input.deliveryRemittanceId, effectiveBranchIds);
     if (!hasFinanceWriteAccess(actor) && !this.actorHasAnyPermission(actor, 'finance.cashRemittance.markReceived')) {
       throw new TRPCError({
         code: 'FORBIDDEN',
