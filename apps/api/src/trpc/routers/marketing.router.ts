@@ -465,11 +465,15 @@ export const marketingRouter = router({
         }),
     )
     .query(async ({ input, ctx }) => {
-      return getMarketingService().getFundingFlow(input, {
-        id: ctx.user.id,
-        role: ctx.user.role,
-        permissions: ctx.user.permissions ?? [],
-      });
+      return getMarketingService().getFundingFlow(
+        input,
+        {
+          id: ctx.user.id,
+          role: ctx.user.role,
+          permissions: ctx.user.permissions ?? [],
+        },
+        ctx.effectiveBranchIds,
+      );
     }),
 
   // ── Ad Spend ─────────────────────────────────────
