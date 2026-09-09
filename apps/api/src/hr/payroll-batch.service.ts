@@ -2534,8 +2534,9 @@ export class PayrollBatchService {
   // Stage transitions
   // ============================================
 
-  async submitBatch(input: SubmitBatchInput, actor: SessionUser) {
+  async submitBatch(input: SubmitBatchInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     const batch = await this.requireBatch(input.batchId);
+    assertBatchInScope(batch, actor, effectiveBranchIds);
     if (!(await this.canPrepareDept(actor, batch.branchId, batch.department))) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the owning department head (or admin) can submit this batch.' });
     }
@@ -2924,8 +2925,9 @@ export class PayrollBatchService {
     return updated;
   }
 
-  async recalculateBatch(batchId: string, actor: SessionUser) {
+  async recalculateBatch(batchId: string, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     const batch = await this.requireBatch(batchId);
+    assertBatchInScope(batch, actor, effectiveBranchIds);
     if (batch.status === 'PAID') {
       throw new TRPCError({ code: 'CONFLICT', message: 'Cannot recalculate a PAID batch. Paid payroll is an immutable financial record.' });
     }
@@ -2984,6 +2986,7 @@ export class PayrollBatchService {
   async overridePayslipLine(
     input: { payoutId: string; baseSalary?: number; performanceBonus?: number; payeTax?: number; reason: string },
     actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ) {
     const payoutRows = await this.db
       .select()
@@ -2994,6 +2997,7 @@ export class PayrollBatchService {
     if (!payout?.batchId) throw new TRPCError({ code: 'NOT_FOUND', message: 'Payout not found' });
 
     const batch = await this.requireBatch(payout.batchId);
+    assertBatchInScope(batch, actor, effectiveBranchIds);
     if (batch.status === 'PAID') {
       throw new TRPCError({ code: 'CONFLICT', message: 'Cannot override a PAID batch. Paid payroll is an immutable financial record.' });
     }
@@ -3810,8 +3814,9 @@ export class PayrollBatchService {
   // HR edits — open until Finance marks the batch paid (see isBatchOpenForHrEdit)
   // ============================================
 
-  async addBatchAdjustment(input: AddBatchAdjustmentInput, actor: SessionUser) {
+  async addBatchAdjustment(input: AddBatchAdjustmentInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     const batch = await this.requireBatch(input.batchId);
+    assertBatchInScope(batch, actor, effectiveBranchIds);
     if (batch.status === 'PAID') {
       throw new TRPCError({
         code: 'CONFLICT',
@@ -3880,8 +3885,9 @@ export class PayrollBatchService {
    * deleted, so the per-party audit trail survives and a later run can re-absorb
    * them. Then the batch totals + staff count are re-rolled.
    */
-  async removePayoutLine(input: RemovePayoutLineInput, actor: SessionUser) {
+  async removePayoutLine(input: RemovePayoutLineInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     const batch = await this.requireBatch(input.batchId);
+    assertBatchInScope(batch, actor, effectiveBranchIds);
     if (batch.status === 'PAID') {
       throw new TRPCError({
         code: 'CONFLICT',

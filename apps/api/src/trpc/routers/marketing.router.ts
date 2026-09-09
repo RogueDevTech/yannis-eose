@@ -1022,8 +1022,8 @@ export const marketingRouter = router({
 
   getOfferTemplate: authedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getMarketingService().getOfferTemplate(input.id);
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().getOfferTemplate(input.id, ctx.activeGroupId);
     }),
 
   listOfferTemplates: authedProcedure
@@ -1057,8 +1057,8 @@ export const marketingRouter = router({
 
   getOfferGroup: authedProcedure
     .input(getOfferGroupSchema)
-    .query(async ({ input }) => {
-      return getMarketingService().getOfferGroup(input.id);
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().getOfferGroup(input.id, ctx.activeGroupId);
     }),
 
   listOfferGroups: authedProcedure
@@ -1072,7 +1072,7 @@ export const marketingRouter = router({
     .input(clearLegacyOfferTemplatesSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...rest } = input;
-      return getMarketingService().clearLegacyOfferTemplates(rest, ctx.user.id);
+      return getMarketingService().clearLegacyOfferTemplates(rest, ctx.user.id, ctx.activeGroupId);
     }),
 
   // ── Campaigns ────────────────────────────────────
@@ -1092,13 +1092,13 @@ export const marketingRouter = router({
     .input(updateCampaignSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...campaignInput } = input;
-      return getMarketingService().updateCampaign(campaignInput, ctx.user.id);
+      return getMarketingService().updateCampaign(campaignInput, ctx.user.id, ctx.effectiveBranchIds);
     }),
 
   getCampaign: authedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getMarketingService().getCampaign(input.id);
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().getCampaign(input.id, ctx.effectiveBranchIds);
     }),
 
   listCampaigns: authedProcedure

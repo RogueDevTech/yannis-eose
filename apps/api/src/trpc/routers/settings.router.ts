@@ -117,6 +117,11 @@ export const settingsRouter = router({
         CLIENT_UI_CONFIG_KEY,
         { defaultAppTheme: input.defaultAppTheme },
         ctx.user.id,
+        // Without groupId the UPDATE is `WHERE key = ?` only — and
+        // system_settings is unique on (key, group_id), so one row exists per
+        // company. Omitting it rewrote EVERY company's row in one statement.
+        undefined,
+        ctx.activeGroupId,
       );
       await invalidateSystemSettingsCache();
       return { success: true };
@@ -174,6 +179,10 @@ export const settingsRouter = router({
         NOTIFICATION_EMAIL_CONFIG_KEY,
         { enabledTypes: input.enabledTypes },
         ctx.user.id,
+        // See updateClientUiConfig: omitting groupId mass-updates every
+        // company's row.
+        undefined,
+        ctx.activeGroupId,
       );
       await invalidateSystemSettingsCache();
       await invalidateNotificationEmailConfigCache();

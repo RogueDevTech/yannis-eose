@@ -932,7 +932,7 @@ export class InventoryService {
    * the same source). If the source no longer has the requested quantity, the
    * approver gets the same BAD_REQUEST shape as `initiateTransfer`.
    */
-  async approveTransfer(input: ApproveTransferInput, actor: SessionUser) {
+  async approveTransfer(input: ApproveTransferInput, actor: SessionUser, groupId?: string | null) {
     const now = new Date();
     const result = await withActor(this.db, actor, async (tx) => {
       // FOR UPDATE: two concurrent approvals both reading PENDING would each
@@ -948,6 +948,7 @@ export class InventoryService {
       if (!transfer) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
       }
+      await this.assertProductInCompany(transfer.productId, groupId);
       if (transfer.transferStatus !== 'PENDING') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -1092,7 +1093,7 @@ export class InventoryService {
    * side effects, since nothing was deducted at initiate. The original initiator
    * gets a notification with the rejection reason.
    */
-  async rejectTransfer(input: RejectTransferInput, actor: SessionUser) {
+  async rejectTransfer(input: RejectTransferInput, actor: SessionUser, groupId?: string | null) {
     const reason = input.reason.trim();
     if (reason.length < 10) {
       throw new TRPCError({
@@ -1114,6 +1115,7 @@ export class InventoryService {
       if (!transfer) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
       }
+      await this.assertProductInCompany(transfer.productId, groupId);
       if (transfer.transferStatus !== 'PENDING') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -1179,7 +1181,7 @@ export class InventoryService {
    * 3PL manager verifies receipt of a transfer.
    * If received < sent, auto-generates a Shrinkage Alert.
    */
-  async verifyTransfer(input: VerifyTransferInput, actor: SessionUser) {
+  async verifyTransfer(input: VerifyTransferInput, actor: SessionUser, groupId?: string | null) {
    return withActor(this.db, actor, async (tx) => {
     // FOR UPDATE: two concurrent verifies both reading IN_TRANSIT would each
     // credit the destination. The lock serialises them; the loser re-reads
@@ -1195,6 +1197,7 @@ export class InventoryService {
     if (!transfer) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
     }
+    await this.assertProductInCompany(transfer.productId, groupId);
 
     // Destination authority: a 3PL manager can only verify transfers destined
     // for their own warehouse. Warehouse-side roles (Stock Manager, HoL,
@@ -1343,7 +1346,7 @@ export class InventoryService {
    *    and cancelling would break inventory accounting — the user must do a
    *    Stock Adjustment instead.
    */
-  async cancelTransfer(input: { transferId: string; reason?: string | null }, actor: SessionUser) {
+  async cancelTransfer(input: { transferId: string; reason?: string | null }, actor: SessionUser, groupId?: string | null) {
     return withActorAndBranch(this.db, actor, async (tx) => {
       // FOR UPDATE: two concurrent cancels both reading RECEIVED would each
       // restore the source (and deduct the destination twice).
@@ -1357,6 +1360,7 @@ export class InventoryService {
       if (!transfer) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
       }
+      await this.assertProductInCompany(transfer.productId, groupId);
       if (transfer.transferStatus === 'CANCELLED') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer is already cancelled' });
       }
@@ -1492,7 +1496,8 @@ export class InventoryService {
   // Stock Adjustment — Manual Correction
   // ============================================
 
-  async adjust(input: StockAdjustmentInput, actor: SessionUser) {
+  async adjust(input: StockAdjustmentInput, actor: SessionUser, groupId?: string | null) {
+    await this.assertProductInCompany(input.productId, groupId);
     return withActor(this.db, actor, async (tx) => {
       // Atomic relative update with the floor guard in the WHERE clause. The
       // old shape (unlocked read, absolute write) silently overwrote any
@@ -2066,6 +2071,32 @@ export class InventoryService {
    *    an order whose `logisticsLocationId = X` (rescues historical DELIVERY / RETURN /
    *    WRITE_OFF rows that were written before location fields were stamped).
    */
+
+  /**
+   * COMPANY BOUNDARY for by-id stock mutations.
+   *
+   * Stock transfers carry no company of their own — they resolve through
+   * products.group_id, the same chain levelDetail already uses on the read
+   * side ("otherwise this endpoint leaks another company's FIFO cost layers").
+   * The mutations never got that treatment, so approve/reject/verify/cancel
+   * and adjust could act on another company's stock given a transfer UUID.
+   *
+   * A null groupId keeps the previous behaviour for org-wide callers.
+   */
+  private async assertProductInCompany(productId: string, groupId?: string | null): Promise<void> {
+    if (!groupId) return;
+    const [row] = await this.db
+      .select({ groupId: schema.products.groupId })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId))
+      .limit(1);
+    // NOT_FOUND rather than FORBIDDEN so the endpoint does not confirm the
+    // record exists in another company.
+    if (!row || (row.groupId ?? null) !== groupId) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Inventory record not found' });
+    }
+  }
+
   async levelDetail(
     productId: string,
     locationId: string,

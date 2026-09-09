@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import { TRPCError } from '@trpc/server';
 import { Cron } from '@nestjs/schedule';
 import { eq, and, desc, count, inArray, or, gte, lte, lt, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
@@ -1562,7 +1563,32 @@ export class NotificationsService {
   /**
    * Update an existing push automation rule.
    */
-  async updateAutomationRule(actorId: string, input: UpdateAutomationRuleInput) {
+
+  /**
+   * COMPANY BOUNDARY for push automation rule by-id writes.
+   *
+   * getAutomationRules(branchId, effectiveBranchIds) filters on the rule's
+   * branch; update/toggle/delete took only an id. Combined with the unscoped
+   * fan-out this was worse than a normal by-id write: rewriting another
+   * company's bodyTemplate sent arbitrary push content to their staff.
+   */
+  private async assertAutomationRuleInCompany(
+    ruleId: string,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<void> {
+    if (!effectiveBranchIds?.length) return;
+    const [row] = await this.db
+      .select({ branchId: schema.pushAutomationRules.branchId })
+      .from(schema.pushAutomationRules)
+      .where(eq(schema.pushAutomationRules.id, ruleId))
+      .limit(1);
+    if (row?.branchId && !effectiveBranchIds.includes(row.branchId)) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Automation rule not found' });
+    }
+  }
+
+  async updateAutomationRule(actorId: string, input: UpdateAutomationRuleInput, effectiveBranchIds?: string[] | null) {
+    await this.assertAutomationRuleInCompany(input.id, effectiveBranchIds);
     const { id, ...rest } = input;
     const updateData: Partial<typeof schema.pushAutomationRules.$inferInsert> = {};
 
@@ -1591,7 +1617,8 @@ export class NotificationsService {
   /**
    * Toggle an automation rule active/inactive.
    */
-  async toggleAutomationRule(id: string, isActive: boolean) {
+  async toggleAutomationRule(id: string, isActive: boolean, effectiveBranchIds?: string[] | null) {
+    await this.assertAutomationRuleInCompany(id, effectiveBranchIds);
     const rows = await this.db
       .update(schema.pushAutomationRules)
       .set({ isActive })
@@ -1605,7 +1632,8 @@ export class NotificationsService {
   /**
    * Delete an automation rule permanently.
    */
-  async deleteAutomationRule(id: string): Promise<void> {
+  async deleteAutomationRule(id: string, effectiveBranchIds?: string[] | null): Promise<void> {
+    await this.assertAutomationRuleInCompany(id, effectiveBranchIds);
     await this.db
       .delete(schema.pushAutomationRules)
       .where(eq(schema.pushAutomationRules.id, id));
@@ -1635,6 +1663,25 @@ export class NotificationsService {
     }
 
     // Resolve target users
+    // COMPANY BOUNDARY — this runs from cron with no session, so scope comes
+    // from the rule's OWN branch (stamped at creation). Without it, ROLE and
+    // ALL targets resolved to every active user in every company, so one
+    // company's push template was delivered to another company's staff
+    // devices — automatically, on schedule, with no attacker action.
+    //
+    // broadcastPush already solves this with the same subquery; this is the
+    // copy that never got the fix. A rule with no branch predates
+    // multi-company and stays org-wide.
+    const ruleBranchRestriction = rule.branchId
+      ? inArray(
+          schema.users.id,
+          this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(eq(schema.userBranches.branchId, rule.branchId)),
+        )
+      : undefined;
+
     let targetUserIds: string[] = [];
 
     if (rule.targetType === 'USER' && rule.targetUserId) {
@@ -1647,6 +1694,7 @@ export class NotificationsService {
           and(
             eq(schema.users.role, rule.targetRole as (typeof schema.users.$inferSelect)['role']),
             eq(schema.users.status, 'ACTIVE'),
+            ruleBranchRestriction,
           ),
         );
       targetUserIds = roleRows.map((r) => r.id);
@@ -1654,7 +1702,7 @@ export class NotificationsService {
       const allRows = await this.db
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(eq(schema.users.status, 'ACTIVE'));
+        .where(and(eq(schema.users.status, 'ACTIVE'), ruleBranchRestriction));
       targetUserIds = allRows.map((r) => r.id);
     }
 

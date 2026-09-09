@@ -273,7 +273,7 @@ export async function executeTool(
         if (!Number.isFinite(orderNumber) || orderNumber <= 0) {
           return JSON.stringify({ error: 'Provide a valid numeric order number, e.g. 68366.' });
         }
-        result = await services.ordersService.traceOrderByNumber(orderNumber);
+        result = await services.ordersService.traceOrderByNumber(orderNumber, ctx.effectiveBranchIds);
         break;
       }
 

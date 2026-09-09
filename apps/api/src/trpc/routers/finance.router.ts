@@ -48,7 +48,7 @@ export const financeRouter = router({
   getInvoice: authedProcedure
     .input(z.object({ invoiceId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      const inv = await getFinanceService().getInvoiceById(input.invoiceId);
+      const inv = await getFinanceService().getInvoiceById(input.invoiceId, ctx.effectiveBranchIds);
       if (inv.orderId) {
         const order = await getOrdersService().getById(inv.orderId);
         getOrdersService().assertActorMayViewOrderForRead(ctx.user, order);
