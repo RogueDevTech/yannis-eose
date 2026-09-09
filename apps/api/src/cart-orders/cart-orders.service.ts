@@ -16,6 +16,7 @@ import { isTransitionAllowed } from '../orders/order-state-machine';
 import { expandCustomerPhoneSearchDigitRuns } from '../orders/orders.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
+import { parseOrderNumberSearch } from '../common/utils/parse-order-number';
 // Raw SQL pull/backfill calls PostgreSQL uuidv7().
 // PG 18 has it natively; older DBs get a polyfill via migration 0275.
 
@@ -380,8 +381,7 @@ export class CartOrdersService {
                 return parts.length > 1 ? or(...parts) : parts[0];
               })()
             : undefined;
-        const orderNumMatch = trimmed.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
-        const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
+        const parsedOrderNum = parseOrderNumberSearch(trimmed);
         if (!Number.isNaN(parsedOrderNum) && parsedOrderNum > 0) {
           const combined = or(
             eq(schema.cartOrders.orderNumber, parsedOrderNum),

@@ -60,6 +60,7 @@ import { runGlPostWithFinanceAlert } from '../finance/gl-posting-notify';
 import { hasFinanceAccess, hasFinanceWriteAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
+import { parseOrderNumberSearch } from '../common/utils/parse-order-number';
 
 /**
  * After remitting graduated orders, sync REMITTED status back to their source
@@ -2535,8 +2536,7 @@ export class LogisticsService implements OnModuleInit {
       // Parse "YNS-00123", "YNS00123", or bare "00123" → exact order_number match.
       // Mirrors listDeliveryRemittanceEligibleOrders: order_number is stored as an
       // int, so CAST(...) ILIKE '%YNS-90285%' can never match the ref users see.
-      const orderNumMatch = trimmedSearch.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
-      const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
+      const parsedOrderNum = parseOrderNumberSearch(trimmedSearch);
       const orderNumberClause =
         !Number.isNaN(parsedOrderNum) && parsedOrderNum > 0
           ? sql` OR o.order_number = ${parsedOrderNum}`
@@ -3156,8 +3156,7 @@ export class LogisticsService implements OnModuleInit {
       const term = `%${trimmedSearch}%`;
       // Parse "YNS-00123", "YNS00123", or bare "00123" → exact order_number match.
       // Without this the visible YNS-prefixed ref never matches the int column.
-      const orderNumMatch = trimmedSearch.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
-      const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
+      const parsedOrderNum = parseOrderNumberSearch(trimmedSearch);
       const orderNumberClause =
         !Number.isNaN(parsedOrderNum) && parsedOrderNum > 0
           ? sql` OR ${schema.orders.orderNumber} = ${parsedOrderNum}`
@@ -3955,8 +3954,7 @@ export class LogisticsService implements OnModuleInit {
       // Parse "YNS-00123", "YNS00123", or bare "00123" → exact order_number match.
       // Mirrors orders.service.ts so the placeholder's "order ID" promise is real
       // (the visible YNS-XXXXX ref, not the internal UUID).
-      const orderNumMatch = trimmed.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
-      const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
+      const parsedOrderNum = parseOrderNumberSearch(trimmed);
       const orderNumberClause =
         !Number.isNaN(parsedOrderNum) && parsedOrderNum > 0
           ? sql` OR ${schema.orders.orderNumber} = ${parsedOrderNum}`
