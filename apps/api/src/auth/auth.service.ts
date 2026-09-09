@@ -561,7 +561,18 @@ export class AuthService {
       // of the read-only "live walkthrough".
       appTheme: target.appTheme ?? null,
       fontScale: target.fontScale ?? null,
-      mirroredBy: { id: actor.id, name: actor.name, role: actor.role },
+      mirroredBy: {
+        id: actor.id,
+        name: actor.name,
+        role: actor.role,
+        // Snapshot the actor's OWN company/branch selection so stopMirror can
+        // put them back exactly where they were. The mirrored session overwrites
+        // these fields with the target's context, so this is the only place the
+        // actor's own selection survives.
+        priorActiveGroupId: actor.activeGroupId ?? null,
+        priorCurrentBranchId: actor.currentBranchId ?? null,
+        priorSelectedBranchIds: actor.selectedBranchIds ?? null,
+      },
       mirrorSessionId,
     };
 
@@ -592,6 +603,12 @@ export class AuthService {
 
     const originalActorId = currentSession.mirroredBy.id;
     const mirrorSessionId = currentSession.mirrorSessionId ?? null;
+    // The actor's own company/branch selection, snapshotted by startMirror.
+    // `undefined` on sessions that began before this was captured — those fall
+    // back to the previous behaviour (resolve a default company on next request).
+    const priorActiveGroupId = currentSession.mirroredBy.priorActiveGroupId;
+    const priorCurrentBranchId = currentSession.mirroredBy.priorCurrentBranchId;
+    const priorSelectedBranchIds = currentSession.mirroredBy.priorSelectedBranchIds;
 
     // Close the audit row. Match by id when we have it; fall back to the most
     // recent open row for this actor+target so a stale session still closes.
@@ -668,6 +685,22 @@ export class AuthService {
     }
     // Global users default to null = "All Branches".
 
+    // Prefer the branch the actor had selected before mirroring. Only honoured
+    // for a branch they can still reach: a global user may select any branch,
+    // everyone else must still be a member (memberships are re-read fresh above,
+    // so a branch removed during the mirror is correctly dropped).
+    if (priorCurrentBranchId !== undefined) {
+      if (priorCurrentBranchId === null) {
+        // The actor was on "All Branches" — restore that, not a resolved default.
+        if (actorGlobal) currentBranchId = null;
+      } else if (
+        actorGlobal ||
+        memberships.some((m) => (m.branchId as string) === priorCurrentBranchId)
+      ) {
+        currentBranchId = priorCurrentBranchId;
+      }
+    }
+
     const restored: SessionUser = {
       id: actor.id,
       email: actor.email,
@@ -681,13 +714,22 @@ export class AuthService {
       logisticsLocationId: actor.logisticsLocationId,
       currentBranchId,
       branchIds: memberships.map((m) => m.branchId as string),
-      // Restore the actor's own country scope on mirror-stop. Deliberately
-      // UNSCOPED by company: `restored` sets no activeGroupId (it goes back to
-      // the actor's own default context, resolved on their next request), so
-      // there is no company to scope by yet. Returning every grant they hold is
-      // the safe restore — the per-company narrowing happens when their session
-      // next resolves a company, and mirror-exit must never leave the actor with
-      // LESS access than they started with.
+      // Put the actor back in the company they were viewing before the mirror.
+      // Previously `restored` set no activeGroupId at all, so exiting a mirror
+      // dropped them onto the default company: browsing Zarvon, mirroring a
+      // Zarvon user, then exiting landed you in Yannis Marketing.
+      //
+      // `undefined` (a session started before startMirror snapshotted this)
+      // keeps the old behaviour — no company, resolved fresh on the next
+      // request — so in-flight mirrors are not broken by the deploy.
+      ...(priorActiveGroupId !== undefined ? { activeGroupId: priorActiveGroupId } : {}),
+      ...(priorSelectedBranchIds !== undefined
+        ? { selectedBranchIds: priorSelectedBranchIds }
+        : {}),
+      // Country scope stays UNSCOPED by company, deliberately: passing a groupId
+      // NARROWS the grants (see getUserCurrencyCodes), and mirror-exit must never
+      // return the actor with LESS access than they started with. The per-company
+      // narrowing happens when their session next resolves a company.
       currencyCodes: await this.getUserCurrencyCodes(actor.id),
       appTheme: actor.appTheme ?? null,
       fontScale: actor.fontScale ?? null,

@@ -70,6 +70,17 @@ export interface SessionUser {
     id: string;
     name: string;
     role: string;
+    /**
+     * The actor's OWN company/branch selection at the moment they started
+     * mirroring, so `stopMirror` can put them back where they were. Without
+     * this, exiting a mirror dropped the admin onto the default company —
+     * mirroring a Zarvon user from a Zarvon context and exiting landed you in
+     * Yannis Marketing. Optional so sessions created before this field existed
+     * still resolve (they fall back to the old default-company behaviour).
+     */
+    priorActiveGroupId?: string | null;
+    priorCurrentBranchId?: string | null;
+    priorSelectedBranchIds?: string[] | null;
   } | null;
   /** mirror_sessions row id — used by stopMirror to close out the active row. */
   mirrorSessionId?: string | null;
