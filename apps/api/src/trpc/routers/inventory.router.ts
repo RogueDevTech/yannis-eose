@@ -258,7 +258,7 @@ export const inventoryRouter = router({
   approveTransfer: permissionProcedure('inventory.approveTransfer')
     .input(approveTransferSchema)
     .mutation(async ({ input, ctx }) => {
-      return getInventoryService().approveTransfer(input, ctx.user);
+      return getInventoryService().approveTransfer(input, ctx.user, ctx.activeGroupId);
     }),
 
   /**
@@ -268,7 +268,7 @@ export const inventoryRouter = router({
   rejectTransfer: permissionProcedure('inventory.approveTransfer')
     .input(rejectTransferSchema)
     .mutation(async ({ input, ctx }) => {
-      return getInventoryService().rejectTransfer(input, ctx.user);
+      return getInventoryService().rejectTransfer(input, ctx.user, ctx.activeGroupId);
     }),
 
   /**
@@ -277,7 +277,7 @@ export const inventoryRouter = router({
   verifyTransfer: permissionProcedure('inventory.verifyTransfer')
     .input(verifyTransferSchema)
     .mutation(async ({ input, ctx }) => {
-      return getInventoryService().verifyTransfer(input, ctx.user);
+      return getInventoryService().verifyTransfer(input, ctx.user, ctx.activeGroupId);
     }),
 
   /**
@@ -296,7 +296,7 @@ export const inventoryRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      return getInventoryService().cancelTransfer(input, ctx.user);
+      return getInventoryService().cancelTransfer(input, ctx.user, ctx.activeGroupId);
     }),
 
   /**
@@ -305,7 +305,7 @@ export const inventoryRouter = router({
   adjust: permissionProcedure('inventory.adjust')
     .input(stockAdjustmentSchema)
     .mutation(async ({ input, ctx }) => {
-      return getInventoryService().adjust(input, ctx.user);
+      return getInventoryService().adjust(input, ctx.user, ctx.activeGroupId);
     }),
 
   /**
@@ -661,37 +661,37 @@ export const inventoryRouter = router({
     updateLines: permissionProcedure('inventory.intake')
       .input(updateShipmentLinesSchema)
       .mutation(async ({ input, ctx }) => {
-        return getShipmentsService().updateShipmentLines(input, ctx.user);
+        return getShipmentsService().updateShipmentLines(input, ctx.user, ctx.effectiveBranchIds);
       }),
 
     markInTransit: permissionProcedure('inventory.intake')
       .input(shipmentTransitionSchema)
       .mutation(async ({ input, ctx }) => {
-        return getShipmentsService().markInTransit(input, ctx.user);
+        return getShipmentsService().markInTransit(input, ctx.user, ctx.effectiveBranchIds);
       }),
 
     markArrived: permissionProcedure('inventory.intake')
       .input(shipmentTransitionSchema)
       .mutation(async ({ input, ctx }) => {
-        return getShipmentsService().markArrived(input, ctx.user);
+        return getShipmentsService().markArrived(input, ctx.user, ctx.effectiveBranchIds);
       }),
 
     verify: permissionProcedure('inventory.verifyTransfer')
       .input(verifyShipmentSchema)
       .mutation(async ({ input, ctx }) => {
-        return getShipmentsService().verifyShipment(input, ctx.user);
+        return getShipmentsService().verifyShipment(input, ctx.user, ctx.effectiveBranchIds);
       }),
 
     close: permissionProcedure('inventory.verifyTransfer')
       .input(shipmentTransitionSchema)
       .mutation(async ({ input, ctx }) => {
-        return getShipmentsService().closeShipment(input, ctx.user);
+        return getShipmentsService().closeShipment(input, ctx.user, ctx.effectiveBranchIds);
       }),
 
     cancel: permissionProcedure('inventory.intake')
       .input(cancelShipmentSchema)
       .mutation(async ({ input, ctx }) => {
-        return getShipmentsService().cancelShipment(input, ctx.user);
+        return getShipmentsService().cancelShipment(input, ctx.user, ctx.effectiveBranchIds);
       }),
   }),
 

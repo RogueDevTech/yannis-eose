@@ -756,7 +756,46 @@ export class ShipmentsService {
     return created;
   }
 
-  async updateShipmentLines(input: UpdateShipmentLinesInput, actor: SessionUser) {
+
+  /**
+   * COMPANY BOUNDARY for by-id shipment mutations.
+   *
+   * getShipment already refuses a shipment whose destinationBranchId is outside
+   * the caller's scope. The six lifecycle mutations took no scope parameter at
+   * all and loaded by bare id, so they could transition another company's
+   * shipment given its UUID.
+   *
+   * A null effectiveBranchIds keeps the previous behaviour for org-wide callers,
+   * and admin-level roles bypass, mirroring the read path.
+   */
+  private async assertShipmentInCompany(
+    shipmentId: string,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<void> {
+    if (isAdminLevel(actor)) return;
+    if (!effectiveBranchIds?.length) return;
+    // logistics_locations.branch_id exists in the DB (migration 0041) but is not
+    // on the Drizzle schema — read raw and alias, mirroring getShipment.
+    const [row] = await this.db
+      .select({ destinationBranchId: sql<string | null>`${schema.logisticsLocations}.branch_id` })
+      .from(schema.shipments)
+      .innerJoin(
+        schema.logisticsLocations,
+        eq(schema.logisticsLocations.id, schema.shipments.destinationLocationId),
+      )
+      .where(eq(schema.shipments.id, shipmentId))
+      .limit(1);
+    if (row?.destinationBranchId && !effectiveBranchIds.includes(row.destinationBranchId)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'This shipment belongs to a different branch.',
+      });
+    }
+  }
+
+  async updateShipmentLines(input: UpdateShipmentLinesInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertShipmentInCompany(input.shipmentId, actor, effectiveBranchIds);
     if (!this.hasIntakePermission(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -829,7 +868,8 @@ export class ShipmentsService {
     return updated;
   }
 
-  async markInTransit(input: ShipmentTransitionInput, actor: SessionUser) {
+  async markInTransit(input: ShipmentTransitionInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertShipmentInCompany(input.shipmentId, actor, effectiveBranchIds);
     if (!this.hasIntakePermission(actor)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'No permission.' });
     }
@@ -856,7 +896,8 @@ export class ShipmentsService {
     });
   }
 
-  async markArrived(input: ShipmentTransitionInput, actor: SessionUser) {
+  async markArrived(input: ShipmentTransitionInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertShipmentInCompany(input.shipmentId, actor, effectiveBranchIds);
     if (!this.hasIntakePermission(actor)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'No permission.' });
     }
@@ -895,7 +936,8 @@ export class ShipmentsService {
    * `inventory_levels.stock_count`, and log an `INTAKE` `stock_movements` row
    * — exactly what the existing single-product `intake()` does, just batched.
    */
-  async verifyShipment(input: VerifyShipmentInput, actor: SessionUser) {
+  async verifyShipment(input: VerifyShipmentInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertShipmentInCompany(input.shipmentId, actor, effectiveBranchIds);
     if (!this.hasVerifyPermission(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -1137,7 +1179,8 @@ export class ShipmentsService {
     return { success: true };
   }
 
-  async closeShipment(input: ShipmentTransitionInput, actor: SessionUser) {
+  async closeShipment(input: ShipmentTransitionInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertShipmentInCompany(input.shipmentId, actor, effectiveBranchIds);
     if (!this.hasVerifyPermission(actor)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'No permission to close shipments.' });
     }
@@ -1170,7 +1213,8 @@ export class ShipmentsService {
     });
   }
 
-  async cancelShipment(input: CancelShipmentInput, actor: SessionUser) {
+  async cancelShipment(input: CancelShipmentInput, actor: SessionUser, effectiveBranchIds?: string[] | null) {
+    await this.assertShipmentInCompany(input.shipmentId, actor, effectiveBranchIds);
     if (!this.hasIntakePermission(actor)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'No permission.' });
     }
