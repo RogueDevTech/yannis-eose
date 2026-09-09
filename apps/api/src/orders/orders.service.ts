@@ -12023,7 +12023,18 @@ export class OrdersService {
    * Phone numbers are NOT included here — the AI executor masks them anyway, and
    * the caller must be admin/CS-lead gated at the tool layer.
    */
-  async traceOrderByNumber(orderNumber: number): Promise<{
+  async traceOrderByNumber(
+    orderNumber: number,
+    /**
+     * COMPANY BOUNDARY. Order numbers are a single global sequence shared by
+     * every company, so a bare `WHERE order_number = ?` lets any caller pull
+     * another company's order by guessing a number. The AI assistant's
+     * trace_order tool reaches this, and it was the only tool in the executor
+     * passing no scope — so the model would surface another company's customer
+     * name, status and assigned staff on request.
+     */
+    effectiveBranchIds?: string[] | null,
+  ): Promise<{
     found: boolean;
     order?: {
       id: string;
@@ -12076,7 +12087,17 @@ export class OrdersService {
       })
       .from(schema.orders)
       .leftJoin(schema.users, eq(schema.users.id, schema.orders.assignedCsId))
-      .where(eq(schema.orders.orderNumber, orderNumber))
+      .where(
+        and(
+          eq(schema.orders.orderNumber, orderNumber),
+          ...(effectiveBranchIds?.length
+            ? [or(
+                inArray(schema.orders.servicingBranchId, effectiveBranchIds),
+                inArray(schema.orders.branchId, effectiveBranchIds),
+              )!]
+            : []),
+        ),
+      )
       .limit(1);
 
     if (!order) {
