@@ -2056,7 +2056,12 @@ function OrdersListPageImpl({
                 </span>
               </div>
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-sm text-app-fg-muted">Pipeline backlog:</span>
+                {/* Deliberately NOT date-filtered: this is the standing queue
+                    behind today's target, so it must not reset when the page's
+                    date filter changes. Labelled "all time" because sitting next
+                    to a "Today" chip it otherwise reads as a contradiction (a
+                    non-zero backlog above an empty list). */}
+                <span className="text-sm text-app-fg-muted">Pipeline backlog (all time):</span>
                 <span className={`text-sm font-semibold tabular-nums ${myWorkload.pendingCount > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg'}`}>
                   {myWorkload.pendingCount}
                 </span>
@@ -2075,7 +2080,7 @@ function OrdersListPageImpl({
         })() : deferredLoading ? (
           <div className="card !py-2.5 !px-4 flex items-center gap-4 flex-wrap" aria-hidden>
             <span className="text-sm text-app-fg-muted">Today&apos;s duty: <span className="inline-block h-4 w-10 rounded bg-app-hover animate-pulse align-middle" /></span>
-            <span className="text-sm text-app-fg-muted">Pipeline backlog: <span className="inline-block h-4 w-6 rounded bg-app-hover animate-pulse align-middle" /></span>
+            <span className="text-sm text-app-fg-muted">Pipeline backlog (all time): <span className="inline-block h-4 w-6 rounded bg-app-hover animate-pulse align-middle" /></span>
             <div className="flex-1 min-w-[6rem] flex items-center gap-2">
               <div className="flex-1 h-1.5 bg-app-hover rounded-full overflow-hidden" />
               <span className="inline-block h-3 w-6 rounded bg-app-hover animate-pulse" />
