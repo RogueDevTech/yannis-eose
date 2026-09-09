@@ -262,11 +262,30 @@ const blockMediaBuyerMutationsOutsideMemberBranch = t.middleware(async ({ ctx, t
  * fields, mirror access) but CANNOT mutate any data. Same escape hatch as
  * mirror mode: `.meta({ viewOnlyOk: true })` allows session-only mutations
  * like `branches.switchBranch`.
+ *
+ * History: this guard was gutted to a pass-through on 2026-06-26, granting
+ * SUPPORT full SUPER_ADMIN write access while these comments still claimed
+ * read-only. Restored 2026-09-09 after a SUPPORT account transitioned a live
+ * order to CS_ENGAGED and logged a MANUAL_CALL simply by opening the detail
+ * page and copying the customer phone number.
+ *
+ * NOTE: `isAdminLevel()` includes SUPPORT (see `common/authz.ts`), so SUPPORT
+ * bypasses `permissionProcedure` code checks. This middleware is therefore the
+ * ONLY thing standing between a support account and every write in the app —
+ * do not weaken it without replacing that protection.
  */
-const blockMutationsForSupportRole = t.middleware(async ({ next }) => {
-  // SUPPORT role now has full mutation access (same as SUPER_ADMIN bypass).
-  // Previously blocked all mutations — removed per CEO directive 2026-06-26.
-  return next();
+const SUPPORT_READ_ONLY_MESSAGE =
+  'Support accounts are read-only. Use an operational account to make changes.';
+
+const blockMutationsForSupportRole = t.middleware(async ({ ctx, type, meta, next }) => {
+  if (type !== 'mutation') return next();
+  if (ctx.user?.role !== 'SUPPORT') return next();
+  // Same escape hatch as mirror mode: session-only mutations (branch switch,
+  // theme, notification read receipts) carry `.meta({ viewOnlyOk: true })` and
+  // touch no business data.
+  const viewOnlyOk = (meta as Record<string, unknown> | undefined)?.['viewOnlyOk'] === true;
+  if (viewOnlyOk) return next();
+  throw new TRPCError({ code: 'FORBIDDEN', message: SUPPORT_READ_ONLY_MESSAGE });
 });
 
 /**
