@@ -48,6 +48,16 @@ const AUDITABLE_TABLES = [
   'payroll_batches', 'payroll_pay_roles', 'payroll_product_tier_configs',
   'payroll_tax_band_configs', 'payroll_contractors',
   'stock_reconciliations',
+  // Inbound shipments + their SKU lines. Both are written through
+  // `withActorAndBranch` and have populated `*_history` tables (mig 0113,
+  // untouched by 0119), but were never whitelisted — so "who created this
+  // shipment?" was unanswerable in the UI even though the data was there.
+  // Shipments produce the FIFO `stock_batches` and carry landed cost, so the
+  // create → verify chain is exactly the trail Pillar 4 exists to serve.
+  // Neither history table has a `branch_id` column (branch flows via
+  // `destination_location_id` → `logistics_locations`), so they deliberately
+  // stay OUT of HISTORY_TABLES_WITH_BRANCH_ID below.
+  'shipments', 'shipment_lines',
   'email_change_requests', 'user_product_assignments',
   'permission_requests', 'system_settings',
   'permissions', 'user_permissions',
