@@ -167,6 +167,7 @@ export const cartRouter = router({
       return getCartService().getById(input.cartId, {
         includeRawPhone: true,
         requireMediaBuyerId,
+        effectiveBranchIds: ctx.effectiveBranchIds,
       });
     }),
 
@@ -230,6 +231,10 @@ export const cartRouter = router({
   revealPhoneForAbandoned: permissionProcedure('cart.delete')
     .input(z.object({ cartId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
-      return getCartService().revealPhoneForAbandonedCart(input.cartId, ctx.user.id);
+      return getCartService().revealPhoneForAbandonedCart(
+        input.cartId,
+        ctx.user.id,
+        ctx.effectiveBranchIds,
+      );
     }),
 });

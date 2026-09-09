@@ -1387,7 +1387,11 @@ export class CartOrdersService {
       quantity: it.quantity,
       unitPrice: String(it.unitPrice),
     }));
-    const totalAmount = gradItems.reduce((sum, it) => sum + Number(it.unitPrice) * Number(it.quantity ?? 1), 0);
+    // unitPrice IS the offer/line total — sum directly, never multiply by
+    // quantity. A "BUY 2 GET 1 FREE" line is qty 3 at a unitPrice of ₦120,000
+    // for the whole offer; multiplying billed ₦360,000. Matches
+    // autoCreateInvoiceForCartOrder above and the orders/follow-up builders.
+    const totalAmount = gradItems.reduce((sum, it) => sum + Number(it.unitPrice), 0);
 
     await this.db.insert(schema.invoices).values({
       orderId,
@@ -1822,8 +1826,12 @@ export class CartOrdersService {
    * caller's active company. In scope when EITHER its servicing branch OR its
    * marketing branch is in `effectiveBranchIds`. Org-wide callers (null) bypass.
    * Throws NOT_FOUND for a missing id, FORBIDDEN for a cross-company id.
+   *
+   * Public because `finance.router.ts::assertOrderIdInAnyTableScope` probes all
+   * three order tables (orders / follow_up_orders / cart_orders) to resolve an id
+   * a finance caller supplied, and needs this guard from outside the service.
    */
-  private async assertCartOrderInScope(
+  async assertCartOrderInScope(
     id: string,
     effectiveBranchIds: string[] | null | undefined,
   ): Promise<void> {
@@ -2093,12 +2101,57 @@ export class CartOrdersService {
   // Called from the queue.carts page or cron to convert abandoned carts
   // into cart_orders for CS to work.
 
+  /**
+   * Company-isolation guard for a batch of abandoned carts. `cart_abandonments`
+   * has no branch column of its own — a cart's company is derived through its
+   * campaign (`campaign_id -> campaigns.branch_id`), the same join the
+   * abandoned-cart LIST queries scope on. Mirrors
+   * `CartService::assertAbandonedCartInScope`, batched: one query for the whole
+   * set, and the WHOLE pull is refused if any cart falls outside the company, so
+   * a scoped caller cannot recover another company's leads into their pipeline.
+   *
+   * A campaignless cart has no derivable company, so a scoped caller cannot pull
+   * it — matching the branchless rule in `assertEntityInScope`.
+   */
+  async assertCartsInScope(
+    cartIds: string[],
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    if (effectiveBranchIds == null) return; // org-wide caller
+    if (cartIds.length === 0) return;
+
+    const ids = [...new Set(cartIds)];
+    const rows = await this.db
+      .select({
+        id: schema.cartAbandonments.id,
+        branchId: schema.campaigns.branchId,
+      })
+      .from(schema.cartAbandonments)
+      .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+      .where(inArray(schema.cartAbandonments.id, ids));
+
+    const scoped = new Set(effectiveBranchIds);
+    const admitted = new Set(
+      rows.filter((r) => r.branchId != null && scoped.has(r.branchId)).map((r) => r.id),
+    );
+    if (admitted.size !== ids.length) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'One or more of those carts is not in your company.',
+      });
+    }
+  }
+
   async pullFromAbandonedCarts(
     cartIds: string[],
     targetBranchId: string | null,
     _actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ) {
     if (cartIds.length === 0) return { pulled: 0 };
+
+    // Company isolation — refuse the whole batch if any cart is out of scope.
+    await this.assertCartsInScope(cartIds, effectiveBranchIds);
 
     // Defence-in-depth: validate all IDs are strict UUIDs before interpolation
     // into raw SQL. Zod validates at the router, but we enforce here at the

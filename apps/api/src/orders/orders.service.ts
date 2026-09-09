@@ -1682,6 +1682,89 @@ export class OrdersService {
   }
 
   /** Edge tamper gate: order lines must match allowlisted tiers for this campaign (templates or legacy base price). */
+  /**
+   * Company-isolation guard: assert the order (by id) belongs to the caller's
+   * active company. In scope when EITHER its marketing branch (`branch_id`) OR
+   * its CS servicing branch (`servicing_branch_id`) is in `effectiveBranchIds` —
+   * the two differ whenever CS routing moved the order, and either one being in
+   * the company admits it. Org-wide callers (null) bypass.
+   *
+   * Mirrors `assertFollowUpOrderInCompanyScope` / `assertCartOrderInScope` so
+   * `finance.router.ts::assertOrderIdInAnyTableScope` can probe all three order
+   * tables with the same contract: NOT_FOUND for a missing id, FORBIDDEN for a
+   * cross-company one.
+   */
+  /**
+   * Batch form of {@link assertOrderInCompanyScope} for the bulk endpoints, which
+   * accept client-supplied id arrays (up to 2000). One query for the whole batch
+   * rather than N round-trips — these run against a high-latency DB.
+   *
+   * All-or-nothing: if ANY id is outside the caller's company the batch is
+   * refused, so a caller cannot smuggle foreign orders into an otherwise valid
+   * bulk action. (`bulkTransition` is the exception — it reports per-order
+   * results, so it checks inside its own loop.)
+   */
+  async assertOrdersInCompanyScope(
+    orderIds: string[],
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    if (effectiveBranchIds == null) return; // org-wide caller
+    if (orderIds.length === 0) return;
+
+    const ids = [...new Set(orderIds)];
+    const rows = await this.db
+      .select({
+        id: schema.orders.id,
+        branchId: schema.orders.branchId,
+        servicingBranchId: schema.orders.servicingBranchId,
+      })
+      .from(schema.orders)
+      .where(inArray(schema.orders.id, ids));
+
+    const scoped = new Set(effectiveBranchIds);
+    const admitted = new Set(
+      rows
+        .filter(
+          (r) =>
+            (r.branchId != null && scoped.has(r.branchId)) ||
+            (r.servicingBranchId != null && scoped.has(r.servicingBranchId)),
+        )
+        .map((r) => r.id),
+    );
+    const rejected = ids.filter((id) => !admitted.has(id));
+    if (rejected.length > 0) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `${rejected.length} of ${ids.length} order(s) are not in your company.`,
+      });
+    }
+  }
+
+  async assertOrderInCompanyScope(
+    orderId: string,
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    if (effectiveBranchIds == null) return; // org-wide caller
+
+    const rows = await this.db
+      .select({
+        branchId: schema.orders.branchId,
+        servicingBranchId: schema.orders.servicingBranchId,
+      })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    assertEntityInScopeAny([row.branchId, row.servicingBranchId], effectiveBranchIds, {
+      message: 'This order is not in your company.',
+    });
+  }
+
   private async assertEdgeFormLineItemsAllowlisted(orderInput: CreateOrderInput): Promise<void> {
     const campaignId = orderInput.campaignId;
     if (!campaignId) return;

@@ -155,8 +155,12 @@ function MarketingSquadOverviewCard({
         />
         <MarketingTeamCompactStat label="Ad Spend" value={formatNaira(squad.totalAdSpend)} />
         <MarketingTeamCompactStat
-          label="CPA"
+          label="Avg CPA"
           value={squad.avgCpa != null ? <NairaPrice amount={squad.avgCpa} /> : '—'}
+        />
+        <MarketingTeamCompactStat
+          label="Funnel CPA"
+          value={squad.funnelCpa != null ? <NairaPrice amount={squad.funnelCpa} /> : '—'}
         />
         <MarketingTeamCompactStat
           label="Orders"
@@ -291,14 +295,18 @@ function MarketingTeamMemberCard({
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <MarketingTeamCompactStat
           label="Ad Spend"
           value={member.adSpend != null ? formatNaira(member.adSpend) : '—'}
         />
         <MarketingTeamCompactStat
-          label="CPA"
+          label="Avg CPA"
           value={member.cpa != null ? <NairaPrice amount={member.cpa} /> : '—'}
+        />
+        <MarketingTeamCompactStat
+          label="Funnel CPA"
+          value={member.funnelCpa != null ? <NairaPrice amount={member.funnelCpa} /> : '—'}
         />
         <MarketingTeamCompactStat
           label="Orders"
@@ -476,8 +484,16 @@ const TEAM_SORT_MENU_OPTIONS = [
   },
   {
     value: 'cpa',
-    label: 'CPA',
-    description: 'Cost per order created.',
+    label: 'Avg CPA',
+    description: 'Ad spend divided by all orders, including cart-graduated deliveries.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'asc' as const,
+  },
+  {
+    value: 'funnelCpa',
+    label: 'Funnel CPA',
+    description: 'Ad spend divided by front-end funnel orders only.',
     ascLabel: 'Lowest first',
     descLabel: 'Highest first',
     defaultDir: 'asc' as const,
@@ -832,10 +848,17 @@ export function MarketingTeamPage({
       },
       {
         key: 'cpa',
-        header: 'CPA',
+        header: 'Avg CPA',
         align: 'right',
         nowrap: true,
         render: (m) => (m.cpa != null ? <NairaPrice amount={m.cpa} /> : '\u2014'),
+      },
+      {
+        key: 'funnelCpa',
+        header: 'Funnel CPA',
+        align: 'right',
+        nowrap: true,
+        render: (m) => (m.funnelCpa != null ? <NairaPrice amount={m.funnelCpa} /> : '\u2014'),
       },
       {
         key: 'orders',
@@ -1082,7 +1105,13 @@ export function MarketingTeamPage({
             label: 'Avg CPA',
             value: overviewStats.avgCpa > 0 ? <NairaPrice amount={Math.round(overviewStats.avgCpa)} /> : '\u2014',
             valueClassName: 'text-app-fg',
-            title: `Total ad spend ÷ total orders = ₦${Math.round(overviewStats.avgCpa).toLocaleString()}`,
+            title: `Total ad spend ÷ all orders (funnel + cart-graduated deliveries) = ₦${Math.round(overviewStats.avgCpa).toLocaleString()}`,
+          },
+          {
+            label: 'Funnel CPA',
+            value: overviewStats.funnelCpa > 0 ? <NairaPrice amount={Math.round(overviewStats.funnelCpa)} /> : '\u2014',
+            valueClassName: 'text-app-fg',
+            title: `Total ad spend ÷ ${overviewStats.funnelOrders.toLocaleString()} front-end funnel orders = ₦${Math.round(overviewStats.funnelCpa).toLocaleString()}`,
           },
           {
             label: 'MB Unspent Balance (all-time)',

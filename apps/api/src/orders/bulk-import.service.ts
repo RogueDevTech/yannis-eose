@@ -160,7 +160,13 @@ interface CodeMaps {
 
 /** One reference field left NULL because its code didn't resolve (row still imported). */
 interface UnresolvedRef {
-  field: 'mediaBuyer' | 'closer';
+  /**
+   * `totalAmount` / `unitPrice` flag a money cell that would not parse to a
+   * finite number. The row still imports (the amount falls back), but the
+   * operator sees WHICH cell was unreadable instead of silently getting a
+   * zero — or, before the finite check, a NaN that poisoned every SUM.
+   */
+  field: 'mediaBuyer' | 'closer' | 'totalAmount' | 'unitPrice';
   code: string;
 }
 
@@ -1922,7 +1928,21 @@ export class BulkImportService {
     const offerLabel = m.offerLabel ? this.readCell(record, m.offerLabel) : undefined;
 
     const totalAmountRaw = m.totalAmount ? this.readCell(record, m.totalAmount) : undefined;
-    const totalAmount = totalAmountRaw != null && totalAmountRaw !== '' ? Number(totalAmountRaw) : undefined;
+    // `Number('abc')` is NaN, and NaN is a VALID value for a Postgres numeric
+    // column — it inserts silently and then poisons every SUM() it lands in
+    // (SUM over any NaN returns NaN, not a skewed number), which broke
+    // delivered-revenue reporting for whole months. Treat unparseable money as
+    // absent so the fallbacks below decide, rather than storing NaN.
+    const totalAmountParsed =
+      totalAmountRaw != null && totalAmountRaw !== '' ? Number(totalAmountRaw) : undefined;
+    const totalAmount =
+      totalAmountParsed != null && Number.isFinite(totalAmountParsed) ? totalAmountParsed : undefined;
+    // Cells that carried something but did not parse to a number — surfaced as
+    // row warnings below so the operator can fix the sheet.
+    const moneyWarnings: UnresolvedRef[] = [];
+    if (totalAmountParsed != null && !Number.isFinite(totalAmountParsed)) {
+      moneyWarnings.push({ field: 'totalAmount', code: String(totalAmountRaw) });
+    }
 
     // Line price. NOTE `unitPrice` is the OFFER/LINE TOTAL, not a per-unit rate
     // (see orders.service.ts: the order total sums line unitPrices directly, and
@@ -1939,8 +1959,16 @@ export class BulkImportService {
     //   4. 0 — only when the file carries no money at all.
     const unitPriceRaw = m.unitPrice ? this.readCell(record, m.unitPrice) : undefined;
     let unitPrice: number;
-    if (unitPriceRaw != null && unitPriceRaw !== '') {
-      unitPrice = Number(unitPriceRaw);
+    const unitPriceParsed =
+      unitPriceRaw != null && unitPriceRaw !== '' ? Number(unitPriceRaw) : undefined;
+    if (unitPriceParsed != null && Number.isFinite(unitPriceParsed)) {
+      unitPrice = unitPriceParsed;
+    } else if (unitPriceParsed != null && !Number.isFinite(unitPriceParsed)) {
+      moneyWarnings.push({ field: 'unitPrice', code: String(unitPriceRaw) });
+      unitPrice =
+        totalAmount != null && Number.isFinite(totalAmount)
+          ? totalAmount
+          : config.defaultUnitPrice ?? 0;
     } else if (totalAmount != null && Number.isFinite(totalAmount)) {
       unitPrice = totalAmount;
     } else {
@@ -1995,7 +2023,7 @@ export class BulkImportService {
     }
 
     // ── References: MB / CS resolved from codes; BRANCH derived from them ──────
-    const unresolved: UnresolvedRef[] = [];
+    const unresolved: UnresolvedRef[] = [...moneyWarnings];
 
     // Media buyer: per-row code wins. An unknown code HARD-FAILS the row (same as
     // an unknown product code) so the user fixes the code or the record instead of

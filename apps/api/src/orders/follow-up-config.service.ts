@@ -16,6 +16,7 @@ import { expandCustomerPhoneSearchDigitRuns } from './orders.service';
 import { isAdminLevel } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { CacheService } from '../common/cache/cache.service';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
@@ -2617,6 +2618,78 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     this.logger.log(`Redistributed ${orders.length} follow-up orders from branch ${branchId} to ${targetBranches.length} branches`);
     return orders.length;
+  }
+
+  /**
+   * Company-isolation guard for SINGLE follow-up-order operations. Mirrors
+   * `OrdersService.assertOrderInCompanyScope` but reads the `follow_up_orders`
+   * table, which carries the same marketing/servicing branch pair. The list
+   * queries here are scoped by `effectiveBranchIds`; the by-id paths were not.
+   */
+  /**
+   * Batch form of {@link assertFollowUpOrderInCompanyScope} for the bulk
+   * follow-up endpoints (id arrays up to 2000). One query for the batch; refuses
+   * the whole batch if any id is outside the caller's company.
+   */
+  async assertFollowUpOrdersInCompanyScope(
+    orderIds: string[],
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    if (effectiveBranchIds == null) return; // org-wide caller
+    if (orderIds.length === 0) return;
+
+    const ids = [...new Set(orderIds)];
+    const rows = await this.db
+      .select({
+        id: schema.followUpOrders.id,
+        branchId: schema.followUpOrders.branchId,
+        servicingBranchId: schema.followUpOrders.servicingBranchId,
+      })
+      .from(schema.followUpOrders)
+      .where(inArray(schema.followUpOrders.id, ids));
+
+    const scoped = new Set(effectiveBranchIds);
+    const admitted = new Set(
+      rows
+        .filter(
+          (r) =>
+            (r.branchId != null && scoped.has(r.branchId)) ||
+            (r.servicingBranchId != null && scoped.has(r.servicingBranchId)),
+        )
+        .map((r) => r.id),
+    );
+    const rejected = ids.filter((id) => !admitted.has(id));
+    if (rejected.length > 0) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `${rejected.length} of ${ids.length} order(s) are not in your company.`,
+      });
+    }
+  }
+
+  async assertFollowUpOrderInCompanyScope(
+    orderId: string,
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    if (effectiveBranchIds == null) return;
+
+    const rows = await this.db
+      .select({
+        branchId: schema.followUpOrders.branchId,
+        servicingBranchId: schema.followUpOrders.servicingBranchId,
+      })
+      .from(schema.followUpOrders)
+      .where(eq(schema.followUpOrders.id, orderId))
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Follow-up order not found' });
+    }
+
+    assertEntityInScopeAny([row.branchId, row.servicingBranchId], effectiveBranchIds, {
+      message: 'This order is not in your company.',
+    });
   }
 
   async transferFollowUpOrder(orderId: string, targetBranchId: string, actor: SessionUser) {

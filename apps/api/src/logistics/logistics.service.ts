@@ -1978,6 +1978,8 @@ export class LogisticsService implements OnModuleInit {
       const orderRows = await tx
         .select({
           id: schema.orders.id,
+          // Surfaced so a refused settlement can name the offending orders.
+          orderNumber: schema.orders.orderNumber,
           status: schema.orders.status,
           logisticsLocationId: schema.orders.logisticsLocationId,
           // Logistics works the order in its CS servicing branch (migration 0150).
@@ -2207,6 +2209,27 @@ export class LogisticsService implements OnModuleInit {
       // soft-deleted / DELETED rows.
       let completedAmountTotal = 0;
       if (markReceivedNow) {
+        // An order with no usable total must NOT be swept into a settled batch:
+        // `Number(null)` is 0 and `Number('NaN')` is NaN, so a missing total
+        // used to silently contribute ₦0 to the batch amount. Because
+        // delivery_remittance_outcomes.amount is frozen at settlement, that
+        // under-recording is unrecoverable once the batch is RECEIVED — it cost
+        // ₦211,000 across 4 batches in June 2026, one of which settled negative.
+        // Refuse the batch instead and let Finance fix the order first.
+        // NB `Number(null)` is 0 — which IS finite — so a null check must come
+        // first or a missing total slips through as a legitimate ₦0.
+        const unusableTotals = orderRows.filter(
+          (r) => r.totalAmount == null || !Number.isFinite(Number(r.totalAmount)),
+        );
+        if (unusableTotals.length > 0) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              `Cannot settle this batch: ${unusableTotals.length} order(s) have no valid total ` +
+              `and would be recorded as ₦0. Fix the order total(s) first, then retry. ` +
+              `Affected: ${unusableTotals.map((r) => r.orderNumber ?? r.id).join(', ')}`,
+          });
+        }
         for (const orderRow of orderRows) {
           const orderTotal = Number(orderRow.totalAmount ?? 0);
           // Use the input fee (just written above) since orderRows were fetched

@@ -7,7 +7,9 @@ import { SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared
 import { emitCartAbandonedAutomationEvent } from '../automation/automation-hooks';
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
+import { TRPCError } from '@trpc/server';
 import { withActor } from '../common/db/with-actor';
+import { assertEntityInScope } from '../common/db/assert-entity-in-scope';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { CartOrdersService } from '../cart-orders/cart-orders.service';
 
@@ -760,12 +762,43 @@ export class CartService {
    * `includeRawPhone` mirrors `listAbandoned`: only callers who could already trigger
    * the audited reveal (`cart.delete` / SUPER_ADMIN) get the dialable number inline.
    */
+  /**
+   * Company-isolation guard for a single abandoned cart. `cart_abandonments` has
+   * no branch column — a cart's company is derived through its campaign
+   * (`campaign_id -> campaigns.branch_id`), the same join the abandoned-cart LIST
+   * queries scope on (see `openCartConditions`). Without this, a bare cartId from
+   * another company resolves fine, which for `revealPhoneForAbandonedCart` means
+   * a raw customer phone crossing the company boundary.
+   *
+   * A campaignless cart has no derivable company, so a scoped caller cannot reach it.
+   */
+  async assertAbandonedCartInScope(
+    cartId: string,
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    if (effectiveBranchIds == null) return; // org-wide caller
+
+    const [row] = await this.db
+      .select({ branchId: schema.campaigns.branchId })
+      .from(schema.cartAbandonments)
+      .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+      .where(eq(schema.cartAbandonments.id, cartId))
+      .limit(1);
+
+    if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart not found' });
+    assertEntityInScope(row.branchId, effectiveBranchIds, {
+      message: 'This cart is not in your company.',
+    });
+  }
+
   async getById(
     cartId: string,
     opts: {
       includeRawPhone?: boolean;
       /** When set, the cart is only returned if it belongs to this MB's campaign. */
       requireMediaBuyerId?: string | null;
+      /** Company-group scope; the cart's campaign branch must fall inside it. */
+      effectiveBranchIds?: string[] | null;
     } = {},
   ): Promise<{
     id: string;
@@ -789,6 +822,7 @@ export class CartService {
     quantity: number | null;
     customFieldValues: Record<string, unknown> | null;
   } | null> {
+    await this.assertAbandonedCartInScope(cartId, opts.effectiveBranchIds);
     const rows = await this.db
       .select({
         id: schema.cartAbandonments.id,
@@ -997,7 +1031,9 @@ export class CartService {
   async revealPhoneForAbandonedCart(
     cartId: string,
     actorId: string,
+    effectiveBranchIds?: string[] | null,
   ): Promise<{ phone: string; isDialable: boolean }> {
+    await this.assertAbandonedCartInScope(cartId, effectiveBranchIds);
     const rows = await this.db
       .select({
         id: schema.cartAbandonments.id,

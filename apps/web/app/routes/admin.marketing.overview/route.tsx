@@ -90,11 +90,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       pendingSpend: 0,
       approvedSpend: 0,
       totalOrders: 0,
+      funnelOrders: 0,
       deliveredOrders: 0,
       deliveredRevenue: 0,
       confirmedOrders: 0,
       confirmationRate: 0,
       cpa: 0,
+      funnelCpa: 0,
       trueRoas: 0,
       deliveryRate: 0,
     };

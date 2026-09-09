@@ -578,6 +578,7 @@ export const ordersRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { cartId, ...overrides } = input;
+      await getCartOrdersService().assertCartsInScope([cartId], ctx.effectiveBranchIds);
       const res = await getOrdersService().recoverFromCart(cartId, overrides, ctx.user.id);
       await invalidateOrdersAggregatesCache();
       return res;
@@ -594,6 +595,7 @@ export const ordersRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      await getCartOrdersService().assertCartsInScope(input.cartIds, ctx.effectiveBranchIds);
       const result = await getOrdersService().bulkRecoverCarts(input.cartIds, ctx.user.id);
       if (result.orderIds.length > 0) await invalidateOrdersAggregatesCache();
       return result;
@@ -622,6 +624,7 @@ export const ordersRouter = router({
   getById: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const order = await getOrdersService().getById(input.orderId);
       getOrdersService().assertActorMayViewOrderForRead(ctx.user, order);
       const ob = order.branchId ?? null;
@@ -645,6 +648,7 @@ export const ordersRouter = router({
   listItemOffers: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       return getOrdersService().listOrderItemOffers(input.orderId, ctx.user);
     }),
 
@@ -661,6 +665,7 @@ export const ordersRouter = router({
       // strip them so the product-swap picker doesn't show an NGN price mislabelled
       // with the foreign symbol; the modal falls back to Custom entry. Matches
       // listOrderItemOffers' embedded-offer handling.
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const isForeignCurrency = await getOrdersService().isOrderNonBaseCurrency(input.orderId);
       const result = await getProductsService().list(
         { page: 1, limit: 200, status: 'ACTIVE', sortBy: 'name', sortOrder: 'asc' },
@@ -681,9 +686,10 @@ export const ordersRouter = router({
    */
   clipboardSummary: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
-    .query(async ({ input, ctx }) => ({
-      text: await getOrdersService().getClipboardSummaryText(input.orderId, ctx.user),
-    })),
+    .query(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
+      return { text: await getOrdersService().getClipboardSummaryText(input.orderId, ctx.user) };
+    }),
 
   /**
    * Single round-trip for inventory DELIVERY rows: customer names only.
@@ -695,12 +701,14 @@ export const ordersRouter = router({
       if (!canAccessDeliveryMovementCustomerNames(ctx.user)) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized' });
       }
+      await getOrdersService().assertOrdersInCompanyScope(input.orderIds, ctx.effectiveBranchIds);
       return getOrdersService().listCustomerNamesByOrderIds(ctx.user, input.orderIds);
     }),
 
   listAllocatableLocations: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       return getOrdersService().listAllocatableLocations(input.orderId, ctx.user.role);
     }),
 
@@ -877,6 +885,7 @@ export const ordersRouter = router({
     .input(transitionOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...transitionInput } = input;
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().transition(transitionInput, ctx.user);
       await Promise.all([
         invalidateOrdersAggregatesCache(),
@@ -893,6 +902,7 @@ export const ordersRouter = router({
     .input(updateOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...updateInput } = input;
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().update(updateInput, ctx.user);
       await Promise.all([
         invalidateOrdersAggregatesCache(),
@@ -912,6 +922,7 @@ export const ordersRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, orderType, ...body } = input;
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().requestLinePriceChangeApproval(body, ctx.user, orderType);
       // The cached `pendingOrderLinePriceRequestId` flips after this — drop the
       // detail cache so the next viewer sees the new pending-request hint.
@@ -927,6 +938,7 @@ export const ordersRouter = router({
     .input(requestOrderDeletionSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...body } = input;
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().requestOrderDeletionApproval(body, ctx.user);
       // Same reasoning as `requestLinePriceChangeApproval` — the cached
       // `pendingOrderDeletionRequestId` field flips after the mutation.
@@ -942,6 +954,7 @@ export const ordersRouter = router({
     .input(requestOrderDeletionSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, reason, orderId } = input;
+      await getOrdersService().assertOrderInCompanyScope(orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().softDeleteOrder(orderId, ctx.user, { approverNote: reason });
       await Promise.all([
         invalidateOrdersAggregatesCache(),
@@ -957,6 +970,7 @@ export const ordersRouter = router({
   resolveRetrack: authedProcedure
     .input(resolveRetrackSchema)
     .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().resolveRetrack(input.orderId, ctx.user, { note: input.note });
       await invalidateOrderDetailCache(input.orderId);
       return res;
@@ -971,6 +985,7 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(retrackOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().retrackOrder(
         {
           orderId: input.orderId,
@@ -998,6 +1013,7 @@ export const ordersRouter = router({
   requestDeliveredOrderDeletion: authedProcedure
     .input(requestDeliveredOrderDeletionSchema)
     .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().requestDeliveredOrderDeletion(input, ctx.user);
       await invalidateOrderDetailCache(input.orderId);
       return res;
@@ -1010,6 +1026,7 @@ export const ordersRouter = router({
   requestOrderRetrack: authedProcedure
     .input(requestOrderRetrackSchema)
     .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().requestOrderRetrack(input, ctx.user);
       await invalidateOrderDetailCache(input.orderId);
       return res;
@@ -1027,6 +1044,7 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(assignOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().assignToCS(input.orderId, input.csCloserId, ctx.user, {
         reason: input.reason,
       });
@@ -1045,6 +1063,7 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(bulkReassignSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrdersInCompanyScope(input.orderIds, ctx.effectiveBranchIds);
       const res = await getOrdersService().bulkReassign(
         input.orderIds,
         input.fromAgentId,
@@ -2171,6 +2190,7 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(z.object({ orderId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().revealPhoneForManualCall(input.orderId, ctx.user);
       // May have transitioned UNPROCESSED → CS_ENGAGED inside the service; the
       // cached payload's status / engagement timestamps are now stale.
@@ -2198,6 +2218,7 @@ export const ordersRouter = router({
   initiateCall: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const order = await getOrdersService().getById(input.orderId);
       if (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') {
         await getOrdersService().transition(
@@ -2217,7 +2238,8 @@ export const ordersRouter = router({
    */
   getCallLogs: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       return getVoipService().getCallLogsForOrder(input.orderId);
     }),
 
@@ -2226,7 +2248,8 @@ export const ordersRouter = router({
    */
   latestCall: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       return getVoipService().getLatestCallForOrder(input.orderId);
     }),
 
@@ -2246,6 +2269,7 @@ export const ordersRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().scheduleCallback(input.orderId, ctx.user, {
         delayMinutes: input.delayMinutes,
         notes: input.notes,
@@ -2281,7 +2305,11 @@ export const ordersRouter = router({
   /** Raw phones for a duplicate pair — used by the comparison modal on the order detail page. */
   getDuplicateComparisonPhones: permissionProcedure('orders.flaggedDuplicates')
     .input(z.object({ orderId: z.string().uuid(), originalOrderId: z.string().uuid() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await Promise.all([
+        getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds),
+        getOrdersService().assertOrderInCompanyScope(input.originalOrderId, ctx.effectiveBranchIds),
+      ]);
       return getOrdersService().getDuplicateComparisonPhones(input.orderId, input.originalOrderId);
     }),
 
@@ -2298,6 +2326,10 @@ export const ordersRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      await Promise.all([
+        getOrdersService().assertOrderInCompanyScope(input.duplicateId, ctx.effectiveBranchIds),
+        getOrdersService().assertOrderInCompanyScope(input.originalId, ctx.effectiveBranchIds),
+      ]);
       const res = await getOrdersService().mergeDuplicate(input.duplicateId, input.originalId, ctx.user);
       await Promise.all([
         invalidateOrdersAggregatesCache(),
@@ -2314,6 +2346,7 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(z.object({ orderId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().dismissDuplicate(input.orderId, ctx.user);
       await Promise.all([
         invalidateOrdersAggregatesCache(),
@@ -2344,6 +2377,7 @@ export const ordersRouter = router({
         input.newStatus,
         input.metadata,
         ctx.user,
+        ctx.effectiveBranchIds,
       );
       await Promise.all([
         invalidateOrdersAggregatesCache(),
@@ -2370,6 +2404,13 @@ export const ordersRouter = router({
       ) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Admin or Head of CS can move orders between branches' });
       }
+      if (
+        ctx.effectiveBranchIds != null &&
+        !ctx.effectiveBranchIds.includes(input.targetBranchId)
+      ) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'That branch is not in your company.' });
+      }
+      await getOrdersService().assertOrdersInCompanyScope(input.orderIds, ctx.effectiveBranchIds);
       const res = await getOrdersService().moveOrdersToBranch(
         input.orderIds,
         input.targetBranchId,
@@ -2394,6 +2435,13 @@ export const ordersRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      if (
+        ctx.effectiveBranchIds != null &&
+        !ctx.effectiveBranchIds.includes(input.targetBranchId)
+      ) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'That branch is not in your company.' });
+      }
+      await getOrdersService().assertOrdersInCompanyScope(input.orderIds, ctx.effectiveBranchIds);
       const res = await getOrdersService().moveOrdersToBranch(
         input.orderIds,
         input.targetBranchId,
@@ -2416,6 +2464,14 @@ export const ordersRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      if (
+        input.targetBranchId &&
+        ctx.effectiveBranchIds != null &&
+        !ctx.effectiveBranchIds.includes(input.targetBranchId)
+      ) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'That branch is not in your company.' });
+      }
+      await getOrdersService().assertOrdersInCompanyScope(input.orderIds, ctx.effectiveBranchIds);
       const res = await getOrdersService().reopenForFollowUp(
         input.orderIds,
         ctx.user,
@@ -2468,6 +2524,7 @@ export const ordersRouter = router({
           : input.csCloserId
             ? [input.csCloserId]
             : [];
+      await getOrdersService().assertOrdersInCompanyScope(input.orderIds, ctx.effectiveBranchIds);
       const res = await getOrdersService().bulkAssignToCS(input.orderIds, csCloserIds, ctx.user, { reason: input.reason });
       await Promise.all([
         invalidateOrdersAggregatesCache(),
@@ -2486,6 +2543,7 @@ export const ordersRouter = router({
   getTimeline: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       return getOrdersService().getOrderTimeline(input.orderId, ctx.user);
     }),
 
@@ -2503,6 +2561,7 @@ export const ordersRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...rest } = input;
+      await getOrdersService().assertOrderInCompanyScope(rest.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().addCsOrderComment(rest.orderId, ctx.user, {
         comment: rest.comment,
       });
@@ -2528,6 +2587,7 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(z.object({ orderId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const res = await getOrdersService().claimOrder(input.orderId, ctx.user);
       // Claim assigns the order + transitions UNPROCESSED → CS_ENGAGED — both
       // status and assignedCsId fields in the cached payload need refreshing.
@@ -2619,6 +2679,13 @@ export const ordersRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      // Batch items are `orders` rows chosen by the client — verify each is in
+      // the caller's company before it is pulled into a follow-up batch.
+      await Promise.all(
+        input.items.map((it) =>
+          getOrdersService().assertOrderInCompanyScope(it.orderId, ctx.effectiveBranchIds),
+        ),
+      );
       return getOrdersService().createFollowUpBatch({
         ...input,
         createdById: ctx.user.id,
@@ -2776,6 +2843,12 @@ export const ordersRouter = router({
   followUpConfigRedistribute: permissionProcedure('orders.followUpConfig')
     .input(z.object({ branchId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
+      if (
+        ctx.effectiveBranchIds != null &&
+        !ctx.effectiveBranchIds.includes(input.branchId)
+      ) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'That branch is not in your company.' });
+      }
       const moved = await getFollowUpConfigService().redistributeFromBranch(input.branchId, ctx.user);
       return { moved };
     }),
@@ -2783,12 +2856,26 @@ export const ordersRouter = router({
   transferFollowUpOrder: permissionProcedure('orders.followUp')
     .input(z.object({ orderId: z.string().uuid(), targetBranchId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
+      if (
+        ctx.effectiveBranchIds != null &&
+        !ctx.effectiveBranchIds.includes(input.targetBranchId)
+      ) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'That branch is not in your company.' });
+      }
+      await getFollowUpConfigService().assertFollowUpOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       return getFollowUpConfigService().transferFollowUpOrder(input.orderId, input.targetBranchId, ctx.user);
     }),
 
   bulkTransferFollowUpOrders: permissionProcedure('orders.followUp')
     .input(z.object({ orderIds: z.array(z.string().uuid()).min(1).max(2000), targetBranchId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
+      if (
+        ctx.effectiveBranchIds != null &&
+        !ctx.effectiveBranchIds.includes(input.targetBranchId)
+      ) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'That branch is not in your company.' });
+      }
+      await getFollowUpConfigService().assertFollowUpOrdersInCompanyScope(input.orderIds, ctx.effectiveBranchIds);
       return getFollowUpConfigService().bulkTransferFollowUpOrders(input.orderIds, input.targetBranchId, ctx.user);
     }),
 
@@ -2800,6 +2887,7 @@ export const ordersRouter = router({
       metadata: z.record(z.unknown()).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      await getFollowUpConfigService().assertFollowUpOrdersInCompanyScope(input.orderIds, ctx.effectiveBranchIds);
       const result = await getFollowUpConfigService().bulkTransitionFollowUpOrders(
         input.orderIds, input.newStatus, ctx.user, input.note, input.metadata,
       );
@@ -2829,6 +2917,7 @@ export const ordersRouter = router({
   unfreezeOrder: permissionProcedure('orders.freeze')
     .input(z.object({ orderId: z.string().uuid(), reason: z.string().optional() }))
     .mutation(async ({ input, ctx }) => {
+      await getFollowUpConfigService().assertFollowUpOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       return getFollowUpConfigService().unfreezeOrder(input.orderId, ctx.user, input.reason);
     }),
 
@@ -2842,6 +2931,7 @@ export const ordersRouter = router({
       reason: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      await getFollowUpConfigService().assertFollowUpOrdersInCompanyScope(input.orderIds, ctx.effectiveBranchIds);
       const res = await getFollowUpConfigService().bulkFreezeOrders(input.orderIds, ctx.user, input.reason);
       await Promise.all([
         invalidateOrdersAggregatesCache(),
@@ -2860,6 +2950,7 @@ export const ordersRouter = router({
       reason: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      await getFollowUpConfigService().assertFollowUpOrdersInCompanyScope(input.orderIds, ctx.effectiveBranchIds);
       const res = await getFollowUpConfigService().bulkUnfreezeOrders(input.orderIds, ctx.user, input.reason);
       await Promise.all([
         invalidateOrdersAggregatesCache(),
@@ -2940,6 +3031,7 @@ export const ordersRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const { orderId, ...updates } = input;
+      await getFollowUpConfigService().assertFollowUpOrderInCompanyScope(orderId, ctx.effectiveBranchIds);
       return getFollowUpConfigService().updateFollowUpOrder(orderId, updates, ctx.user);
     }),
 
@@ -2955,6 +3047,7 @@ export const ordersRouter = router({
       totalAmount: z.coerce.number().min(0),
     }))
     .mutation(async ({ input, ctx }) => {
+      await getFollowUpConfigService().assertFollowUpOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       return getFollowUpConfigService().adjustFollowUpOrderItems(input.orderId, input.items, input.totalAmount, ctx.user);
     }),
 
@@ -2984,12 +3077,14 @@ export const ordersRouter = router({
   addFollowUpOrderComment: authedProcedure
     .input(z.object({ orderId: z.string().uuid(), comment: z.string().min(1).max(2000) }))
     .mutation(async ({ input, ctx }) => {
+      await getFollowUpConfigService().assertFollowUpOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       return getFollowUpConfigService().addFollowUpOrderComment(input.orderId, input.comment, ctx.user);
     }),
 
   followUpEnsureInvoice: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
+      await getFollowUpConfigService().assertFollowUpOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const fuDetail = await getFollowUpConfigService().getFollowUpOrderDetail(input.orderId);
       await getFinanceService().ensureInvoiceForOrder({
         order: {
@@ -3012,6 +3107,7 @@ export const ordersRouter = router({
   followUpOrdersTransition: permissionProcedure('orders.followUp')
     .input(transitionFollowUpOrderSchema)
     .mutation(async ({ input, ctx }) => {
+      await getFollowUpConfigService().assertFollowUpOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const result = await getFollowUpConfigService().transitionFollowUpOrderStatus(
         input.orderId,
         input.newStatus,
@@ -3053,6 +3149,7 @@ export const ordersRouter = router({
   followUpRecordCall: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
+      await getFollowUpConfigService().assertFollowUpOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       return getFollowUpConfigService().recordManualCall(input.orderId, ctx.user);
     }),
 
