@@ -604,23 +604,29 @@ export const hrRouter = router({
 
   getPayrollMetrics: permissionProcedure('hr.read')
     .input(z.object({ staffId: z.string().uuid(), periodStart: z.string(), periodEnd: z.string() }))
-    .query(async ({ input }) => {
-      const userRows = await getUsersService().getById(input.staffId, null);
+    .query(async ({ input, ctx }) => {
+      // Pass the actor: getById skips its authorization gate entirely when
+      // actor is null, so `null` here let any hr.read holder read a staff
+      // member from another company by UUID. effectiveBranchIds additionally
+      // scopes the metrics themselves to the caller's company.
+      const userRows = await getUsersService().getById(input.staffId, ctx.user, ctx.effectiveBranchIds ?? undefined);
       return getPayrollMetricsService().getStaffMetrics({
         staffId: input.staffId,
         staffRole: userRows.role,
         periodStart: new Date(input.periodStart),
         periodEnd: new Date(input.periodEnd),
         crmLinked: true,
+        servicingBranchIds: ctx.effectiveBranchIds,
       });
     }),
 
   getPayrollMetricsBulk: permissionProcedure('hr.read')
     .input(getPayrollMetricsBulkSchema)
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const staffRows = await Promise.all(
         input.staffIds.map(async (id) => {
-          const user = await getUsersService().getById(id, null);
+          // See getPayrollMetrics: a null actor bypasses the access gate.
+          const user = await getUsersService().getById(id, ctx.user, ctx.effectiveBranchIds ?? undefined);
           return {
             id: user.id,
             role: user.role,
@@ -634,6 +640,8 @@ export const hrRouter = router({
         staffRows,
         new Date(input.periodStart),
         new Date(input.periodEnd),
+        undefined,
+        ctx.effectiveBranchIds,
       );
       return Object.fromEntries(metricsMap.entries());
     }),
