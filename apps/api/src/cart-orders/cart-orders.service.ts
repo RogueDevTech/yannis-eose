@@ -2113,7 +2113,7 @@ export class CartOrdersService {
    * A campaignless cart has no derivable company, so a scoped caller cannot pull
    * it — matching the branchless rule in `assertEntityInScope`.
    */
-  private async assertCartsInScope(
+  async assertCartsInScope(
     cartIds: string[],
     effectiveBranchIds: string[] | null | undefined,
   ): Promise<void> {

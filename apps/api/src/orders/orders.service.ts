@@ -1694,6 +1694,52 @@ export class OrdersService {
    * tables with the same contract: NOT_FOUND for a missing id, FORBIDDEN for a
    * cross-company one.
    */
+  /**
+   * Batch form of {@link assertOrderInCompanyScope} for the bulk endpoints, which
+   * accept client-supplied id arrays (up to 2000). One query for the whole batch
+   * rather than N round-trips — these run against a high-latency DB.
+   *
+   * All-or-nothing: if ANY id is outside the caller's company the batch is
+   * refused, so a caller cannot smuggle foreign orders into an otherwise valid
+   * bulk action. (`bulkTransition` is the exception — it reports per-order
+   * results, so it checks inside its own loop.)
+   */
+  async assertOrdersInCompanyScope(
+    orderIds: string[],
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    if (effectiveBranchIds == null) return; // org-wide caller
+    if (orderIds.length === 0) return;
+
+    const ids = [...new Set(orderIds)];
+    const rows = await this.db
+      .select({
+        id: schema.orders.id,
+        branchId: schema.orders.branchId,
+        servicingBranchId: schema.orders.servicingBranchId,
+      })
+      .from(schema.orders)
+      .where(inArray(schema.orders.id, ids));
+
+    const scoped = new Set(effectiveBranchIds);
+    const admitted = new Set(
+      rows
+        .filter(
+          (r) =>
+            (r.branchId != null && scoped.has(r.branchId)) ||
+            (r.servicingBranchId != null && scoped.has(r.servicingBranchId)),
+        )
+        .map((r) => r.id),
+    );
+    const rejected = ids.filter((id) => !admitted.has(id));
+    if (rejected.length > 0) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `${rejected.length} of ${ids.length} order(s) are not in your company.`,
+      });
+    }
+  }
+
   async assertOrderInCompanyScope(
     orderId: string,
     effectiveBranchIds: string[] | null | undefined,
@@ -11746,6 +11792,7 @@ export class OrdersService {
     newStatus: string,
     metadata: Record<string, unknown> | undefined,
     actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ) {
     const results: Array<{
       orderId: string;
@@ -11755,6 +11802,10 @@ export class OrdersService {
 
     for (const orderId of orderIds) {
       try {
+        // Per-order company check inside the loop: a cross-company id is
+        // reported as a failed row rather than aborting the whole batch,
+        // matching how every other per-order error is handled here.
+        await this.assertOrderInCompanyScope(orderId, effectiveBranchIds);
         await this.transition(
           { orderId, newStatus: newStatus as OrderStatus, metadata },
           actor,
