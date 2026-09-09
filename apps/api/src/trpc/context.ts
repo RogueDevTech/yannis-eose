@@ -96,7 +96,7 @@ export function createContext(req: Request, res: Response): TrpcContext {
   //
   // Priority:
   //  1. selectedBranchIds from session (scoped to activeGroupId on login/switch)
-  //  2. activeGroupId set but selectedBranchIds empty → empty array (match nothing)
+  //  2. activeGroupId set but selectedBranchIds empty → `[]` (unresolved: match nothing)
   //  3. Non-global user without company → their personal branchIds
   //  4. Global user without company → null (truly org-wide)
   let effectiveBranchIds: string[] | null = null;
@@ -118,9 +118,21 @@ export function createContext(req: Request, res: Response): TrpcContext {
       effectiveBranchIds = [currentBranchId];
     } else if (activeGroupId) {
       // A company IS selected ("All branches") but selectedBranchIds is empty —
-      // stale session or race before /auth/me backfill runs. Use a non-matching
-      // UUID so IN-based filters return zero rows rather than leaking org-wide.
-      effectiveBranchIds = ['00000000-0000-0000-0000-000000000000'];
+      // stale session, or the race before the /auth/me backfill lands.
+      //
+      // This is UNRESOLVED scope, not an empty one. Signal it as `[]` rather
+      // than a sentinel branch UUID: both make IN-based list filters return
+      // zero rows (the original intent — never leak org-wide), but `[]` is the
+      // shape `isEntityInScope` already understands as "selected but
+      // unresolved", whereas a fake branch id reaches `includes()` and is
+      // indistinguishable from a genuine cross-company violation.
+      //
+      // That distinction matters now that per-entity guards
+      // (`assertEntityInScope*`) run on by-id procedures: with the sentinel, a
+      // fully authorized user mid-backfill got "This record is not in your
+      // company." on their own order. Keeping the unresolved state its own
+      // shape lets those guards stay fail-closed without mislabelling it.
+      effectiveBranchIds = [];
     } else if (currentBranchId === null && !canViewAllBranches(user)) {
       // Non-global user at "All branches" without a company selection —
       // fall back to their personal branch memberships.

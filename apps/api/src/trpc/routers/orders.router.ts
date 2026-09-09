@@ -2185,11 +2185,7 @@ export const ordersRouter = router({
   getCallablePhone: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      return getOrdersService().getCallablePhoneForViewer(
-        input.orderId,
-        ctx.user,
-        ctx.effectiveBranchIds,
-      );
+      return getOrdersService().getCallablePhoneForViewer(input.orderId, ctx.user);
     }),
 
   // ── VOIP Procedures ────────────────────────────────────────────
