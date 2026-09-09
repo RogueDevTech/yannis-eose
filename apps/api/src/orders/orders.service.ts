@@ -58,6 +58,7 @@ import { isAdminLevel } from '../common/authz';
 import { hasFinanceAccess, hasFinanceWriteAccess } from '../common/utils/strip-finance-fields';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { EventsService } from '../events/events.service';
 import { emitOrderAutomationEvents } from '../automation/automation-hooks';
@@ -4250,6 +4251,95 @@ export class OrdersService {
    * roundtrip; downstream consumers (finance.ensureInvoiceForOrder, etc.)
    * already accept `string | Date | null` shapes for date columns.
    */
+  /**
+   * Company-isolation guard for SINGLE-ORDER operations (getById / transition /
+   * update / assign / delete / retrack …). Those take a raw client-supplied
+   * `orderId`, so without this an org-wide-scoped caller in Company A can reach
+   * Company B's order simply by passing its id — the list queries are scoped by
+   * `effectiveBranchIds` but the by-id path was not.
+   *
+   * An order carries TWO branches: `branchId` (marketing attribution, fixed) and
+   * `servicingBranchId` (the CS/fulfillment branch, set at routing). Per the
+   * multi-branch rules these can legitimately differ, so the order is in scope
+   * when EITHER lands inside the caller's active company — otherwise a
+   * cross-branch-serviced order would vanish for the company that owns its
+   * marketing attribution.
+   *
+   * Deliberately bypasses the order-detail cache: this reads only the two branch
+   * columns, and the guard must run before any payload is served.
+   */
+  /**
+   * Batch form of {@link assertOrderInCompanyScope} for the bulk endpoints, which
+   * accept client-supplied id arrays (up to 2000). One query for the whole batch
+   * rather than N round-trips — these run against a high-latency DB.
+   *
+   * All-or-nothing: if ANY id is outside the caller's company the batch is
+   * refused, so a caller cannot smuggle foreign orders into an otherwise valid
+   * bulk action. (`bulkTransition` is the exception — it reports per-order
+   * results, so it checks inside its own loop.)
+   */
+  async assertOrdersInCompanyScope(
+    orderIds: string[],
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    if (effectiveBranchIds == null) return; // org-wide caller
+    if (orderIds.length === 0) return;
+
+    const ids = [...new Set(orderIds)];
+    const rows = await this.db
+      .select({
+        id: schema.orders.id,
+        branchId: schema.orders.branchId,
+        servicingBranchId: schema.orders.servicingBranchId,
+      })
+      .from(schema.orders)
+      .where(inArray(schema.orders.id, ids));
+
+    const scoped = new Set(effectiveBranchIds);
+    const admitted = new Set(
+      rows
+        .filter(
+          (r) =>
+            (r.branchId != null && scoped.has(r.branchId)) ||
+            (r.servicingBranchId != null && scoped.has(r.servicingBranchId)),
+        )
+        .map((r) => r.id),
+    );
+    const rejected = ids.filter((id) => !admitted.has(id));
+    if (rejected.length > 0) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `${rejected.length} of ${ids.length} order(s) are not in your company.`,
+      });
+    }
+  }
+
+  async assertOrderInCompanyScope(
+    orderId: string,
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    // Org-wide caller (SuperAdmin / Support / no company selected) — nothing to check.
+    if (effectiveBranchIds == null) return;
+
+    const rows = await this.db
+      .select({
+        branchId: schema.orders.branchId,
+        servicingBranchId: schema.orders.servicingBranchId,
+      })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    assertEntityInScopeAny([row.branchId, row.servicingBranchId], effectiveBranchIds, {
+      message: 'This order is not in your company.',
+    });
+  }
+
   async getById(orderId: string): ReturnType<OrdersService['loadOrderDetailPayload']> {
     return this.cache.getOrSet(
       OrdersService.ORDER_DETAIL_CACHE_KEY(orderId),
@@ -4920,7 +5010,6 @@ export class OrdersService {
   async getCallablePhoneForViewer(
     orderId: string,
     actor: SessionUser,
-    effectiveBranchIds?: string[] | null,
   ): Promise<{ phone: string; isDialable: boolean } | null> {
     const voipSetting = await this.settingsService.get('VOIP_ENABLED');
     if (voipSetting?.['enabled'] === true) return null;
@@ -4946,6 +5035,7 @@ export class OrdersService {
         customerPhoneHash: schema.orders.customerPhoneHash,
         branchId: schema.orders.branchId,
         servicingBranchId: schema.orders.servicingBranchId,
+        mediaBuyerId: schema.orders.mediaBuyerId,
       })
       .from(schema.orders)
       .where(eq(schema.orders.id, orderId))
@@ -4956,6 +5046,7 @@ export class OrdersService {
           customerPhoneHash: string | null;
           branchId: string | null;
           servicingBranchId: string | null;
+          mediaBuyerId: string | null;
         }
       | undefined = regular;
 
@@ -4966,6 +5057,7 @@ export class OrdersService {
           customerPhoneHash: schema.cartOrders.customerPhoneHash,
           branchId: schema.cartOrders.branchId,
           servicingBranchId: schema.cartOrders.servicingBranchId,
+          mediaBuyerId: schema.cartOrders.mediaBuyerId,
         })
         .from(schema.cartOrders)
         .where(eq(schema.cartOrders.id, orderId))
@@ -4980,6 +5072,7 @@ export class OrdersService {
           customerPhoneHash: schema.followUpOrders.customerPhoneHash,
           branchId: schema.followUpOrders.branchId,
           servicingBranchId: schema.followUpOrders.servicingBranchId,
+          mediaBuyerId: schema.followUpOrders.mediaBuyerId,
         })
         .from(schema.followUpOrders)
         .where(eq(schema.followUpOrders.id, orderId))
@@ -4989,18 +5082,23 @@ export class OrdersService {
 
     if (!phoneRow) return null;
 
-    // Visibility gate — reveal only for orders this actor is scoped to see.
-    // Global/org-wide viewers pass `effectiveBranchIds == null` (no branch
-    // restriction, exactly like the order lists). Branch-scoped viewers must
-    // have the order's servicing branch (marketing branch as fallback) inside
-    // their scoped set or their currently selected branch.
-    if (effectiveBranchIds != null) {
-      const orderBranch = phoneRow.servicingBranchId ?? phoneRow.branchId;
-      const allowedBranches = new Set(effectiveBranchIds);
-      if (actor.currentBranchId) allowedBranches.add(actor.currentBranchId);
-      // A branchless order (no servicing/marketing branch) can only be seen by
-      // org-wide viewers, who never reach this block — so deny for scoped viewers.
-      if (!orderBranch || !allowedBranches.has(orderBranch)) return null;
+    // Visibility gate — reveal only for orders this actor may READ, using the
+    // exact rule `orders.getById` applies (`assertActorMayViewOrderForRead`).
+    // This is the same Pillar-2 IDOR protection as before: an actor who cannot
+    // read the order cannot harvest its phone by iterating ids.
+    //
+    // It deliberately does NOT filter on `effectiveBranchIds`. That set is a
+    // LIST-scoping device, not an authorization one: when a company is selected
+    // but `selectedBranchIds` is empty (stale session, or the race before the
+    // /auth/me backfill lands) the context resolves it to a sentinel UUID that
+    // matches no branch (see trpc/context.ts). Feeding that into an authz check
+    // denied the phone for a fully-authorized CS who was already looking at the
+    // order, and denied every branchless legacy order outright — while getById
+    // happily returned the order itself. The two gates must not disagree.
+    try {
+      this.assertActorMayViewOrderForRead(actor, { mediaBuyerId: phoneRow.mediaBuyerId });
+    } catch {
+      return null;
     }
 
     // Phone is always visible once loaded — no status restriction.
@@ -11708,6 +11806,7 @@ export class OrdersService {
     newStatus: string,
     metadata: Record<string, unknown> | undefined,
     actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ) {
     const results: Array<{
       orderId: string;
@@ -11717,6 +11816,10 @@ export class OrdersService {
 
     for (const orderId of orderIds) {
       try {
+        // Per-order company check inside the loop: a cross-company id is
+        // reported as a failed row rather than aborting the whole batch,
+        // matching how every other per-order error is handled here.
+        await this.assertOrderInCompanyScope(orderId, effectiveBranchIds);
         await this.transition(
           { orderId, newStatus: newStatus as OrderStatus, metadata },
           actor,
