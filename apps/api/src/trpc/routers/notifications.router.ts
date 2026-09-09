@@ -244,6 +244,7 @@ export const notificationsRouter = router({
       const rule = await getNotificationsService().updateAutomationRule(
         ctx.user.id,
         input,
+        ctx.effectiveBranchIds,
       );
 
       // Reload scheduler to pick up any cron expression changes
@@ -260,10 +261,11 @@ export const notificationsRouter = router({
    */
   toggleAutomationRule: permissionProcedure('notifications.broadcast')
     .input(toggleAutomationRuleSchema)
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const rule = await getNotificationsService().toggleAutomationRule(
         input.id,
         input.isActive,
+        ctx.effectiveBranchIds,
       );
 
       const scheduler = getPushSchedulerService();
@@ -293,11 +295,11 @@ export const notificationsRouter = router({
    */
   deleteAutomationRule: permissionProcedure('notifications.broadcast')
     .input(z.object({ id: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       // Unregister cron job before deleting (safe to call even for EVENT-type rules)
       getPushSchedulerService().unregisterCronJob(input.id);
 
-      await getNotificationsService().deleteAutomationRule(input.id);
+      await getNotificationsService().deleteAutomationRule(input.id, ctx.effectiveBranchIds);
       return { success: true };
     }),
 });
