@@ -43,6 +43,7 @@ function rollupSquadOverview(
   let confirmedOrders = 0;
   let deliveredOrders = 0;
   let deliveredThisMonth = 0;
+  let funnelOrders = 0;
   let totalAdSpend = 0;
   let totalBalance = 0;
   let totalReceived = 0;
@@ -52,6 +53,8 @@ function rollupSquadOverview(
 
   for (const m of members) {
     totalOrders += m.totalOrders ?? 0;
+    // Fall back to totalOrders when a row predates the funnel split.
+    funnelOrders += m.funnelOrders ?? m.totalOrders ?? 0;
     confirmedOrders += m.confirmedOrders ?? 0;
     deliveredOrders += m.deliveredOrders ?? 0;
     deliveredThisMonth += m.deliveredThisMonth ?? 0;
@@ -78,6 +81,8 @@ function rollupSquadOverview(
     deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : null,
     totalAdSpend,
     avgCpa: totalOrders > 0 ? totalAdSpend / totalOrders : null,
+    funnelOrders,
+    funnelCpa: funnelOrders > 0 ? totalAdSpend / funnelOrders : null,
     totalBalance,
     totalReceived,
     totalSpent,
@@ -98,6 +103,8 @@ function computeMarketingTeamOverview(
     confirmedOrders: number;
     deliveredOrders: number;
     deliveredThisMonth?: number;
+    /** Front-end orders only — Funnel CPA's denominator. */
+    funnelOrders?: number;
   }>,
 ): MarketingTeamOverviewStats {
   const mbMembers = teamMembers.filter((m) => m.role === 'MEDIA_BUYER');
@@ -108,6 +115,9 @@ function computeMarketingTeamOverview(
   const totals = leaderboard.reduce(
     (acc, entry) => {
       acc.totalOrders += entry.totalOrders;
+      // Fall back to totalOrders so a leaderboard row predating the funnel
+      // split doesn't silently drag the team Funnel CPA denominator down.
+      acc.funnelOrders += entry.funnelOrders ?? entry.totalOrders;
       acc.confirmedOrders += entry.confirmedOrders;
       acc.deliveredOrders += entry.deliveredOrders;
       acc.totalAdSpend += entry.totalSpend;
@@ -119,7 +129,7 @@ function computeMarketingTeamOverview(
       }
       return acc;
     },
-    { totalOrders: 0, confirmedOrders: 0, deliveredOrders: 0, totalAdSpend: 0, totalCarryOver: 0, activeOrders: 0, inactiveOrders: 0 },
+    { totalOrders: 0, funnelOrders: 0, confirmedOrders: 0, deliveredOrders: 0, totalAdSpend: 0, totalCarryOver: 0, activeOrders: 0, inactiveOrders: 0 },
   );
 
   const totalDisbursed = mbMembers.reduce((s, m) => s + Number(m.totalReceived), 0);
@@ -138,6 +148,9 @@ function computeMarketingTeamOverview(
     totalAdSpend: totals.totalAdSpend,
     totalExpenses,
     avgCpa: totals.totalOrders > 0 ? totals.totalAdSpend / totals.totalOrders : 0,
+    // Team-level Funnel CPA: same ad spend over front-end orders only.
+    funnelCpa: totals.funnelOrders > 0 ? totals.totalAdSpend / totals.funnelOrders : 0,
+    funnelOrders: totals.funnelOrders,
     totalDisbursed,
     mbUnspentBalance,
     mbCount: mbMembers.length,
@@ -208,11 +221,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalOrders: number;
     confirmedOrders: number;
     deliveredOrders: number;
+    /** Carry-over delivered (by delivered_at). Display-only. */
+    deliveredThisMonth?: number;
     deliveredRevenue: number;
     deliveredRevenueByCurrency?: Record<string, number>;
     confirmationRate: number;
     deliveryRate: number;
     cpa: number;
+    /** Ad spend / funnel orders only. Sits beside `cpa`, never replaces it. */
+    funnelCpa: number;
+    /** Front-end order count — the Funnel CPA denominator. */
+    funnelOrders: number;
     trueRoas: number;
     profitabilityScore: number | null;
   };
@@ -232,6 +251,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         confirmationRate: e.confirmationRate,
         deliveryRate: e.deliveryRate,
         cpa: e.cpa,
+        funnelCpa: e.funnelCpa,
+        funnelOrders: e.funnelOrders,
         trueRoas: e.trueRoas,
         profitabilityScore: e.profitabilityScore,
       },
@@ -255,6 +276,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           confirmationRate: metrics.confirmationRate,
           deliveryRate: metrics.deliveryRate,
           cpa: metrics.cpa,
+          funnelCpa: metrics.funnelCpa,
+          funnelOrders: metrics.funnelOrders,
           trueRoas: metrics.trueRoas,
           profitabilityScore: metrics.profitabilityScore,
         }
@@ -283,6 +306,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       confirmationRate: e.confirmationRate,
       deliveryRate: e.deliveryRate,
       cpa: e.cpa,
+      funnelCpa: e.funnelCpa,
+      funnelOrders: e.funnelOrders,
       trueRoas: e.trueRoas,
       profitabilityScore: e.profitabilityScore,
     }));
@@ -298,6 +323,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     'confirm',
     'delivery',
     'cpa',
+    'funnelCpa',
     'profitability',
   ]);
   const q = (url.searchParams.get('q') ?? '').trim();
@@ -358,7 +384,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
                 ? m.totalOrders ?? 0
                 : sortBy === 'cpa'
                   ? m.cpa ?? 0
-                  : 0;
+                  : sortBy === 'funnelCpa'
+                    ? m.funnelCpa ?? 0
+                    : 0;
     const rate = (m: FundingBalanceRow, k: 'confirmationRate' | 'deliveryRate') => m[k];
     sorted.sort((a, b) => {
       const rp = rolePriority(a) - rolePriority(b);
@@ -369,7 +397,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         sortBy === 'spent' ||
         sortBy === 'adSpend' ||
         sortBy === 'orders' ||
-        sortBy === 'cpa'
+        sortBy === 'cpa' ||
+        sortBy === 'funnelCpa'
       ) {
         return sortDir === 'asc' ? num(a) - num(b) : num(b) - num(a);
       }

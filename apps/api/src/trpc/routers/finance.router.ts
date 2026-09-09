@@ -23,6 +23,42 @@ import { getMarketingService } from './marketing.router';
 import { listBranchesForUser } from './branches.router';
 import { isAdminLevel } from '../../common/authz';
 
+/**
+ * Company-isolation guard for an order id that may live in ANY of the three
+ * order tables (`orders`, `follow_up_orders`, `cart_orders`). The invoice
+ * endpoints accept a bare id and probe each table in turn, so the id is in
+ * scope when it resolves inside the caller's company in at least one of them.
+ *
+ * Each per-table guard throws NOT_FOUND when the id isn't in that table and
+ * FORBIDDEN when it is but belongs to another company — so "no table admitted
+ * it" is the failure case, and we surface FORBIDDEN rather than leaking which
+ * table (if any) holds the id.
+ */
+async function assertOrderIdInAnyTableScope(
+  orderId: string,
+  effectiveBranchIds: string[] | null,
+): Promise<void> {
+  if (effectiveBranchIds == null) return; // org-wide caller
+
+  for (const check of [
+    () => getOrdersService().assertOrderInCompanyScope(orderId, effectiveBranchIds),
+    () => getFollowUpConfigService().assertFollowUpOrderInCompanyScope(orderId, effectiveBranchIds),
+    () => getCartOrdersService().assertCartOrderInScope(orderId, effectiveBranchIds),
+  ]) {
+    try {
+      await check();
+      return; // admitted by one of the tables
+    } catch {
+      // Not in this table, or not in this company — try the next.
+    }
+  }
+
+  throw new TRPCError({
+    code: 'FORBIDDEN',
+    message: 'This order is not in your company.',
+  });
+}
+
 let financeServiceInstance: FinanceService | null = null;
 
 export function setFinanceService(service: FinanceService) {
@@ -74,6 +110,10 @@ export const financeRouter = router({
   getInvoiceByOrder: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
+      // Company isolation: the id may name a row in ANY of the three order tables,
+      // so the order is in scope if it resolves inside the caller's company in
+      // one of them. Mirrors the visibility cascade directly below.
+      await assertOrderIdInAnyTableScope(input.orderId, ctx.effectiveBranchIds);
       // Try main orders first; fall back to follow-up orders, then cart orders for visibility check.
       try {
         const order = await getOrdersService().getById(input.orderId);
@@ -99,6 +139,8 @@ export const financeRouter = router({
     .mutation(async ({ input, ctx }) => {
       // Any authenticated user can trigger invoice generation — it's idempotent
       // and only creates a DRAFT if the order is confirmed and has no invoice yet.
+      // Still company-scoped: an id from another company is refused outright.
+      await assertOrderIdInAnyTableScope(input.orderId, ctx.effectiveBranchIds);
 
       // Try main orders table first, fall back to follow-up orders, then cart orders
       type InvoiceOrder = {

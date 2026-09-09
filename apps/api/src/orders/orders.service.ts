@@ -58,6 +58,7 @@ import { isAdminLevel } from '../common/authz';
 import { hasFinanceAccess, hasFinanceWriteAccess } from '../common/utils/strip-finance-fields';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { EventsService } from '../events/events.service';
 import { emitOrderAutomationEvents } from '../automation/automation-hooks';
@@ -1681,6 +1682,43 @@ export class OrdersService {
   }
 
   /** Edge tamper gate: order lines must match allowlisted tiers for this campaign (templates or legacy base price). */
+  /**
+   * Company-isolation guard: assert the order (by id) belongs to the caller's
+   * active company. In scope when EITHER its marketing branch (`branch_id`) OR
+   * its CS servicing branch (`servicing_branch_id`) is in `effectiveBranchIds` —
+   * the two differ whenever CS routing moved the order, and either one being in
+   * the company admits it. Org-wide callers (null) bypass.
+   *
+   * Mirrors `assertFollowUpOrderInCompanyScope` / `assertCartOrderInScope` so
+   * `finance.router.ts::assertOrderIdInAnyTableScope` can probe all three order
+   * tables with the same contract: NOT_FOUND for a missing id, FORBIDDEN for a
+   * cross-company one.
+   */
+  async assertOrderInCompanyScope(
+    orderId: string,
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    if (effectiveBranchIds == null) return; // org-wide caller
+
+    const rows = await this.db
+      .select({
+        branchId: schema.orders.branchId,
+        servicingBranchId: schema.orders.servicingBranchId,
+      })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    assertEntityInScopeAny([row.branchId, row.servicingBranchId], effectiveBranchIds, {
+      message: 'This order is not in your company.',
+    });
+  }
+
   private async assertEdgeFormLineItemsAllowlisted(orderInput: CreateOrderInput): Promise<void> {
     const campaignId = orderInput.campaignId;
     if (!campaignId) return;

@@ -55,6 +55,10 @@ export interface FundingBalanceRow {
   adSpend?: number;
   /** Ad spend / total orders (period), when merged from leaderboard */
   cpa?: number;
+  /** Ad spend / funnel (front-end) orders only. Reported alongside `cpa`. */
+  funnelCpa?: number;
+  /** Front-end order count — the Funnel CPA denominator. */
+  funnelOrders?: number;
   trueRoas?: number;
   /** min(1, trueRoas / target); null when no ad spend in period */
   profitabilityScore?: number | null;
@@ -70,6 +74,10 @@ export interface MarketingTeamOverviewStats {
   totalAdSpend: number;
   totalExpenses: number;
   avgCpa: number;
+  /** Team-level ad spend / funnel orders. Shown beside `avgCpa`. */
+  funnelCpa: number;
+  /** Team-level front-end order count. */
+  funnelOrders: number;
   totalDisbursed: number;
   mbUnspentBalance: number;
   mbCount: number;
@@ -94,6 +102,10 @@ export interface MarketingSquadOverview {
   deliveryRate: number | null;
   totalAdSpend: number;
   avgCpa: number | null;
+  /** Squad ad spend / funnel orders. Shown beside `avgCpa`. */
+  funnelCpa: number | null;
+  /** Squad front-end order count. */
+  funnelOrders: number;
   totalBalance: number;
   totalReceived: number;
   totalSpent: number;
@@ -221,6 +233,10 @@ export interface Metrics {
   confirmedOrders: number;
   confirmationRate: number;
   cpa: number;
+  /** Ad spend / funnel (front-end) orders only. Sits beside `cpa`. */
+  funnelCpa: number;
+  /** Front-end order count — the Funnel CPA denominator. */
+  funnelOrders: number;
   trueRoas: number;
   deliveryRate: number;
 }
@@ -241,6 +257,10 @@ export interface LeaderboardEntry {
   confirmedOrders: number;
   confirmationRate: number;
   cpa: number;
+  /** Ad spend / funnel (front-end) orders only. Sits beside `cpa`. */
+  funnelCpa: number;
+  /** Front-end order count — the Funnel CPA denominator. */
+  funnelOrders: number;
   trueRoas: number;
   deliveryRate: number;
 }
