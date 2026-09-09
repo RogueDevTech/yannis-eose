@@ -7,7 +7,6 @@ import { DashboardLayout } from '~/components/layout/dashboard-layout';
 import { getCurrentUser, apiRequest, getSessionCookie, sessionCookieHeaders } from '~/lib/api.server';
 import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
 import { normalizeRouteErrorData } from '~/lib/network-error';
-import { ALL_BRANCHES_ROLES } from '~/components/layout/header-branch-scope';
 
 interface Notification {
   id: string;
@@ -88,18 +87,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })
     .catch(() => [] as BranchListEntry[]);
 
-  // Fetch branch groups for the header switcher (non-blocking).
-  // Any role that sees all branches needs group headers to avoid cross-company mixing.
-  type BranchGroupEntry = { id: string; name: string; status?: string };
-  const branchGroupsPromise = ALL_BRANCHES_ROLES.has(user?.role ?? '')
-    ? apiRequest<unknown>('/trpc/branches.listGroups', { method: 'GET', cookie })
-        .then((res) => {
-          if (!res.ok) return [] as BranchGroupEntry[];
-          const data = (res.data as { result?: { data?: BranchGroupEntry[] } })?.result?.data;
-          return data ?? [];
-        })
-        .catch(() => [] as BranchGroupEntry[])
-    : Promise.resolve([] as BranchGroupEntry[]);
+  // Fetch branch groups (non-blocking). Two consumers:
+  //  1. the header company switcher — all-branches roles only; and
+  //  2. `useActiveCompanyOrderPrefix()`, which every `<OrderIdBadge>` falls back
+  //     to when the call site has no branch to pass.
+  //
+  // (2) is why this is NOT gated on ALL_BRANCHES_ROLES any more. A CS closer got
+  // an empty catalog, so the prefix resolved to undefined and every order on
+  // their page rendered with the default YNS- prefix even when the order
+  // belonged to a company whose prefix is ZAR-.
+  //
+  // Safe to fetch for everyone: `branches.listGroups` is an authedProcedure that
+  // already returns only the groups containing branches the caller can access
+  // (see branches.router.ts) precisely so company names do not leak to users
+  // outside them. `orderPrefix` is part of that scoped payload.
+  type BranchGroupEntry = { id: string; name: string; status?: string; orderPrefix?: string | null };
+  const branchGroupsPromise = apiRequest<unknown>('/trpc/branches.listGroups', { method: 'GET', cookie })
+    .then((res) => {
+      if (!res.ok) return [] as BranchGroupEntry[];
+      const data = (res.data as { result?: { data?: BranchGroupEntry[] } })?.result?.data;
+      return data ?? [];
+    })
+    .catch(() => [] as BranchGroupEntry[]);
 
   // Fetch the ACTIVE currency catalog for the company (non-blocking). Drives the
   // app-wide `useHasMultipleCurrencies()` gate. Falls back to [] → NGN in the
