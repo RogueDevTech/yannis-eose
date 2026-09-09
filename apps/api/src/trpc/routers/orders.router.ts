@@ -3061,10 +3061,15 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Global search — cross-table order/product/user lookup WITHOUT branch scoping.
-   * Used by the Cmd+K search modal so results are not filtered by the currently
-   * selected header branch. Calls each service's `list()` with null branchId
-   * and null effectiveBranchIds so `branchScopeCondition` returns null (no filter).
+   * Global search — cross-table order/product/user lookup that ignores the
+   * currently selected header BRANCH but stays inside the caller's COMPANY.
+   *
+   * Each service gets `branchId: null` (so branchScopeCondition does not pin to
+   * one branch) but still receives `ctx.effectiveBranchIds` / `activeGroupId`.
+   * Passing null for both, as this used to, meant "no filter at all" — which was
+   * correct when there was one company and became a cross-company leak once
+   * there were several: Cmd+K returned another company's orders, customers,
+   * products and staff.
    */
   globalSearch: authedProcedure
     .input(z.object({ search: z.string().min(2).max(200) }))
@@ -3085,15 +3090,15 @@ export const ordersRouter = router({
         getOrdersService()
           .list(
             { ...listInput, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const },
-            null, // branchId — null bypasses branch scoping
-            { effectiveBranchIds: null, searchIncludeCustomerPhone },
+            null, // branchId — null bypasses the header BRANCH picker
+            { effectiveBranchIds: ctx.effectiveBranchIds, searchIncludeCustomerPhone },
           )
           .catch(() => ({ orders: [], total: 0, totalPages: 0 })),
         getFollowUpConfigService()
           .listFollowUpOrders(
             { search, limit: 5, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const },
             null,
-            null,
+            ctx.effectiveBranchIds,
             null,
             { searchIncludeCustomerPhone, effectiveCurrencyCodes: ctx.effectiveCurrencyCodes },
           )
@@ -3102,16 +3107,16 @@ export const ordersRouter = router({
           .list(
             { search, limit: 5, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const },
             null,
-            null,
+            ctx.effectiveBranchIds,
             null,
             { searchIncludeCustomerPhone },
           )
           .catch(() => ({ orders: [], total: 0, totalPages: 0 })),
         getProductsService()
-          .list({ search, limit: 3, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const }, ctx.user.id, ctx.user.role, null)
+          .list({ search, limit: 3, page: 1, sortBy: 'createdAt', sortOrder: 'desc' as const }, ctx.user.id, ctx.user.role, ctx.activeGroupId)
           .catch(() => ({ products: [], pagination: { page: 1, limit: 3, total: 0, totalPages: 0 } })),
         getUsersService()
-          .list({ search, limit: 3, page: 1, status: 'ACTIVE' as const, sortBy: 'name' as const, sortOrder: 'asc' as const }, ctx.user, null, null)
+          .list({ search, limit: 3, page: 1, status: 'ACTIVE' as const, sortBy: 'name' as const, sortOrder: 'asc' as const }, ctx.user, null, ctx.effectiveBranchIds)
           .catch(() => ({ users: [], total: 0, totalPages: 0 })),
       ]);
 

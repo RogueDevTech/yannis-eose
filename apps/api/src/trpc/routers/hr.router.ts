@@ -480,7 +480,7 @@ export const hrRouter = router({
   submitBatch: authedProcedure
     .input(submitBatchSchema)
     .mutation(async ({ input, ctx }) => {
-      return getPayrollBatchService().submitBatch(input, ctx.user);
+      return getPayrollBatchService().submitBatch(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   deleteBatch: authedProcedure
@@ -512,25 +512,25 @@ export const hrRouter = router({
   addBatchAdjustment: authedProcedure
     .input(addBatchAdjustmentSchema)
     .mutation(async ({ input, ctx }) => {
-      return getPayrollBatchService().addBatchAdjustment(input, ctx.user);
+      return getPayrollBatchService().addBatchAdjustment(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   removePayoutLine: authedProcedure
     .input(removePayoutLineSchema)
     .mutation(async ({ input, ctx }) => {
-      return getPayrollBatchService().removePayoutLine(input, ctx.user);
+      return getPayrollBatchService().removePayoutLine(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   recalculateBatch: authedProcedure
     .input(getBatchSchema)
     .mutation(async ({ input, ctx }) => {
-      return getPayrollBatchService().recalculateBatch(input.batchId, ctx.user);
+      return getPayrollBatchService().recalculateBatch(input.batchId, ctx.user, ctx.effectiveBranchIds);
     }),
 
   overridePayslipLine: authedProcedure
     .input(overridePayslipLineSchema)
     .mutation(async ({ input, ctx }) => {
-      return getPayrollBatchService().overridePayslipLine(input, ctx.user);
+      return getPayrollBatchService().overridePayslipLine(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   listPayslips: permissionProcedure('hr.read')
