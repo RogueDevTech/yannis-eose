@@ -3778,6 +3778,12 @@ export class MarketingService {
         .limit(1);
 
       if (!transfer) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+      // Only a party to the transfer may reject it. acceptMbFundTransfer has
+      // always enforced this for the receiver; reject had no check at all, so
+      // any authenticated user could reject another company's pending transfer.
+      if (transfer.receiverMbId !== actor.id && transfer.senderMbId !== actor.id) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only a party to this transfer can reject it.' });
+      }
       if (transfer.status !== 'PENDING') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer is not pending' });
 
       const [updated] = await tx
@@ -5248,6 +5254,7 @@ export class MarketingService {
         approvedSpend: 0,
         otherExpenses: 0,
         totalOrders: 0,
+        funnelOrders: 0,
         deliveredOrders: 0,
         deliveredThisMonth: 0,
         deliveredRevenue: 0,
@@ -5256,6 +5263,7 @@ export class MarketingService {
         confirmedOrders: 0,
         confirmationRate: 0,
         cpa: 0,
+        funnelCpa: 0,
         trueRoas: 0,
         deliveryRate: 0,
       };
@@ -5610,7 +5618,10 @@ export class MarketingService {
     const cartDelivered = cartDeliveredRows[0]?.deliveredCount ?? 0;
     const cartRevenue = cartDeliveredRows[0]?.deliveredRevenue ?? 0;
     const funnelRevenue = Number(deliveredRevenueRows[0]?.total ?? 0);
-    const totalOrders = (totalOrdersRows[0]?.count ?? 0) + cartDelivered;
+    // Pure funnel cohort (orders table only) — Funnel CPA's denominator,
+    // before cart-graduated deliveries are added into `totalOrders` below.
+    const funnelOrders = totalOrdersRows[0]?.count ?? 0;
+    const totalOrders = funnelOrders + cartDelivered;
     const deliveredOrders = (deliveredOrdersRows[0]?.count ?? 0) + cartDelivered;
     const deliveredRevenue = funnelRevenue + cartRevenue;
     // Per-currency delivered revenue (funnel + cart), keyed by ISO code. Powers
@@ -5632,6 +5643,7 @@ export class MarketingService {
       approvedSpend,
       otherExpenses,
       totalOrders,
+      funnelOrders,
       deliveredOrders,
       // Total Delivered This Month (carry-over-inclusive, by delivered_at).
       // Display-only — intentionally NOT used in deliveryRate/cpa/roas below.
@@ -5651,6 +5663,9 @@ export class MarketingService {
       // inflate the metric, confusing the overview strip where "Ad Spend" shows
       // approved-only next to CPA.
       cpa: totalOrders > 0 ? approvedSpend / totalOrders : 0,
+      // Ad spend / front-end orders only (excludes cart-graduated deliveries
+      // that `totalOrders` carries). Approved-spend numerator, same as `cpa`.
+      funnelCpa: funnelOrders > 0 ? approvedSpend / funnelOrders : 0,
       trueRoas: approvedSpend > 0 ? deliveredRevenue / approvedSpend : 0,
       // DR = delivered cohort / total cohort (DELETED-excluded) — same
       // denominator as CR so the two read as a funnel: of every N orders
@@ -5690,14 +5705,23 @@ export class MarketingService {
     deliveredRevenue: number;
     confirmedOrders: number;
     deliveredThisMonth?: number;
+    /**
+     * Front-end/funnel orders only — the orders table cohort before
+     * cart-graduated deliveries are added into `totalOrders`. Denominator for
+     * `funnelCpa`. Defaults to `totalOrders` for callers that predate the split
+     * (single-source surfaces where the two are the same number).
+     */
+    funnelOrders?: number;
     /** Delivered revenue split by frozen ISO currency code. Sums to
      *  `deliveredRevenue`. Empty on single-currency companies. */
     deliveredRevenueByCurrency?: Record<string, number>;
   }) {
     const { totalSpend, totalOrders, deliveredOrders, deliveredRevenue, confirmedOrders } = raw;
+    const funnelOrders = raw.funnelOrders ?? totalOrders;
     return {
       totalSpend,
       totalOrders,
+      funnelOrders,
       deliveredOrders,
       // Total Delivered This Month (carry-over-inclusive, by delivered_at).
       // Pass-through display value — NEVER used in any rate below.
@@ -5709,6 +5733,11 @@ export class MarketingService {
       confirmedOrders,
       confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0,
       cpa: totalOrders > 0 ? totalSpend / totalOrders : 0,
+      // Funnel CPA = ad spend / front-end orders only. `cpa` above divides by
+      // `totalOrders`, which also carries cart-graduated deliveries, so it
+      // answers a different question: cost per acquired order across every
+      // source. Both are reported; neither replaces the other.
+      funnelCpa: funnelOrders > 0 ? totalSpend / funnelOrders : 0,
       trueRoas: totalSpend > 0 ? deliveredRevenue / totalSpend : 0,
       // DR = delivered / total — same funnel denominator as CR (see
       // getPerformanceMetrics for full rationale).
@@ -5985,6 +6014,9 @@ export class MarketingService {
         this.deriveBuyerMetrics({
           totalSpend: spend,
           totalOrders: Number(orderRow?.totalOrders ?? 0) + cartDelivered,
+          // Funnel CPA denominator: the orders-table cohort WITHOUT the
+          // cart-graduated deliveries folded in on the line above.
+          funnelOrders: Number(orderRow?.totalOrders ?? 0),
           deliveredOrders: Number(orderRow?.deliveredOrders ?? 0) + cartDelivered,
           deliveredRevenue: Number(orderRow?.deliveredRevenue ?? 0) + cartRevenue,
           deliveredRevenueByCurrency: revenueByCurrencyByBuyer.get(buyerId) ?? {},
@@ -6621,6 +6653,52 @@ export class MarketingService {
     });
   }
 
+
+  /**
+   * COMPANY BOUNDARY for offer-template and offer-group by-id paths.
+   *
+   * listOfferTemplates(input, groupId) and listOfferGroups(input, groupId)
+   * both filter on products.groupId. Their by-id read and update siblings took no
+   * groupId, so another company's offer names, prices and variants were
+   * readable — and editable, which cascades into products.baseSalePrice via
+   * syncProductBaseSalePriceFromTemplates.
+   */
+  private async assertOfferTemplateInCompany(templateId: string, groupId?: string | null): Promise<void> {
+    if (!groupId) return;
+    const [row] = await this.db
+      .select({ productGroupId: schema.products.groupId })
+      .from(schema.offerTemplates)
+      .innerJoin(schema.products, eq(schema.products.id, schema.offerTemplates.productId))
+      .where(eq(schema.offerTemplates.id, templateId))
+      .limit(1);
+    if (!row || (row.productGroupId ?? null) !== groupId) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Offer not found' });
+    }
+  }
+
+  private async assertOfferGroupInCompany(offerGroupId: string, groupId?: string | null): Promise<void> {
+    if (!groupId) return;
+    // offer_groups has no product link of its own — it reaches products through
+    // offer_group_items. Mirrors the subquery listOfferGroups already uses.
+    const [row] = await this.db
+      .select({ id: schema.offerGroups.id })
+      .from(schema.offerGroups)
+      .where(
+        and(
+          eq(schema.offerGroups.id, offerGroupId),
+          sql`${schema.offerGroups.id} IN (
+            SELECT ogi.offer_group_id FROM offer_group_items ogi
+            INNER JOIN products p ON p.id = ogi.product_id
+            WHERE (p.group_id = ${groupId} OR p.group_id IS NULL)
+          )`,
+        ),
+      )
+      .limit(1);
+    if (!row) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Offer group not found' });
+    }
+  }
+
   async updateOfferTemplate(
     input: UpdateOfferTemplateInput,
     actorId: string,
@@ -6756,7 +6834,8 @@ export class MarketingService {
     });
   }
 
-  async getOfferTemplate(id: string) {
+  async getOfferTemplate(id: string, groupId?: string | null) {
+    await this.assertOfferTemplateInCompany(id, groupId);
     const rows = await this.db
       .select()
       .from(schema.offerTemplates)
@@ -7158,7 +7237,8 @@ export class MarketingService {
     });
   }
 
-  async getOfferGroup(id: string) {
+  async getOfferGroup(id: string, groupId?: string | null) {
+    await this.assertOfferGroupInCompany(id, groupId);
     const [group] = await this.db
       .select()
       .from(schema.offerGroups)
@@ -7254,12 +7334,27 @@ export class MarketingService {
   async clearLegacyOfferTemplates(
     input: ClearLegacyOfferTemplatesInput,
     actorId: string,
+    /**
+     * COMPANY BOUNDARY. This is a destructive org-wide sweep: it archives
+     * offer templates and strips offer references from live campaign forms.
+     * Unscoped, one products.offers holder wiped EVERY company's offer
+     * templates and detached every company's forms. Templates reach a company
+     * through their product; campaigns through their branch.
+     */
+    activeGroupId?: string | null,
   ): Promise<{ archivedCount: number; detachedCampaigns: number }> {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const tierRows = await tx
         .select({ id: schema.offerTemplates.id })
         .from(schema.offerTemplates)
-        .where(inArray(schema.offerTemplates.status, ['ACTIVE', 'INACTIVE']));
+        .where(
+          and(
+            inArray(schema.offerTemplates.status, ['ACTIVE', 'INACTIVE']),
+            ...(activeGroupId
+              ? [sql`${schema.offerTemplates.productId} IN (SELECT id FROM products WHERE group_id = ${activeGroupId})`]
+              : []),
+          ),
+        );
       const archivedIds = new Set(tierRows.map((r) => r.id));
 
       let detachedCampaigns = 0;
@@ -7274,6 +7369,9 @@ export class MarketingService {
           .where(
             and(
               isNull(schema.campaigns.validTo),
+              ...(activeGroupId
+                ? [sql`${schema.campaigns.branchId} IN (SELECT id FROM branches WHERE group_id = ${activeGroupId})`]
+                : []),
               or(
                 sql`${schema.campaigns.offerTemplateId} IS NOT NULL`,
                 sql`${schema.campaigns.formConfig}::jsonb ? 'selectedOfferTemplateIds'`,
@@ -7480,7 +7578,7 @@ export class MarketingService {
     });
   }
 
-  async updateCampaign(input: UpdateCampaignInput, actorId: string) {
+  async updateCampaign(input: UpdateCampaignInput, actorId: string, effectiveBranchIds?: string[] | null) {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const existing = await tx
         .select()
@@ -7489,6 +7587,17 @@ export class MarketingService {
         .limit(1);
 
       if (existing.length === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Campaign not found' });
+      }
+      // COMPANY BOUNDARY — campaigns are live revenue forms. Without this a
+      // marketing.campaigns holder could rename, re-point or DEACTIVATE another
+      // company's form by id. createCampaign already takes branchId and
+      // listCampaigns takes effectiveBranchIds; this write took neither.
+      if (
+        effectiveBranchIds?.length &&
+        existing[0]?.branchId &&
+        !effectiveBranchIds.includes(existing[0].branchId)
+      ) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Campaign not found' });
       }
 
@@ -7570,11 +7679,22 @@ export class MarketingService {
     });
   }
 
-  async getCampaign(id: string) {
+  async getCampaign(id: string, effectiveBranchIds?: string[] | null) {
+    // COMPANY BOUNDARY — the authenticated admin-facing read. listCampaigns is
+    // branch-scoped; this by-id sibling was not, so another company's form
+    // config, product ids and media buyer were readable by id.
+    // getPublicCampaign is the separate frozen public path and is unaffected.
     const rows = await this.db
       .select()
       .from(schema.campaigns)
-      .where(eq(schema.campaigns.id, id))
+      .where(
+        and(
+          eq(schema.campaigns.id, id),
+          ...(effectiveBranchIds?.length
+            ? [inArray(schema.campaigns.branchId, effectiveBranchIds)]
+            : []),
+        ),
+      )
       .limit(1);
 
     if (rows.length === 0) {
