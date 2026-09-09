@@ -24,6 +24,7 @@ import { EventsService } from '../events/events.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
+import { parseOrderNumberSearch } from '../common/utils/parse-order-number';
 import { randomUUID } from 'node:crypto';
 
 /** Valid values for the order_timeline_events.event_type enum.
@@ -1140,8 +1141,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
                 return parts.length > 1 ? or(...parts) : parts[0];
               })()
             : undefined;
-        const orderNumMatch = trimmed.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
-        const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
+        const parsedOrderNum = parseOrderNumberSearch(trimmed);
         if (!Number.isNaN(parsedOrderNum) && parsedOrderNum > 0) {
           const combined = or(
             eq(schema.followUpOrders.orderNumber, parsedOrderNum),
