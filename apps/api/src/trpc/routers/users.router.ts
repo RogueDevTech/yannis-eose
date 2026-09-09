@@ -15,6 +15,7 @@ import {
   NOTIFICATION_TYPE_META,
   MANDATORY_EMAIL_TYPES,
 } from '@yannis/shared';
+import { isAdminLevel } from '../../common/authz';
 import type { UsersService } from '../../users/users.service';
 import type { SessionStoreService } from '../../auth/session-store.service';
 import { CacheService } from '../../common/cache/cache.service';
@@ -120,9 +121,27 @@ export const usersRouter = router({
    * Get a single user by ID.
    */
   getById: authedProcedure
-    .input(z.object({ userId: z.string().uuid() }))
+    .input(
+      z.object({
+        userId: z.string().uuid(),
+        /**
+         * Edit form only: return memberships in EVERY company, not just the
+         * active one. The form shows a checkbox per company group and would
+         * otherwise render another company's group unchecked, then submit that
+         * as the truth. Admin-level only — they are the only role whose branch
+         * picker spans companies (`branches.listAll`).
+         */
+        forEdit: z.boolean().optional(),
+      }),
+    )
     .query(async ({ input, ctx }) => {
-      return getUsersService().getById(input.userId, ctx.user, ctx.effectiveBranchIds ?? undefined);
+      const includeAll = input.forEdit === true && isAdminLevel(ctx.user);
+      return getUsersService().getById(
+        input.userId,
+        ctx.user,
+        ctx.effectiveBranchIds ?? undefined,
+        includeAll,
+      );
     }),
 
   /**
@@ -284,7 +303,13 @@ export const usersRouter = router({
     .input(updateStaffSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...updateInput } = input;
-      const res = await getUsersService().update(updateInput, ctx.user);
+      // Pass the editor's company scope so memberships outside it are preserved
+      // rather than silently revoked (the form cannot show them to begin with).
+      const res = await getUsersService().update(
+        updateInput,
+        ctx.user,
+        ctx.effectiveBranchIds ?? null,
+      );
       await invalidatePermissionsUserMatrixCache();
       // Multi-country: if country scope changed, re-sync the target's active
       // sessions so the grant/revoke takes effect on their next request (not

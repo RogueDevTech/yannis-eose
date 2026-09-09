@@ -1090,6 +1090,15 @@ export class UsersService {
     userId: string,
     actor: { id: string; role: string; permissions?: string[] } | null = null,
     effectiveBranchIds?: string[],
+    /**
+     * The EDIT FORM needs every membership, not just the active company's.
+     * It renders a checkbox per company group and ticks one only when all of
+     * that group's branches are selected, so filtering the memberships makes
+     * another company's group render UNCHECKED even though the membership
+     * exists — and saving then submits that as the truth. Callers that only
+     * display a user (lists, detail pages) keep the company-isolated default.
+     */
+    includeAllBranchMemberships = false,
   ) {
     const rows = await this.db
       .select({
@@ -1164,7 +1173,7 @@ export class UsersService {
     // Empty array = company selected but no branches resolved → return none
     // (same isolation rule as `buildUsersListConditions`).
     const branchMemberships =
-      effectiveBranchIds != null
+      effectiveBranchIds != null && !includeAllBranchMemberships
         ? allMemberships.filter((m) => effectiveBranchIds.includes(m.branchId))
         : allMemberships;
 
@@ -1869,7 +1878,19 @@ export class UsersService {
    * Update a staff member's details.
    * If actor is HR and requested role is sensitive, creates permission_request instead.
    */
-  async update(input: UpdateStaffInput, actor: SessionUser) {
+  async update(
+    input: UpdateStaffInput,
+    actor: SessionUser,
+    /**
+     * The editor's active-company branch ids. The edit form can only show —
+     * and therefore only send back — branches inside this scope, so any
+     * membership OUTSIDE it must be preserved rather than deleted. Without
+     * this, saving the user form silently revoked memberships in another
+     * company that the admin never saw and never intended to touch.
+     * `null`/undefined = org-wide editor, who legitimately sees everything.
+     */
+    effectiveBranchIds?: string[] | null,
+  ) {
     if (input.userId === actor.id && input.role) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -1927,7 +1948,10 @@ export class UsersService {
     }
 
     const existingMembershipRows = await this.db
-      .select({ branchId: schema.userBranches.branchId })
+      // `isPrimary` is carried so an out-of-scope membership preserved below
+      // keeps its own primary flag instead of being recomputed from the
+      // editing company's picker.
+      .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
       .from(schema.userBranches)
       .where(eq(schema.userBranches.userId, input.userId));
     const existingBranchIds = [...new Set(existingMembershipRows.map((r) => r.branchId))];
@@ -2443,8 +2467,16 @@ export class UsersService {
     const beforeMembershipBranchIds = [...existingBranchIds].sort((a, b) => a.localeCompare(b));
     const branchesOrPrimaryPayloadTouched =
       input.branchIds !== undefined || input.primaryBranchId !== undefined || input.primaryBranchByGroup !== undefined;
+    // Memberships outside the editor's company survive the write (see the
+    // preservation block below), so they must count as "after" too — otherwise
+    // `removedBranchIds` treats them as dropped and deactivates another
+    // company's campaigns and team rosters.
+    const outOfScopeSurviving =
+      effectiveBranchIds != null
+        ? existingBranchIds.filter((id) => !effectiveBranchIds.includes(id))
+        : [];
     const afterMembershipBranchIds = branchesOrPrimaryPayloadTouched
-      ? [...new Set(nextBranchIds)].sort((a, b) => a.localeCompare(b))
+      ? [...new Set([...nextBranchIds, ...outOfScopeSurviving])].sort((a, b) => a.localeCompare(b))
       : beforeMembershipBranchIds;
     // Branches the user is dropping — drives campaign deactivation AND
     // team/department roster cleanup below. Computed here so the post-commit
@@ -2483,14 +2515,31 @@ export class UsersService {
             ? Object.values(input.primaryBranchByGroup)
             : nextPrimaryBranchId ? [nextPrimaryBranchId] : [],
         );
+        // Memberships OUTSIDE the editor's active company are invisible to the
+        // edit form, so they can never appear in `nextBranchIds`. Carry them
+        // through untouched — a delete-and-reinsert of only what the form could
+        // see would silently revoke another company's access. Org-wide editors
+        // (null scope) see everything, so nothing is preserved implicitly.
+        const outOfScopeBranchIds =
+          effectiveBranchIds != null
+            ? existingBranchIds.filter((id) => !effectiveBranchIds.includes(id))
+            : [];
+        const branchIdsToWrite = [...new Set([...nextBranchIds, ...outOfScopeBranchIds])];
+        // Preserve each carried-over membership's own primary flag rather than
+        // recomputing it from this company's picker.
+        const preservedPrimary = new Set(
+          existingMembershipRows
+            .filter((m) => m.isPrimary && outOfScopeBranchIds.includes(m.branchId))
+            .map((m) => m.branchId),
+        );
         await tx
           .delete(schema.userBranches)
           .where(eq(schema.userBranches.userId, input.userId));
         await tx.insert(schema.userBranches).values(
-          nextBranchIds.map((branchId) => ({
+          branchIdsToWrite.map((branchId) => ({
             userId: input.userId,
             branchId,
-            isPrimary: primaryBranchIdSet.has(branchId),
+            isPrimary: primaryBranchIdSet.has(branchId) || preservedPrimary.has(branchId),
             roleInBranch: null,
           })),
         );
