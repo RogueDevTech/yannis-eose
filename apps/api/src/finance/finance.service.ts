@@ -132,7 +132,7 @@ export class FinanceService {
     });
   }
 
-  async getInvoiceById(invoiceId: string) {
+  async getInvoiceById(invoiceId: string, effectiveBranchIds?: string[] | null) {
     const rows = await this.db
       .select()
       .from(schema.invoices)
@@ -141,6 +141,26 @@ export class FinanceService {
 
     if (!rows[0]) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+    }
+
+    // COMPANY BOUNDARY — mirrors updateInvoiceStatus, which already performs
+    // this check on the write path. The read path had none, so an invoice from
+    // another company could be fetched by id. An invoice has no branch of its
+    // own; it inherits the linked order's.
+    if (effectiveBranchIds != null && rows[0].orderId) {
+      const [ord] = await this.db
+        .select({
+          branchId: schema.orders.branchId,
+          servicingBranchId: schema.orders.servicingBranchId,
+        })
+        .from(schema.orders)
+        .where(eq(schema.orders.id, rows[0].orderId))
+        .limit(1);
+      if (ord) {
+        assertEntityInScopeAny([ord.servicingBranchId, ord.branchId], effectiveBranchIds, {
+          message: 'Invoice is not in your company.',
+        });
+      }
     }
 
     // Invoices carry no currency column — they inherit the order's frozen

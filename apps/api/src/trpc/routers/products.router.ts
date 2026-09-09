@@ -89,7 +89,7 @@ export const productsRouter = router({
   getById: authedProcedure
     .input(z.object({ productId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      return getProductsService().getById(input.productId, ctx.user.id, ctx.user.role);
+      return getProductsService().getById(input.productId, ctx.user.id, ctx.user.role, ctx.activeGroupId);
     }),
 
   /**
@@ -110,7 +110,7 @@ export const productsRouter = router({
   update: permissionProcedure('products.update')
     .input(updateProductSchema)
     .mutation(async ({ input, ctx }) => {
-      const res = await getProductsService().update(input, ctx.user);
+      const res = await getProductsService().update(input, ctx.user, ctx.activeGroupId);
       await invalidateProductsOptionsCache();
       return res;
     }),
@@ -121,7 +121,7 @@ export const productsRouter = router({
   requestArchive: permissionProcedure('products.update')
     .input(requestProductArchiveSchema)
     .mutation(async ({ input, ctx }) => {
-      const res = await getProductsService().requestArchive(input, ctx.user);
+      const res = await getProductsService().requestArchive(input, ctx.user, ctx.activeGroupId);
       await invalidateProductsOptionsCache();
       return res;
     }),
@@ -138,8 +138,8 @@ export const productsRouter = router({
    */
   getBundleComponents: authedProcedure
     .input(z.object({ productId: z.string().uuid() }))
-    .query(async ({ input }) => {
-      return getProductsService().getBundleComponents(input.productId);
+    .query(async ({ input, ctx }) => {
+      return getProductsService().getBundleComponents(input.productId, ctx.activeGroupId);
     }),
 
   /**
@@ -153,6 +153,7 @@ export const productsRouter = router({
         input.productId,
         input.components,
         ctx.user,
+        ctx.activeGroupId,
       );
     }),
 });
