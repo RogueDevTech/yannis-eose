@@ -210,19 +210,19 @@ export class ReportsService {
       case 'follow_up_orders':
         return this.exportFollowUpOrders(input as Extract<ExportReportInput, { reportKey: 'follow_up_orders' }>, user, currentBranchId, date, eIds);
       case 'delivery_remittances':
-        return this.exportDeliveryRemittances(input as Extract<ExportReportInput, { reportKey: 'delivery_remittances' }>, user, currentBranchId, date);
+        return this.exportDeliveryRemittances(input as Extract<ExportReportInput, { reportKey: 'delivery_remittances' }>, user, currentBranchId, date, groupId, eIds);
       case 'payroll':
-        return this.exportPayroll(input as Extract<ExportReportInput, { reportKey: 'payroll' }>, user, date);
+        return this.exportPayroll(input as Extract<ExportReportInput, { reportKey: 'payroll' }>, user, date, eIds);
       case 'funding_requests':
         return this.exportFundingRequests(input as Extract<ExportReportInput, { reportKey: 'funding_requests' }>, user, currentBranchId, date, eIds);
       case 'users':
         return this.exportUsers(input as Extract<ExportReportInput, { reportKey: 'users' }>, user, currentBranchId, date, eIds);
       case 'expenses':
-        return this.exportExpenses(input as Extract<ExportReportInput, { reportKey: 'expenses' }>, user, date);
+        return this.exportExpenses(input as Extract<ExportReportInput, { reportKey: 'expenses' }>, user, date, groupId);
       case 'products':
         return this.exportProducts(input as Extract<ExportReportInput, { reportKey: 'products' }>, user, date, groupId);
       case 'shipments':
-        return this.exportShipments(input as Extract<ExportReportInput, { reportKey: 'shipments' }>, user, date);
+        return this.exportShipments(input as Extract<ExportReportInput, { reportKey: 'shipments' }>, user, date, groupId, eIds);
       default:
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unsupported report key' });
     }
@@ -1049,6 +1049,8 @@ export class ReportsService {
     user: SessionUser,
     _currentBranchId: string | null,
     date: string,
+    groupId: string | null,
+    effectiveBranchIds: string[] | null,
   ) {
     this.ensureExportPermission(user, 'logistics.providers.view', 'logistics.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
@@ -1062,7 +1064,7 @@ export class ReportsService {
         ...(startDate ? { startDate } : {}),
         ...(endDate ? { endDate } : {}),
       });
-      const result = await this.logisticsService.listDeliveryRemittances(parsed, user);
+      const result = await this.logisticsService.listDeliveryRemittances(parsed, user, groupId, effectiveBranchIds);
       const batch = Array.isArray(result) ? result : (result as { remittances?: unknown[] }).remittances ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) break;
@@ -1101,6 +1103,7 @@ export class ReportsService {
     input: Extract<ExportReportInput, { reportKey: 'payroll' }>,
     user: SessionUser,
     date: string,
+    effectiveBranchIds: string[] | null,
   ) {
     this.ensureExportPermission(user, 'hr.payroll', 'hr.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
@@ -1114,7 +1117,9 @@ export class ReportsService {
         ...(startDate ? { periodStart: startDate } : {}),
         ...(endDate ? { periodEnd: endDate } : {}),
       });
-      const result = await this.hrService.listPayouts(parsed);
+      // Company scope is mandatory here: without effectiveBranchIds, listPayouts
+      // returns EVERY company's payroll (its own doc warns of this).
+      const result = await this.hrService.listPayouts(parsed, user, effectiveBranchIds);
       const batch = result.payouts ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) break;
@@ -1277,6 +1282,7 @@ export class ReportsService {
     input: Extract<ExportReportInput, { reportKey: 'expenses' }>,
     user: SessionUser,
     date: string,
+    groupId: string | null,
   ) {
     this.ensureExportPermission(user, 'finance.read', 'finance.export');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1286,6 +1292,10 @@ export class ReportsService {
         page,
         limit: EXPORT_PAGE_LIMIT,
         ...(input.filters?.status ? { status: input.filters.status } : {}),
+        // Without groupId, listExpenses' groupEqOn falls back to
+        // `WHERE group_id IS NULL` — which returns every orphaned row rather
+        // than this company's, so omitting it leaks rather than narrows.
+        ...(groupId ? { groupId } : {}),
       });
       const result = await this.expenseService.listExpenses(parsed);
       const batch = result.expenses ?? [];
@@ -1376,6 +1386,8 @@ export class ReportsService {
     input: Extract<ExportReportInput, { reportKey: 'shipments' }>,
     user: SessionUser,
     date: string,
+    groupId: string | null,
+    effectiveBranchIds: string[] | null,
   ) {
     this.ensureExportPermission(user, 'inventory.read', 'inventory.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
@@ -1389,7 +1401,7 @@ export class ReportsService {
         ...(startDate ? { startDate } : {}),
         ...(endDate ? { endDate } : {}),
       });
-      const result = await this.shipmentsService.listShipments(parsed, user, null);
+      const result = await this.shipmentsService.listShipments(parsed, user, null, effectiveBranchIds, groupId);
       const batch = result.rows ?? [];
       all.push(...batch);
       if (batch.length < EXPORT_PAGE_LIMIT) break;
