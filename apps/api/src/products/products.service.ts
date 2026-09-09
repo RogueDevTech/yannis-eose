@@ -204,6 +204,35 @@ export class ProductsService {
     return map;
   }
 
+
+  /**
+   * COMPANY BOUNDARY — a product belongs to exactly one company via
+   * products.group_id, and `list`/`listOptions`/`getCategories` all filter on
+   * it. The by-id paths had no groupId parameter at all, so any staff member
+   * could read or write another company's product given its UUID.
+   *
+   * The catalog gate is not a substitute: getCatalogScopeForViewer returns
+   * `allowedProductIds: null` (unrestricted) whenever restrictProductAccess is
+   * false and the user has no explicit assignments — the default, and true for
+   * every active user in prod.
+   *
+   * Passing a null groupId keeps the previous behaviour for genuinely org-wide
+   * callers rather than failing them closed mid-release.
+   */
+  private async assertProductInCompany(productId: string, groupId?: string | null): Promise<void> {
+    if (!groupId) return;
+    const [row] = await this.db
+      .select({ groupId: schema.products.groupId })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId))
+      .limit(1);
+    // Report NOT_FOUND rather than FORBIDDEN so the endpoint does not confirm
+    // that a product with this id exists in another company.
+    if (!row || (row.groupId ?? null) !== groupId) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
+    }
+  }
+
   private async getCatalogScopeForViewer(
     viewerId: string,
     role: string,
@@ -325,7 +354,8 @@ export class ProductsService {
    * Get a single product by ID.
    * Financial field stripping is handled by the tRPC CLS middleware.
    */
-  async getById(productId: string, viewerId: string, viewerRole: string) {
+  async getById(productId: string, viewerId: string, viewerRole: string, groupId?: string | null) {
+    await this.assertProductInCompany(productId, groupId);
     const { allowedProductIds } = await this.getCatalogScopeForViewer(viewerId, viewerRole);
     if (allowedProductIds !== null) {
       if (allowedProductIds.length === 0 || !allowedProductIds.includes(productId)) {
@@ -593,7 +623,8 @@ export class ProductsService {
   /**
    * Update product details.
    */
-  async update(input: UpdateProductInput, actor: SessionUser) {
+  async update(input: UpdateProductInput, actor: SessionUser, groupId?: string | null) {
+    await this.assertProductInCompany(input.productId, groupId);
     return withActor(this.db, actor, async (tx) => {
       const existingRows = await tx
         .select({ id: schema.products.id })
@@ -708,7 +739,8 @@ export class ProductsService {
    * Archive (soft-remove) a product. Super Admin applies immediately; everyone else with
    * `products.update` creates a PENDING permission request for Super Admin approval.
    */
-  async requestArchive(input: RequestProductArchiveInput, actor: SessionUser) {
+  async requestArchive(input: RequestProductArchiveInput, actor: SessionUser, groupId?: string | null) {
+    await this.assertProductInCompany(input.productId, groupId);
     const [product] = await this.db
       .select({
         id: schema.products.id,
@@ -794,7 +826,8 @@ export class ProductsService {
   /**
    * Get bundle components for a product. Returns empty array if not a bundle.
    */
-  async getBundleComponents(productId: string) {
+  async getBundleComponents(productId: string, groupId?: string | null) {
+    await this.assertProductInCompany(productId, groupId);
     const rows = await this.db
       .select({
         id: schema.productBundleComponents.id,
@@ -825,7 +858,14 @@ export class ProductsService {
     productId: string,
     components: Array<{ componentProductId: string; quantity: number }>,
     actor: SessionUser,
+    groupId?: string | null,
   ) {
+    await this.assertProductInCompany(productId, groupId);
+    // Components must be in the same company as the bundle — otherwise a bundle
+    // could pull another company's product into its own catalog.
+    for (const c of components) {
+      await this.assertProductInCompany(c.componentProductId, groupId);
+    }
     // Validate the bundle product exists
     const [bundleProduct] = await this.db
       .select({ id: schema.products.id })
