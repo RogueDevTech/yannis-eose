@@ -272,7 +272,7 @@ export const logisticsRouter = router({
   listRemittances: permissionProcedure('logistics.read')
     .input(listRemittancesSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listRemittances(input, ctx.user);
+      return getLogisticsService().listRemittances(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   markRemittanceReceived: permissionProcedure('logistics.write')
@@ -290,13 +290,13 @@ export const logisticsRouter = router({
   createDeliveryRemittance: authedProcedure
     .input(createDeliveryRemittanceSchema)
     .mutation(async ({ input, ctx }) => {
-      return getLogisticsService().createDeliveryRemittance(input, ctx.user);
+      return getLogisticsService().createDeliveryRemittance(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   updateDeliveryRemittance: authedProcedure
     .input(updateDeliveryRemittanceSchema)
     .mutation(async ({ input, ctx }) => {
-      return getLogisticsService().updateDeliveryRemittance(input, ctx.user);
+      return getLogisticsService().updateDeliveryRemittance(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   listDeliveryRemittances: authedProcedure
@@ -444,7 +444,7 @@ export const logisticsRouter = router({
   markDeliveryRemittanceReceived: permissionProcedure('finance.approve')
     .input(markDeliveryRemittanceReceivedSchema)
     .mutation(async ({ input, ctx }) => {
-      return getLogisticsService().markDeliveryRemittanceReceived(input, ctx.user);
+      return getLogisticsService().markDeliveryRemittanceReceived(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   getDeliveryRemittance: authedProcedure
@@ -456,7 +456,7 @@ export const logisticsRouter = router({
   disputeDeliveryRemittance: permissionProcedure('finance.approve')
     .input(disputeDeliveryRemittanceSchema)
     .mutation(async ({ input, ctx }) => {
-      return getLogisticsService().disputeDeliveryRemittance(input, ctx.user);
+      return getLogisticsService().disputeDeliveryRemittance(input, ctx.user, ctx.effectiveBranchIds);
     }),
 
   // Delivery confirmation requests (rider/3PL submit → HOL approve/reject)
