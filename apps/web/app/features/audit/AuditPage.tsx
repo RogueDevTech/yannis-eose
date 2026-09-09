@@ -755,7 +755,9 @@ function DetailModal({
         .map(([key, value]) => ({ key, value })),
     [entry.data],
   );
-  const asOf = entry.validFrom;
+  // Resolve names/roles as of WHEN THE CHANGE HAPPENED (validTo), falling back
+  // to validFrom for the live row (validTo = null).
+  const asOf = entry.validTo ?? entry.validFrom;
 
   const actorInfo = entry.changedBy ? resolveActor(actorNames, entry.changedBy, asOf) : null;
   const actorDisplay = getActorDisplay(entry.changedBy, actorNames, asOf);
@@ -1417,10 +1419,10 @@ export function AuditPage({
         description="Choose format and columns for the current audit rows."
         filenamePrefix="audit-log"
         rows={rows.map((entry) => ({
-          timestamp: formatDate(entry.validFrom),
+          timestamp: formatDate(entry.validTo ?? entry.validFrom),
           table: formatAuditTableName(entry.tableName),
           description: generateAuditDescription(entry, actorNames, locationNames, permissionNames),
-          actor: getActorDisplay(entry.changedBy, actorNames, entry.validFrom),
+          actor: getActorDisplay(entry.changedBy, actorNames, entry.validTo ?? entry.validFrom),
           recordId: entry.recordId,
           validTo: entry.validTo ? formatDate(entry.validTo) : 'Current',
         }))}
@@ -1455,7 +1457,12 @@ export function AuditPage({
                 hideable: false,
                 nowrap: true,
                 cellClassName: 'text-xs text-app-fg-muted',
-                render: (entry) => formatDate(entry.validFrom),
+                // When the change happened = `validTo` (the capture trigger stamps
+                // it as the version is superseded). `validFrom` is the record's
+                // creation instant and is identical across every version, so it
+                // rendered one repeated timestamp per record. The live row has
+                // validTo = null — that IS the current state, so fall back.
+                render: (entry) => formatDate(entry.validTo ?? entry.validFrom),
               },
               {
                 key: 'description',
@@ -1491,7 +1498,7 @@ export function AuditPage({
                       </span>
                     );
                   }
-                  const display = getActorDisplay(entry.changedBy, actorNames, entry.validFrom);
+                  const display = getActorDisplay(entry.changedBy, actorNames, entry.validTo ?? entry.validFrom);
                   const known = isActorKnown(entry.changedBy, actorNames);
                   if (known && entry.changedBy) {
                     return (
@@ -1558,9 +1565,9 @@ export function AuditPage({
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
                   <span>
-                    {actorNamesLoading ? '…' : getActorDisplay(entry.changedBy, actorNames, entry.validFrom)}
+                    {actorNamesLoading ? '…' : getActorDisplay(entry.changedBy, actorNames, entry.validTo ?? entry.validFrom)}
                   </span>
-                  <span className="shrink-0">{formatDate(entry.validFrom)}</span>
+                  <span className="shrink-0">{formatDate(entry.validTo ?? entry.validFrom)}</span>
                 </div>
               </button>
             ))
