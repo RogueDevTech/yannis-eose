@@ -168,9 +168,27 @@ export class PayrollMetricsService {
       return this.getRecoveryCombinedStaffMetrics(input, tx);
     }
 
-    const attribution = or(
-      eq(schema.orders.assignedCsId, input.staffId),
-      eq(schema.orders.mediaBuyerId, input.staffId),
+    // COMPANY BOUNDARY — attribution alone is not a company filter. A staff
+    // member attributed on orders in two companies had their delivered,
+    // returned and total counts silently summed across both, so the metrics
+    // that drive pay (deliveredCount, returnedCount, individualDr) were
+    // computed from another company's orders.
+    //
+    // `servicingBranchIds` was already resolved by the batch caller but only
+    // ever reached computeQualifyingRevenue — the counts below never used it.
+    const companyScope = input.servicingBranchIds?.length
+      ? or(
+          inArray(schema.orders.servicingBranchId, input.servicingBranchIds),
+          inArray(schema.orders.branchId, input.servicingBranchIds),
+        )
+      : undefined;
+
+    const attribution = and(
+      or(
+        eq(schema.orders.assignedCsId, input.staffId),
+        eq(schema.orders.mediaBuyerId, input.staffId),
+      ),
+      ...(companyScope ? [companyScope] : []),
     );
 
     const [deliveredRows, totalOrdersRows, deliveredCohortRows, returnedRows, carryOverRows] = await Promise.all([
@@ -356,18 +374,34 @@ export class PayrollMetricsService {
   ): Promise<PayrollMetrics> {
     const { staffId, periodStart, periodEnd } = input;
 
+    // COMPANY BOUNDARY — see getStaffMetrics. Attribution alone spans companies.
+    const scopeIds = input.servicingBranchIds ?? null;
+
     // orders slice: only the delivered-follow-up population, attributed to staff.
-    const ordAttribution = or(
-      eq(schema.orders.assignedCsId, staffId),
-      eq(schema.orders.mediaBuyerId, staffId),
+    const ordAttribution = and(
+      or(
+        eq(schema.orders.assignedCsId, staffId),
+        eq(schema.orders.mediaBuyerId, staffId),
+      ),
+      ...(scopeIds?.length
+        ? [or(
+            inArray(schema.orders.servicingBranchId, scopeIds),
+            inArray(schema.orders.branchId, scopeIds),
+          )!]
+        : []),
     );
     const ordDeliveredFollowUp = eq(schema.orders.isDeliveredFollowUp, true);
 
     // cart_orders slice: whole table (no delivered-follow-up flag exists here),
     // attributed to staff.
-    const cartAttribution = or(
-      eq(schema.cartOrders.assignedCsId, staffId),
-      eq(schema.cartOrders.mediaBuyerId, staffId),
+    const cartAttribution = and(
+      or(
+        eq(schema.cartOrders.assignedCsId, staffId),
+        eq(schema.cartOrders.mediaBuyerId, staffId),
+      ),
+      ...(scopeIds?.length
+        ? [inArray(schema.cartOrders.servicingBranchId, scopeIds)]
+        : []),
     );
 
     const [
@@ -566,6 +600,8 @@ export class PayrollMetricsService {
     periodStart: Date,
     periodEnd: Date,
     tx: TxLike = this.db,
+    /** Company scope — see getStaffMetrics. Omit only for org-wide callers. */
+    servicingBranchIds?: string[] | null,
   ): Promise<Map<string, PayrollMetrics>> {
     const reporteeMap = new Map<string, string[]>();
     for (const s of staff) {
@@ -607,6 +643,7 @@ export class PayrollMetricsService {
             reporteeIds: reporteeMap.get(s.id),
             deliveredMetricSource:
               s.payRoleId && recoveryPayRoleIds.has(s.payRoleId) ? 'RECOVERY_COMBINED' : 'FUNNEL',
+            servicingBranchIds,
           },
           tx,
         );
