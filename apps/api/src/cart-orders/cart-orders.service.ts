@@ -174,12 +174,35 @@ export class CartOrdersService {
       INSERT INTO cart_order_items (id, cart_order_id, product_id, quantity, unit_price, offer_label)
       SELECT
         uuidv7(), co.id, ca.product_id, COALESCE(ca.quantity, 1),
+        -- Same precedence as Step B in pullFromAbandonedCarts and as the catalog's
+        -- own loadActiveOfferTemplatesByProductIds: offer_group_items (newest) ->
+        -- offer_templates -> products.offers jsonb -> base_sale_price, matching the
+        -- cart's offer_label first and falling back to the cheapest ACTIVE tier.
+        -- Reading only products.offers booked every offer_group_items-priced
+        -- product at 0. This repair path runs on every API boot, so leaving it
+        -- unfixed would re-create the free orders Step B now avoids.
         COALESCE(
+          (SELECT ogi.price FROM offer_group_items ogi
+            JOIN offer_groups og ON og.id = ogi.offer_group_id
+            WHERE ogi.product_id = ca.product_id
+              AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'
+              AND ogi.label = ca.offer_label
+            LIMIT 1),
+          (SELECT ot.price FROM offer_templates ot
+            WHERE ot.product_id = ca.product_id
+              AND ot.status = 'ACTIVE' AND ot.name = ca.offer_label
+            LIMIT 1),
           (SELECT (o->>'price')::numeric
            FROM jsonb_array_elements(COALESCE(p.offers, '[]'::jsonb)) AS o
            WHERE o->>'label' = ca.offer_label
            LIMIT 1),
-          COALESCE(p.base_sale_price, 0)
+          (SELECT min(ogi.price) FROM offer_group_items ogi
+            JOIN offer_groups og ON og.id = ogi.offer_group_id
+            WHERE ogi.product_id = ca.product_id
+              AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'),
+          (SELECT min(ot.price) FROM offer_templates ot
+            WHERE ot.product_id = ca.product_id AND ot.status = 'ACTIVE'),
+          NULLIF(p.base_sale_price, 0)
         ),
         ca.offer_label
       FROM cart_orders co
@@ -189,6 +212,31 @@ export class CartOrdersService {
         SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
       )
         AND ca.product_id IS NOT NULL
+        -- unit_price is NOT NULL: skip unpriced carts instead of aborting the
+        -- batch or booking them free. They are retried once the catalog is priced.
+        AND COALESCE(
+          (SELECT ogi.price FROM offer_group_items ogi
+            JOIN offer_groups og ON og.id = ogi.offer_group_id
+            WHERE ogi.product_id = ca.product_id
+              AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'
+              AND ogi.label = ca.offer_label
+            LIMIT 1),
+          (SELECT ot.price FROM offer_templates ot
+            WHERE ot.product_id = ca.product_id
+              AND ot.status = 'ACTIVE' AND ot.name = ca.offer_label
+            LIMIT 1),
+          (SELECT (o->>'price')::numeric
+           FROM jsonb_array_elements(COALESCE(p.offers, '[]'::jsonb)) AS o
+           WHERE o->>'label' = ca.offer_label
+           LIMIT 1),
+          (SELECT min(ogi.price) FROM offer_group_items ogi
+            JOIN offer_groups og ON og.id = ogi.offer_group_id
+            WHERE ogi.product_id = ca.product_id
+              AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'),
+          (SELECT min(ot.price) FROM offer_templates ot
+            WHERE ot.product_id = ca.product_id AND ot.status = 'ACTIVE'),
+          NULLIF(p.base_sale_price, 0)
+        ) IS NOT NULL
     `);
     const inserted = result.count ?? 0;
     if (inserted > 0) {
@@ -1339,7 +1387,11 @@ export class CartOrdersService {
       quantity: it.quantity,
       unitPrice: String(it.unitPrice),
     }));
-    const totalAmount = gradItems.reduce((sum, it) => sum + Number(it.unitPrice) * Number(it.quantity ?? 1), 0);
+    // unitPrice IS the offer/line total — sum directly, never multiply by
+    // quantity. A "BUY 2 GET 1 FREE" line is qty 3 at a unitPrice of ₦120,000
+    // for the whole offer; multiplying billed ₦360,000. Matches
+    // autoCreateInvoiceForCartOrder above and the orders/follow-up builders.
+    const totalAmount = gradItems.reduce((sum, it) => sum + Number(it.unitPrice), 0);
 
     await this.db.insert(schema.invoices).values({
       orderId,
@@ -1774,8 +1826,12 @@ export class CartOrdersService {
    * caller's active company. In scope when EITHER its servicing branch OR its
    * marketing branch is in `effectiveBranchIds`. Org-wide callers (null) bypass.
    * Throws NOT_FOUND for a missing id, FORBIDDEN for a cross-company id.
+   *
+   * Public because `finance.router.ts::assertOrderIdInAnyTableScope` probes all
+   * three order tables (orders / follow_up_orders / cart_orders) to resolve an id
+   * a finance caller supplied, and needs this guard from outside the service.
    */
-  private async assertCartOrderInScope(
+  async assertCartOrderInScope(
     id: string,
     effectiveBranchIds: string[] | null | undefined,
   ): Promise<void> {
@@ -2045,12 +2101,57 @@ export class CartOrdersService {
   // Called from the queue.carts page or cron to convert abandoned carts
   // into cart_orders for CS to work.
 
+  /**
+   * Company-isolation guard for a batch of abandoned carts. `cart_abandonments`
+   * has no branch column of its own — a cart's company is derived through its
+   * campaign (`campaign_id -> campaigns.branch_id`), the same join the
+   * abandoned-cart LIST queries scope on. Mirrors
+   * `CartService::assertAbandonedCartInScope`, batched: one query for the whole
+   * set, and the WHOLE pull is refused if any cart falls outside the company, so
+   * a scoped caller cannot recover another company's leads into their pipeline.
+   *
+   * A campaignless cart has no derivable company, so a scoped caller cannot pull
+   * it — matching the branchless rule in `assertEntityInScope`.
+   */
+  async assertCartsInScope(
+    cartIds: string[],
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<void> {
+    if (effectiveBranchIds == null) return; // org-wide caller
+    if (cartIds.length === 0) return;
+
+    const ids = [...new Set(cartIds)];
+    const rows = await this.db
+      .select({
+        id: schema.cartAbandonments.id,
+        branchId: schema.campaigns.branchId,
+      })
+      .from(schema.cartAbandonments)
+      .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+      .where(inArray(schema.cartAbandonments.id, ids));
+
+    const scoped = new Set(effectiveBranchIds);
+    const admitted = new Set(
+      rows.filter((r) => r.branchId != null && scoped.has(r.branchId)).map((r) => r.id),
+    );
+    if (admitted.size !== ids.length) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'One or more of those carts is not in your company.',
+      });
+    }
+  }
+
   async pullFromAbandonedCarts(
     cartIds: string[],
     targetBranchId: string | null,
     _actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
   ) {
     if (cartIds.length === 0) return { pulled: 0 };
+
+    // Company isolation — refuse the whole batch if any cart is out of scope.
+    await this.assertCartsInScope(cartIds, effectiveBranchIds);
 
     // Defence-in-depth: validate all IDs are strict UUIDs before interpolation
     // into raw SQL. Zod validates at the router, but we enforce here at the
@@ -2315,6 +2416,30 @@ export class CartOrdersService {
     // INNER JOIN products to skip carts whose product was deleted — a dangling
     // product_id FK would cause the entire batch INSERT to fail, leaving all
     // cart orders in the batch without items.
+    //
+    // PRICE RESOLUTION — must mirror the catalog's own precedence, which lives in
+    // `products.service.ts::loadActiveOfferTemplatesByProductIds`:
+    //   1. offer_group_items  (newest system; takes precedence when present)
+    //   2. offer_templates    (legacy tiers)
+    //   3. products.offers    (jsonb column; older still)
+    //   4. products.base_sale_price
+    // Within 1-3 we match the cart's `offer_label` first, then fall back to the
+    // cheapest ACTIVE tier for the product so a cart abandoned BEFORE the customer
+    // picked a tier still prices at a real number.
+    //
+    // This previously read ONLY `products.offers` then `base_sale_price`, and
+    // bottomed out at a literal 0. Products priced through offer_group_items (the
+    // current system) have an empty `offers` jsonb, so every cart abandonment for
+    // them booked at ₦0 and flowed through CS -> delivery -> remittance as a free
+    // order.
+    //
+    // `cart_order_items.unit_price` is NOT NULL, so an unpriced line cannot be
+    // parked as NULL — that would abort the whole batch INSERT and leave every
+    // cart order in it without items. Instead the WHERE clause skips carts whose
+    // price resolves to nothing: no line is written, `backfillMissingCartOrderItems`
+    // reports the shortfall, and the cart is retried on the next pull once the
+    // catalog is priced. Financial Truth: refuse to invent a number, but never at
+    // the cost of dropping the rest of the batch.
     let items: Array<{ id: string }> = [];
     try {
       items = await this.pg.unsafe<Array<{ id: string }>>(`
@@ -2328,11 +2453,36 @@ export class CartOrdersService {
           ca.product_id,
           COALESCE(ca.quantity, 1),
           COALESCE(
+            -- 1. offer_group_items, exact label match
+            (SELECT ogi.price FROM offer_group_items ogi
+              JOIN offer_groups og ON og.id = ogi.offer_group_id
+              WHERE ogi.product_id = ca.product_id
+                AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'
+                AND ogi.label = ca.offer_label
+              LIMIT 1),
+            -- 2. offer_templates, exact label match (legacy name column)
+            (SELECT ot.price FROM offer_templates ot
+              WHERE ot.product_id = ca.product_id
+                AND ot.status = 'ACTIVE'
+                AND ot.name = ca.offer_label
+              LIMIT 1),
+            -- 3. products.offers jsonb, exact label match
             (SELECT (o->>'price')::numeric
-             FROM jsonb_array_elements(COALESCE(p.offers, '[]'::jsonb)) AS o
-             WHERE o->>'label' = ca.offer_label
-             LIMIT 1),
-            COALESCE(p.base_sale_price, 0)
+              FROM jsonb_array_elements(COALESCE(p.offers, '[]'::jsonb)) AS o
+              WHERE o->>'label' = ca.offer_label
+              LIMIT 1),
+            -- 4. No label match (cart abandoned before a tier was picked, or the
+            --    label was renamed): cheapest ACTIVE tier, same precedence order.
+            (SELECT min(ogi.price) FROM offer_group_items ogi
+              JOIN offer_groups og ON og.id = ogi.offer_group_id
+              WHERE ogi.product_id = ca.product_id
+                AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'),
+            (SELECT min(ot.price) FROM offer_templates ot
+              WHERE ot.product_id = ca.product_id AND ot.status = 'ACTIVE'),
+            -- 5. Base sale price, but only when it is a REAL price. NULLIF keeps a
+            --    0.00 base (the default for template-priced products) from being
+            --    mistaken for "free".
+            NULLIF(p.base_sale_price, 0)
           ),
           ca.offer_label
         FROM cart_orders co
@@ -2342,6 +2492,33 @@ export class CartOrdersService {
           AND NOT EXISTS (
             SELECT 1 FROM cart_order_items coi WHERE coi.cart_order_id = co.id
           )
+          -- Skip carts with no resolvable price rather than booking them free.
+          -- Mirrors the COALESCE chain above; NULL here means every source came
+          -- up empty, so the cart waits for the catalog to be priced.
+          AND COALESCE(
+            (SELECT ogi.price FROM offer_group_items ogi
+              JOIN offer_groups og ON og.id = ogi.offer_group_id
+              WHERE ogi.product_id = ca.product_id
+                AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'
+                AND ogi.label = ca.offer_label
+              LIMIT 1),
+            (SELECT ot.price FROM offer_templates ot
+              WHERE ot.product_id = ca.product_id
+                AND ot.status = 'ACTIVE'
+                AND ot.name = ca.offer_label
+              LIMIT 1),
+            (SELECT (o->>'price')::numeric
+              FROM jsonb_array_elements(COALESCE(p.offers, '[]'::jsonb)) AS o
+              WHERE o->>'label' = ca.offer_label
+              LIMIT 1),
+            (SELECT min(ogi.price) FROM offer_group_items ogi
+              JOIN offer_groups og ON og.id = ogi.offer_group_id
+              WHERE ogi.product_id = ca.product_id
+                AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'),
+            (SELECT min(ot.price) FROM offer_templates ot
+              WHERE ot.product_id = ca.product_id AND ot.status = 'ACTIVE'),
+            NULLIF(p.base_sale_price, 0)
+          ) IS NOT NULL
         RETURNING id
       `);
       this.logger.log(`[pull] Step B: created ${items.length} line items`);

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import { router, permissionProcedure, authedProcedure } from '../trpc';
 import {
   listCartOrdersSchema,
@@ -173,10 +174,25 @@ export const cartOrdersRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
+      // Both ends of the pull are company-checked: the source carts (in-service,
+      // via their campaign's branch) and the destination branch, so a caller
+      // cannot pull carts INTO another company's branch either.
+      const targetBranchId = input.targetBranchId ?? ctx.currentBranchId ?? null;
+      if (
+        targetBranchId &&
+        ctx.effectiveBranchIds != null &&
+        !ctx.effectiveBranchIds.includes(targetBranchId)
+      ) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'That branch is not in your company.',
+        });
+      }
       return getCartOrdersService().pullFromAbandonedCarts(
         input.cartIds,
-        input.targetBranchId ?? ctx.currentBranchId ?? null,
+        targetBranchId,
         ctx.user,
+        ctx.effectiveBranchIds,
       );
     }),
 

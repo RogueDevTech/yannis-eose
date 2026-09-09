@@ -68,8 +68,16 @@ export interface ImportRowFailure {
   externalId: string | null;
   reason: string;
   severity?: 'error' | 'warning';
-  /** For warnings: which reference fields were left unresolved, and the raw code. */
-  unresolved?: Array<{ field: 'mediaBuyer' | 'closer' | 'branch'; code: string }>;
+  /**
+   * For warnings: which fields could not be used, and the raw cell value.
+   * Reference codes (`mediaBuyer` / `closer` / `branch`) were left NULL;
+   * money cells (`totalAmount` / `unitPrice`) did not parse to a finite
+   * number and fell back rather than storing NaN.
+   */
+  unresolved?: Array<{
+    field: 'mediaBuyer' | 'closer' | 'branch' | 'totalAmount' | 'unitPrice';
+    code: string;
+  }>;
 }
 
 /** Outcome of a single imported row. */

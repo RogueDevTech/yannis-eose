@@ -4158,10 +4158,12 @@ export function OrderDetailPage({
                 </div>
               </>
             ) : !callablePhone ? (
-              /* No callable phone — VOIP is on, viewer not authorised, or order in a terminal status. */
+              /* No callable phone: VOIP is on, the viewer is a marketing role, the order
+                 is outside the viewer's branch scope, or no number was ever stored.
+                 Status is NOT a factor — getCallablePhoneForViewer applies no status gate. */
               <>
                 <p className="text-sm text-app-fg-muted mb-3">
-                  The customer&apos;s number is not available. This can happen when VOIP is enabled, the order is in a terminal status, or you don&apos;t have access. Enable VOIP in Settings to call via the app, or record that you called using your own records below.
+                  The customer&apos;s number is not available. This can happen when VOIP is enabled, no number was stored for this order, or the order is outside your access. Enable VOIP in Settings to call via the app, or record that you called using your own records below.
                 </p>
                 <div className="flex gap-2 justify-end flex-wrap">
                   <Button type="button" variant="secondary" onClick={() => setCallCustomerModalOpen(false)}>

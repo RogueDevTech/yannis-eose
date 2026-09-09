@@ -13,4 +13,4 @@ export * from './slack.helpers';
 export { apiErrorTemplate } from './templates/api-error.template';
 export type { ApiErrorAlertData } from './templates/api-error.template';
 export { dailyReportTemplate } from './templates/daily-report.template';
-export type { DailyReportData } from './templates/daily-report.template';
+export type { DailyReportData, DailyReportCompany } from './templates/daily-report.template';

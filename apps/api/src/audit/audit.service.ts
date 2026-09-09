@@ -552,7 +552,14 @@ export class AuditService {
         const conditions: string[] = [];
 
         const isMirror = table === 'mirror_sessions';
-        const fromCol = isMirror ? 'started_at' : 'valid_from';
+        // The temporal column that answers "when did this change happen".
+        // For *_history that is `valid_to` (set to now() by the capture trigger
+        // when the version was superseded), NOT `valid_from` (the record's
+        // creation instant, identical across every version of one record).
+        // mirror_sessions is append-only with no _history twin; it keeps its own
+        // COALESCE(ended_at, started_at) marker so an in-flight session (NULL
+        // ended_at) still sorts and filters by when it began.
+        const fromCol = isMirror ? 'COALESCE(ended_at, started_at)' : 'valid_to';
 
         if (actorIdx) {
           if (isMirror) {
@@ -590,7 +597,7 @@ export class AuditService {
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
         // Two SELECTs per arm — the data path includes ORDER BY + LIMIT so the
-        // planner can use the (valid_from DESC) index, while the count path
+        // planner can use the (valid_to DESC NULLS FIRST) index (mig 0344), while the count path
         // stays predicate-only (a top-N cap on each arm would under-count the
         // total).
         if (isMirror) {
@@ -600,7 +607,7 @@ export class AuditService {
                      row_to_json(mirror_sessions.*) AS _row_data
               FROM mirror_sessions
               ${whereClause}
-              ORDER BY ${fromCol} DESC
+              ORDER BY ${fromCol} DESC NULLS FIRST
               LIMIT $${dataLimitIdx})`,
           );
           countUnionParts.push(
@@ -616,7 +623,7 @@ export class AuditService {
                      row_to_json(${table}_history.*) AS _row_data
               FROM ${table}_history
               ${whereClause}
-              ORDER BY valid_from DESC
+              ORDER BY valid_to DESC NULLS FIRST
               LIMIT $${dataLimitIdx})`,
           );
           countUnionParts.push(
@@ -653,9 +660,18 @@ export class AuditService {
       const outerLimitIdx = next;
       const outerOffsetIdx = next + 1;
       const finalParams = [...dataParams, limit, offset];
+      // Order by WHEN THE CHANGE HAPPENED, not when the record was created.
+      // `yannis_capture_history()` sets `OLD.valid_to := now()` and never touches
+      // `valid_from`, so every history row for a given record shares one
+      // `valid_from` (its creation instant) while `valid_to` carries the actual
+      // transition time. Sorting by `valid_from` therefore grouped rows by record
+      // age — an order created in June sorted below one created in September even
+      // when its edits were newer, and every version of one record collapsed onto
+      // a single displayed timestamp. The live row has valid_to = NULL and is the
+      // most recent state, so NULLS FIRST keeps it at the top of a DESC sort.
       const dataQuery =
         `SELECT * FROM (${dataUnionParts.join('\n UNION ALL \n')}) AS _audit_union
-         ORDER BY valid_from DESC
+         ORDER BY valid_to DESC NULLS FIRST
          LIMIT $${outerLimitIdx} OFFSET $${outerOffsetIdx}`;
 
       const rows = await this.sql.unsafe(dataQuery, finalParams);

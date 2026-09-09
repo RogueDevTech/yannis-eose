@@ -2829,6 +2829,14 @@ export class MarketingService {
   async getFundingFlow(
     input: { transferId?: string; requestId?: string },
     actor: { id: string; role: string; permissions?: string[] },
+    /**
+     * COMPANY BOUNDARY. The gate below says a marketing.funding.approve holder
+     * sees "every funding flow in their scope" — but no scope was ever
+     * computed, so it meant every flow in every company: amounts, sender and
+     * receiver names, reasons and receipt URLs. Parties to the flow still see
+     * their own row regardless.
+     */
+    effectiveBranchIds?: string[] | null,
   ) {
     if (!input.transferId && !input.requestId) {
       throw new TRPCError({
@@ -2923,12 +2931,37 @@ export class MarketingService {
       const perms = actor.permissions ?? [];
       const canViewAllFlows =
         perms.includes('marketing.funding.approve') || perms.includes('finance.costView');
+      // Confine that "all flows" grant to the caller's own company. Funding
+      // rows carry no branch, so company resolves through the counterparties'
+      // branch memberships.
+      const partyIds = [
+        transferRow?.senderId,
+        transferRow?.receiverId,
+        requestRow?.requesterId,
+        requestRow?.targetUserId,
+      ].filter((id): id is string => typeof id === 'string' && id.length > 0);
+      let flowInScope = true;
+      if (canViewAllFlows && effectiveBranchIds?.length && partyIds.length > 0) {
+        const shared = await this.db
+          .select({ userId: schema.userBranches.userId })
+          .from(schema.userBranches)
+          .where(
+            and(
+              inArray(schema.userBranches.userId, partyIds),
+              inArray(schema.userBranches.branchId, effectiveBranchIds),
+            ),
+          )
+          .limit(1);
+        flowInScope = shared.length > 0;
+      }
       const isParty =
         (transferRow &&
           (transferRow.senderId === actor.id || transferRow.receiverId === actor.id)) ||
         (requestRow &&
           (requestRow.requesterId === actor.id || requestRow.targetUserId === actor.id));
-      if (!canViewAllFlows && !isParty) {
+      // A party always sees their own flow. The blanket grant additionally
+      // requires the flow to be in the caller's company.
+      if (!(canViewAllFlows && flowInScope) && !isParty) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'You do not have access to this funding flow',
@@ -3419,6 +3452,31 @@ export class MarketingService {
 
     if (!existing) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Ad spend record not found' });
+    }
+
+    // COMPANY BOUNDARY — the campaign/branch validation below runs only when a
+    // campaign is present ("Skip campaign/branch validation for daily-flow
+    // rows"), and daily-flow rows are almost all of them: on prod just 3 of
+    // 5,550 ad-spend rows carry a campaign with a branch. So the existing row
+    // itself was never checked, and another company's ad spend was editable.
+    //
+    // ad_spend_logs.branch_id is NULL on every prod row, so scope resolves
+    // through the media buyer's branch memberships instead. A row whose owner
+    // shares no company with the caller is refused.
+    if (effectiveBranchIds?.length && existing.mediaBuyerId) {
+      const [owned] = await this.db
+        .select({ userId: schema.userBranches.userId })
+        .from(schema.userBranches)
+        .where(
+          and(
+            eq(schema.userBranches.userId, existing.mediaBuyerId),
+            inArray(schema.userBranches.branchId, effectiveBranchIds),
+          ),
+        )
+        .limit(1);
+      if (!owned) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Ad spend record not found' });
+      }
     }
 
     // New daily-flow rows (productId IS NULL) allow editing even when APPROVED
