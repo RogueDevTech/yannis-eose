@@ -1827,9 +1827,10 @@ export class CartOrdersService {
    * marketing branch is in `effectiveBranchIds`. Org-wide callers (null) bypass.
    * Throws NOT_FOUND for a missing id, FORBIDDEN for a cross-company id.
    *
-   * Public because `finance.router.ts::assertOrderIdInAnyTableScope` probes all
+   * Public because `order-scope.ts::assertOrderIdInAnyTableScope` probes all
    * three order tables (orders / follow_up_orders / cart_orders) to resolve an id
-   * a finance caller supplied, and needs this guard from outside the service.
+   * supplied to a shared surface (finance invoices, the order detail page), and
+   * needs this guard from outside the service.
    */
   async assertCartOrderInScope(
     id: string,
