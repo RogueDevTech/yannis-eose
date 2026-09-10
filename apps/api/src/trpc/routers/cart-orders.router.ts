@@ -166,6 +166,18 @@ export const cartOrdersRouter = router({
       return getCartOrdersService().initiateCall(input.orderId, ctx.user, ctx.effectiveBranchIds);
     }),
 
+  /** CS comment on a cart order — the cart-table counterpart of `orders.addCsOrderComment`. */
+  addComment: authedProcedure
+    .input(z.object({ orderId: z.string().uuid(), comment: z.string().min(1).max(2000) }))
+    .mutation(async ({ input, ctx }) => {
+      return getCartOrdersService().addComment(
+        input.orderId,
+        input.comment,
+        ctx.user,
+        ctx.effectiveBranchIds,
+      );
+    }),
+
   pullFromCarts: permissionProcedure('orders.bulkAssign')
     .input(
       listCartOrdersSchema.pick({}).extend({

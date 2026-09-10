@@ -1510,6 +1510,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
       }
       return json({ success: true });
     }
+    // Cart orders have their own timeline table, so they cannot use the funnel
+    // path below — it resolves the id against `orders` and returned "Order not
+    // found" for every cart order. The form already sends this flag.
+    const isCartOrder = formData.get('isCartOrder') === 'true';
+    if (isCartOrder) {
+      const res = await apiRequest<unknown>('/trpc/cartOrders.addComment', {
+        method: 'POST',
+        cookie,
+        body: { orderId, comment: trimmed },
+      });
+      if (!res.ok) {
+        return json({ error: extractApiErrorMessage(res.data, 'Could not save comment') }, { status: safeStatus(res.status) });
+      }
+      return json({ success: true });
+    }
     const res = await apiRequest<unknown>('/trpc/orders.addCsOrderComment', {
       method: 'POST',
       cookie,

@@ -1827,9 +1827,10 @@ export class CartOrdersService {
    * marketing branch is in `effectiveBranchIds`. Org-wide callers (null) bypass.
    * Throws NOT_FOUND for a missing id, FORBIDDEN for a cross-company id.
    *
-   * Public because `finance.router.ts::assertOrderIdInAnyTableScope` probes all
+   * Public because `order-scope.ts::assertOrderIdInAnyTableScope` probes all
    * three order tables (orders / follow_up_orders / cart_orders) to resolve an id
-   * a finance caller supplied, and needs this guard from outside the service.
+   * supplied to a shared surface (finance invoices, the order detail page), and
+   * needs this guard from outside the service.
    */
   async assertCartOrderInScope(
     id: string,
@@ -2062,6 +2063,52 @@ export class CartOrdersService {
 
   // ── Initiate Call ─────────────────────────────────────────────────────
   // Mirrors orders.initiateCall: transitions to CS_ENGAGED + records MANUAL_CALL.
+
+  /**
+   * CS comment on a cart order. Mirrors `addFollowUpOrderComment` — cart orders
+   * have their own timeline table, so the funnel path (`orders.addCsOrderComment`,
+   * which writes `order_timeline_events` keyed on `orders.id`) cannot serve them:
+   * it resolves the id against `orders` and threw NOT_FOUND for every cart order.
+   */
+  async addComment(
+    orderId: string,
+    comment: string,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    await this.assertCartOrderInScope(orderId, effectiveBranchIds);
+
+    const trimmed = comment.trim();
+    if (trimmed.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Comment cannot be empty' });
+    }
+    if (trimmed.length > 2000) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Comment must be at most 2000 characters' });
+    }
+
+    const [order] = await this.db
+      .select({
+        id: schema.cartOrders.id,
+        servicingBranchId: schema.cartOrders.servicingBranchId,
+      })
+      .from(schema.cartOrders)
+      .where(eq(schema.cartOrders.id, orderId))
+      .limit(1);
+    if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart order not found' });
+
+    await withActor(this.db, actor, async (tx) => {
+      await tx.insert(schema.cartOrderTimelineEvents).values({
+        cartOrderId: orderId,
+        eventType: 'CS_COMMENT',
+        actorId: actor.id,
+        actorName: actor.name,
+        description: trimmed,
+        branchId: order.servicingBranchId,
+      });
+    });
+
+    return { success: true };
+  }
 
   async initiateCall(orderId: string, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     await this.assertCartOrderInScope(orderId, effectiveBranchIds);

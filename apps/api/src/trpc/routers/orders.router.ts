@@ -49,6 +49,7 @@ import { getProductsService } from './products.router';
 import { getLogisticsService } from './logistics.router';
 import { getCartService } from './cart.router';
 import { getCartOrdersService } from './cart-orders.router';
+import { assertOrderIdInAnyTableScope } from './order-scope';
 import { getInventoryService } from './inventory.router';
 import { getFinanceService } from './finance.router';
 import {
@@ -624,6 +625,13 @@ export const ordersRouter = router({
   getById: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
+      // DELIBERATELY the single-table guard, and it MUST keep throwing NOT_FOUND
+      // for an id this table does not hold. The shared order detail page loads
+      // cart / follow-up orders by cascading `getById` → `followUpOrdersDetail`
+      // → `cartOrders.getById`, and keys that cascade on NOT_FOUND
+      // (`trpcOrderGetByIdIsNotFound` in apps/web/app/lib/trpc-http-response.ts).
+      // Widening this to `assertOrderIdInAnyTableScope` would return FORBIDDEN
+      // instead, breaking the fallback and blanking the page for both pipelines.
       await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
       const order = await getOrdersService().getById(input.orderId);
       getOrdersService().assertActorMayViewOrderForRead(ctx.user, order);
@@ -648,7 +656,7 @@ export const ordersRouter = router({
   listItemOffers: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
+      await assertOrderIdInAnyTableScope(input.orderId, ctx.effectiveBranchIds);
       return getOrdersService().listOrderItemOffers(input.orderId, ctx.user);
     }),
 
@@ -665,7 +673,7 @@ export const ordersRouter = router({
       // strip them so the product-swap picker doesn't show an NGN price mislabelled
       // with the foreign symbol; the modal falls back to Custom entry. Matches
       // listOrderItemOffers' embedded-offer handling.
-      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
+      await assertOrderIdInAnyTableScope(input.orderId, ctx.effectiveBranchIds);
       const isForeignCurrency = await getOrdersService().isOrderNonBaseCurrency(input.orderId);
       const result = await getProductsService().list(
         { page: 1, limit: 200, status: 'ACTIVE', sortBy: 'name', sortOrder: 'asc' },
@@ -687,7 +695,7 @@ export const ordersRouter = router({
   clipboardSummary: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
+      await assertOrderIdInAnyTableScope(input.orderId, ctx.effectiveBranchIds);
       return { text: await getOrdersService().getClipboardSummaryText(input.orderId, ctx.user) };
     }),
 
@@ -708,7 +716,7 @@ export const ordersRouter = router({
   listAllocatableLocations: authedProcedure
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
+      await assertOrderIdInAnyTableScope(input.orderId, ctx.effectiveBranchIds);
       return getOrdersService().listAllocatableLocations(input.orderId, ctx.user.role);
     }),
 
@@ -922,7 +930,27 @@ export const ordersRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, orderType, ...body } = input;
-      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
+      // The shared order detail page serves all three pipelines and tells us
+      // which one this id belongs to, so scope against THAT table — the service
+      // below dispatches on the same flag, so guard and service provably agree
+      // on the table. Guarding against `orders` alone rejected every cart /
+      // follow-up price change as "Order not found".
+      //
+      // `orderType` is client-supplied, which is safe ONLY because every branch
+      // fails closed: a mismatched flag runs the wrong table's guard, which
+      // throws NOT_FOUND for an id that table does not hold. That is strictly
+      // more restrictive, never less. Any future branch added here MUST preserve
+      // that property — never add a permissive fallback.
+      if (orderType === 'followUp') {
+        await getFollowUpConfigService().assertFollowUpOrderInCompanyScope(
+          input.orderId,
+          ctx.effectiveBranchIds,
+        );
+      } else if (orderType === 'cart') {
+        await getCartOrdersService().assertCartOrderInScope(input.orderId, ctx.effectiveBranchIds);
+      } else {
+        await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
+      }
       const res = await getOrdersService().requestLinePriceChangeApproval(body, ctx.user, orderType);
       // The cached `pendingOrderLinePriceRequestId` flips after this — drop the
       // detail cache so the next viewer sees the new pending-request hint.
