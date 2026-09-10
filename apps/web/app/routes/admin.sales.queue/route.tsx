@@ -8,6 +8,7 @@ import {
   BULK_ORDER_MUTATION_TIMEOUT_MS,
   getSessionCookie,
   requirePermission,
+  requirePermissionForAction,
   safeStatus,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -553,7 +554,12 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'createOffline') {
-    await requirePermission(request, 'cs.teamOverview');
+    // Must NOT use requirePermission here: it throws a redirect, which a fetcher
+    // submit swallows, leaving the modal spinner stuck forever with no message.
+    const auth = await requirePermissionForAction(request, 'cs.teamOverview');
+    if (!auth.ok) {
+      return json({ error: auth.error }, { status: auth.status });
+    }
     const customerName = formData.get('customerName')?.toString()?.trim() ?? '';
     const customerPhone = formData.get('customerPhone')?.toString()?.trim() ?? '';
     const itemsRaw = formData.get('items')?.toString() ?? '[]';
@@ -595,6 +601,10 @@ export async function action({ request }: ActionFunctionArgs) {
         customerEmail: paymentMethod === 'PAY_ONLINE' ? customerEmail : undefined,
         items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, offerLabel: i.offerLabel })),
         totalAmount: parseFloat((formData.get('totalAmount') as string) || '0') || undefined,
+        // The modal sends both; this route used to drop them, so queue-created
+        // offline orders lost their category and fell back to NGN.
+        offlineOrderCategory: formData.get('offlineOrderCategory')?.toString()?.trim() || undefined,
+        currencyCode: formData.get('currencyCode')?.toString()?.trim() || undefined,
         ...(branchId ? { branchId } : {}),
         ...(formData.get('customFields') ? { customFields: JSON.parse(formData.get('customFields') as string) } : {}),
       },

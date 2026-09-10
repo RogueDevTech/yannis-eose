@@ -746,6 +746,49 @@ export async function requireRole(request: Request, allowedRoles: string[]) {
 }
 
 /**
+ * Action-safe counterpart to {@link requirePermission}.
+ *
+ * `requirePermission` THROWS a redirect. In a loader that's correct — the browser
+ * follows it to /auth. In a `useFetcher` action it is not: the redirect never
+ * reaches `fetcher.data`, so `fetcher.data` stays undefined, no error renders and
+ * `fetcher.state` settles back to idle with the submit button still showing its
+ * spinner. The user sees an infinite "loading" and no explanation.
+ *
+ * This returns a discriminated result instead, so callers can `return` the JSON
+ * error and let the modal's existing error surface display it. Session expiry is
+ * the common trigger (sessions expire at 23:59 local under the daily-expiry
+ * directive), which is role-independent — SuperAdmin hits it too, because the
+ * null-user check precedes `sessionBypassesPermissions`.
+ */
+export async function requirePermissionForAction(
+  request: Request,
+  permissionCode: string | string[],
+): Promise<
+  | { ok: true; user: Awaited<ReturnType<typeof requirePermission>> }
+  | { ok: false; error: string; status: number }
+> {
+  const user = await getCurrentUser(request);
+  if (!user) {
+    return { ok: false, error: 'Your session expired. Please sign in again.', status: 401 };
+  }
+  if (sessionBypassesPermissions(user)) {
+    return { ok: true, user: user as Awaited<ReturnType<typeof requirePermission>> };
+  }
+  const codes = (Array.isArray(permissionCode) ? permissionCode : [permissionCode]).map((c) =>
+    canonicalPermissionCode(c),
+  );
+  const perms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
+  if (!codes.some((c) => perms.includes(c))) {
+    return {
+      ok: false,
+      error: "You don't have permission to perform this action.",
+      status: 403,
+    };
+  }
+  return { ok: true, user: user as Awaited<ReturnType<typeof requirePermission>> };
+}
+
+/**
  * Check if this session should bypass permission checks. True when:
  * - The user's own role is SUPER_ADMIN or SUPPORT.
  *

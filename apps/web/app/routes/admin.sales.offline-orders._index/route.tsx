@@ -8,6 +8,7 @@ import {
   BULK_ORDER_MUTATION_TIMEOUT_MS,
   getSessionCookie,
   requirePermission,
+  requirePermissionForAction,
   defaultThisMonthRange,
   parsePerPage,
   safeStatus,
@@ -405,7 +406,13 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = form.get('intent') as string;
 
   if (intent === 'createOffline') {
-    const createOfflineUser = await requirePermission(request, 'orders.read');
+    // JSON, not a thrown redirect: a fetcher submit swallows redirects and the
+    // modal spinner would hang with no message.
+    const auth = await requirePermissionForAction(request, 'orders.read');
+    if (!auth.ok) {
+      return json({ error: auth.error }, { status: auth.status });
+    }
+    const createOfflineUser = auth.user;
     if (!['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN', 'SUPPORT'].includes(createOfflineUser.role)) {
       return json({ error: 'Only closers and Head of CS can create offline orders' }, { status: 403 });
     }
