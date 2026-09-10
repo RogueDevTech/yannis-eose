@@ -51,7 +51,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const productsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const locationsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
-  const userInput = encodeURIComponent(JSON.stringify({ userId }));
+  // `forEdit` returns memberships across EVERY company, not just the active
+  // one. The branch picker below spans companies for admins, so a filtered
+  // membership list would render another company's group unchecked and the
+  // save would then submit that as the truth.
+  const userInput = encodeURIComponent(JSON.stringify({ userId, forEdit: true }));
   const matrixInput = encodeURIComponent(JSON.stringify({ userId, intent: 'edit_matrix' }));
 
   // Kick off ALL fetches in parallel — sync block awaits user + matrix; the

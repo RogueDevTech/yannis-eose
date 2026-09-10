@@ -16,48 +16,13 @@ import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { FinanceService } from '../../finance/finance.service';
 import { getOrdersService, getFollowUpConfigService } from './orders.router';
 import { getCartOrdersService } from './cart-orders.router';
+import { assertOrderIdInAnyTableScope } from './order-scope';
 import { getLogisticsService } from './logistics.router';
 import { getPayrollBatchService } from './hr.router';
 import { getUsersService } from './users.router';
 import { getMarketingService } from './marketing.router';
 import { listBranchesForUser } from './branches.router';
 import { isAdminLevel } from '../../common/authz';
-
-/**
- * Company-isolation guard for an order id that may live in ANY of the three
- * order tables (`orders`, `follow_up_orders`, `cart_orders`). The invoice
- * endpoints accept a bare id and probe each table in turn, so the id is in
- * scope when it resolves inside the caller's company in at least one of them.
- *
- * Each per-table guard throws NOT_FOUND when the id isn't in that table and
- * FORBIDDEN when it is but belongs to another company — so "no table admitted
- * it" is the failure case, and we surface FORBIDDEN rather than leaking which
- * table (if any) holds the id.
- */
-async function assertOrderIdInAnyTableScope(
-  orderId: string,
-  effectiveBranchIds: string[] | null,
-): Promise<void> {
-  if (effectiveBranchIds == null) return; // org-wide caller
-
-  for (const check of [
-    () => getOrdersService().assertOrderInCompanyScope(orderId, effectiveBranchIds),
-    () => getFollowUpConfigService().assertFollowUpOrderInCompanyScope(orderId, effectiveBranchIds),
-    () => getCartOrdersService().assertCartOrderInScope(orderId, effectiveBranchIds),
-  ]) {
-    try {
-      await check();
-      return; // admitted by one of the tables
-    } catch {
-      // Not in this table, or not in this company — try the next.
-    }
-  }
-
-  throw new TRPCError({
-    code: 'FORBIDDEN',
-    message: 'This order is not in your company.',
-  });
-}
 
 let financeServiceInstance: FinanceService | null = null;
 

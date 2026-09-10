@@ -5,6 +5,7 @@ import { getAppLogoSrc } from '~/lib/theme';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { useResolveFilterHref } from '~/hooks/useFilterPreferences';
 import { CONTROL_HEIGHT_CLASS } from '~/components/ui/_control-heights';
+import { buildMenuSearchResults } from './menu-search';
 
 /**
  * Order list pages whose URL carries filter params. Clicking their sidebar
@@ -20,7 +21,18 @@ const FILTER_RESET_HREFS = new Set([
 
 export interface SidebarGroup {
   group: string | null;
-  items: { label: string; href: string; icon: React.ReactNode }[];
+  items: {
+    label: string;
+    href: string;
+    icon: React.ReactNode;
+    /**
+     * Sections inside this page (its `?tab=` values), so menu search can match
+     * "remittance" to "Finance › Cash remittance". Declared on the nav item in
+     * `dashboard-layout.tsx`; see NavItemDef.tabs for why they are declared
+     * rather than harvested.
+     */
+    tabs?: Array<{ value: string; label: string }>;
+  }[];
 }
 
 interface SidebarProps {
@@ -144,17 +156,18 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
 
   // Match on the item label AND its group name, so "hr" surfaces everything
   // under the HR group even when a label alone wouldn't match.
-  const searchResults = isSearching
-    ? groups.flatMap((g) =>
-        g.items
-          .filter(
-            (item) =>
-              item.label.toLowerCase().includes(trimmedQuery) ||
-              (g.group ?? '').toLowerCase().includes(trimmedQuery),
-          )
-          .map((item) => ({ item, group: g.group })),
-      )
-    : [];
+  //
+  // Tabs INSIDE a page are searched too: typing "remittance" should reach
+  // "Finance › Cash remittance", which is a section of a page rather than a page
+  // of its own. A tab is only ever emitted for an item already in `groups`, so
+  // it inherits that item's permission filtering — a tab can never surface a
+  // page the user cannot open.
+  //
+  // A page whose own label matches is NOT expanded into all of its tabs: typing
+  // "settings" should list Settings once, not seven near-identical rows. Tabs
+  // appear only when the tab label itself matches, or when the page is reached
+  // through a group-name match (where the page row is already shown anyway).
+  const searchResults = isSearching ? buildMenuSearchResults(groups, trimmedQuery) : [];
 
   return (
     <>
@@ -257,7 +270,7 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
               </p>
             ) : (
               <div className="space-y-0.5">
-                {searchResults.map(({ item, group }, i) => (
+                {searchResults.map(({ item, group, tabLabel }, i) => (
                   <div key={item.href}>
                     {/* Caption only on the first hit of each group — results are
                         already ordered by group, so repeating it per item would
@@ -272,7 +285,10 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
                       </p>
                     )}
                     <SidebarNavLink
-                      item={item}
+                      // A tab hit reads "Settings › Security" so it is obvious the
+                      // result is a section inside a page, not a page of its own —
+                      // several pages have a "Security" or "Templates" tab.
+                      item={tabLabel ? { ...item, label: `${item.label} › ${tabLabel}` } : item}
                       isExpanded={false}
                       onMobileClose={() => {
                         setMenuQuery('');

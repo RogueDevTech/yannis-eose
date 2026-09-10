@@ -110,6 +110,28 @@ interface NavItemDef {
   excludeRoles?: string[];
   /** Dev-only item: hidden unless NODE_ENV=development. */
   devOnly?: boolean;
+  /**
+   * Sections INSIDE this page that the sidebar search should find, so typing
+   * "remittance" surfaces "Finance › Cash remittance" and not just "Finance".
+   *
+   * `value` is the page's own `?tab=` key — the pages read it via
+   * `searchParams.get('tab')`, so the search result deep-links straight to the
+   * open section. `label` is the tab's text with any live count stripped: the
+   * pages render `Accounts (${n})`, and a registry cannot know `n`.
+   *
+   * Declared here rather than harvested from the pages on purpose. Tab arrays
+   * are built inline, conditionally, with interpolated counts, and sit among
+   * hundreds of look-alike `{ value, label }` filter and sort options — there is
+   * no reliable way to tell a tab from a status filter, and no way to know a
+   * tab's permission. Declaring them next to the nav item means each tab
+   * inherits its parent's `permission` / `roles` / `excludeRoles` for free, so a
+   * tab can never surface to someone who cannot open the page it lives on.
+   *
+   * Only page-level tabs belong here. Tabs on detail pages (a specific branch,
+   * contractor or order) are deliberately omitted: their URL needs a record id,
+   * so there is nothing stable to link to from a nav search.
+   */
+  tabs?: Array<{ value: string; label: string }>;
 }
 
 interface NavGroupDef {
@@ -165,6 +187,12 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Funding',
         href: '/admin/marketing/funding',
+        tabs: [
+          { value: 'distributing', label: 'Funds distributed' },
+          { value: 'received', label: 'Funds received' },
+          { value: 'balances', label: 'Recipient balances' },
+          { value: 'transfers', label: 'Peer transfers' },
+        ],
         icon: SidebarIcons.marketing,
         permission: 'marketing.read',
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
@@ -179,6 +207,10 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Forms',
         href: '/admin/marketing/forms',
+        tabs: [
+          { value: 'all', label: 'All forms' },
+          { value: 'mine', label: 'My forms' },
+        ],
         icon: SidebarIcons.campaigns,
         permission: 'marketing.campaigns',
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
@@ -205,6 +237,14 @@ const navStructure: NavGroupDef[] = [
         label: 'Live Activities',
         labelShort: 'Sales',
         href: '/admin/sales/queue',
+        tabs: [
+          { value: 'queue', label: 'Queue' },
+          { value: 'abandoned', label: 'Abandoned carts' },
+          { value: 'callbacks', label: 'Callbacks' },
+          { value: 'hotswap', label: 'Hot Swap' },
+          { value: 'performance', label: 'Performance' },
+          { value: 'claim', label: 'Claim Queue' },
+        ],
         icon: SidebarIcons.cs,
         permission: 'cs.teamOverview',
       },
@@ -255,6 +295,11 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Message Templates',
         href: '/admin/sales/message-templates',
+        tabs: [
+          { value: 'ALL', label: 'All' },
+          { value: 'SMS', label: 'SMS' },
+          { value: 'WHATSAPP', label: 'WhatsApp' },
+        ],
         icon: SidebarIcons.notifications,
         // Sales closers need to author + use templates; HoCS / Admins manage shared ones via
         // the same page (cs.teamOverview). Ownership-based edit gating is enforced server-side.
@@ -300,6 +345,11 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Inventory',
         href: '/admin/inventory',
+        tabs: [
+          { value: 'levels', label: 'Stock levels' },
+          { value: 'transfers', label: 'Transfers' },
+          { value: 'reconciliation', label: 'Reconciliation' },
+        ],
         icon: SidebarIcons.inventory,
         permission: 'inventory.read',
         // HEAD_OF_CS sees inventory read-only by role so CS can plan against
@@ -335,6 +385,10 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Products',
         href: '/admin/products',
+        tabs: [
+          { value: 'product', label: 'Product' },
+          { value: 'offers', label: 'Offers' },
+        ],
         icon: SidebarIcons.products,
         permission: 'products.read',
       },
@@ -364,6 +418,11 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Disbursements',
         href: '/admin/finance/disbursements',
+        tabs: [
+          { value: 'disbursements', label: 'Disbursements' },
+          { value: 'requests', label: 'Funding requests' },
+          { value: 'balances', label: 'Recipient balances' },
+        ],
         icon: SidebarIcons.disbursements,
         permission: 'finance.disburse',
       },
@@ -439,6 +498,12 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Account Config',
         href: '/admin/accounting/account-config',
+        tabs: [
+          { value: 'accounts', label: 'Accounts' },
+          { value: 'mappings', label: 'Mappings' },
+          { value: 'categories', label: 'Account types' },
+          { value: 'rules', label: 'Posting rules' },
+        ],
         icon: SidebarIcons.settings,
         permission: 'accounting.read',
       },
@@ -459,6 +524,10 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Aging',
         href: '/admin/accounting/aging',
+        tabs: [
+          { value: 'RECEIVABLE', label: 'Receivable' },
+          { value: 'PAYABLE', label: 'Payable' },
+        ],
         icon: SidebarIcons.clock,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -559,10 +628,31 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/notifications',
         icon: SidebarIcons.notifications,
       },
-      { label: 'Settings', href: '/admin/settings', icon: SidebarIcons.settings },
+      {
+        label: 'Settings',
+        href: '/admin/settings',
+        icon: SidebarIcons.settings,
+        tabs: [
+          { value: 'profile', label: 'Profile' },
+          { value: 'security', label: 'Security' },
+          { value: 'notifications', label: 'Notifications' },
+          { value: 'push', label: 'Push' },
+          // `system` and `orgEmails` render only for admin-class users
+          // (SettingsPage::allowedTabs). Listing them is safe: the nav item
+          // itself is unrestricted, but a non-admin who follows the link just
+          // lands on the default Profile tab rather than seeing anything extra.
+          { value: 'system', label: 'System' },
+          { value: 'orgEmails', label: 'Org emails' },
+        ],
+      },
       {
         label: 'Marketing Automation',
         href: '/admin/marketing/automation',
+        tabs: [
+          { value: 'rules', label: 'Automations' },
+          { value: 'templates', label: 'Message templates' },
+          { value: 'groups', label: 'Target groups' },
+        ],
         icon: SidebarIcons.campaigns,
         // ADMIN / SUPER_ADMIN / SUPPORT reach it via the permission bypass; Head of
         // Marketing is granted marketing.automation.manage in the RBAC catalog.
@@ -584,6 +674,10 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Role templates',
         href: '/admin/settings/role-templates',
+        tabs: [
+          { value: 'templates', label: 'Templates' },
+          { value: 'catalog', label: 'Permission catalog' },
+        ],
         icon: SidebarIcons.settings,
         permission: 'rbac.manage_templates',
       },
@@ -807,6 +901,10 @@ function getNavGroupsForUser(
         label: forMobile ? getDisplayLabelMobile(item, user) : getDisplayLabel(item, user),
         href: item.href,
         icon: item.icon,
+        // Carried through so sidebar search can match sections inside the page.
+        // Already permission-filtered: we only reach here for items this user
+        // may see, and a tab inherits its parent item's visibility.
+        ...(item.tabs ? { tabs: item.tabs } : {}),
       }));
 
     if (visibleItems.length === 0) continue;
