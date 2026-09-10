@@ -80,6 +80,8 @@ export function CreateOfflineOrderModal({
   const [customerEmail, setCustomerEmail] = useState('');
   const [offlineOrderCategory, setOfflineOrderCategory] = useState<'website_order' | 'referrals' | ''>('');
   const [dismissedError, setDismissedError] = useState(false);
+  /** Client-side guard message, so a blocked submit always explains itself. */
+  const [validationError, setValidationError] = useState('');
 
   // Extra custom fields
   const [extraFields, setExtraFields] = useState<Array<{ label: string; value: string }>>([]);
@@ -152,6 +154,7 @@ export function CreateOfflineOrderModal({
   useCloseOnFetcherSuccess(fetcher, handleCreateOrderSuccess);
 
   function resetForm() {
+    setValidationError('');
     setCustomerName('');
     setCustomerPhone('');
     setCustomerAddress('');
@@ -180,7 +183,18 @@ export function CreateOfflineOrderModal({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!productId || !selectedOffer || !offlineOrderCategory) return;
+    // Never return silently — the Product field is a SearchableSelect whose
+    // `required` is only a visual asterisk (no native validation), so a bare
+    // `return` here looks identical to a broken button.
+    if (!productId || !selectedOffer) {
+      setValidationError('Select a product and an offer before creating the order.');
+      return;
+    }
+    if (!offlineOrderCategory) {
+      setValidationError('Select a category before creating the order.');
+      return;
+    }
+    setValidationError('');
 
     const validItems = [{
       productId,
@@ -255,6 +269,14 @@ export function CreateOfflineOrderModal({
                 message={fetcherSurface.friendlyError}
                 durationMs={5000}
                 onDismiss={() => setDismissedError(true)}
+              />
+            )}
+            {validationError && (
+              <PageNotification
+                variant="error"
+                message={validationError}
+                durationMs={5000}
+                onDismiss={() => setValidationError('')}
               />
             )}
 
