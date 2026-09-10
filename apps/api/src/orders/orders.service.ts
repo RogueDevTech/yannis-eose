@@ -1933,17 +1933,47 @@ export class OrdersService {
   }
 
   /**
-   * True when the order's currency differs from the company's base (default)
-   * currency — i.e. a foreign-currency order. Used to strip base-currency-only
-   * embedded offers from pickers that can't price them in the order's currency.
+   * Resolve an order's currency code across all three order tables, in the same
+   * `orders` -> `follow_up_orders` -> `cart_orders` order the rest of the shared
+   * detail-page paths use. Defaults to NGN when the id is in none of them, which
+   * preserves the previous behaviour for a genuinely unknown id.
    */
-  async isOrderNonBaseCurrency(orderId: string): Promise<boolean> {
+  private async resolveOrderCurrencyCode(orderId: string): Promise<string> {
     const [order] = await this.db
       .select({ currencyCode: schema.orders.currencyCode })
       .from(schema.orders)
       .where(eq(schema.orders.id, orderId))
       .limit(1);
-    const orderCode = (order?.currencyCode ?? 'NGN').toUpperCase();
+    if (order) return order.currencyCode ?? 'NGN';
+
+    const [fu] = await this.db
+      .select({ currencyCode: schema.followUpOrders.currencyCode })
+      .from(schema.followUpOrders)
+      .where(eq(schema.followUpOrders.id, orderId))
+      .limit(1);
+    if (fu) return fu.currencyCode ?? 'NGN';
+
+    const [co] = await this.db
+      .select({ currencyCode: schema.cartOrders.currencyCode })
+      .from(schema.cartOrders)
+      .where(eq(schema.cartOrders.id, orderId))
+      .limit(1);
+    if (co) return co.currencyCode ?? 'NGN';
+
+    return 'NGN';
+  }
+
+  /**
+   * True when the order's currency differs from the company's base (default)
+   * currency — i.e. a foreign-currency order. Used to strip base-currency-only
+   * embedded offers from pickers that can't price them in the order's currency.
+   */
+  async isOrderNonBaseCurrency(orderId: string): Promise<boolean> {
+    // The shared order detail page calls this for all three pipelines, so resolve
+    // the id across `orders` -> `follow_up_orders` -> `cart_orders`. Looking only
+    // at `orders` silently fell back to NGN for a cart / follow-up order, which
+    // showed base-currency embedded offers relabelled with a foreign symbol.
+    const orderCode = (await this.resolveOrderCurrencyCode(orderId)).toUpperCase();
     const [baseCur] = await this.db
       .select({ code: schema.currencies.code })
       .from(schema.currencies)
@@ -1963,22 +1993,88 @@ export class OrdersService {
    * Returns an empty tier list for products with no offers (UI falls back to
    * manual "Custom" entry).
    */
-  async listOrderItemOffers(orderId: string, actor: SessionUser) {
+  /**
+   * Resolve the fields `listOrderItemOffers` needs (currency, campaign, MB
+   * attribution for the read check, and the product ids on the order) from
+   * whichever of the three order tables holds this id. Probed in the same
+   * `orders` -> `follow_up_orders` -> `cart_orders` order as every other shared
+   * detail-page path. Returns null when no table holds it.
+   */
+  private async resolveOrderForOffers(orderId: string): Promise<
+    | {
+        order: { currencyCode: string | null; campaignId: string | null; mediaBuyerId: string | null };
+        productIds: string[];
+      }
+    | null
+  > {
     const [order] = await this.db
-      .select()
+      .select({
+        currencyCode: schema.orders.currencyCode,
+        campaignId: schema.orders.campaignId,
+        mediaBuyerId: schema.orders.mediaBuyerId,
+      })
       .from(schema.orders)
       .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
       .limit(1);
-    if (!order) {
+    if (order) {
+      const rows = await this.db
+        .select({ productId: schema.orderItems.productId })
+        .from(schema.orderItems)
+        .where(eq(schema.orderItems.orderId, orderId));
+      return { order, productIds: rows.map((r) => r.productId) };
+    }
+
+    const [fu] = await this.db
+      .select({
+        currencyCode: schema.followUpOrders.currencyCode,
+        campaignId: schema.followUpOrders.campaignId,
+        mediaBuyerId: schema.followUpOrders.mediaBuyerId,
+      })
+      .from(schema.followUpOrders)
+      .where(eq(schema.followUpOrders.id, orderId))
+      .limit(1);
+    if (fu) {
+      const rows = await this.db
+        .select({ productId: schema.followUpOrderItems.productId })
+        .from(schema.followUpOrderItems)
+        .where(eq(schema.followUpOrderItems.followUpOrderId, orderId));
+      return { order: fu, productIds: rows.map((r) => r.productId) };
+    }
+
+    const [co] = await this.db
+      .select({
+        currencyCode: schema.cartOrders.currencyCode,
+        campaignId: schema.cartOrders.campaignId,
+        mediaBuyerId: schema.cartOrders.mediaBuyerId,
+      })
+      .from(schema.cartOrders)
+      .where(eq(schema.cartOrders.id, orderId))
+      .limit(1);
+    if (co) {
+      const rows = await this.db
+        .select({ productId: schema.cartOrderItems.productId })
+        .from(schema.cartOrderItems)
+        .where(eq(schema.cartOrderItems.cartOrderId, orderId));
+      return { order: co, productIds: rows.map((r) => r.productId) };
+    }
+
+    return null;
+  }
+
+  async listOrderItemOffers(orderId: string, actor: SessionUser) {
+    // Resolve across all three order tables — the offer picker in the Adjust
+    // modal is on the SHARED detail page, so this id may be a cart or follow-up
+    // order. Looking only at `orders` threw NOT_FOUND for those, which the web
+    // loader swallowed into an empty offer list: CS saw no preset tiers on cart
+    // and follow-up orders and had to key every price in by hand.
+    const resolved = await this.resolveOrderForOffers(orderId);
+    if (!resolved) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
+    const { order, productIds } = resolved;
     this.assertActorMayViewOrderForRead(actor, order);
 
-    const itemRows = await this.db
-      .select({ productId: schema.orderItems.productId })
-      .from(schema.orderItems)
-      .where(eq(schema.orderItems.orderId, orderId));
-    const orderProductIds = [...new Set(itemRows.map((r) => r.productId))];
+    const orderProductIds = [...new Set(productIds)];
     if (orderProductIds.length === 0) return [];
 
     // Per-currency offer pricing: for a non-base-currency order (e.g. GHS), each
