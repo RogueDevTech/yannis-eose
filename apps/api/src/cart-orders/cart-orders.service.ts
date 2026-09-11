@@ -2809,6 +2809,11 @@ export class CartOrdersService {
       if (ruleAnchor) {
         const ruleGroupId = await groupOfBranch(ruleAnchor);
         if (ruleGroupId !== cartGroupId) continue;
+      } else if (cartGroupId === null) {
+        // Fully-unanchored rule (both branches NULL) and a cart we cannot place
+        // in a company. Nothing proves they belong together, so fail closed
+        // rather than round-robin the cart into an arbitrary company.
+        continue;
       }
 
       // currencyCode filter: a rule scoped to a currency only matches carts of
@@ -2820,8 +2825,23 @@ export class CartOrdersService {
         return { branchId: rule.targetBranchId, ruleId: rule.id, ruleName: rule.name, teamId: rule.teamId };
       }
 
-      // targetBranchId=null → round-robin across active CS branches
-      const activeBranches = await this.getActiveCsBranchIds();
+      // targetBranchId=null → round-robin across active CS branches WITHIN the
+      // cart's own company. Round-robin must NEVER deal across a company line:
+      // unconstrained, this handed one company's carts to another company's
+      // closers (the same bug follow-up routing had before `withinBranchId`).
+      //
+      // The anchor is the CART's branch, never the rule's target — the cart's
+      // company is the boundary, and a rule cannot widen it. If we cannot place
+      // the cart in a company, we refuse to distribute it at all: an unrouted
+      // cart is a visible backlog, a misrouted one is a silent data leak.
+      const rrAnchor = campaignBranchId ?? rule.sourceBranchId ?? null;
+      if (!rrAnchor) {
+        this.logger.warn(
+          `[routing] rule "${rule.name}" wants round-robin but the cart has no branch to anchor a company; leaving unrouted rather than dealing org-wide`,
+        );
+        return null;
+      }
+      const activeBranches = await this.getActiveCsBranchIds(rrAnchor);
       if (activeBranches.length === 0) return null;
 
       // Simple round-robin: use current count of today's cart orders as offset
@@ -2836,8 +2856,17 @@ export class CartOrdersService {
     return null;
   }
 
-  /** Returns branch IDs that have an active CS department. */
-  private async getActiveCsBranchIds(): Promise<string[]> {
+  /**
+   * Returns branch IDs that have an active CS department, confined to
+   * `withinBranchId`'s company.
+   *
+   * The company filter is REQUIRED, not optional. This previously defaulted to
+   * "every active CS branch org-wide", and cart round-robin called it that way —
+   * which dealt one company's carts out to another company's closers. Callers
+   * that cannot name a company must not distribute work at all, so there is no
+   * unscoped overload: pass a branch, or don't call this.
+   */
+  private async getActiveCsBranchIds(withinBranchId: string): Promise<string[]> {
     const rows = await this.db
       .select({ branchId: schema.branchDepartments.branchId })
       .from(schema.branchDepartments)
@@ -2847,6 +2876,7 @@ export class CartOrdersService {
         eq(schema.branchDepartments.status, 'ACTIVE'),
         eq(schema.branches.status, 'ACTIVE'),
         sql`(${schema.branches.groupId} IS NULL OR ${schema.branches.groupId} IN (SELECT id FROM branch_groups WHERE status = 'ACTIVE'))`,
+        sql`${schema.branches.groupId} IS NOT DISTINCT FROM (SELECT group_id FROM branches WHERE id = ${withinBranchId}::uuid)`,
       ));
     return rows.map((r) => r.branchId);
   }
