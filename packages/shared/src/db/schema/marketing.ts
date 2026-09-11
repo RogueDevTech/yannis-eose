@@ -237,10 +237,17 @@ export const crossFunnelAttempts = pgTable(
     productId: uuid('product_id')
       .notNull()
       .references(() => products.id),
-    /** Whose form caught the duplicate. They are the only non-admin who can see this row. */
-    mediaBuyerId: uuid('media_buyer_id')
-      .notNull()
-      .references(() => users.id),
+    /**
+     * Whose form caught the duplicate. They are the only non-admin who can see
+     * this row.
+     *
+     * NULLABLE since 0346: when neither the submission nor the winning order
+     * yields a media buyer, the attempt is still recorded rather than dropped.
+     * Such a row is invisible to any individual MB (they match on
+     * media_buyer_id = caller.id) but remains visible to Admin/HoM via
+     * branch_id — an admin-visible row beats no row at all.
+     */
+    mediaBuyerId: uuid('media_buyer_id').references(() => users.id),
     /** Their funnel/campaign. */
     campaignId: uuid('campaign_id').references(() => campaigns.id),
     /** Branch context for HoM scoping. Derived from campaign or MB at insert. */
