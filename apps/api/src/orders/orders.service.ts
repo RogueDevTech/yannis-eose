@@ -2495,7 +2495,12 @@ export class OrdersService {
         // above), so for any campaign submission it is set; winner's MB is a
         // further fallback so the CFA row is never orphaned.
         const cfaMbId = orderInput.mediaBuyerId ?? winner.mediaBuyerId ?? null;
-        if (cfaMbId) {
+        // Recorded UNCONDITIONALLY (0346 made media_buyer_id nullable). A blocked
+        // submission with no resolvable MB used to be dropped entirely — the only
+        // case where a rejected order left no trace a human could find. An
+        // unattributed row is invisible to an individual MB but visible to
+        // Admin/HoM via branch_id, which beats no row at all.
+        {
           try {
             await this.recordCrossFunnelAttempt({
               customerPhoneHash: orderInput.customerPhoneHash,
@@ -2523,8 +2528,9 @@ export class OrdersService {
             // MB sees "success" on the form but no order in their list and reports the
             // form "isn't tracking". Fire-and-forget (enqueueCreate never awaits) and
             // wrapped so it can NEVER throw into the frozen create() path.
+            // Only notifiable when an MB was actually resolved.
             try {
-              this.notifications.enqueueCreate({
+              if (cfaMbId) this.notifications.enqueueCreate({
                 userId: cfaMbId,
                 type: 'order:duplicate_blocked',
                 title: 'A submission matched an existing order',
@@ -2553,19 +2559,19 @@ export class OrdersService {
               'cross-funnel attempt insert failed — dedup still blocks the order; MB will not see this attempt',
             );
           }
-        } else {
-          // DIAGNOSTIC (Phase 1): a duplicate was blocked but NO media buyer could
-          // be resolved (no campaign MB, no winner MB) — so no cross-funnel row is
-          // written and the attempt is invisible to any MB. Should be near-zero now
-          // that MB is campaign-derived; if it ever fires, this is the data gap.
+        }
+        if (!cfaMbId) {
+          // The attempt IS recorded (unattributed) but no individual MB will see
+          // it, and none was notified. Kept as a warning so the data gap stays
+          // observable. Should be near-zero now that MB is campaign-derived.
           this.logger.warn(
             {
-              event: 'cfa_skipped_no_mb',
+              event: 'cfa_recorded_no_mb',
               campaignId: orderInput.campaignId ?? null,
               winnerId: winner.id,
               orderSource,
             },
-            'duplicate blocked but no MB resolvable — cross-funnel attempt NOT recorded (invisible to MB)',
+            'duplicate blocked with no MB resolvable — cross-funnel attempt recorded UNATTRIBUTED (Admin/HoM only)',
           );
         }
         // Convert the cart so it doesn't linger as an abandonment — the customer
@@ -11845,7 +11851,8 @@ export class OrdersService {
     customerPhone: string | null;
     customerName: string;
     productIds: string[];
-    mediaBuyerId: string;
+    /** Null when no MB could be resolved — the row is recorded unattributed (0346). */
+    mediaBuyerId: string | null;
     campaignId: string | null;
     branchId: string | null;
     winner: {
