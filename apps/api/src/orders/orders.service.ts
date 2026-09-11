@@ -80,6 +80,7 @@ import { runGlPostWithFinanceAlert } from '../finance/gl-posting-notify';
 import { CacheService } from '../common/cache/cache.service';
 import { parseOrderNumberSearch } from '../common/utils/parse-order-number';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
+import { dedupExcludedStatuses } from './dedup-excluded-statuses';
 
 /**
  * OR-substrings for `customer_phone` ILIKE — DB often stores `0803…` while users search `+234803…`.
@@ -3855,6 +3856,9 @@ export class OrdersService {
     const existing = await this.findExistingOrderForDedup(
       phoneHash,
       items.map((i) => i.productId),
+      // Recovery is a "which order did this cart become?" lookup, not a dedup
+      // rejection — a DELIVERED/REMITTED order must still be found and linked.
+      { includeCompleted: true },
     );
     if (existing) {
       try {
@@ -4013,6 +4017,8 @@ export class OrdersService {
         this.findExistingOrderForDedup(
           p.phoneHash,
           p.items.map((i) => i.productId),
+          // See above: recovery must still match completed orders.
+          { includeCompleted: true },
         ).catch(() => null),
       ),
     );
@@ -11663,7 +11669,7 @@ export class OrdersService {
   private async findExistingOrderForDedup(
     phoneHash: string,
     productIds: string[],
-    opts?: { skipCartOrders?: boolean; executor?: DbOrTx },
+    opts?: { skipCartOrders?: boolean; executor?: DbOrTx; includeCompleted?: boolean },
   ): Promise<DedupWinner | null> {
     if (!phoneHash || productIds.length === 0) return null;
 
@@ -11671,8 +11677,19 @@ export class OrdersService {
     // paths pass their INSERT transaction so the dedup SELECT and the INSERT are
     // serialized by the same transaction-scoped advisory lock (fixes the
     // fail-open race that let rapid CS re-submits create duplicates). Defaults to
-    // the pool for the frozen edge-form path, whose behavior is unchanged.
+    // the pool for the edge-form path, which passes no executor.
     const db = opts?.executor ?? this.db;
+
+    // Which statuses can never block a new order. Rationale, prod measurements
+    // and the includeCompleted contract live in `dedup-excluded-statuses.ts`,
+    // which is unit-tested — this decision is the whole behaviour of the guard.
+    //
+    // Applies to EVERY create path, edge form included (owner sign-off
+    // 2026-09-11). Loosening dedup is fail-OPEN: it can only ever create more
+    // orders, never reject one, so it cannot repeat the 2026-08-04 freeze.
+    const excludedStatuses = dedupExcludedStatuses(
+      opts?.includeCompleted ?? false,
+    ) as unknown as (typeof schema.orders.$inferSelect)['status'][];
 
     // 14-day window: same phone + overlapping product within 14 days = duplicate.
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
@@ -11702,7 +11719,7 @@ export class OrdersService {
         .where(
           and(
             eq(schema.orders.customerPhoneHash, phoneHash),
-            notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
+            notInArray(schema.orders.status, excludedStatuses),
             isNull(schema.orders.deletedAt),
             gte(schema.orders.createdAt, fourteenDaysAgo),
           ),
@@ -11724,7 +11741,7 @@ export class OrdersService {
             .where(
               and(
                 eq(schema.cartOrders.customerPhoneHash, phoneHash),
-                notInArray(schema.cartOrders.status, ['CANCELLED', 'DELETED']),
+                notInArray(schema.cartOrders.status, excludedStatuses),
                 isNull(schema.cartOrders.deletedAt),
                 gte(schema.cartOrders.createdAt, fourteenDaysAgo),
               ),
@@ -11744,7 +11761,7 @@ export class OrdersService {
         .where(
           and(
             eq(schema.followUpOrders.customerPhoneHash, phoneHash),
-            notInArray(schema.followUpOrders.status, ['CANCELLED', 'DELETED']),
+            notInArray(schema.followUpOrders.status, excludedStatuses),
             isNull(schema.followUpOrders.deletedAt),
             gte(schema.followUpOrders.createdAt, fourteenDaysAgo),
           ),
