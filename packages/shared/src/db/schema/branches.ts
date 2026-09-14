@@ -13,8 +13,13 @@ export const branches = pgTable('branches', {
   /** Branch group ("company") this branch belongs to. CEO directive 2026-06-10. */
   groupId: uuid('group_id').references(() => branchGroups.id),
   name: text('name').notNull(),
-  /** Short unique code for the branch, e.g. "LGS", "ABJ". */
-  code: text('code').notNull().unique(),
+  /**
+   * Short code for the branch, e.g. "LGS", "ABJ". Unique per company, NOT
+   * org-wide — two companies may each run a branch coded "KENYA". Enforced by
+   * branches_group_code_uniq (migration 0347); the index is expression-based
+   * (COALESCE + LOWER) so it lives in SQL rather than here.
+   */
+  code: text('code').notNull(),
   status: branchStatusEnum('status').default('ACTIVE').notNull(),
   /** Branch-level config overrides: dispatch mode, claim cap, commission defaults, etc. */
   settings: jsonb('settings'),
