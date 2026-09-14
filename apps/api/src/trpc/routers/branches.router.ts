@@ -742,22 +742,35 @@ export const branchesRouter = router({
       const db = getDb();
       const branchTeams = getBranchTeamsService();
 
-      // Uniqueness check — name and code must be unique org-wide
+      // Uniqueness check — name and code are unique WITHIN a company, not
+      // org-wide. Two companies may each run a "Kenya" branch; one company's
+      // branch names must never constrain another's. Mirrors the
+      // branches_group_name_uniq / branches_group_code_uniq indexes (0347).
       const [existingName] = await db
         .select({ id: schema.branches.id })
         .from(schema.branches)
-        .where(sql`LOWER(${schema.branches.name}) = LOWER(${input.name})`)
+        .where(
+          and(
+            sql`LOWER(${schema.branches.name}) = LOWER(${input.name})`,
+            eq(schema.branches.groupId, input.groupId),
+          ),
+        )
         .limit(1);
       if (existingName) {
-        throw new TRPCError({ code: 'CONFLICT', message: `A branch named "${input.name}" already exists` });
+        throw new TRPCError({ code: 'CONFLICT', message: `A branch named "${input.name}" already exists in this company` });
       }
       const [existingCode] = await db
         .select({ id: schema.branches.id })
         .from(schema.branches)
-        .where(sql`LOWER(${schema.branches.code}) = LOWER(${input.code})`)
+        .where(
+          and(
+            sql`LOWER(${schema.branches.code}) = LOWER(${input.code})`,
+            eq(schema.branches.groupId, input.groupId),
+          ),
+        )
         .limit(1);
       if (existingCode) {
-        throw new TRPCError({ code: 'CONFLICT', message: `A branch with code "${input.code}" already exists` });
+        throw new TRPCError({ code: 'CONFLICT', message: `A branch with code "${input.code}" already exists in this company` });
       }
 
       const rows = await withActor(db, ctx.user, async (tx) => {
@@ -804,22 +817,41 @@ export const branchesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = getDb();
 
-      // Uniqueness checks — name and code must be unique org-wide (excluding self)
-      if (input.name) {
-        const [dup] = await db
-          .select({ id: schema.branches.id })
+      // Uniqueness checks — name and code are unique WITHIN the branch's own
+      // company (excluding self), matching `create` and the 0347 indexes. The
+      // company is read off the branch itself rather than taken from input,
+      // since `update` cannot move a branch between companies.
+      if (input.name || input.code) {
+        const [target] = await db
+          .select({ groupId: schema.branches.groupId })
           .from(schema.branches)
-          .where(and(sql`LOWER(${schema.branches.name}) = LOWER(${input.name})`, sql`${schema.branches.id} != ${input.branchId}`))
+          .where(eq(schema.branches.id, input.branchId))
           .limit(1);
-        if (dup) throw new TRPCError({ code: 'CONFLICT', message: `A branch named "${input.name}" already exists` });
-      }
-      if (input.code) {
-        const [dup] = await db
-          .select({ id: schema.branches.id })
-          .from(schema.branches)
-          .where(and(sql`LOWER(${schema.branches.code}) = LOWER(${input.code})`, sql`${schema.branches.id} != ${input.branchId}`))
-          .limit(1);
-        if (dup) throw new TRPCError({ code: 'CONFLICT', message: `A branch with code "${input.code}" already exists` });
+        if (!target) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Branch not found' });
+        }
+        // An ungrouped branch shares one namespace with every other ungrouped
+        // branch, mirroring the COALESCE bucket in the unique indexes.
+        const sameCompany = target.groupId
+          ? eq(schema.branches.groupId, target.groupId)
+          : isNull(schema.branches.groupId);
+
+        if (input.name) {
+          const [dup] = await db
+            .select({ id: schema.branches.id })
+            .from(schema.branches)
+            .where(and(sql`LOWER(${schema.branches.name}) = LOWER(${input.name})`, sql`${schema.branches.id} != ${input.branchId}`, sameCompany))
+            .limit(1);
+          if (dup) throw new TRPCError({ code: 'CONFLICT', message: `A branch named "${input.name}" already exists in this company` });
+        }
+        if (input.code) {
+          const [dup] = await db
+            .select({ id: schema.branches.id })
+            .from(schema.branches)
+            .where(and(sql`LOWER(${schema.branches.code}) = LOWER(${input.code})`, sql`${schema.branches.id} != ${input.branchId}`, sameCompany))
+            .limit(1);
+          if (dup) throw new TRPCError({ code: 'CONFLICT', message: `A branch with code "${input.code}" already exists in this company` });
+        }
       }
 
       const updateFields: Record<string, unknown> = { updatedAt: new Date() };
