@@ -32,6 +32,12 @@ export interface SidebarGroup {
      * rather than harvested.
      */
     tabs?: Array<{ value: string; label: string }>;
+    /**
+     * Domain synonyms so menu search finds a page by a word its label does not
+     * contain ("salary" → Payroll). Declared on the nav item in
+     * `dashboard-layout.tsx`; see NavItemDef.keywords.
+     */
+    keywords?: string[];
   }[];
 }
 
@@ -260,9 +266,9 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
 
         {/* Navigation — overflow-x-visible when collapsed so icon tooltips can show to the right */}
         <nav className={`flex-1 overflow-y-auto py-3 px-3 ${isExpanded ? 'overflow-x-visible' : ''}`}>
-          {/* Search results replace the accordion tree entirely: a flat, already
-              visible list of every match, each captioned with its group so the
-              user still knows where the page lives. */}
+          {/* Search results replace the accordion tree entirely: a flat list of
+              every match, ranked best-first, each row labelled with its own
+              group so the user still knows where the page lives. */}
           {isSearching ? (
             searchResults.length === 0 ? (
               <p className="px-3 py-6 text-center text-sm text-app-fg-muted">
@@ -270,25 +276,28 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
               </p>
             ) : (
               <div className="space-y-0.5">
-                {searchResults.map(({ item, group, tabLabel }, i) => (
-                  <div key={item.href}>
-                    {/* Caption only on the first hit of each group — results are
-                        already ordered by group, so repeating it per item would
-                        just be noise. */}
-                    {group && group !== searchResults[i - 1]?.group && (
-                      <p
-                        className={`select-none px-3 py-1 text-mini font-semibold uppercase tracking-wider text-app-fg-muted ${
-                          i === 0 ? '' : 'mt-2'
-                        }`}
-                      >
-                        {group}
-                      </p>
-                    )}
+                {searchResults.map(({ item, group, tabLabel }) => (
+                  /* Key on href AND tab label: a page and one of its own tabs can
+                     both be hits, and they share the base href. */
+                  <div key={`${item.href}|${tabLabel ?? ''}`}>
                     <SidebarNavLink
-                      // A tab hit reads "Settings › Security" so it is obvious the
-                      // result is a section inside a page, not a page of its own —
-                      // several pages have a "Security" or "Templates" tab.
-                      item={tabLabel ? { ...item, label: `${item.label} › ${tabLabel}` } : item}
+                      // Results are ranked by match strength rather than grouped,
+                      // so each row carries its own context instead of sitting
+                      // under a group caption:
+                      //   - a tab hit reads "Settings › Security", making clear
+                      //     it is a section inside a page, not a page of its own
+                      //     (several pages have a "Security" or "Templates" tab);
+                      //   - the group is appended so the user still knows where
+                      //     the page lives, on every row, at any position.
+                      item={{
+                        ...item,
+                        label: [
+                          tabLabel ? `${item.label} › ${tabLabel}` : item.label,
+                          group ? `· ${group}` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' '),
+                      }}
                       isExpanded={false}
                       onMobileClose={() => {
                         setMenuQuery('');
