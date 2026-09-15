@@ -131,7 +131,22 @@ interface NavItemDef {
    * contractor or order) are deliberately omitted: their URL needs a record id,
    * so there is nothing stable to link to from a nav search.
    */
-  tabs?: Array<{ value: string; label: string }>;
+  tabs?: Array<{ value: string; label: string; param?: string }>;
+  /**
+   * Domain synonyms that should find this page, for words the label does not
+   * contain. "salary" must reach Payroll, "staff" must reach Users, "cogs"
+   * must reach Shipments — nobody navigating by concept knows our labels.
+   *
+   * Only the label, group name and URL slug are searched for free; everything
+   * else a user might reasonably type belongs here. Matching is already
+   * typo- and acronym-tolerant (see `~/lib/smart-search`), so keywords are for
+   * DIFFERENT words, not for spellings or abbreviations of the same word.
+   *
+   * Like `tabs`, these inherit the item's `permission` / `roles` /
+   * `excludeRoles`, so a keyword can never surface a page to someone who
+   * cannot open it.
+   */
+  keywords?: string[];
 }
 
 interface NavGroupDef {
@@ -145,7 +160,12 @@ const navStructure: NavGroupDef[] = [
   {
     group: null,
     items: [
-      { label: 'Dashboard', href: '/admin', icon: SidebarIcons.dashboard },
+      {
+        label: 'Dashboard',
+        href: '/admin',
+        keywords: ['home', 'overview', 'kpi', 'summary'],
+        icon: SidebarIcons.dashboard,
+      },
     ],
   },
   {
@@ -154,6 +174,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Analytics',
         href: '/admin/marketing/analytics',
+        keywords: ['form analytics', 'landing', 'conversion', 'views', 'funnel performance'],
         icon: SidebarIcons.trendUp,
         // MB sees own form analytics; HoM/admin see the branch; marketing team
         // supervisors see their team (enforced server-side in formAnalyticsPageBundle).
@@ -164,6 +185,7 @@ const navStructure: NavGroupDef[] = [
         label: 'Live Activities',
         labelShort: 'Marketing',
         href: '/admin/marketing/overview',
+        keywords: ['live', 'realtime', 'activity feed'],
         icon: SidebarIcons.marketing,
         permission: 'marketing.teamOverview',
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
@@ -171,6 +193,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Team Analysis',
         href: '/admin/marketing/team',
+        keywords: ['media buyers', 'mb performance', 'buyer'],
         icon: SidebarIcons.marketing,
         permission: 'marketing.teamOverview',
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
@@ -178,6 +201,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Orders',
         href: '/admin/marketing/orders',
+        keywords: ['media buyer orders', 'campaign orders', 'attribution'],
         icon: SidebarIcons.orders,
         permission: 'marketing.orders',
         // HoM / admin-class: same pattern as Live Activities — role fallback if session
@@ -187,11 +211,15 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Funding',
         href: '/admin/marketing/funding',
+        keywords: ['budget', 'top up', 'wallet', 'allocation', 'ad money'],
+        // This page drives its top-level sections from `?section=`; its `?tab=`
+        // is a sub-tab accepting only requests/transfers. Verified against
+        // admin.marketing.funding/route.tsx.
         tabs: [
-          { value: 'distributing', label: 'Funds distributed' },
-          { value: 'received', label: 'Funds received' },
-          { value: 'balances', label: 'Recipient balances' },
-          { value: 'transfers', label: 'Peer transfers' },
+          { value: 'distributing', label: 'Funds distributed', param: 'section' },
+          { value: 'received', label: 'Funds received', param: 'section' },
+          { value: 'balances', label: 'Recipient balances', param: 'section' },
+          { value: 'peer', label: 'Peer transfers', param: 'section' },
         ],
         icon: SidebarIcons.marketing,
         permission: 'marketing.read',
@@ -200,6 +228,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Expenses',
         href: '/admin/marketing/expenses',
+        keywords: ['ad spend', 'adspend', 'facebook spend', 'cost per', 'cpa'],
         icon: SidebarIcons.marketing,
         permission: 'marketing.read',
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
@@ -207,6 +236,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Forms',
         href: '/admin/marketing/forms',
+        keywords: ['landing pages', 'edge form', 'campaign links', 'order form'],
         tabs: [
           { value: 'all', label: 'All forms' },
           { value: 'mine', label: 'My forms' },
@@ -218,6 +248,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Leaderboard',
         href: '/admin/marketing/leaderboard',
+        keywords: ['ranking', 'top performers', 'standings'],
         icon: SidebarIcons.leaderboards,
         permission: 'marketing.leaderboard',
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
@@ -225,6 +256,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Cross-funnel',
         href: '/admin/marketing/cross-funnel',
+        keywords: ['duplicate leads', 'blocked attempts', 'poaching', 'same phone'],
         icon: SidebarIcons.marketing,
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'],
       },
@@ -237,6 +269,7 @@ const navStructure: NavGroupDef[] = [
         label: 'Live Activities',
         labelShort: 'Sales',
         href: '/admin/sales/queue',
+        keywords: ['live', 'callbacks', 'hot swap', 'claim', 'abandoned', 'assignment'],
         tabs: [
           { value: 'queue', label: 'Queue' },
           { value: 'abandoned', label: 'Abandoned carts' },
@@ -251,30 +284,35 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Funnel Orders',
         href: '/admin/sales/orders',
+        keywords: ['leads', 'web orders', 'edge form orders'],
         icon: SidebarIcons.orders,
         permission: 'orders.read',
       },
       {
         label: 'Offline Orders',
         href: '/admin/sales/offline-orders',
+        keywords: ['walk in', 'manual orders', 'phone orders'],
         icon: SidebarIcons.orders,
         permission: 'orders.read',
       },
       {
         label: 'Delivered Follow-Up',
         href: '/admin/sales/delivered-follow-up',
+        keywords: ['repeat purchase', 'resell', 'upsell'],
         icon: SidebarIcons.orders,
         permission: 'orders.read',
       },
       {
         label: 'Cart Orders',
         href: '/admin/sales/cart-orders',
+        keywords: ['abandoned cart', 'recovered carts', 'checkout'],
         icon: SidebarIcons.orders,
         permission: 'orders.read',
       },
       {
         label: 'Follow Up Orders',
         href: '/admin/cs/follow-up',
+        keywords: ['callback', 'retry', 'nurture', 'abandoned cart'],
         icon: SidebarIcons.orders,
         permission: 'orders.followUp',
         roles: ['CS_CLOSER'],
@@ -282,6 +320,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Team Analysis',
         href: '/admin/sales/team',
+        keywords: ['closers', 'cs performance', 'agents'],
         icon: SidebarIcons.cs,
         permission: 'cs.teamOverview',
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
@@ -289,17 +328,17 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Leaderboard',
         href: '/admin/sales/leaderboard',
+        keywords: ['ranking', 'top closers', 'standings'],
         icon: SidebarIcons.leaderboards,
         permission: 'cs.leaderboard',
       },
       {
         label: 'Message Templates',
         href: '/admin/sales/message-templates',
-        tabs: [
-          { value: 'ALL', label: 'All' },
-          { value: 'SMS', label: 'SMS' },
-          { value: 'WHATSAPP', label: 'WhatsApp' },
-        ],
+        keywords: ['sms', 'whatsapp', 'canned replies', 'scripts'],
+        // No `tabs` declared: this page keeps its section in local `useState`
+        // and never reads the URL, so a deep-link would silently land on its
+        // default section. Declare tabs here once the page reads a query param.
         icon: SidebarIcons.notifications,
         // Sales closers need to author + use templates; HoCS / Admins manage shared ones via
         // the same page (cs.teamOverview). Ownership-based edit gating is enforced server-side.
@@ -314,12 +353,14 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Logistics companies',
         href: '/admin/logistics/partners',
+        keywords: ['3pl', 'tpl', 'couriers', 'riders', 'providers', 'delivery companies'],
         icon: SidebarIcons.logistics,
         permission: 'logistics.providers.view',
       },
       {
         label: 'Partner stock transfers',
         href: '/admin/logistics/transfers',
+        keywords: ['3pl stock', 'consignment', 'courier stock'],
         icon: SidebarIcons.transfers,
         permission: 'logistics.partner_transfers.view',
       },
@@ -327,12 +368,14 @@ const navStructure: NavGroupDef[] = [
         label: 'Orders',
         labelShort: 'Logistics',
         href: '/admin/logistics/orders',
+        keywords: ['deliveries', 'dispatch', 'in transit', 'waybill'],
         icon: SidebarIcons.orders,
         permission: 'logistics.read',
       },
       {
         label: 'Logistics Analysis',
         href: '/admin/logistics/team',
+        keywords: ['rider performance', 'delivery rate', 'courier performance'],
         icon: SidebarIcons.leaderboards,
         permission: 'logistics.teamOverview',
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER'],
@@ -345,11 +388,10 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Inventory',
         href: '/admin/inventory',
-        tabs: [
-          { value: 'levels', label: 'Stock levels' },
-          { value: 'transfers', label: 'Transfers' },
-          { value: 'reconciliation', label: 'Reconciliation' },
-        ],
+        keywords: ['stock', 'levels', 'quantity on hand', 'reconciliation', 'stock count'],
+        // No `tabs` declared: this page keeps its section in local `useState`
+        // and never reads the URL, so a deep-link would silently land on its
+        // default section. Declare tabs here once the page reads a query param.
         icon: SidebarIcons.inventory,
         permission: 'inventory.read',
         // HEAD_OF_CS sees inventory read-only by role so CS can plan against
@@ -362,18 +404,21 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Shipments',
         href: '/admin/shipments',
+        keywords: ['landed cost', 'cogs', 'fifo', 'imports', 'containers', 'purchase'],
         icon: SidebarIcons.inventory,
         permission: 'inventory.shipments.read',
       },
       {
         label: 'Our warehouse',
         href: '/admin/inventory/warehouses',
+        keywords: ['locations', 'stores', 'depot'],
         icon: SidebarIcons.inventory,
         permission: 'inventory.read',
       },
       {
         label: 'Transfers',
         href: '/admin/transfers',
+        keywords: ['stock movement', 'move stock', 'branch transfer'],
         icon: SidebarIcons.transfers,
         permission: 'transfers.read',
       },
@@ -385,6 +430,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Products',
         href: '/admin/products',
+        keywords: ['sku', 'items', 'catalog', 'offers', 'pricing', 'bundles', 'kits'],
         tabs: [
           { value: 'product', label: 'Product' },
           { value: 'offers', label: 'Offers' },
@@ -395,6 +441,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Categories',
         href: '/admin/categories',
+        keywords: ['product types', 'taxonomy', 'groups'],
         icon: SidebarIcons.categories,
         permission: 'categories.read',
       },
@@ -406,18 +453,21 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Finance',
         href: '/admin/finance/overview',
+        keywords: ['revenue', 'profit', 'cash', 'money', 'pnl'],
         icon: SidebarIcons.finance,
         permission: 'finance.read',
       },
       {
         label: 'Cash remittance',
         href: '/admin/finance/delivery-remittances',
+        keywords: ['collections', 'cash collected', 'rider cash', 'settlement', 'money received'],
         icon: SidebarIcons.remittances,
         permission: 'finance.read',
       },
       {
         label: 'Disbursements',
         href: '/admin/finance/disbursements',
+        keywords: ['payouts', 'funding requests', 'release funds', 'transfers out'],
         tabs: [
           { value: 'disbursements', label: 'Disbursements' },
           { value: 'requests', label: 'Funding requests' },
@@ -435,6 +485,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Chart of Accounts',
         href: '/admin/accounting/accounts',
+        keywords: ['coa', 'ledger accounts', 'account tree'],
         icon: SidebarIcons.chartOfAccounts,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -442,6 +493,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Journal Entries',
         href: '/admin/accounting/journal-entries',
+        keywords: ['double entry', 'postings', 'manual entry', 'gl entries'],
         icon: SidebarIcons.journal,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -449,6 +501,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Expenses',
         href: '/admin/accounting/expenses',
+        keywords: ['costs', 'bills', 'overheads', 'spending'],
         icon: SidebarIcons.finance,
         permission: 'accounting.read',
         roles: ['AUDITOR', 'HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'],
@@ -456,6 +509,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Bank Reconciliation',
         href: '/admin/accounting/bank-reconciliation',
+        keywords: ['statement', 'match transactions', 'bank match'],
         icon: SidebarIcons.bank,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -463,6 +517,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'General Ledger',
         href: '/admin/accounting/general-ledger',
+        keywords: ['gl', 'account activity', 'postings'],
         icon: SidebarIcons.journal,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -470,6 +525,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Trial Balance',
         href: '/admin/accounting/trial-balance',
+        keywords: ['tb', 'debits credits'],
         icon: SidebarIcons.scale,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -477,6 +533,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Profit & Loss',
         href: '/admin/accounting/profit-loss',
+        keywords: ['pnl', 'p&l', 'income statement', 'earnings'],
         icon: SidebarIcons.trendUp,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -484,6 +541,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Balance Sheet',
         href: '/admin/accounting/balance-sheet',
+        keywords: ['assets liabilities', 'equity', 'financial position'],
         icon: SidebarIcons.scale,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -491,6 +549,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Cash Flow',
         href: '/admin/accounting/cash-flow',
+        keywords: ['cashflow', 'liquidity', 'money in out'],
         icon: SidebarIcons.trendUp,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -498,12 +557,10 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Account Config',
         href: '/admin/accounting/account-config',
-        tabs: [
-          { value: 'accounts', label: 'Accounts' },
-          { value: 'mappings', label: 'Mappings' },
-          { value: 'categories', label: 'Account types' },
-          { value: 'rules', label: 'Posting rules' },
-        ],
+        keywords: ['posting rules', 'mappings', 'gl setup'],
+        // No `tabs` declared: this page keeps its section in local `useState`
+        // and never reads the URL, so a deep-link would silently land on its
+        // default section. Declare tabs here once the page reads a query param.
         icon: SidebarIcons.settings,
         permission: 'accounting.read',
       },
@@ -517,6 +574,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Asset Register',
         href: '/admin/accounting/assets',
+        keywords: ['fixed assets', 'depreciation', 'equipment'],
         icon: SidebarIcons.inventory,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -524,9 +582,11 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Aging',
         href: '/admin/accounting/aging',
+        keywords: ['receivable', 'payable', 'debtors', 'creditors', 'overdue'],
+        // AgingPage writes and reads `?kind=`, not `?tab=`.
         tabs: [
-          { value: 'RECEIVABLE', label: 'Receivable' },
-          { value: 'PAYABLE', label: 'Payable' },
+          { value: 'RECEIVABLE', label: 'Receivable', param: 'kind' },
+          { value: 'PAYABLE', label: 'Payable', param: 'kind' },
         ],
         icon: SidebarIcons.clock,
         permission: 'accounting.read',
@@ -535,6 +595,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Tax Returns',
         href: '/admin/accounting/tax-returns',
+        keywords: ['vat', 'paye', 'filing', 'compliance'],
         icon: SidebarIcons.calculator,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -542,6 +603,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'WHT Certificates',
         href: '/admin/accounting/wht-certificates',
+        keywords: ['withholding tax', 'wht'],
         icon: SidebarIcons.calculator,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -549,6 +611,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Budget Report',
         href: '/admin/accounting/budget-report',
+        keywords: ['budget vs actual', 'variance', 'forecast'],
         icon: SidebarIcons.campaigns,
         permission: 'accounting.read',
         roles: ['AUDITOR'],
@@ -560,16 +623,25 @@ const navStructure: NavGroupDef[] = [
     items: [
       // Branch Admin's two core features are Users (their branch) + Attendance,
       // so they're role-allowlisted here in addition to the hr.read permission.
-      { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: ['hr.read', 'users.read'], roles: ['BRANCH_ADMIN'] },
+      {
+        label: 'Users',
+        href: '/hr/users',
+        keywords: ['staff', 'employees', 'people', 'team members', 'accounts', 'roles'],
+        icon: SidebarIcons.users,
+        permission: ['hr.read', 'users.read'],
+        roles: ['BRANCH_ADMIN'],
+      },
       {
         label: 'Staff Onboarding',
         href: '/hr/staff-onboarding-documents',
+        keywords: ['documents', 'new hire', 'paperwork', 'id cards'],
         icon: SidebarIcons.orders,
         permission: 'hr.onboarding.read',
       },
       {
         label: 'Payroll',
         href: '/hr/payroll',
+        keywords: ['salary', 'salaries', 'wages', 'pay run', 'net pay', 'paye'],
         icon: SidebarIcons.hr,
         // hr.read = full HR access; payroll.batches.view = narrow "Payroll page only"
         // (e.g. a finance approver outside HR). Either grants the link.
@@ -579,6 +651,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Attendance',
         href: '/hr/attendance',
+        keywords: ['clock in', 'clock out', 'shifts', 'present absent', 'lateness', 'time'],
         icon: SidebarIcons.hr,
         permission: ['attendance.read', 'attendance.manage'],
         roles: ['BRANCH_ADMIN'],
@@ -586,30 +659,35 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Payroll Config',
         href: '/hr/payroll/config/roles',
+        keywords: ['commission', 'bonus rules', 'pay rules', 'tax bands'],
         icon: SidebarIcons.settings,
         permission: 'payroll.config.read',
       },
       {
         label: 'Payslips',
         href: '/hr/payroll/payslips',
+        keywords: ['pay stub', 'salary slip', 'earnings statement'],
         icon: SidebarIcons.finance,
         permission: 'hr.read',
       },
       {
         label: 'Payroll Reports',
         href: '/hr/payroll/reports',
+        keywords: ['payroll summary', 'salary report', 'tax report'],
         icon: SidebarIcons.finance,
         permission: 'hr.read',
       },
       {
         label: 'Contractors',
         href: '/hr/payroll/contractors',
+        keywords: ['freelancers', 'vendors', 'non staff'],
         icon: SidebarIcons.users,
         permission: 'payroll.config.read',
       },
       {
         label: 'Commission Plans',
         href: '/hr/payroll/config/roles',
+        keywords: ['commission', 'bonus rules', 'pay rules', 'tax bands'],
         icon: SidebarIcons.leaderboards,
         permission: 'hr.read',
         roles: ['HEAD_OF_CS', 'HEAD_OF_LOGISTICS'],
@@ -622,15 +700,22 @@ const navStructure: NavGroupDef[] = [
     items: [
       // Personal profile entry — mirrors the "My Profile" link in the header dropdown so
       // users can reach it from the sidebar too. Open to every authenticated user, no permission gate.
-      { label: 'My Profile', href: '/admin/profile', icon: SidebarIcons.profile },
+      {
+        label: 'My Profile',
+        href: '/admin/profile',
+        keywords: ['my account', 'me', 'password', 'preferences'],
+        icon: SidebarIcons.profile,
+      },
       {
         label: 'Notifications',
         href: '/admin/notifications',
+        keywords: ['alerts', 'inbox', 'messages'],
         icon: SidebarIcons.notifications,
       },
       {
         label: 'Settings',
         href: '/admin/settings',
+        keywords: ['preferences', 'configuration', 'theme', 'security', 'system'],
         icon: SidebarIcons.settings,
         tabs: [
           { value: 'profile', label: 'Profile' },
@@ -648,11 +733,10 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Marketing Automation',
         href: '/admin/marketing/automation',
-        tabs: [
-          { value: 'rules', label: 'Automations' },
-          { value: 'templates', label: 'Message templates' },
-          { value: 'groups', label: 'Target groups' },
-        ],
+        keywords: ['campaigns', 'drip', 'auto messages', 'sms whatsapp email'],
+        // No `tabs` declared: this page keeps its section in local `useState`
+        // and never reads the URL, so a deep-link would silently land on its
+        // default section. Declare tabs here once the page reads a query param.
         icon: SidebarIcons.campaigns,
         // ADMIN / SUPER_ADMIN / SUPPORT reach it via the permission bypass; Head of
         // Marketing is granted marketing.automation.manage in the RBAC catalog.
@@ -662,6 +746,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Branches',
         href: '/admin/branches',
+        keywords: ['locations', 'offices', 'companies', 'sites'],
         icon: SidebarIcons.settings,
         permission: 'branches.manage',
         // Org-wide heads see this entry too so they can drill into branches
@@ -674,16 +759,17 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Role templates',
         href: '/admin/settings/role-templates',
-        tabs: [
-          { value: 'templates', label: 'Templates' },
-          { value: 'catalog', label: 'Permission catalog' },
-        ],
+        keywords: ['permissions', 'access control', 'rbac', 'privileges'],
+        // No `tabs` declared: this page keeps its section in local `useState`
+        // and never reads the URL, so a deep-link would silently land on its
+        // default section. Declare tabs here once the page reads a query param.
         icon: SidebarIcons.settings,
         permission: 'rbac.manage_templates',
       },
       {
         label: 'Permission Requests',
         href: '/admin/permission-requests',
+        keywords: ['approvals', 'access requests', 'pending approvals'],
         icon: SidebarIcons.audit,
         // Visible to anyone holding at least one approve code. SuperAdmin / ADMIN
         // bypass via the standard permission middleware. Submitters (Sales Closers
@@ -702,12 +788,14 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Export',
         href: '/admin/data/export',
+        keywords: ['download', 'csv', 'excel', 'extract', 'backup'],
         icon: SidebarIcons.exportData,
         permission: 'data.export',
       },
       {
         label: 'Import',
         href: '/admin/data/import',
+        keywords: ['upload', 'bulk', 'csv', 'excel', 'migrate'],
         icon: SidebarIcons.importData,
         permission: 'data.import',
       },
@@ -719,6 +807,7 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Audit Trail',
         href: '/admin/analytics/audit',
+        keywords: ['who did this', 'history', 'logs', 'changes', 'accountability', 'activity log'],
         icon: SidebarIcons.audit,
         permission: 'audit.read',
       },
@@ -734,6 +823,7 @@ const navStructure: NavGroupDef[] = [
         // The route loader re-checks isAdminLevel server-side.
         label: 'Reports',
         href: '/admin/reports',
+        keywords: ['analytics', 'insights', 'statements', 'summaries'],
         icon: SidebarIcons.reports,
         roles: ['SUPER_ADMIN', 'ADMIN', 'SUPPORT'],
       },
@@ -901,10 +991,12 @@ function getNavGroupsForUser(
         label: forMobile ? getDisplayLabelMobile(item, user) : getDisplayLabel(item, user),
         href: item.href,
         icon: item.icon,
-        // Carried through so sidebar search can match sections inside the page.
+        // Carried through so sidebar search can match sections inside the page,
+        // and concept words that the label itself does not contain.
         // Already permission-filtered: we only reach here for items this user
-        // may see, and a tab inherits its parent item's visibility.
+        // may see, and both inherit their parent item's visibility.
         ...(item.tabs ? { tabs: item.tabs } : {}),
+        ...(item.keywords ? { keywords: item.keywords } : {}),
       }));
 
     if (visibleItems.length === 0) continue;
@@ -1587,7 +1679,9 @@ function DashboardLayoutInner({
           </div>
         </div>
       )}
-      <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
+      {/* `navGroups` is the same permission-filtered tree the sidebar renders, so
+          the palette's page results can never include a page this user cannot open. */}
+      <SearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} navGroups={navGroups} />
       <NavProgressBar />
       <Sidebar
         groups={navGroups}
