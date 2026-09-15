@@ -1,20 +1,25 @@
 /**
  * Sidebar menu search — matches nav pages AND the tab sections inside them.
  *
- * Pure and separate from `sidebar.tsx` so the matching rules can be tested
- * without mounting the sidebar.
+ * The matching itself lives in `~/lib/route-search`, shared with the Cmd+K
+ * command palette so the sidebar filter and the palette rank identically.
+ * This file keeps the sidebar's own types and its flat, ranked output.
+ *
+ * Permission filtering is inherited, not re-implemented: `groups` has already
+ * been filtered to what this user may see, and a tab is only ever emitted for
+ * an item in that list — so a tab can never surface a page the user cannot
+ * open.
  */
 
-export interface MenuSearchItem {
-  label: string;
-  href: string;
-  tabs?: Array<{ value: string; label: string }>;
-}
+import {
+  searchRoutes,
+  type RouteSearchGroup,
+  type RouteSearchItem,
+  type RouteSearchHit,
+} from '~/lib/route-search';
 
-export interface MenuSearchGroup<TItem extends MenuSearchItem> {
-  group: string | null;
-  items: TItem[];
-}
+export type MenuSearchItem = RouteSearchItem;
+export type MenuSearchGroup<TItem extends MenuSearchItem> = RouteSearchGroup<TItem>;
 
 export interface MenuSearchResult<TItem extends MenuSearchItem> {
   /** The nav item to render. For a tab hit, `href` carries `?tab=<value>`. */
@@ -25,49 +30,22 @@ export interface MenuSearchResult<TItem extends MenuSearchItem> {
 }
 
 /**
- * Rules:
+ * Rank the nav tree against `trimmedQuery`, best match first.
  *
- *  - a page matches on its own label OR its group name, so "hr" surfaces
- *    everything under the HR group;
- *  - a tab matches on the tab label, and deep-links to `?tab=<value>` — the
- *    pages read that param via `searchParams.get('tab')`, so the result opens
- *    the section directly;
- *  - a page whose OWN label matches is not expanded into all its tabs. Typing
- *    "settings" should list Settings once, not seven near-identical rows. Tabs
- *    surface when the tab label itself matches, or when the page was reached by
- *    a group-name match (where the page row is shown anyway).
- *
- * Permission filtering is inherited, not re-implemented: `groups` has already
- * been filtered to what this user may see, and a tab is only ever emitted for an
- * item in that list — so a tab can never surface a page the user cannot open.
+ * Matching is typo-, acronym- and synonym-tolerant (see `~/lib/smart-search`):
+ * "remitance" still reaches Cash remittance, "cr" reaches it by acronym, and a
+ * page's `keywords` let "salary" reach Payroll. Every word of a multi-word
+ * query must match something, in any order.
  */
 export function buildMenuSearchResults<TItem extends MenuSearchItem>(
   groups: Array<MenuSearchGroup<TItem>>,
   trimmedQuery: string,
 ): Array<MenuSearchResult<TItem>> {
-  const q = trimmedQuery.toLowerCase();
-  if (!q) return [];
-
-  return groups.flatMap((g) =>
-    g.items.flatMap((item) => {
-      const labelHit = item.label.toLowerCase().includes(q);
-      const groupHit = (g.group ?? '').toLowerCase().includes(q);
-      const rows: Array<MenuSearchResult<TItem>> = [];
-
-      if (labelHit || groupHit) rows.push({ item, group: g.group });
-
-      if (!labelHit) {
-        for (const tab of item.tabs ?? []) {
-          if (!tab.label.toLowerCase().includes(q)) continue;
-          rows.push({
-            item: { ...item, href: `${item.href}?tab=${encodeURIComponent(tab.value)}` },
-            group: g.group,
-            tabLabel: tab.label,
-          });
-        }
-      }
-
-      return rows;
+  return searchRoutes(groups, trimmedQuery).map(
+    ({ item, group, tabLabel }: RouteSearchHit<TItem>) => ({
+      item,
+      group,
+      ...(tabLabel ? { tabLabel } : {}),
     }),
   );
 }

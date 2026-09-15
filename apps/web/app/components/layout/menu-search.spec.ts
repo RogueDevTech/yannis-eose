@@ -84,7 +84,11 @@ describe('buildMenuSearchResults', () => {
       [{ group: null, items: [{ label: 'P', href: '/p', tabs: [{ value: 'a b&c', label: 'Zed' }] }] }],
       'zed',
     );
-    expect(r[0]!.item.href).toBe('/p?tab=a%20b%26c');
+    // Built with URLSearchParams, which encodes a space as `+` in a query
+    // string. `searchParams.get('tab')` decodes it back to 'a b&c', so the
+    // deep-link resolves to the same tab either way.
+    expect(r[0]!.item.href).toBe('/p?tab=a+b%26c');
+    expect(new URL(`https://x${r[0]!.item.href}`).searchParams.get('tab')).toBe('a b&c');
   });
 
   it('returns nothing for an empty query', () => {
