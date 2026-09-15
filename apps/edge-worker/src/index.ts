@@ -2,7 +2,7 @@ import { Redis } from '@upstash/redis/cloudflare';
 import {
   DEFAULT_CAMPAIGN_FORM_ACCENT_HEX,
   normalizeCampaignFieldOrder,
-  COUNTRY_PHONE_RULES,
+  COUNTRY_NUMBER_SPECS,
   phoneRuleForCountry,
   normalizePhoneForHash,
 } from '@yannis/shared';
@@ -1448,10 +1448,35 @@ function getFormScript(
       // Apply the phone placeholder/pattern/hint for the selected country so a
       // Ghana form accepts Ghanaian numbers. Rules come from data-phone-rules
       // (COUNTRY_PHONE_RULES); unknown countries keep the current attributes.
-      var _phoneRules = {};
-      try { _phoneRules = JSON.parse((form && form.dataset.phoneRules) || '{}') || {}; } catch (e) { _phoneRules = {}; }
+      // Compact per-country specs ({dial, len, prefixes}); the full rule is built
+      // on demand. Mirrors buildPhoneRule() in packages/shared: keep the two in
+      // step, or a country validates differently in the browser than on the
+      // server. Sending specs instead of pre-built rules keeps ~6KB off every
+      // form page load, which matters on mobile data.
+      var _phoneSpecs = {};
+      try { _phoneSpecs = JSON.parse((form && form.dataset.phoneSpecs) || '{}') || {}; } catch (e) { _phoneSpecs = {}; }
+      var _phoneRuleCache = {};
+      function phoneRuleFor(country) {
+        if (_phoneRuleCache[country]) return _phoneRuleCache[country];
+        var spec = _phoneSpecs[country];
+        if (!spec || !spec.prefixes || !spec.prefixes.length) return null;
+        var national = spec.prefixes.map(function (p) {
+          return p + '[0-9]{' + (spec.len - p.length) + '}';
+        }).join('|');
+        var first = spec.prefixes[0];
+        var filler = '12345678901234'.slice(0, Math.max(0, spec.len - first.length));
+        var rule = {
+          country: country,
+          dialCode: spec.dial,
+          pattern: '(0(?:' + national + ')|\\\\+?' + spec.dial + '(?:' + national + '))',
+          example: '0' + first + filler,
+          exampleIntl: '+' + spec.dial + first + filler
+        };
+        _phoneRuleCache[country] = rule;
+        return rule;
+      }
       function applyPhoneRule(country) {
-        var rule = _phoneRules[country];
+        var rule = phoneRuleFor(country);
         if (!rule) return;
         var pEl = document.getElementById('customerPhone') || form.querySelector('[name="customerPhone"]');
         if (!pEl) return;
@@ -1459,6 +1484,7 @@ function getFormScript(
         pEl.setAttribute('pattern', '^' + (rule.pattern || '') + '$');
         pEl.setAttribute('title', 'Enter a valid ' + (rule.country || country) + ' phone number, e.g. ' + (rule.example || '') + ' or ' + (rule.exampleIntl || ''));
         pEl.setAttribute('data-phone-country', rule.country || country);
+        pEl.setAttribute('data-dial-code', rule.dialCode || '');
       }
       // Seed the phone rule from the form's initial country on load.
       try { applyPhoneRule((form && form.dataset.initialCountry) || ''); } catch (e) {}
@@ -1568,7 +1594,7 @@ function getFormScript(
 
       // Nigerian phone regex — mirrors the worker's /cart + /submit validators.
       // Accepts 0XXXXXXXXXX (11 digits, leading 0 + 7/8/9) or +234XXXXXXXXXX.
-      var NG_PHONE_RE = /^(?:0[789]\\d{9}|\\+234[789]\\d{9})$/;
+      var NG_PHONE_RE = /^(?:0[789]\\d{9}|\\+?234[789]\\d{9})$/;
 
       // Cart abandonment: save name+phone when both filled (debounced)
       var savedCartId = null;
@@ -1580,6 +1606,58 @@ function getFormScript(
       function isValidNgPhone(value) {
         return NG_PHONE_RE.test((value || '').trim());
       }
+      // Country-aware phone check, hoisted so BOTH the blur hint and the submit
+      // handler share one implementation. Validates against the input's LIVE
+      // pattern attribute (re-set per country by the country selector), falling
+      // back to the Nigerian validator when no pattern is present.
+      //
+      // This is the only client-side gate that BLOCKS a submit. The worker's
+      // /submit validator stays deliberately permissive (7-15 digits,
+      // STAMP-never-reject) so a valid foreign number is never 4xx'd at intake:
+      // a rejection there is a lost order that the QStash buffer won't catch.
+      // Permissive E.164-ish fallback, mirroring phoneRuleForCountry()'s default
+      // in packages/shared. Used when we cannot trust a country pattern, so a
+      // broken rule degrades to "loose but sane" instead of blocking a whole
+      // country's customers.
+      var INTL_PHONE_RE = /^\\+?[0-9]{7,15}$/;
+      // Rebuild the canonical LOCAL form when a customer drops the leading zero.
+      // Typing 8031234567 instead of 08031234567 is by far the most common real
+      // input shape (~7% of all orders), and it is the same physical phone.
+      //
+      // This must NORMALISE rather than just widen the pattern: the phone hash
+      // maps a leading-0 local number to its dial code, so a bare 10-digit value
+      // would hash as 8031234567 while the same customer's 0-prefixed value
+      // hashes as 2348031234567, silently splitting dedup / target groups /
+      // follow-ups. Rewriting to the 0-form keeps one customer, one hash.
+      //
+      // Only fires when prepending '0' actually satisfies the country's own
+      // pattern, so it can never turn an invalid number into an accepted one.
+      function normalisePhoneValue(el, value) {
+        var v = (value || '').trim();
+        if (!el || !v || v.charAt(0) === '+' || v.charAt(0) === '0') return v;
+        if (!/^[0-9]+$/.test(v)) return v;
+        // Already a country-code form (234 prefix): leave it, the pattern accepts it.
+        var dial = el.getAttribute('data-dial-code') || '';
+        if (dial && v.indexOf(dial) === 0) return v;
+        var candidate = '0' + v;
+        return isValidPhoneForInput(el, candidate) ? candidate : v;
+      }
+      function isValidPhoneForInput(el, value) {
+        var v = (value || '').trim();
+        if (!el) return isValidNgPhone(v);
+        var pat = el.getAttribute('pattern');
+        if (pat) {
+          // The pattern attribute is already anchored at every write site, so
+          // test it as-is rather than re-wrapping (re-anchoring an unparenthesised
+          // alternation would bind the anchors to single branches).
+          try { return new RegExp(pat).test(v); } catch (e) {}
+          // Pattern failed to COMPILE. Never fall back to the Nigerian rule here:
+          // on a Ghana/international form that would reject every legitimate
+          // number and lose the order. Fail open to the permissive check.
+          return INTL_PHONE_RE.test(v);
+        }
+        return isValidNgPhone(v);
+      }
       function maybeSaveCart() {
         if (cartSaveDisabled) return;
         var nameEl = form.querySelector('#customerName') || form.querySelector('[name="customerName"]');
@@ -1588,7 +1666,9 @@ function getFormScript(
         var name = nameEl ? (nameEl.value || '').trim() : '';
         // Gate on a real Nigerian phone only — product/offer/name are progressive.
         // Name is optional; defaults to "Unknown" on the API side.
-        if (!isValidNgPhone(phoneEl.value)) return;
+        // Normalise a dropped leading zero first, so a cart is still captured for
+        // the ~7% of customers who type 803xxxxxxx instead of 0803xxxxxxx.
+        if (!isValidNgPhone(normalisePhoneValue(phoneEl, phoneEl.value))) return;
         if (!isOnline) return;
         // Helper: read a field by name, return trimmed value or undefined if blank.
         function fv(name) {
@@ -1766,13 +1846,11 @@ function getFormScript(
           return phoneInput.getAttribute('title') || 'Enter a valid phone number.';
         }
         // Validate against the input's LIVE pattern (set per country), falling
-        // back to the Nigerian validator if no pattern is present.
+        // back to the Nigerian validator if no pattern is present. Delegates to
+        // the hoisted shared validator so the blur hint and the submit-time
+        // block can never diverge.
         function _phoneOk(v) {
-          var pat = phoneInput.getAttribute('pattern');
-          if (pat) {
-            try { return new RegExp('^(?:' + pat + ')$').test(v); } catch (e) {}
-          }
-          return isValidNgPhone(v);
+          return isValidPhoneForInput(phoneInput, v);
         }
         phoneError.textContent = _phoneHint();
         if (phoneInput.parentNode) {
@@ -2117,6 +2195,42 @@ function getFormScript(
           btn.textContent = form.dataset.btnText || 'Submit Order';
           if (firstInvalid) firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
           return;
+        }
+
+        // ── Main phone format gate ────────────────────────────────────────────
+        // e.preventDefault() above bypasses native validation, so the input's
+        // pattern attribute is never enforced by the browser. Without this
+        // block a malformed number (truncated, wrong length, foreign) reaches
+        // the worker, whose gate is intentionally permissive, and lands in the
+        // CRM as an uncallable order. Runs AFTER the required-field loop so a
+        // blank phone reports as "required" rather than as a format error.
+        var mainPhoneEl = form.querySelector('#customerPhone') || form.querySelector('[name="customerPhone"]');
+        if (mainPhoneEl) {
+          // Rebuild the leading zero BEFORE validating, and write it back so the
+          // canonical form is what gets submitted (and hashed) downstream.
+          var mainPhoneVal = normalisePhoneValue(mainPhoneEl, mainPhoneEl.value);
+          if (mainPhoneVal !== (mainPhoneEl.value || '').trim()) mainPhoneEl.value = mainPhoneVal;
+          if (mainPhoneVal.length > 0 && !isValidPhoneForInput(mainPhoneEl, mainPhoneVal)) {
+            msg.className = 'msg msg-error';
+            msg.textContent = mainPhoneEl.getAttribute('title') || 'Enter a valid phone number.';
+            // Surface the inline error next to the field too, matching blur.
+            // The required-field sweep above removes every .field-error node,
+            // so re-create it here rather than expecting the blur node to still
+            // be in the DOM.
+            if (mainPhoneEl.parentNode) {
+              var mainPhoneErr = document.createElement('p');
+              mainPhoneErr.className = 'field-error';
+              mainPhoneErr.style.cssText = 'color:#dc2626;font-size:0.875rem;margin:0.25rem 0 0;';
+              mainPhoneErr.textContent = mainPhoneEl.getAttribute('title') || 'Enter a valid phone number.';
+              mainPhoneEl.parentNode.insertBefore(mainPhoneErr, mainPhoneEl.nextSibling);
+            }
+            mainPhoneEl.classList.add('input-error');
+            btn.disabled = false;
+            btn.textContent = form.dataset.btnText || 'Submit Order';
+            mainPhoneEl.focus();
+            mainPhoneEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+          }
         }
 
         // Kill further cart saves only after client validation passes —
@@ -2533,7 +2647,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
     <h2>${escapeHtml(heading)}</h2>
     ${subtitleBlock}
     <div id="yannisMsg" class="msg hidden"></div>
-    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${showPaymentMethod ? 'true' : 'false'}" data-show-customer-email="${showStandaloneEmail ? 'true' : 'false'}" data-require-customer-email="${requiredField('customerEmail') ? 'true' : 'false'}" data-success-callback="${escapeHtml(fc.successCallbackUrl ?? '')}" data-initial-currency="${escapeHtml(initialCurrency)}" data-currency-meta="${escapeHtml(JSON.stringify(currencyList))}" data-initial-country="${escapeHtml(initialCountry)}" data-phone-rules="${escapeHtml(JSON.stringify(COUNTRY_PHONE_RULES))}"${singleProductAttr}>
+    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${showPaymentMethod ? 'true' : 'false'}" data-show-customer-email="${showStandaloneEmail ? 'true' : 'false'}" data-require-customer-email="${requiredField('customerEmail') ? 'true' : 'false'}" data-success-callback="${escapeHtml(fc.successCallbackUrl ?? '')}" data-initial-currency="${escapeHtml(initialCurrency)}" data-currency-meta="${escapeHtml(JSON.stringify(currencyList))}" data-initial-country="${escapeHtml(initialCountry)}" data-phone-specs="${escapeHtml(JSON.stringify(COUNTRY_NUMBER_SPECS))}"${singleProductAttr}>
       <!-- Honeypot: bots auto-fill every input they see; humans never touch this. Field is
            visually hidden + tabindex=-1 + autocomplete=off + aria-hidden so real users and
            screen readers skip it entirely. If submitted with a value, the worker silently
@@ -2689,7 +2803,7 @@ function renderCustomField(field: CampaignCustomField): string {
           autocomplete="tel"
           data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="phone" ${required} ${placeholder}
           maxlength="14"
-          pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$"
+          pattern="^(0[789][0-9]{9}|\\+?234[789][0-9]{9})$"
           title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678"
           oninput="this.value = this.value.replace(/[^0-9+]/g, '')">
         <p class="phone-error" style="display:none;color:#dc2626;font-size:.75rem;margin:-0.5rem 0 0.75rem">Enter a valid Nigerian phone number</p>
@@ -2821,7 +2935,7 @@ function renderFallbackForm(campaignId: string, workerUrl: string): Response {
       <label for="customerName">Full Name</label>
       <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name" autocomplete="one-time-code">
       <label for="customerPhone">Phone Number</label>
-      <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
+      <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+?234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
       <label for="deliveryAddress">Delivery Address</label>
       <textarea id="deliveryAddress" name="deliveryAddress" placeholder="Your delivery address"></textarea>
       <label for="deliveryNotes">Delivery Notes (optional)</label>
