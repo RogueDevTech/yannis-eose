@@ -47,6 +47,34 @@ export const currenciesRouter = router({
     return getCurrenciesService().listActive(ctx.activeGroupId ?? null);
   }),
 
+  /**
+   * The countries this caller may actually SELECT in the switcher.
+   *
+   * Deliberately separate from `listActive`: that is the company's money-
+   * rendering catalog (every authed user needs every code to format an amount
+   * correctly, including codes they cannot browse), so filtering it to a user's
+   * grants would mislabel other countries' totals.
+   *
+   * The switcher previously built its options straight from `listActive`, so a
+   * country-scoped user was shown countries they had no grant for and got
+   * "You do not have access to that country." on click. This returns the
+   * selectable set instead.
+   *
+   * `null` means "every active currency in this company" (all-countries users).
+   */
+  selectableCountries: authedProcedure.query(async ({ ctx }) => {
+    const active = await getCurrenciesService().listActive(ctx.activeGroupId ?? null);
+    // The PERMISSION set, not `effectiveCurrencyCodes` — that one is already
+    // narrowed to the current selection, so using it would show a user who has
+    // picked Kenya only Kenya, with no way back.
+    const allowed = ctx.permittedCurrencyCodes;
+    return {
+      /** Codes this user may switch to, or null for all of `currencies`. */
+      allowedCodes: allowed,
+      currencies: allowed == null ? active : active.filter((c) => allowed.includes(c.code)),
+    };
+  }),
+
   /** Full list (incl. inactive) for the config panel. */
   list: permissionProcedure('settings.currencies.view').input(listCurrenciesSchema).query(async ({ input, ctx }) => {
     return getCurrenciesService().list({

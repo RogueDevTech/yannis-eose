@@ -169,6 +169,10 @@ export {
   updateStaffSchema,
   listUsersSchema,
   usersRosterSummarySchema,
+  // Multi-country staff phone: one rule for the API, the form and the importer.
+  staffPhoneSchema,
+  STAFF_PHONE_REGEX,
+  STAFF_PHONE_ERROR,
   searchUsersForPushTargetSchema,
   resetPasswordSchema,
   processEmailChangeSchema,
