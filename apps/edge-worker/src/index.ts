@@ -2490,6 +2490,15 @@ function getFormInnerHTML(config: CampaignConfig): string {
   // The country the form STARTS in (locked country when the picker is off).
   const initialCountry =
     (fc.deliveryCountry && regionsByCountry[fc.deliveryCountry] ? fc.deliveryCountry : undefined) ??
+    // The campaign's own country, even when we have no REGION list for it.
+    // regionsByCountry only exists for multi-currency campaigns (the API omits
+    // currencies entirely unless an offer is priced beyond base), so gating the
+    // country on it left every single-currency campaign with country '' — and
+    // an empty country means phoneRuleForCountry() hands back the permissive
+    // international rule (\+?[0-9]{7,15}), which accepts almost any digits.
+    // Regions drive the Delivery State dropdown; the phone rule is a separate
+    // concern and must not depend on them.
+    (fc.deliveryCountry || undefined) ??
     // Fall back to the base currency's country, else the first configured country.
     currencyList.find((c) => c.isDefault)?.countryName ??
     countryList[0] ??
