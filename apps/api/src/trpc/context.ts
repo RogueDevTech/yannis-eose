@@ -6,7 +6,10 @@ import { canViewAllBranches, canViewAllCountries } from '../common/authz';
  * Base country the operational view defaults to when an all-countries admin has
  * made no explicit switcher selection. NGN is the system base everywhere
  * (currency_code DEFAULT 'NGN' on every table; the switcher UI's own baseCode
- * fallback; the ['NGN'] fallback for unassigned country-scoped users below).
+ * fallback). Used for ONE thing here: the fallback for a country-scoped user
+ * with no grant in the active company, so they get a working app rather than a
+ * blank one. It is deliberately NOT used as a default for users who may see
+ * every country — see the note further down.
  * Resolved as a constant to keep the per-request context path query-free.
  */
 const BASE_CURRENCY_CODE = 'NGN';
@@ -60,6 +63,18 @@ export interface TrpcContext {
    * See `countryScopeCondition`.
    */
   effectiveCurrencyCodes: string[] | null;
+  /**
+   * The country PERMISSION set, before the switcher selection is folded in.
+   *
+   * `effectiveCurrencyCodes` is the permission narrowed by the current view, so
+   * once a user picks one country it holds just that one. Anything that needs to
+   * know what the user MAY see — above all the switcher's own option list — must
+   * read this instead, or selecting a country would leave them unable to select
+   * another.
+   *
+   * `null` means every country (all-countries users).
+   */
+  permittedCurrencyCodes: string[] | null;
   /**
    * Multi-country VIEW — the single country the user has selected in the top-bar
    * switcher, or null for "all countries I can see". This narrows the effective
@@ -154,8 +169,11 @@ export function createContext(req: Request, res: Response): TrpcContext {
     if (canViewAllCountries(user)) {
       effectiveCurrencyCodes = null;
     } else {
+      // A country-scoped user with no grant in this company falls back to the
+      // base country rather than an empty set, so they get a working app rather
+      // than a blank one. (Only 3 active users are in this state on prod.)
       const assigned = user.currencyCodes ?? [];
-      effectiveCurrencyCodes = assigned.length > 0 ? assigned : ['NGN'];
+      effectiveCurrencyCodes = assigned.length > 0 ? assigned : [BASE_CURRENCY_CODE];
     }
   }
 
@@ -172,6 +190,10 @@ export function createContext(req: Request, res: Response): TrpcContext {
   // `marketingCurrencyScope` (see marketing.router.ts:1157, orders.router.ts:784)
   // so a Media Buyer / marketing view keeps its cross-country visibility. That
   // opt-out lives at the query layer, so narrowing here is safe for marketing.
+  // Snapshot the PERMISSION set before the switcher narrows it below, so the
+  // switcher can still offer every country this user may choose.
+  const permittedCurrencyCodes: string[] | null = effectiveCurrencyCodes;
+
   const currentCurrencyCode = user?.currentCurrencyCode
     ? user.currentCurrencyCode.toUpperCase()
     : null;
@@ -186,17 +208,26 @@ export function createContext(req: Request, res: Response): TrpcContext {
     }
     // If not allowed (stale selection after a revoke), ignore it and keep the
     // permission-scoped set — never expose a country the user can't see.
-  } else if (user && effectiveCurrencyCodes == null) {
-    // All-countries admin with NO explicit switcher selection: default the
-    // operational view to the BASE country (CEO directive — non-marketing
-    // sections show one country at a time, matching what the switcher displays,
-    // which is the base country until the admin picks another). NGN is the base
-    // by system default (currency_code default 'NGN' on every table, and the
-    // switcher's own baseCode fallback). Marketing surfaces still ignore this
-    // (they hardcode a null marketingCurrencyScope), so cross-country marketing
-    // views are unaffected.
-    effectiveCurrencyCodes = [BASE_CURRENCY_CODE];
   }
+  // NOTE: no base-country fallback here, deliberately.
+  //
+  // This used to narrow an all-countries user with no switcher selection to
+  // `[BASE_CURRENCY_CODE]` ('NGN'), to match what the switcher displayed. The
+  // effect was that every operational surface (orders / CS / logistics /
+  // inventory / finance) silently hid every non-Nigerian row until the user
+  // actively switched away from the default — and since `currentCurrencyCode`
+  // is session-only and was dropped on each login, it reverted every time.
+  //
+  // On prod that hid 48 KES + 48 ZMW orders (plus 4 cart + 25 follow-up rows)
+  // that were being created daily, across three live products. The countries
+  // were correctly configured the whole time: five active currencies with FX
+  // rates and staff assigned to each.
+  //
+  // "No selection" now means "everything you are permitted to see", which is
+  // what `null` already means everywhere downstream (see countryScopeCondition)
+  // and what the branch switcher's "All branches" does. One-country-at-a-time
+  // is still fully supported — it is what picking a country in the switcher
+  // does, and that choice now persists (see auth.service session builds).
 
   return {
     user,
@@ -207,6 +238,7 @@ export function createContext(req: Request, res: Response): TrpcContext {
     effectiveBranchIds,
     activeGroupId,
     effectiveCurrencyCodes,
+    permittedCurrencyCodes,
     currentCurrencyCode,
   };
 }

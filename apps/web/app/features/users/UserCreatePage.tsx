@@ -20,6 +20,11 @@ import type {
 } from './types';
 import { formatRole, ROLE_AVATAR_GRADIENTS } from './types';
 import { useFetcherToast } from '~/components/ui/toast';
+import {
+  COUNTRY_NUMBER_SPECS,
+  countryForCurrency,
+  phoneRuleForCountry,
+} from '@yannis/shared';
 import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
 import { PermissionMatrix } from './PermissionMatrix';
 import {
@@ -686,13 +691,54 @@ export function UserCreatePage({
     );
   };
 
-  const phoneIsComplete = /^[789]\d{9}$/.test(phoneLocal);
-  const phoneError =
-    phoneLocal.length > 0 && !phoneIsComplete
-      ? phoneLocal.length < 10
-        ? 'Enter all 10 digits.'
-        : 'Number must start with 7, 8, or 9.'
-      : undefined;
+  /**
+   * Phone format follows the country this staff member is being assigned to,
+   * rather than being hardcoded to Nigeria.
+   *
+   * The field used to prefix `+234` and demand exactly 10 digits starting 7/8/9,
+   * so a Ghanaian or Kenyan number could not be entered at all — on prod every
+   * one of 240 staff phones was Nigerian because nothing else was accepted.
+   *
+   * Which country: the first country selected for the user, falling back to the
+   * company's default currency, then Nigeria. A staff member may legitimately
+   * keep a phone from another market, so this drives the HINT and the prefix,
+   * while the server accepts any operating country's format.
+   */
+  const phoneCountryCode = useMemo(() => {
+    if (selectedCurrencyCodes.length > 0) return selectedCurrencyCodes[0]!;
+    const fallback = activeCurrencies.find((c) => c.isDefault) ?? activeCurrencies[0];
+    return fallback?.code ?? 'NGN';
+  }, [selectedCurrencyCodes, activeCurrencies]);
+
+  const phoneRule = useMemo(() => {
+    const country = countryForCurrency(phoneCountryCode)?.country;
+    return phoneRuleForCountry(country);
+  }, [phoneCountryCode]);
+
+  /** National significant length, excluding the trunk '0'. */
+  const phoneNationalLength = useMemo(() => {
+    const country = countryForCurrency(phoneCountryCode)?.country;
+    return (country && COUNTRY_NUMBER_SPECS[country]?.len) || 10;
+  }, [phoneCountryCode]);
+
+  const phoneAllowedPrefixes = useMemo(() => {
+    const country = countryForCurrency(phoneCountryCode)?.country;
+    return (country && COUNTRY_NUMBER_SPECS[country]?.prefixes) || ['7', '8', '9'];
+  }, [phoneCountryCode]);
+
+  const phoneIsComplete = useMemo(() => {
+    if (phoneLocal.length !== phoneNationalLength) return false;
+    return phoneAllowedPrefixes.some((pfx) => phoneLocal.startsWith(pfx));
+  }, [phoneLocal, phoneNationalLength, phoneAllowedPrefixes]);
+
+  const phoneError = (() => {
+    if (phoneLocal.length === 0 || phoneIsComplete) return undefined;
+    if (phoneLocal.length < phoneNationalLength) {
+      return `Enter all ${phoneNationalLength} digits.`;
+    }
+    const list = phoneAllowedPrefixes.join(', ');
+    return `Number must start with ${list}.`;
+  })();
 
   // In edit mode, suppress the conflict warning when the role isn't actually changing —
   // the existing user already holds that head slot and re-saving shouldn't trigger a warning
@@ -1595,41 +1641,44 @@ export function UserCreatePage({
           <div className="card space-y-4">
             <h2 className="text-lg font-semibold text-app-fg">Contact</h2>
             <div className="sm:w-1/2">
-              {/* Visible input is the 10-digit local part. We always submit
-                  +234XXXXXXXXXX through a hidden field — keeps the API regex
-                  happy regardless of what the user typed. */}
+              {/* Visible input is the LOCAL part for the selected country; the
+                  hidden field below submits the full international form. Both
+                  the length and the dial code follow `phoneRule`, so a Ghanaian
+                  or Kenyan number is enterable rather than silently rejected. */}
               <TextInput
                 id="phone-local"
                 type="tel"
                 inputMode="numeric"
                 autoComplete="tel-national"
                 label="WhatsApp / Phone Number"
-                placeholder="8031234567"
+                placeholder={phoneRule.example.replace(/^0/, '')}
                 value={phoneLocal}
                 onChange={(e) => {
-                  // Strip non-digits, drop a leading 0 if pasted (so 08031234567
-                  // becomes 8031234567), then cap at 10.
+                  // Strip non-digits, drop this country's dial code and any
+                  // leading trunk 0 if pasted, then cap at the national length.
                   let digits = e.target.value.replace(/\D/g, '');
-                  if (digits.startsWith('234')) digits = digits.slice(3);
+                  if (phoneRule.dialCode && digits.startsWith(phoneRule.dialCode)) {
+                    digits = digits.slice(phoneRule.dialCode.length);
+                  }
                   if (digits.startsWith('0')) digits = digits.slice(1);
-                  setPhoneLocal(digits.slice(0, 10));
+                  setPhoneLocal(digits.slice(0, phoneNationalLength));
                 }}
-                leftAddon="+234"
+                leftAddon={`+${phoneRule.dialCode}`}
                 hint={
                   isEditMode
                     ? undefined
-                    : '10 digits, starting with 7, 8, or 9. Must be unique across all staff. Never displayed publicly; masked in all views.'
+                    : `${phoneNationalLength} digits, starting with ${phoneAllowedPrefixes.join(', ')}. Must be unique across all staff. Never displayed publicly; masked in all views.`
                 }
                 error={phoneError}
                 required={!isEditMode}
-                maxLength={10}
+                maxLength={phoneNationalLength}
               />
               {/* No "current value" hint anymore — the field is prefilled with
                   the user's existing number, so the editor sees it directly. */}
               <input
                 type="hidden"
                 name="phone"
-                value={phoneIsComplete ? `+234${phoneLocal}` : ''}
+                value={phoneIsComplete ? `+${phoneRule.dialCode}${phoneLocal}` : ''}
               />
             </div>
           </div>

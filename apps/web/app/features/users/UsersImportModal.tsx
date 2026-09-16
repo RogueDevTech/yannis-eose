@@ -31,6 +31,7 @@ import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { useFetcherToast } from '~/components/ui/toast';
+import { STAFF_PHONE_ERROR, STAFF_PHONE_REGEX } from '@yannis/shared';
 
 interface BranchInfo {
   id: string;
@@ -87,7 +88,12 @@ function normalizeRole(raw: string): string | null {
   return ROLE_LABEL_LOOKUP[lower] ?? null;
 }
 
-const NIGERIAN_PHONE = /^(?:0[789]\d{9}|\+234[789]\d{9})$/;
+/**
+ * Re-exported from the shared validator rather than re-declared, so this
+ * preview and the API agree. The previous local Nigeria-only copy meant a
+ * Ghanaian or Kenyan staff row failed here even though it is now valid.
+ */
+const NIGERIAN_PHONE = STAFF_PHONE_REGEX;
 
 interface ParsedRow {
   rowIndex: number; // 1-based for human display
@@ -218,7 +224,7 @@ function resolveRow(parsed: ParsedRow, branches: BranchInfo[]): ResolvedRow {
     errors.push('Email is invalid.');
   }
   if (!NIGERIAN_PHONE.test(parsed.phone)) {
-    errors.push('Phone must be a Nigerian number (08031234567 or +2348031234567).');
+    errors.push(STAFF_PHONE_ERROR);
   }
   const resolvedRole = parsed.role ? normalizeRole(parsed.role) : null;
   if (!resolvedRole) {

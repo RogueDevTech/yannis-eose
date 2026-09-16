@@ -1,4 +1,59 @@
 import { z } from 'zod';
+import { AFRICAN_COUNTRY_CURRENCIES, phoneRuleForCountry } from '../currency/african-countries';
+
+/**
+ * Currency codes we have ever operated in, as of the multi-country rollout.
+ * Used to bound the staff-phone union: validating against all 50+ African
+ * numbering plans is so permissive that a typo'd Nigerian number can match a
+ * distant country's plan (Congo-Brazzaville's national numbers start '0', so
+ * '01031234567' would pass as Congolese). Keeping the union to live markets
+ * makes the check meaningfully strict.
+ *
+ * Widen this when a market opens. It is intentionally a static list rather than
+ * a DB read: validators are pure and are used on both sides of the wire.
+ */
+const OPERATING_CURRENCY_CODES = ['NGN', 'GHS', 'KES', 'TZS', 'ZMW'] as const;
+
+/**
+ * Staff phone — accepted for ANY country we operate in, not just Nigeria.
+ *
+ * This used to be `/^(?:0[789]\d{9}|\+234[789]\d{9})$/`, which HARD-REJECTED
+ * every non-Nigerian number. Staff were being assigned to Kenya and Zambia
+ * while it was impossible to store their phone number: on prod, 240 staff
+ * phones were Nigerian and zero were anything else.
+ *
+ * Built by unioning the per-country patterns in `COUNTRY_PHONE_RULES`, which are
+ * themselves derived from one `COUNTRY_NUMBER_SPECS` row per country. Adding a
+ * market needs no change here.
+ *
+ * Deliberately NOT country-pinned per user: a staff member's phone need not
+ * belong to the country they are assigned to (a regional manager keeps their
+ * home number), so this validates "is a plausible number in a market we know"
+ * rather than "matches this user's country". The client form still nudges toward
+ * the selected country's format.
+ */
+const STAFF_PHONE_PATTERN = (() => {
+  const countries = AFRICAN_COUNTRY_CURRENCIES.filter((c) =>
+    (OPERATING_CURRENCY_CODES as ReadonlyArray<string>).includes(c.code),
+  ).map((c) => c.country);
+  const patterns = [...new Set(countries.map((c) => phoneRuleForCountry(c).pattern))];
+  return new RegExp(`^(?:${patterns.join('|')})$`);
+})();
+
+const STAFF_PHONE_MESSAGE =
+  'Enter a valid phone number for one of your operating countries (e.g. 08031234567 for Nigeria, 0241234567 for Ghana)';
+
+/** Shared so create and update cannot drift apart. */
+export const staffPhoneSchema = z.string().regex(STAFF_PHONE_PATTERN, STAFF_PHONE_MESSAGE);
+
+/**
+ * Exported for CLIENT-side pre-validation (the bulk-import preview), so the
+ * browser flags the same numbers the server would reject. Previously the import
+ * screens each carried their own copy of a Nigeria-only regex, so they diverged
+ * from the API and from each other.
+ */
+export const STAFF_PHONE_REGEX = STAFF_PHONE_PATTERN;
+export const STAFF_PHONE_ERROR = STAFF_PHONE_MESSAGE;
 
 // ============================================
 // User Role Enum (matches DB enum)
@@ -160,10 +215,7 @@ export const createStaffSchema = z.object({
   // Required on create (CEO directive 2026-04-24) — every staff member must have a reachable
   // number and it must be unique across the org. Existing users without a phone can still be
   // edited; the update validator keeps this optional for back-compat.
-  phone: z.string().regex(
-    /^(?:0[789]\d{9}|\+234[789]\d{9})$/,
-    'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)',
-  ),
+  phone: staffPhoneSchema,
 
   // Soft duplicate-name guard acknowledgement. When the create form submits a
   // name that closely matches an existing staff member, the server returns
@@ -225,10 +277,7 @@ export const updateStaffSchema = z.object({
   capacity: z.number().int().min(1).max(100).optional(),
   logisticsLocationId: z.string().uuid().nullable().optional(),
   status: z.enum(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED']).optional(),
-  phone: z.string().regex(
-    /^(?:0[789]\d{9}|\+234[789]\d{9})$/,
-    'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)',
-  ).nullable().optional(),
+  phone: staffPhoneSchema.nullable().optional(),
   visibleOrderStatuses: z.array(visibleOrderStatusSchema).nullable().optional(),
   restrictProductAccess: z.boolean().optional(),
   productIds: z.array(z.string().uuid()).optional(),
