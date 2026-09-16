@@ -195,9 +195,12 @@ export function Header({
     }
     return out;
   }, [mobileActiveCurrencies]);
-  const mobileBaseCurrencyCode = (mobileActiveCurrencies.find((c) => c.isDefault)?.code ?? 'NGN').toUpperCase();
-  const mobileCurrentCountryCode = (currentCurrencyCode || mobileBaseCurrencyCode).toUpperCase();
-  const mobileCanSwitchCountry = mobileCountryOptions.length > 1;
+  // Same model as desktop: no selection means ALL countries, not the base one.
+  const mobileCurrentCountryCode = (currentCurrencyCode ?? '').toUpperCase() || ALL_COUNTRIES;
+  // Stay available at one country whenever a selection is active, so a narrowed
+  // user always has a route back to "All countries".
+  const mobileCanSwitchCountry =
+    mobileCountryOptions.length > 1 || mobileCurrentCountryCode !== ALL_COUNTRIES;
   // Pending (unapplied) mobile country selection — committed on "Apply", mirroring
   // the branch switcher + desktop country switcher.
   const [mobilePendingCountry, setMobilePendingCountry] = useState(mobileCurrentCountryCode);
@@ -211,7 +214,8 @@ export function Header({
     // loader re-runs against the new session country and no stale country-scoped
     // data lingers.
     const fd = new FormData();
-    fd.set('code', mobilePendingCountry);
+    // Empty string clears back to "all countries I may see".
+    fd.set('code', mobilePendingCountry === ALL_COUNTRIES ? '' : mobilePendingCountry);
     try {
       await fetch('/admin/currency/switch', { method: 'POST', body: fd });
     } catch {
@@ -863,6 +867,25 @@ export function Header({
                     </p>
                   </div>
                   <div className="px-5 pb-1 pt-1 space-y-1">
+                    {/* "All countries" first, matching desktop + the branch switcher. */}
+                    <button
+                      type="button"
+                      disabled={mobileApplying}
+                      onClick={() => setMobilePendingCountry(ALL_COUNTRIES)}
+                      className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                        mobilePendingCountry.toUpperCase() === ALL_COUNTRIES
+                          ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300'
+                          : 'text-app-fg hover:bg-app-hover'
+                      }`}
+                    >
+                      <span aria-hidden>🌍</span>
+                      <span className="truncate font-medium">All countries</span>
+                      {mobilePendingCountry.toUpperCase() === ALL_COUNTRIES && (
+                        <svg className="ml-auto h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      )}
+                    </button>
                     {mobileCountryOptions.map((o) => {
                       const isSelected = o.code.toUpperCase() === mobilePendingCountry.toUpperCase();
                       return (
@@ -1708,6 +1731,13 @@ function HeaderBranchSwitcher({
  * more than one country (a single-country-scoped user has nothing to switch),
  * keeping single-country installs byte-for-byte unchanged.
  */
+/**
+ * Sentinel for the "All countries" choice. Posting an empty `code` is what the
+ * switch action maps to a null selection, so this never reaches the wire — it
+ * only distinguishes "all" from a concrete code in local state.
+ */
+const ALL_COUNTRIES = 'ALL';
+
 function HeaderCountrySwitcher({
   currentCurrencyCode,
   currencies,
@@ -1735,9 +1765,11 @@ function HeaderCountrySwitcher({
     }
     return out;
   }, [active]);
-  const baseCode = (active.find((c) => c.isDefault)?.code ?? 'NGN').toUpperCase();
-  const baseName = active.find((c) => c.isDefault)?.countryName ?? 'Nigeria';
-  const currentCode = (currentCurrencyCode || baseCode).toUpperCase();
+  // `ALL` is the explicit "every country I may see" choice, mirroring the branch
+  // switcher's "All Branches". It posts an empty `code`, which the switch action
+  // already maps to null — that clearing path existed but nothing ever reached
+  // it, so a user who picked a country could never get back to seeing them all.
+  const currentCode = (currentCurrencyCode ?? '').toUpperCase() || ALL_COUNTRIES;
 
   // Pending (unapplied) selection — committed only on "Apply", mirroring the
   // branch switcher's select-then-apply pattern.
@@ -1753,11 +1785,15 @@ function HeaderCountrySwitcher({
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  // Nothing to switch: single-currency company, or the user can only see one
-  // country (options come pre-scoped to the user's allowed countries server-side).
-  if (options.length <= 1) return null;
+  // Nothing to switch: a single-country company. Note the switcher stays visible
+  // at exactly one country whenever a selection is active, so a user narrowed to
+  // one country always has a way back to "All countries".
+  if (options.length <= 1 && currentCode === ALL_COUNTRIES) return null;
 
-  const currentName = options.find((o) => o.code.toUpperCase() === currentCode)?.name ?? baseName;
+  const currentName =
+    currentCode === ALL_COUNTRIES
+      ? 'All countries'
+      : (options.find((o) => o.code.toUpperCase() === currentCode)?.name ?? currentCode);
   const dirty = pending.toUpperCase() !== currentCode;
 
   const apply = async () => {
@@ -1767,7 +1803,8 @@ function HeaderCountrySwitcher({
     // fetcher revalidation leaves streamed/cached page data scoped to the old
     // country; a hard reload re-runs every loader against the new session.
     const body = new FormData();
-    body.set('code', pending);
+    // Empty string clears the selection back to "all countries I may see".
+    body.set('code', pending === ALL_COUNTRIES ? '' : pending);
     try {
       await fetch('/admin/currency/switch', { method: 'POST', body });
     } catch {
@@ -1794,6 +1831,26 @@ function HeaderCountrySwitcher({
       {open && (
         <div className="absolute right-0 z-50 mt-1 w-56 rounded-lg border border-app-border bg-app-elevated p-1.5 shadow-lg">
           <div className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-app-fg-muted">Country</div>
+          {/* "All countries" first, like the branch switcher's "All Branches".
+              Without it a user who picked one country had no way back. */}
+          <button
+            type="button"
+            onClick={() => setPending(ALL_COUNTRIES)}
+            disabled={applying}
+            className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors disabled:opacity-60 ${
+              pending.toUpperCase() === ALL_COUNTRIES
+                ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300'
+                : 'text-app-fg hover:bg-app-hover'
+            }`}
+          >
+            <span aria-hidden>🌍</span>
+            <span className="truncate flex-1">All countries</span>
+            {pending.toUpperCase() === ALL_COUNTRIES && (
+              <svg className="h-4 w-4 shrink-0 text-brand-600" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                <path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 011.4-1.4l2.8 2.8 6.8-6.8a1 1 0 011.4 0z" clipRule="evenodd" />
+              </svg>
+            )}
+          </button>
           {options.map((o) => {
             const isSelected = o.code.toUpperCase() === pending.toUpperCase();
             return (

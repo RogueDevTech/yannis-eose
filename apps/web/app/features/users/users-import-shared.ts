@@ -5,6 +5,8 @@
  * keystroke without dragging in modal state.
  */
 
+import { STAFF_PHONE_ERROR, STAFF_PHONE_REGEX } from '@yannis/shared';
+
 export interface BranchInfo {
   id: string;
   code: string;
@@ -71,7 +73,15 @@ export function normalizeRole(raw: string): string | null {
   return ROLE_LABEL_LOOKUP[lower] ?? null;
 }
 
-export const NIGERIAN_PHONE = /^(?:0[789]\d{9}|\+234[789]\d{9})$/;
+/**
+ * Staff phone for import validation — re-exported from the shared validator so
+ * the preview flags exactly what the API would reject. It used to be a local
+ * Nigeria-only copy, which made non-Nigerian staff unimportable and could drift
+ * from the server rule.
+ *
+ * Name kept for call-site compatibility; it is no longer Nigeria-only.
+ */
+export const NIGERIAN_PHONE = STAFF_PHONE_REGEX;
 
 export interface ParsedRow {
   /** 1-based row number from the source sheet (header is row 1). Used for human display. */
@@ -144,7 +154,7 @@ export function resolveRow(parsed: ParsedRow, branches: BranchInfo[]): ResolvedR
     errors.push(
       looksCorrupted
         ? 'Phone was corrupted by Excel (scientific notation). Format the Phone column as Text in your spreadsheet and re-enter the number.'
-        : 'Phone must be a Nigerian number (08031234567 or +2348031234567).',
+        : STAFF_PHONE_ERROR,
     );
   }
   const resolvedRole = parsed.role ? normalizeRole(parsed.role) : null;

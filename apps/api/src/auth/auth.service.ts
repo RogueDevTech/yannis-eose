@@ -313,6 +313,14 @@ export class AuthService {
       // Scoped to the company being entered (0342): country access is per
       // company, so a grant in one never widens or narrows another.
       currencyCodes: await this.getUserCurrencyCodes(user.id, activeGroupId),
+      // Country VIEW starts at "all countries I may see" (null), mirroring how
+      // `currentBranchId` starts at "All branches" for a user who may see them
+      // all. A country is only ever pinned by an explicit switcher action.
+      //
+      // Stated explicitly rather than left undefined: the field is part of the
+      // session contract, and its absence previously combined with a base-country
+      // default in trpc/context.ts to hide every non-Nigerian row.
+      currentCurrencyCode: null,
       appTheme: user.appTheme ?? null,
       fontScale: user.fontScale ?? null,
     };
@@ -556,6 +564,9 @@ export class AuthService {
       // Mirror sees exactly the target's country scope (read-only walkthrough),
       // within the company the mirror session lands in.
       currencyCodes: await this.getUserCurrencyCodes(target.id, mirrorActiveGroupId),
+      // Mirror starts at all-countries too, so the admin sees the target's full
+      // permitted scope rather than a silently Nigeria-only walkthrough.
+      currentCurrencyCode: null,
       // Surface the target's appearance so the admin sees the app exactly as the
       // user would. The green border makes Mirror Mode obvious; the theme is part
       // of the read-only "live walkthrough".
@@ -731,6 +742,8 @@ export class AuthService {
       // return the actor with LESS access than they started with. The per-company
       // narrowing happens when their session next resolves a company.
       currencyCodes: await this.getUserCurrencyCodes(actor.id),
+      // Mirror-exit restores the actor at all-countries, never narrowed.
+      currentCurrencyCode: null,
       appTheme: actor.appTheme ?? null,
       fontScale: actor.fontScale ?? null,
       mirroredBy: null,
