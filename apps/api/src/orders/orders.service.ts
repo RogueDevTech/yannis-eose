@@ -2272,6 +2272,53 @@ export class OrdersService {
   }
 
   /**
+   * Resolve a `cartId` to one that is safe to store on `orders.cart_id`.
+   *
+   * PILLAR 1. `orders.cart_id` has an FK to `cart_abandonments(id)` (migration
+   * 0142), and the column exists only so HoCS can filter "Recovered from cart"
+   * on /admin/sales/orders. It carries no money and no lifecycle meaning — but
+   * because the insert passed the id straight through, an id with no matching
+   * cart row raised `orders_cart_id_fkey` and destroyed the WHOLE order.
+   *
+   * That is reachable on the happy path, not just in theory. Carts are upserted
+   * on (campaign_id, phone_hash) with the id generated server-side, and the edge
+   * worker's `/cart` returns `{ buffered: true }` with NO id when the API is
+   * briefly 5xx — the row goes to QStash and lands later. A form session that
+   * had already captured a cart id keeps it, so the order can arrive carrying an
+   * id whose row is still queued. Prod saw a burst of these while 58 carts and
+   * 40 cart-linked orders in the same window succeeded: a narrow race, and every
+   * loss was an order the customer believed they had placed.
+   *
+   * So: verify, and drop the tag rather than the order. A lookup failure is
+   * swallowed for the same reason — degrade to an untagged order, never a lost
+   * one. This mirrors the attribution read further down, which has always done
+   * `if (cart)` instead of assuming the row exists.
+   *
+   * The cart is still marked CONVERTED separately via `cartService.convert`,
+   * which is already `.catch(() => {})` on every call site.
+   */
+  private async resolveStorableCartId(cartId: string | null | undefined): Promise<string | null> {
+    if (!cartId) return null;
+    try {
+      const rows = await this.db
+        .select({ id: schema.cartAbandonments.id })
+        .from(schema.cartAbandonments)
+        .where(eq(schema.cartAbandonments.id, cartId))
+        .limit(1);
+      if (rows.length > 0) return cartId;
+      this.logger.warn(
+        `Order create: cartId ${cartId} has no cart_abandonments row (cart save likely still buffered) — storing NULL so the order is not lost`,
+      );
+      return null;
+    } catch (err) {
+      this.logger.warn(
+        `Order create: could not verify cartId ${cartId} (${(err as Error)?.message ?? err}) — storing NULL`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Create a new order with status UNPROCESSED.
    * Called by Edge Worker or admin manual entry.
    * When paymentMethod is PAY_ONLINE, initializes Paystack and returns authorizationUrl for redirect.
@@ -2638,6 +2685,10 @@ export class OrdersService {
           )) AS next_num
       `) as unknown as [{ next_num: number }];
 
+      // Verified before the insert: an id whose cart row has not landed yet
+      // must cost the tag, never the order. See resolveStorableCartId.
+      const storableCartId = await this.resolveStorableCartId(cartId);
+
       const rows = await dbOrTx
         .insert(schema.orders)
         .values({
@@ -2669,7 +2720,7 @@ export class OrdersService {
           customFields: orderInput.customFields ? deepStrip0(orderInput.customFields) : null,
           // Back-link to the originating cart so HoCS can filter "Recovered from
           // cart" on /admin/sales/orders (migration 0142). NULL for direct orders.
-          cartId: cartId ?? null,
+          cartId: storableCartId,
           // Form Analytics attribution: links this order to the form view that
           // produced it (funnel Ordered/Confirmed/Delivered stages). NULL when the
           // beacon was blocked or for non-edge-form orders.
@@ -3012,6 +3063,9 @@ export class OrdersService {
         throw new DedupBlock(dup);
       }
 
+      // Same FK guard as the public intake path: drop the tag, keep the order.
+      const storableCartId = await this.resolveStorableCartId(input.cartId);
+
       const rows = await tx
         .insert(schema.orders)
         .values({
@@ -3041,7 +3095,7 @@ export class OrdersService {
           offlineOrderCategory: input.offlineOrderCategory ?? null,
           // Back-link to the cart when this offline order was created from a
           // recovered cart (Assign-from-Modal flow). NULL for direct offline orders.
-          cartId: input.cartId ?? null,
+          cartId: storableCartId,
           customFields: input.customFields ?? null,
         })
         .returning();
@@ -3646,6 +3700,9 @@ export class OrdersService {
         throw new DedupBlock(dup);
       }
 
+      // Same FK guard as the public intake path: drop the tag, keep the order.
+      const storableCartId = await this.resolveStorableCartId(input.cartId);
+
       const rows = await tx
         .insert(schema.orders)
         .values({
@@ -3673,7 +3730,7 @@ export class OrdersService {
           status: 'CS_ASSIGNED',
           orderSource: 'delivered_follow_up',
           isDeliveredFollowUp: true,
-          cartId: input.cartId ?? null,
+          cartId: storableCartId,
           customFields: input.customFields ?? null,
         })
         .returning();
