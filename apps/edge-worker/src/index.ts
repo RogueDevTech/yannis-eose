@@ -6,6 +6,7 @@ import {
   phoneRuleForCountry,
   normalizePhoneForHash,
 } from '@yannis/shared';
+import type { CountryPhoneRule } from '@yannis/shared';
 
 /**
  * Yannis EOSE — Edge Worker
@@ -1894,8 +1895,11 @@ function getFormScript(
         var cfPhoneError = cfPhone.nextElementSibling;
         if (!cfPhoneError || !cfPhoneError.classList.contains('phone-error')) return;
         cfPhone.addEventListener('blur', function() {
-          var v = (cfPhone.value || '').trim();
-          cfPhoneError.style.display = v.length > 0 && !isValidNgPhone(v) ? '' : 'none';
+          // Normalise a dropped leading zero first, then validate against THIS
+          // input's own country pattern - same contract as the main phone field.
+          var v = normalisePhoneValue(cfPhone, cfPhone.value);
+          if (v !== (cfPhone.value || '').trim()) cfPhone.value = v;
+          cfPhoneError.style.display = v.length > 0 && !isValidPhoneForInput(cfPhone, v) ? '' : 'none';
         });
         cfPhone.addEventListener('input', function() {
           if (cfPhoneError.style.display !== 'none') cfPhoneError.style.display = 'none';
@@ -2138,12 +2142,16 @@ function getFormScript(
         var cfPhoneInputs = form.querySelectorAll('[data-yannis-cf-type="phone"]');
         for (var pi = 0; pi < cfPhoneInputs.length; pi++) {
           var cfPh = cfPhoneInputs[pi];
-          var cfPhVal = (cfPh.value || '').trim();
-          if (cfPhVal.length > 0 && !isValidNgPhone(cfPhVal)) {
+          // Rebuild the leading zero BEFORE validating and write it back, so a
+          // required custom phone field can never reject a number the main
+          // phone field accepts (that blocked the whole submit).
+          var cfPhVal = normalisePhoneValue(cfPh, cfPh.value);
+          if (cfPhVal !== (cfPh.value || '').trim()) cfPh.value = cfPhVal;
+          if (cfPhVal.length > 0 && !isValidPhoneForInput(cfPh, cfPhVal)) {
             var cfPhLabel = form.querySelector('label[for="' + cfPh.id + '"]');
             cfPhLabel = cfPhLabel ? cfPhLabel.textContent : 'Phone';
             msg.className = 'msg msg-error';
-            msg.textContent = (cfPhLabel || 'Phone').replace(/\\s*\\*\\s*$/, '').trim() + ': enter a valid Nigerian phone number';
+            msg.textContent = (cfPhLabel || 'Phone').replace(/\\s*\\*\\s*$/, '').trim() + ': ' + (cfPh.getAttribute('title') || 'enter a valid phone number');
             btn.disabled = false;
             btn.textContent = form.dataset.btnText || 'Submit Order';
             cfPh.focus();
@@ -2645,7 +2653,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
       }
       if (token.startsWith('custom.')) {
         const field = customFieldMap.get(token.slice('custom.'.length));
-        return field ? renderCustomField(field) : '';
+        return field ? renderCustomField(field, initialPhoneRule) : '';
       }
       return '';
     })
@@ -2782,7 +2790,7 @@ function renderStandardField(
 
 type CampaignCustomField = NonNullable<NonNullable<CampaignConfig['formConfig']>['customFields']>[number];
 
-function renderCustomField(field: CampaignCustomField): string {
+function renderCustomField(field: CampaignCustomField, phoneRule: CountryPhoneRule): string {
   const id = `yannis-cf-${field.id}`;
   const required = field.required ? 'required' : '';
   const placeholder = field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : '';
@@ -2811,11 +2819,12 @@ function renderCustomField(field: CampaignCustomField): string {
         <input id="${id}" name="${id}" type="tel" inputmode="tel"
           autocomplete="tel"
           data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="phone" ${required} ${placeholder}
-          maxlength="14"
-          pattern="^(0[789][0-9]{9}|\\+?234[789][0-9]{9})$"
-          title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678"
+          maxlength="16"
+          pattern="^${escapeHtml(phoneRule.pattern)}$"
+          title="Enter a valid ${escapeHtml(phoneRule.country)} phone number, e.g. ${escapeHtml(phoneRule.example)} or ${escapeHtml(phoneRule.exampleIntl)}"
+          data-dial-code="${escapeHtml(phoneRule.dialCode)}"
           oninput="this.value = this.value.replace(/[^0-9+]/g, '')">
-        <p class="phone-error" style="display:none;color:#dc2626;font-size:.75rem;margin:-0.5rem 0 0.75rem">Enter a valid Nigerian phone number</p>
+        <p class="phone-error" style="display:none;color:#dc2626;font-size:.75rem;margin:-0.5rem 0 0.75rem">Enter a valid ${escapeHtml(phoneRule.country)} phone number</p>
         ${helpHtml}`;
     case 'number':
       return `${labelHtml}
