@@ -123,7 +123,7 @@ export type MarketingOrdersSecondaryPayload = {
   campaignsForFilter: Array<{ id: string; name: string }>;
   /** Open (un-recovered) abandoned-cart count, scoped to the viewer's media buyer / branch. */
   abandonedCartCount: number;
-  formEntryBreakdown?: { converted: number; pending: number; abandoned: number; total: number };
+  formEntryBreakdown?: { converted: number; pending: number; abandoned: number; blocked: number; total: number };
   offlineCount: number;
   duplicateCount: number;
   /** Status counts for cart-graduated orders (orderSource='online') — separate strip. */
@@ -1438,11 +1438,12 @@ export function MarketingOrdersPage({
         <div className="p-5 space-y-3">
           <h3 className="text-base font-semibold text-app-fg">Form Entries Breakdown</h3>
           {(() => {
-            const fe = secondary.formEntryBreakdown ?? { converted: 0, pending: 0, abandoned: 0, total: 0 };
+            const fe = secondary.formEntryBreakdown ?? { converted: 0, pending: 0, abandoned: 0, blocked: 0, total: 0 };
             const rows: Array<[string, number]> = [
               ['Became an order', fe.converted],
               ['Still in cart pipeline', fe.pending],
               ['Abandoned, no order', fe.abandoned],
+              ['Blocked as duplicate', fe.blocked],
             ];
             return (
               <div className="space-y-2 text-sm">

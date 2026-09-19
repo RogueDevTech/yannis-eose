@@ -1359,7 +1359,7 @@ export const marketingRouter = router({
           effectiveBranchIds: ctx.effectiveBranchIds,
           startDate,
           endDate,
-        }).catch(() => ({ converted: 0, pending: 0, abandoned: 0, total: 0 })),
+        }).catch(() => ({ converted: 0, pending: 0, abandoned: 0, blocked: 0, total: 0 })),
         // Supplementary counts: offline + duplicate — same scope as statusCounts.
         getOrdersService().getSupplementaryCounts(
           ordersScope.mediaBuyerId,

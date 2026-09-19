@@ -1240,7 +1240,7 @@ export class CartService {
    */
   async getEntryBreakdown(
     opts: { mediaBuyerId?: string | null; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string | null; endDate?: string | null } = {},
-  ): Promise<{ converted: number; pending: number; abandoned: number; total: number }> {
+  ): Promise<{ converted: number; pending: number; abandoned: number; blocked: number; total: number }> {
     const conditions: SQL[] = [];
     if (opts.mediaBuyerId) {
       if (opts.mediaBuyerId === '__system__') {
@@ -1270,7 +1270,39 @@ export class CartService {
     const converted = by('CONVERTED');
     const pending = by('PENDING');
     const abandoned = by('ABANDONED');
-    return { converted, pending, abandoned, total: converted + pending + abandoned };
+
+    // Submissions the dedup guard refused. A blocked attempt never produced a
+    // cart_abandonments row at all, so this is a FOURTH destination rather than
+    // a slice of the three above. Scoped the same way (media buyer + branch +
+    // date) so it stays comparable with the rest of the strip.
+    const cfaConditions: SQL[] = [];
+    if (opts.mediaBuyerId && opts.mediaBuyerId !== '__system__') {
+      cfaConditions.push(eq(schema.crossFunnelAttempts.mediaBuyerId, opts.mediaBuyerId));
+    }
+    if (opts.branchId) {
+      cfaConditions.push(eq(schema.crossFunnelAttempts.branchId, opts.branchId));
+    } else if (opts.effectiveBranchIds && opts.effectiveBranchIds.length > 0) {
+      cfaConditions.push(inArray(schema.crossFunnelAttempts.branchId, opts.effectiveBranchIds));
+    }
+    if (opts.startDate) {
+      cfaConditions.push(gte(schema.crossFunnelAttempts.attemptedAt, nigeriaDayStart(opts.startDate)));
+    }
+    if (opts.endDate) {
+      cfaConditions.push(lte(schema.crossFunnelAttempts.attemptedAt, nigeriaDayEnd(opts.endDate)));
+    }
+    const [cfaRow] = await this.db
+      .select({ count: count() })
+      .from(schema.crossFunnelAttempts)
+      .where(cfaConditions.length > 0 ? and(...cfaConditions) : undefined);
+    const blocked = Number(cfaRow?.count ?? 0);
+
+    return {
+      converted,
+      pending,
+      abandoned,
+      blocked,
+      total: converted + pending + abandoned + blocked,
+    };
   }
 
   async countAllCarts(

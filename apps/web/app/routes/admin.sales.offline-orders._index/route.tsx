@@ -447,9 +447,12 @@ export async function action({ request }: ActionFunctionArgs) {
         customerPhone,
         cartId: form.get('cartId')?.toString()?.trim() || undefined,
         customerAddress: form.get('customerAddress')?.toString()?.trim() || undefined,
-        deliveryAddress: form.get('deliveryAddress')?.toString()?.trim() || undefined,
+        // Pass the raw value through (not `|| undefined`): delivery address and
+        // state are required, and dropping a blank turns a clear "Delivery
+        // address is required" into a generic "Required" on a missing key.
+        deliveryAddress: form.get('deliveryAddress')?.toString()?.trim() ?? '',
         deliveryNotes: form.get('deliveryNotes')?.toString()?.trim() || undefined,
-        deliveryState: form.get('deliveryState')?.toString()?.trim() || undefined,
+        deliveryState: form.get('deliveryState')?.toString()?.trim() ?? '',
         customerGender: (form.get('customerGender') as string) || undefined,
         preferredDeliveryDate: form.get('preferredDeliveryDate')?.toString()?.trim() || undefined,
         paymentMethod,
