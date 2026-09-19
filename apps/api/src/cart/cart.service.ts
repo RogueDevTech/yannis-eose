@@ -1222,6 +1222,57 @@ export class CartService {
    * pulled into Cart Orders so marketers see the full abandonment volume.
    * Excludes PENDING (still typing) and CONVERTED (completed the form).
    */
+  /**
+   * Every form entry in the period, split by what it BECAME.
+   *
+   * Marketing only ever sees the survivors — the orders. This answers the
+   * other half: of everyone who started the form, how many converted, how many
+   * are still open, and how many walked away. The three cart statuses
+   * (PENDING / CONVERTED / ABANDONED) partition the table exactly, so the
+   * parts always sum to the total with no double-counting.
+   *
+   * Scoping is identical to countAllCarts/countAbandoned (media buyer + branch
+   * via the cart's campaign, effectiveBranchIds for company isolation), so the
+   * numbers are directly comparable with the rest of the Marketing Orders strip.
+   *
+   * NOTE: dated on updated_at, matching countAllCarts — a cart touched today
+   * counts today, because a cart row is rewritten as the customer types.
+   */
+  async getEntryBreakdown(
+    opts: { mediaBuyerId?: string | null; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string | null; endDate?: string | null } = {},
+  ): Promise<{ converted: number; pending: number; abandoned: number; total: number }> {
+    const conditions: SQL[] = [];
+    if (opts.mediaBuyerId) {
+      if (opts.mediaBuyerId === '__system__') {
+        conditions.push(isNull(schema.campaigns.mediaBuyerId));
+      } else {
+        conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
+      }
+    }
+    if (opts.branchId) {
+      conditions.push(eq(schema.campaigns.branchId, opts.branchId));
+    } else if (opts.effectiveBranchIds && opts.effectiveBranchIds.length > 0) {
+      conditions.push(inArray(schema.campaigns.branchId, opts.effectiveBranchIds));
+    }
+    if (opts.startDate) {
+      conditions.push(gte(schema.cartAbandonments.updatedAt, nigeriaDayStart(opts.startDate)));
+    }
+    if (opts.endDate) {
+      conditions.push(lte(schema.cartAbandonments.updatedAt, nigeriaDayEnd(opts.endDate)));
+    }
+    const rows = await this.db
+      .select({ status: schema.cartAbandonments.status, count: count() })
+      .from(schema.cartAbandonments)
+      .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .groupBy(schema.cartAbandonments.status);
+    const by = (s: string) => Number(rows.find((r) => r.status === s)?.count ?? 0);
+    const converted = by('CONVERTED');
+    const pending = by('PENDING');
+    const abandoned = by('ABANDONED');
+    return { converted, pending, abandoned, total: converted + pending + abandoned };
+  }
+
   async countAllCarts(
     opts: { mediaBuyerId?: string | null; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string | null; endDate?: string | null } = {},
   ): Promise<number> {
