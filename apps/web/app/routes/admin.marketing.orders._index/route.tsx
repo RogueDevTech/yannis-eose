@@ -36,6 +36,7 @@ const EMPTY_SECONDARY: MarketingOrdersSecondaryPayload = {
   productsForFilter: [],
   campaignsForFilter: [],
   abandonedCartCount: 0,
+  formEntryBreakdown: { converted: 0, pending: 0, abandoned: 0, blocked: 0, total: 0 },
   offlineCount: 0,
   duplicateCount: 0,
   cartStatusCounts: {},
@@ -358,6 +359,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
                 productsForFilter: Array<{ id: string; name: string }>;
                 campaignsForFilter: Array<{ id: string; name: string }>;
                 abandonedCartCount: number;
+                formEntryBreakdown?: { converted: number; pending: number; abandoned: number; blocked: number; total: number };
                 offlineCount: number;
                 duplicateCount: number;
                 cartStatusCounts?: Record<string, number>;
@@ -401,6 +403,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         productsForFilter,
         campaignsForFilter,
         abandonedCartCount: data?.abandonedCartCount ?? 0,
+        formEntryBreakdown: data?.formEntryBreakdown ?? { converted: 0, pending: 0, abandoned: 0, blocked: 0, total: 0 },
         offlineCount: data?.offlineCount ?? 0,
         duplicateCount: data?.duplicateCount ?? 0,
         cartStatusCounts: data?.cartStatusCounts ?? {},
@@ -419,6 +422,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         productsForFilter: [],
         campaignsForFilter: [],
         abandonedCartCount: 0,
+        formEntryBreakdown: { converted: 0, pending: 0, abandoned: 0, blocked: 0, total: 0 },
         offlineCount: 0,
         duplicateCount: 0,
         cartStatusCounts: {},
