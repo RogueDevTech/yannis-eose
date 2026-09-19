@@ -581,31 +581,161 @@ export class LogisticsService implements OnModuleInit {
     });
   }
 
+  /**
+   * Everything that references a location, and the label used when telling the
+   * user why it cannot be hard-deleted.
+   *
+   * 13 FKs across 12 tables point at `logistics_locations` and NONE declares a
+   * cascade, so a single surviving row in any of them blocks a DELETE. Four of
+   * them hold financial history (`transfer_remittances`, `delivery_remittances`,
+   * `shipments`, `stock_reconciliations`) and `stock_movements` is an
+   * append-only inventory log — none of that may ever be cascaded away, so
+   * archiving is the only correct retirement path for a location that has been
+   * used.
+   *
+   * Ordered most-explanatory first: the counts are shown to the user, so
+   * "12 stock movements" is more useful than "1 inventory level".
+   */
+  private locationReferenceChecks(locationId: string) {
+    const L = schema;
+    return [
+      { label: 'stock movement', table: L.stockMovements, where: or(eq(L.stockMovements.fromLocationId, locationId), eq(L.stockMovements.toLocationId, locationId))! },
+      { label: 'stock transfer', table: L.stockTransfers, where: or(eq(L.stockTransfers.fromLocationId, locationId), eq(L.stockTransfers.toLocationId, locationId))! },
+      { label: 'shipment', table: L.shipments, where: eq(L.shipments.destinationLocationId, locationId) },
+      { label: 'delivery remittance', table: L.deliveryRemittances, where: eq(L.deliveryRemittances.logisticsLocationId, locationId) },
+      { label: 'transfer remittance', table: L.transferRemittances, where: or(eq(L.transferRemittances.fromLocationId, locationId), eq(L.transferRemittances.toLocationId, locationId))! },
+      { label: 'stock reconciliation', table: L.stockReconciliations, where: eq(L.stockReconciliations.locationId, locationId) },
+      { label: 'inventory record', table: L.inventoryLevels, where: eq(L.inventoryLevels.locationId, locationId) },
+      { label: 'order', table: L.orders, where: eq(L.orders.logisticsLocationId, locationId) },
+      { label: 'cart order', table: L.cartOrders, where: eq(L.cartOrders.logisticsLocationId, locationId) },
+      { label: 'follow-up order', table: L.followUpOrders, where: eq(L.followUpOrders.logisticsLocationId, locationId) },
+    ];
+  }
+
+  /** `3 stock movements, 1 shipment` — only non-zero counts, pluralised. */
+  private formatReferenceSummary(counts: Array<{ label: string; n: number }>): string {
+    return counts
+      .filter((c) => c.n > 0)
+      .map((c) => `${c.n} ${c.label}${c.n === 1 ? '' : 's'}`)
+      .join(', ');
+  }
+
+  /**
+   * Retire a location.
+   *
+   * Hard-deletes ONLY a location nothing references — a mistyped entry created
+   * and never used. Anything with history is ARCHIVED instead, which is what
+   * the table was always built for (`status: recordStatusEnum`, plus temporal
+   * columns for audit). Archived locations stop appearing in pickers but keep
+   * resolving by id, so every historical row still renders.
+   *
+   * Why this replaced a hard delete: the old guard summed `stock_count` and
+   * deleted when the total was 0. But `inventory_levels` rows PERSIST at
+   * `stock_count = 0` once stock moves out, so any location that had ever held
+   * stock passed the guard and then died on
+   * `inventory_levels_location_id_logistics_locations_id_fk` — a raw 500 for
+   * the user, advising them to "move or write off all stock first" when there
+   * was no stock to move. In practice the delete could only ever succeed for a
+   * location that had never been used.
+   */
   async deleteLocation(locationId: string, actorId: string) {
     return withActor(this.db, { id: actorId }, async (tx) => {
-      // Guard: cannot delete a location that still holds stock.
-      const stockRows = await tx
-        .select({
-          total: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount}), 0)`,
-        })
-        .from(schema.inventoryLevels)
-        .where(eq(schema.inventoryLevels.locationId, locationId));
-      const totalStock = Number(stockRows[0]?.total ?? 0);
-      if (totalStock > 0) {
-        throw new TRPCError({
-          code: 'PRECONDITION_FAILED',
-          message: `Cannot delete this location — it still holds ${totalStock} unit(s) of stock. Move or write off all stock first.`,
-        });
-      }
-      const rows = await tx
-        .delete(schema.logisticsLocations)
+      const [existing] = await tx
+        .select({ id: schema.logisticsLocations.id, name: schema.logisticsLocations.name, status: schema.logisticsLocations.status })
+        .from(schema.logisticsLocations)
         .where(eq(schema.logisticsLocations.id, locationId))
-        .returning();
-      if (!rows[0]) {
+        .limit(1);
+      if (!existing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Location not found' });
       }
-      return rows[0];
+
+      // Count every reference up front so the outcome is decided once, and so
+      // the message can name what is actually holding the location.
+      const counts: Array<{ label: string; n: number }> = [];
+      for (const check of this.locationReferenceChecks(locationId)) {
+        const [row] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(check.table)
+          .where(check.where);
+        counts.push({ label: check.label, n: Number(row?.n ?? 0) });
+      }
+      const totalRefs = counts.reduce((sum, c) => sum + c.n, 0);
+
+      if (totalRefs === 0) {
+        // Genuinely unused — safe to remove outright.
+        const rows = await tx
+          .delete(schema.logisticsLocations)
+          .where(eq(schema.logisticsLocations.id, locationId))
+          .returning();
+        return { ...rows[0]!, outcome: 'DELETED' as const, references: '' };
+      }
+
+      if (existing.status === 'ARCHIVED') {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: `"${existing.name}" is already archived. It cannot be deleted because it still has history: ${this.formatReferenceSummary(counts)}.`,
+        });
+      }
+
+      const rows = await tx
+        .update(schema.logisticsLocations)
+        .set({ status: 'ARCHIVED', updatedAt: new Date() })
+        .where(eq(schema.logisticsLocations.id, locationId))
+        .returning();
+
+      this.logger.log(
+        `Location ${locationId} ("${existing.name}") archived by ${actorId} — has ${this.formatReferenceSummary(counts)}`,
+      );
+      return { ...rows[0]!, outcome: 'ARCHIVED' as const, references: this.formatReferenceSummary(counts) };
     });
+  }
+
+  /**
+   * Bring an archived location back into use.
+   *
+   * Mirrors the products convention: archiving is the privileged action, and
+   * restoring is not specially gated (see `products.service.ts` — ARCHIVED is
+   * SuperAdmin/approval-gated, setting a status back is not).
+   */
+  async restoreLocation(locationId: string, actorId: string) {
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const [existing] = await tx
+        .select({ id: schema.logisticsLocations.id, status: schema.logisticsLocations.status })
+        .from(schema.logisticsLocations)
+        .where(eq(schema.logisticsLocations.id, locationId))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Location not found' });
+      }
+      if (existing.status !== 'ARCHIVED') {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'This location is not archived.' });
+      }
+      const rows = await tx
+        .update(schema.logisticsLocations)
+        .set({ status: 'ACTIVE', updatedAt: new Date() })
+        .where(eq(schema.logisticsLocations.id, locationId))
+        .returning();
+      return rows[0]!;
+    });
+  }
+
+  /**
+   * Staff still pointing at this location, so the UI can warn before archiving.
+   *
+   * Deliberately read-only. `users.logistics_location_id` has NO foreign key,
+   * so archiving cannot break it, and `tplLocationScope`
+   * (trpc/routers/inventory.router.ts) forces a TPL manager's every inventory
+   * read to their own location — an archived one simply resolves to no visible
+   * rows. They see an empty warehouse, never someone else's. Nulling the column
+   * would be worse: it turns that into a hard FORBIDDEN on every inventory call
+   * AND silently edits HR records as a side effect of a logistics action. So we
+   * warn and let an admin reassign deliberately.
+   */
+  async getLocationAssignedStaff(locationId: string) {
+    return this.db
+      .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role })
+      .from(schema.users)
+      .where(and(eq(schema.users.logisticsLocationId, locationId), ne(schema.users.status, 'ARCHIVED')));
   }
 
   async listLocations(

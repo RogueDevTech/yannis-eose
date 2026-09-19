@@ -231,12 +231,47 @@ export const logisticsRouter = router({
       return res;
     }),
 
+  /**
+   * Retire a location: hard-delete when nothing references it, ARCHIVE when it
+   * has history. See LogisticsService.deleteLocation for why archiving is the
+   * only correct path for a used location.
+   *
+   * Archiving is the privileged action and restoring is not, mirroring the
+   * products convention (products.service.ts gates ARCHIVED to SuperAdmin /
+   * approval request, but ungates setting a status back).
+   */
   deleteLocation: permissionProcedure('logistics.write')
     .input(z.object({ locationId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
+      if (!isAdminLevel(ctx.user) && ctx.user.role !== 'HEAD_OF_LOGISTICS') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only an admin or the Head of Logistics may retire a location.',
+        });
+      }
       const res = await getLogisticsService().deleteLocation(input.locationId, ctx.user.id);
       await invalidateLogisticsOptionsCache();
       return res;
+    }),
+
+  /** Bring an archived location back into use. Not admin-gated — see above. */
+  restoreLocation: permissionProcedure('logistics.write')
+    .input(z.object({ locationId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const res = await getLogisticsService().restoreLocation(input.locationId, ctx.user.id);
+      await invalidateLogisticsOptionsCache();
+      return res;
+    }),
+
+  /**
+   * Staff still assigned to a location, so the UI can warn before archiving.
+   * Read-only: archiving never edits `users.logistics_location_id` (no FK, and
+   * the TPL inventory scope fails closed), so reassignment stays deliberate.
+   */
+  locationAssignedStaff: permissionProcedure('logistics.read')
+    .input(z.object({ locationId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getLogisticsService().getLocationAssignedStaff(input.locationId);
     }),
 
   // Escalation & Monitoring
