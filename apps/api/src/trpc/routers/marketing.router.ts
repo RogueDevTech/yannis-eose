@@ -1226,6 +1226,7 @@ export const marketingRouter = router({
         productsResult,
         campaignsResult,
         abandonedCartCount,
+        formEntryBreakdown,
         supplementaryCounts,
         deliveredThisMonthOrders,
         deliveredThisMonthCart,
@@ -1349,6 +1350,16 @@ export const marketingRouter = router({
           startDate,
           endDate,
         }).catch(() => 0),
+        // Every form entry in the period, split by what it became (converted /
+        // still open / abandoned). Same scope as countAllCarts above so the
+        // breakdown is comparable with the rest of the strip. Display-only.
+        getCartService().getEntryBreakdown({
+          mediaBuyerId: ordersScope.mediaBuyerId,
+          branchId,
+          effectiveBranchIds: ctx.effectiveBranchIds,
+          startDate,
+          endDate,
+        }).catch(() => ({ converted: 0, pending: 0, abandoned: 0, blocked: 0, total: 0 })),
         // Supplementary counts: offline + duplicate — same scope as statusCounts.
         getOrdersService().getSupplementaryCounts(
           ordersScope.mediaBuyerId,
@@ -1441,6 +1452,7 @@ export const marketingRouter = router({
         productsForFilter,
         campaignsForFilter,
         abandonedCartCount,
+        formEntryBreakdown,
         offlineCount: supplementaryCounts.offlineCount,
         duplicateCount: supplementaryCounts.duplicateCount,
       };

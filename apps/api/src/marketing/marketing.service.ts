@@ -6622,6 +6622,39 @@ export class MarketingService {
     return row?.groupId ?? null;
   }
 
+  /**
+   * The country a campaign's form should start in.
+   *
+   * Prefers the campaign's own `formConfig.deliveryCountry`, but falls back to
+   * the company's DEFAULT CURRENCY country when that key is absent.
+   *
+   * The key lives inside the `form_config` JSONB blob, which the campaign
+   * editor rewrites wholesale — so any save from a UI holding a pre-backfill
+   * copy silently drops it. That happened: a backfill of 414 campaigns lost 3
+   * within four days, and a campaign with no country falls through to
+   * phoneRuleForCountry('')'s permissive international rule (\+?[0-9]{7,15}),
+   * which accepts almost any digits. The public form then stops validating
+   * phone numbers at all.
+   *
+   * Deriving it here means there is nothing for a UI write to clobber: an NGN
+   * company resolves to Nigeria whether or not the key survived.
+   */
+  private async resolveCampaignCountry(
+    branchId: string | null,
+    storedCountry: string | null | undefined,
+  ): Promise<string | undefined> {
+    const stored = typeof storedCountry === 'string' ? storedCountry.trim() : '';
+    if (stored) return stored;
+    const groupId = await this.resolveGroupIdForBranch(branchId);
+    const [row] = await this.db
+      .select({ countryName: schema.currencies.countryName })
+      .from(schema.currencies)
+      .where(and(this.currencyGroupEq(groupId), eq(schema.currencies.active, true), eq(schema.currencies.isDefault, true)))
+      .limit(1);
+    const derived = row?.countryName?.trim();
+    return derived ? derived : undefined;
+  }
+
   /** currencies.group_id = X (or IS NULL) predicate. */
   private currencyGroupEq(groupId: string | null) {
     return groupId == null ? sql`${schema.currencies.groupId} IS NULL` : eq(schema.currencies.groupId, groupId);
@@ -8017,6 +8050,15 @@ export class MarketingService {
       }
     }
 
+    // Country the form starts in. Derived when the stored key is missing, so a
+    // campaign edit that rewrites form_config cannot silently disable phone
+    // validation on the public form.
+    const storedFormConfig = campaign.formConfig as Record<string, unknown> | null;
+    const resolvedDeliveryCountry = await this.resolveCampaignCountry(
+      campaign.branchId ?? null,
+      typeof storedFormConfig?.deliveryCountry === 'string' ? storedFormConfig.deliveryCountry : null,
+    );
+
     return {
       id: campaign.id,
       name: campaign.name,
@@ -8025,7 +8067,9 @@ export class MarketingService {
       products,
       ...(formCurrencies ? { currencies: formCurrencies } : {}),
       ...(regionsByCountry ? { regionsByCountry } : {}),
-      formConfig: campaign.formConfig as {
+      formConfig: (resolvedDeliveryCountry
+        ? { ...(storedFormConfig ?? {}), deliveryCountry: resolvedDeliveryCountry }
+        : campaign.formConfig) as {
         heading?: string;
         subtitle?: string;
         buttonText?: string;
