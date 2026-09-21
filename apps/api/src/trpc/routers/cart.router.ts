@@ -62,7 +62,17 @@ export const cartRouter = router({
       z
         .object({
           page: z.number().int().min(1).default(1),
-          limit: z.number().int().min(1).max(100).default(25),
+          /**
+           * Must cover every page size the UI can request. Marketing Orders and
+           * Sales Funnel Orders drive this from the user's "Per page" picker
+           * (20/50/100/200/400/500/600/800/1000 — see DEFAULT_PAGE_SIZE_OPTIONS),
+           * so a 100 cap rejected five of the nine options with a 400. The
+           * loaders read a failed response as an empty list, so the page showed
+           * "No abandoned carts" and "Page 1 of 0" while the stat tile — which
+           * counts via `countAllCarts`, uncapped — correctly showed 35.
+           * Matches `ordersListSchema`, which already allows 2000.
+           */
+          limit: z.number().int().min(1).max(2000).default(25),
           mediaBuyerId: z.string().uuid().optional(),
           branchId: z.string().uuid().optional(),
           search: z.string().trim().min(1).max(120).optional(),

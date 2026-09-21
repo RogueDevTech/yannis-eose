@@ -179,6 +179,13 @@ interface MarketingOrdersPageProps {
    */
   isCartAbandonmentView?: boolean;
   /**
+   * The list request failed, as opposed to returning no rows. Without this a
+   * failed fetch rendered the ordinary empty state, so a rejected page size
+   * read as "Every captured cart has been recovered or cleared" while the stat
+   * tile showed 35.
+   */
+  listFailed?: boolean;
+  /**
    * When true, the page renders its real chrome but swaps row data + pagination
    * for pulse skeletons — used as the route-level Suspense fallback so the layout
    * stays mounted while the orders list streams in.
@@ -211,6 +218,7 @@ export function MarketingOrdersPage({
   enableTestOrdersOption = false,
   isAdminUser = false,
   isCartAbandonmentView = false,
+  listFailed = false,
   deferredLoading = false,
 }: MarketingOrdersPageProps) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
@@ -1207,11 +1215,19 @@ export function MarketingOrdersPage({
           rowKey={(order) => order.id}
           rowClassName={() => liveState.showGreen ? 'animate-live-flash-row' : ''}
           renderMobileCard={renderMarketingOrderMobileCard}
-          emptyTitle={isCartAbandonmentView ? 'No abandoned carts' : 'No orders match your filters'}
+          emptyTitle={
+            listFailed
+              ? 'This list could not be loaded'
+              : isCartAbandonmentView
+                ? 'No abandoned carts'
+                : 'No orders match your filters'
+          }
           emptyDescription={
-            isCartAbandonmentView
-              ? 'Every captured cart has been recovered or cleared.'
-              : 'Try adjusting your status filter or search query'
+            listFailed
+              ? 'The request failed, so these rows are missing rather than absent. Refresh, or try a smaller page size.'
+              : isCartAbandonmentView
+                ? 'Every captured cart has been recovered or cleared.'
+                : 'Try adjusting your status filter or search query'
           }
         />
       </div>
