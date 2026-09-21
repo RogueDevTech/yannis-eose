@@ -42,6 +42,9 @@ const EMPTY_SECONDARY: MarketingOrdersSecondaryPayload = {
   cartStatusCounts: {},
 };
 
+/** Shape returned by `listPromise` — `listFailed` separates a real empty list from a failed fetch. */
+type ListResult = { orders: Order[]; total: number; totalPages: number; listFailed?: boolean };
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.orders');
   const cookie = getSessionCookie(request);
@@ -283,6 +286,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const cartsData = cartsRes.ok
         ? (cartsRes.data as { result?: { data?: { items: AbandonedCart[]; total: number; page: number; limit: number } } })?.result?.data
         : null;
+      // A FAILED request must not render as "no carts". Reporting zero for an
+      // errored fetch is what hid a rejected page size: the list said "Every
+      // captured cart has been recovered or cleared" while the stat tile
+      // correctly showed 35, and the page looked confidently empty rather than
+      // broken.
+      if (!cartsRes.ok) {
+        return { orders: [], total: 0, totalPages: 0, listFailed: true };
+      }
       const total = cartsData?.total ?? 0;
       const totalPages = total === 0 ? 0 : Math.ceil(total / ORDERS_PER_PAGE);
       const orders: Order[] = (cartsData?.items ?? []).map((c) => ({
@@ -304,7 +315,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         campaignId: c.campaignId,
         campaignName: c.campaignName,
       }));
-      return { orders, total, totalPages };
+      return { orders, total, totalPages, listFailed: false };
     }
 
     const res = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputStr}`, {
@@ -323,7 +334,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       customerPhoneDisplay: '',
     }));
 
-    return { orders, total, totalPages };
+    return { orders, total, totalPages, listFailed: !res.ok };
   })();
 
   // Secondary streams independently — one bundled tRPC call returns counts, CPA,
@@ -596,9 +607,10 @@ export default function MarketingOrdersRoute() {
           {...shellProps}
           secondary={data.secondaryResult as MarketingOrdersSecondaryPayload}
           personalSecondary={data.personalSecondaryResult ?? undefined}
-          orders={(data.listResult as { orders: Order[]; total: number; totalPages: number }).orders}
-          total={(data.listResult as { orders: Order[]; total: number; totalPages: number }).total}
-          totalPages={(data.listResult as { orders: Order[]; total: number; totalPages: number }).totalPages}
+          orders={(data.listResult as ListResult).orders}
+          total={(data.listResult as ListResult).total}
+          totalPages={(data.listResult as ListResult).totalPages}
+          listFailed={(data.listResult as ListResult).listFailed === true}
         />
       )}
     </CachedAwait>
