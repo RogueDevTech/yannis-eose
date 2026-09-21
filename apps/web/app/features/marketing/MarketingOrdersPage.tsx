@@ -123,6 +123,7 @@ export type MarketingOrdersSecondaryPayload = {
   campaignsForFilter: Array<{ id: string; name: string }>;
   /** Open (un-recovered) abandoned-cart count, scoped to the viewer's media buyer / branch. */
   abandonedCartCount: number;
+  formEntryBreakdown?: { converted: number; pending: number; abandoned: number; blocked: number; total: number };
   offlineCount: number;
   duplicateCount: number;
   /** Status counts for cart-graduated orders (orderSource='online') — separate strip. */
@@ -283,6 +284,7 @@ export function MarketingOrdersPage({
             : statusFilter || 'ALL',
   );
   const [breakdownOpen, setBreakdownOpen] = useState(false);
+  const [entriesBreakdownOpen, setEntriesBreakdownOpen] = useState(false);
   const [myTeamTab, setMyTeamTab] = useState<'personal' | 'team'>(
     activeMediaBuyerFilter === viewerUserId ? 'personal' : 'team',
   );
@@ -1026,6 +1028,29 @@ export function MarketingOrdersPage({
                         : {}),
                     },
                     {
+                      // Everyone who entered the form in this period, whatever
+                      // they became. Marketing otherwise only ever sees the
+                      // survivors; the breakdown shows where the rest went.
+                      label: (
+                        <span className="inline-flex items-center gap-1">
+                          Form Entries
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setEntriesBreakdownOpen(true); }}
+                            className="text-app-fg-muted hover:text-app-fg transition-colors"
+                            title="View form entry breakdown"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                            </svg>
+                          </button>
+                        </span>
+                      ),
+                      value: activeSecondary.formEntryBreakdown?.total ?? 0,
+                      valueClassName: 'text-app-fg',
+                      title: 'Everyone who started the form in this period',
+                    },
+                    {
                       // Carry-over: orders delivered this period but generated in
                       // a prior month. Clickable — swaps the list to those orders
                       // (a created_at-based subset, not a status). Still excluded
@@ -1402,6 +1427,35 @@ export function MarketingOrdersPage({
                 <div className="flex justify-between pt-2 border-t border-app-border">
                   <span className="font-semibold text-app-fg">Total</span>
                   <span className="font-bold text-app-fg">{(funnelTotal + cartDelivered).toLocaleString()}</span>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      </Modal>
+
+      <Modal open={entriesBreakdownOpen} onClose={() => setEntriesBreakdownOpen(false)} maxWidth="max-w-xs">
+        <div className="p-5 space-y-3">
+          <h3 className="text-base font-semibold text-app-fg">Form Entries Breakdown</h3>
+          {(() => {
+            const fe = secondary.formEntryBreakdown ?? { converted: 0, pending: 0, abandoned: 0, blocked: 0, total: 0 };
+            const rows: Array<[string, number]> = [
+              ['Became an order', fe.converted],
+              ['Still in cart pipeline', fe.pending],
+              ['Abandoned, no order', fe.abandoned],
+              ['Blocked as duplicate', fe.blocked],
+            ];
+            return (
+              <div className="space-y-2 text-sm">
+                {rows.map(([label, value]) => (
+                  <div key={label} className="flex justify-between">
+                    <span className="text-app-fg-muted">{label}</span>
+                    <span className="font-semibold text-app-fg">{value.toLocaleString()}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between pt-2 border-t border-app-border">
+                  <span className="font-semibold text-app-fg">Total entries</span>
+                  <span className="font-bold text-app-fg">{fe.total.toLocaleString()}</span>
                 </div>
               </div>
             );

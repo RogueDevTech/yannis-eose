@@ -466,12 +466,12 @@ export async function action({ request }: ActionFunctionArgs) {
     if (cartId) body.cartId = cartId;
     const customerAddress = formData.get('customerAddress')?.toString()?.trim();
     if (customerAddress) body.customerAddress = customerAddress;
-    const deliveryAddress = formData.get('deliveryAddress')?.toString()?.trim();
-    if (deliveryAddress) body.deliveryAddress = deliveryAddress;
+    // Always assigned: delivery address is required, and omitting a blank
+    // turns a clear "Delivery address is required" into a generic "Required".
+    body.deliveryAddress = formData.get('deliveryAddress')?.toString()?.trim() ?? '';
     const deliveryNotes = formData.get('deliveryNotes')?.toString()?.trim();
     if (deliveryNotes) body.deliveryNotes = deliveryNotes;
-    const deliveryState = formData.get('deliveryState')?.toString()?.trim();
-    if (deliveryState) body.deliveryState = deliveryState;
+    body.deliveryState = formData.get('deliveryState')?.toString()?.trim() ?? '';
     const customerGender = formData.get('customerGender')?.toString()?.trim();
     if (customerGender) body.customerGender = customerGender;
     const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString()?.trim();
