@@ -179,6 +179,13 @@ interface MarketingOrdersPageProps {
    */
   isCartAbandonmentView?: boolean;
   /**
+   * The list request failed, as opposed to returning no rows. Without this a
+   * failed fetch rendered the ordinary empty state, so a rejected page size
+   * read as "Every captured cart has been recovered or cleared" while the stat
+   * tile showed 35.
+   */
+  listFailed?: boolean;
+  /**
    * When true, the page renders its real chrome but swaps row data + pagination
    * for pulse skeletons — used as the route-level Suspense fallback so the layout
    * stays mounted while the orders list streams in.
@@ -211,6 +218,7 @@ export function MarketingOrdersPage({
   enableTestOrdersOption = false,
   isAdminUser = false,
   isCartAbandonmentView = false,
+  listFailed = false,
   deferredLoading = false,
 }: MarketingOrdersPageProps) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
@@ -1207,11 +1215,19 @@ export function MarketingOrdersPage({
           rowKey={(order) => order.id}
           rowClassName={() => liveState.showGreen ? 'animate-live-flash-row' : ''}
           renderMobileCard={renderMarketingOrderMobileCard}
-          emptyTitle={isCartAbandonmentView ? 'No abandoned carts' : 'No orders match your filters'}
+          emptyTitle={
+            listFailed
+              ? 'This list could not be loaded'
+              : isCartAbandonmentView
+                ? 'No abandoned carts'
+                : 'No orders match your filters'
+          }
           emptyDescription={
-            isCartAbandonmentView
-              ? 'Every captured cart has been recovered or cleared.'
-              : 'Try adjusting your status filter or search query'
+            listFailed
+              ? 'The request failed, so these rows are missing rather than absent. Refresh, or try a smaller page size.'
+              : isCartAbandonmentView
+                ? 'Every captured cart has been recovered or cleared.'
+                : 'Try adjusting your status filter or search query'
           }
         />
       </div>
@@ -1439,17 +1455,45 @@ export function MarketingOrdersPage({
           <h3 className="text-base font-semibold text-app-fg">Form Entries Breakdown</h3>
           {(() => {
             const fe = secondary.formEntryBreakdown ?? { converted: 0, pending: 0, abandoned: 0, blocked: 0, total: 0 };
-            const rows: Array<[string, number]> = [
-              ['Became an order', fe.converted],
-              ['Still in cart pipeline', fe.pending],
-              ['Abandoned, no order', fe.abandoned],
-              ['Blocked as duplicate', fe.blocked],
+            // Carry the active period so a drill-down lands on the same window
+            // the tile counted, not that page's own default range.
+            // Both destinations read `period=all_time` (not periodAllTime) and
+            // fall back to TODAY when no dates are present — so an all-time tile
+            // must say so explicitly or the drill-down silently shows one day.
+            const period = dateFilters.periodAllTime
+              ? 'period=all_time'
+              : `startDate=${encodeURIComponent(dateFilters.startDate)}&endDate=${encodeURIComponent(dateFilters.endDate)}`;
+            // Each destination already lists ITS OWN record type with the right
+            // columns and permissions. The total is deliberately NOT a link:
+            // no single table legitimately holds orders, carts and blocked
+            // attempts together, and forcing them into one view is how a
+            // number starts meaning something other than its label.
+            //
+            // "Became an order" has no link: ?fromCart=1 lists the cart backlog
+            // with includeRecovered, so it cannot isolate the converted subset.
+            // Sending it there would show the same rows as "Abandoned", which is
+            // worse than no link at all.
+            const rows: Array<[string, number, string | null]> = [
+              ['Became an order', fe.converted, null],
+              ['Still in cart pipeline', fe.pending, `/admin/sales/cart-orders?${period}`],
+              ['Abandoned, no order', fe.abandoned, `/admin/marketing/orders?fromCart=1&${period}`],
+              ['Blocked as duplicate', fe.blocked, `/admin/marketing/cross-funnel?${period}`],
             ];
             return (
               <div className="space-y-2 text-sm">
-                {rows.map(([label, value]) => (
+                {rows.map(([label, value, href]) => (
                   <div key={label} className="flex justify-between">
-                    <span className="text-app-fg-muted">{label}</span>
+                    {href && value > 0 ? (
+                      <Link
+                        to={href}
+                        onClick={() => setEntriesBreakdownOpen(false)}
+                        className="text-info-600 hover:underline dark:text-info-400"
+                      >
+                        {label}
+                      </Link>
+                    ) : (
+                      <span className="text-app-fg-muted">{label}</span>
+                    )}
                     <span className="font-semibold text-app-fg">{value.toLocaleString()}</span>
                   </div>
                 ))}
