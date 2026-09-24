@@ -7,7 +7,7 @@ import type { ListCartOrdersInput, UpdateCartOrderInput, CreateCartOrderRoutingR
 import { DRIZZLE, PG_CLIENT_RAW } from '../database/database.module';
 import type postgres from 'postgres';
 import { withActor } from '../common/db/with-actor';
-import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { branchScopeCondition, closerBranchOrAssignedCondition } from '../common/db/branch-scope-condition';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
@@ -404,7 +404,7 @@ export class CartOrdersService {
       // Only applies when the closer is viewing their own queue (viewerCloserId matches).
       const isSelfQuery = viewerCloserId && input.assignedCsId === viewerCloserId;
       if (isSelfQuery && bCond) {
-        conditions.push(or(bCond, eq(schema.cartOrders.assignedCsId, viewerCloserId))!);
+        conditions.push(closerBranchOrAssignedCondition(bCond, schema.cartOrders.servicingBranchId, schema.cartOrders.assignedCsId, viewerCloserId, effectiveBranchIds));
       } else if (bCond) {
         conditions.push(bCond);
       }
@@ -540,7 +540,7 @@ export class CartOrdersService {
       const bCond = branchScopeCondition(branchCol, branchId, effectiveBranchIds);
       const isSelfQuery = viewerCloserId && assignedCsId === viewerCloserId;
       if (isSelfQuery && bCond) {
-        conditions.push(or(bCond, eq(schema.cartOrders.assignedCsId, viewerCloserId))!);
+        conditions.push(closerBranchOrAssignedCondition(bCond, schema.cartOrders.servicingBranchId, schema.cartOrders.assignedCsId, viewerCloserId, effectiveBranchIds));
       } else if (bCond) {
         conditions.push(bCond);
       }
@@ -635,7 +635,7 @@ export class CartOrdersService {
       const bCond = branchScopeCondition(branchCol, branchId, effectiveBranchIds);
       const isSelfQuery = viewerCloserId && assignedCsId === viewerCloserId;
       if (isSelfQuery && bCond) {
-        conditions.push(or(bCond, eq(schema.cartOrders.assignedCsId, viewerCloserId))!);
+        conditions.push(closerBranchOrAssignedCondition(bCond, schema.cartOrders.servicingBranchId, schema.cartOrders.assignedCsId, viewerCloserId, effectiveBranchIds));
       } else if (bCond) {
         conditions.push(bCond);
       }

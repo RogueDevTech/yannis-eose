@@ -12,7 +12,7 @@
  * if (cond) conditions.push(cond);
  * ```
  */
-import { eq, inArray, sql, type SQL, type Column } from 'drizzle-orm';
+import { and, eq, inArray, or, sql, type SQL, type Column } from 'drizzle-orm';
 
 /**
  * Branch scope context — passed from routers to services as a single object.
@@ -88,4 +88,27 @@ export function branchScopeCondition(
 
   // Global user or no branch context → no filter
   return null;
+}
+
+/**
+ * CS closer self-query scope: "my branch OR assigned to me".
+ *
+ * A closer also sees orders assigned to them that another branch services, but
+ * only within the ACTIVE company (servicing branch IN effectiveBranchIds). A
+ * closer who is a member of a branch in two companies otherwise saw the other
+ * company's assignments in lists and counts, and opening one failed the by-id
+ * company guard with "This order is not in your company."
+ *
+ * `branchCond` is the caller's normal branch condition; when it is null (global
+ * viewer, no filter) the caller should not use this helper at all.
+ */
+export function closerBranchOrAssignedCondition(
+  branchCond: SQL,
+  servicingBranchColumn: Column,
+  assignedCsColumn: Column,
+  closerId: string,
+  effectiveBranchIds: string[] | null | undefined,
+): SQL {
+  const companyBound = branchScopeCondition(servicingBranchColumn, null, effectiveBranchIds);
+  return or(branchCond, and(eq(assignedCsColumn, closerId), companyBound ?? undefined))!;
 }

@@ -57,7 +57,7 @@ import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../c
 import { isAdminLevel } from '../common/authz';
 import { hasFinanceAccess, hasFinanceWriteAccess } from '../common/utils/strip-finance-fields';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
-import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { branchScopeCondition, closerBranchOrAssignedCondition } from '../common/db/branch-scope-condition';
 import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { EventsService } from '../events/events.service';
@@ -5709,30 +5709,19 @@ export class OrdersService {
       ) {
         // CS-closer "my servicing branch OR assigned to me" path — a closer
         // sees the pool of orders their branch services, plus any order
-        // assigned to them even if attributed/serviced elsewhere.
-        //
-        // "Elsewhere" is still bounded to the ACTIVE company. A closer who is a
-        // member of a branch in two companies (e.g. Zambia in Yannis Marketing
-        // + Zambia Zarvon in 2B21) otherwise saw the other company's
-        // assignments here, and tapping one hit the detail guard
-        // (`assertOrderInCompanyScope`) with "This order is not in your
-        // company." The bound mirrors that guard exactly — admitted when
-        // either the marketing or servicing branch is in scope — so every row
-        // listed here is one the detail page will open.
-        const companyBound =
-          eIds == null
-            ? undefined
-            : eIds.length === 0
-              ? sql`false`
-              : or(
-                  inArray(schema.orders.servicingBranchId, eIds),
-                  inArray(schema.orders.branchId, eIds),
-                );
-        const branchOrAssigned = or(
-          eq(schema.orders.servicingBranchId, branchId),
-          and(eq(schema.orders.assignedCsId, input.assignedCsId), companyBound),
+        // assigned to them even if attributed/serviced elsewhere, bounded to
+        // the active company (see `closerBranchOrAssignedCondition`). That
+        // bound is exactly what the closer's aggregate counts apply (see
+        // `aggregateBranchIdForCloserSelfQuery`), so strip == list.
+        conditions.push(
+          closerBranchOrAssignedCondition(
+            eq(schema.orders.servicingBranchId, branchId),
+            schema.orders.servicingBranchId,
+            schema.orders.assignedCsId,
+            input.assignedCsId,
+            eIds,
+          ),
         );
-        if (branchOrAssigned) conditions.push(branchOrAssigned);
       } else {
         const cond = this.orderBranchScopeCondition(branchId, scope, eIds);
         if (cond) conditions.push(cond);
