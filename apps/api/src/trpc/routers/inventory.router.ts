@@ -591,7 +591,7 @@ export const inventoryRouter = router({
           return { threshold: 10, items: [] as unknown[] };
         }),
         getInventoryService()
-          .listLocationThresholds()
+          .listLocationThresholds(ctx.activeGroupId, ctx.effectiveBranchIds)
           .catch(() => ({ globalThreshold: 10, locations: [] as Array<unknown> })),
         getShipmentsService()
           .listShipments(
