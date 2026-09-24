@@ -5716,18 +5716,11 @@ export class OrdersService {
         // + Zambia Zarvon in 2B21) otherwise saw the other company's
         // assignments here, and tapping one hit the detail guard
         // (`assertOrderInCompanyScope`) with "This order is not in your
-        // company." The bound mirrors that guard exactly — admitted when
-        // either the marketing or servicing branch is in scope — so every row
-        // listed here is one the detail page will open.
-        const companyBound =
-          eIds == null
-            ? undefined
-            : eIds.length === 0
-              ? sql`false`
-              : or(
-                  inArray(schema.orders.servicingBranchId, eIds),
-                  inArray(schema.orders.branchId, eIds),
-                );
+        // company." The bound is the servicing branch IN effectiveBranchIds —
+        // a subset of what that guard admits, so every listed row opens, and
+        // exactly what the closer's aggregate counts apply (see
+        // `aggregateBranchIdForCloserSelfQuery`), so strip == list.
+        const companyBound = this.orderBranchScopeCondition(null, 'servicing', eIds) ?? undefined;
         const branchOrAssigned = or(
           eq(schema.orders.servicingBranchId, branchId),
           and(eq(schema.orders.assignedCsId, input.assignedCsId), companyBound),

@@ -252,6 +252,12 @@ function orderListBranchId(_user: { role: string }, sessionBranchId: string | nu
  * branch filter when the closer is self-querying yields the same row set as
  * the list's OR-expansion. Returns `null` (no branch filter) in that case;
  * otherwise returns `branchId` unchanged.
+ *
+ * Callers must still pass `ctx.effectiveBranchIds`. The list bounds the
+ * assigned-to-me arm to the active company (servicing branch IN
+ * effectiveBranchIds), and with a null branch the aggregates apply exactly that
+ * bound. Dropping it too counted a two-company closer's other-company orders in
+ * the strip while the list hid them.
  */
 function aggregateBranchIdForCloserSelfQuery(
   user: { id: string; role: string },
@@ -1232,11 +1238,9 @@ export const ordersRouter = router({
         narrowed.assignedCsId,
         effectiveBranchId,
       );
-      // When CS_CLOSER self-query drops the branch, also drop effectiveBranchIds
-      // so stat strip counts match the list's OR-expansion.
-      const countsEffectiveBranchIds = countsBranchId === null && effectiveBranchId !== null
-        ? null
-        : ctx.effectiveBranchIds;
+      // Keep the company bound even when the closer self-query drops the branch
+      // (see `aggregateBranchIdForCloserSelfQuery`).
+      const countsEffectiveBranchIds = ctx.effectiveBranchIds;
 
       const isFollowUp = input?.isFollowUp;
 
@@ -1350,9 +1354,7 @@ export const ordersRouter = router({
       const branchScope: 'servicing' | 'marketing' =
         ctx.user.role === 'HEAD_OF_MARKETING' || ctx.user.role === 'MEDIA_BUYER' ? 'marketing' : 'servicing';
       const countsBranchId = aggregateBranchIdForCloserSelfQuery(ctx.user, narrowed.assignedCsId, effectiveBranchId);
-      const countsEffBranchIds = countsBranchId === null && effectiveBranchId !== null
-        ? null
-        : ctx.effectiveBranchIds;
+      const countsEffBranchIds = ctx.effectiveBranchIds;
       return getOrdersService().getSupplementaryCounts(
         narrowed.mediaBuyerId,
         narrowed.startDate,
@@ -1617,12 +1619,9 @@ export const ordersRouter = router({
         scope.assignedCsId,
         branchId,
       );
-      // When CS_CLOSER self-query drops the branch, also drop effectiveBranchIds
-      // so stat strip counts match the list's OR-expansion (assignedCsId = me is
-      // already sufficient scoping).
-      const aggregateEffectiveBranchIds = aggregateBranchId === null && branchId !== null
-        ? null
-        : ctx.effectiveBranchIds;
+      // Keep the company bound even when the closer self-query drops the branch
+      // (see `aggregateBranchIdForCloserSelfQuery`).
+      const aggregateEffectiveBranchIds = ctx.effectiveBranchIds;
 
       const trendFilters = {
         mediaBuyerId: scope.mediaBuyerId,
