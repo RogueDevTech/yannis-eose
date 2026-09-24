@@ -76,13 +76,19 @@ export class InventoryService {
   private static readonly FIFO_BATCH_PAGE_SIZE = 256;
 
   /**
-   * Org-wide low-stock threshold from `system_settings.INVENTORY_LOW_STOCK_CONFIG`.
+   * Company default low-stock threshold from `system_settings.INVENTORY_LOW_STOCK_CONFIG`.
    * Falls back to {@link DEFAULT_LOW_STOCK_THRESHOLD} when the row is missing or
    * malformed. A configured `0` is honoured (it means "global alerts off") —
    * per-location overrides can still fire independently.
+   *
+   * Read per company: the inventory page saves this setting under the active
+   * company (`settings.updateSystemSetting` → activeGroupId). Reading it with no
+   * company returned whichever company's row came back first, so one company's
+   * default silently applied to another's locations. With no company there is
+   * no company row to trust, so it falls back to the built-in default.
    */
-  private async getGlobalLowStockThreshold(): Promise<number> {
-    const cfg = await this.settings.get('INVENTORY_LOW_STOCK_CONFIG');
+  private async getGlobalLowStockThreshold(groupId: string | null | undefined): Promise<number> {
+    const cfg = groupId ? await this.settings.get('INVENTORY_LOW_STOCK_CONFIG', groupId) : null;
     const raw =
       (cfg?.['threshold'] as number | string | undefined) ??
       InventoryService.DEFAULT_LOW_STOCK_THRESHOLD;
@@ -103,8 +109,6 @@ export class InventoryService {
    */
   async checkLowStockAndNotify(productId: string, locationId: string): Promise<void> {
     try {
-      const globalThreshold = await this.getGlobalLowStockThreshold();
-
       const hasLocCol = await this.locationThresholdColExists();
 
       const [row] = await this.db
@@ -135,8 +139,10 @@ export class InventoryService {
         .limit(1);
       if (!row) return;
 
-      // Per-location override wins; null inherits the org-wide threshold.
-      const threshold = (row as { locationThreshold?: number | null }).locationThreshold ?? globalThreshold;
+      // Per-location override wins; null inherits the owning company's default.
+      const threshold =
+        (row as { locationThreshold?: number | null }).locationThreshold ??
+        (await this.getGlobalLowStockThreshold(row.groupId));
       if (!Number.isFinite(threshold) || threshold <= 0) return;
 
       const available = row.stockCount - row.reservedCount;
@@ -1863,9 +1869,21 @@ export class InventoryService {
               ...(hasLocCol ? { lowStockThreshold: schema.logisticsLocations.lowStockThreshold } : {}),
             })
             .from(schema.logisticsLocations)
-            .where(eq(schema.logisticsLocations.status, 'ACTIVE'));
+            .where(
+              and(
+                eq(schema.logisticsLocations.status, 'ACTIVE'),
+                // Company scope (via provider group), same as listLocationThresholds.
+                // These rows feed the zero-stock expansion below, so unscoped they
+                // listed every company's locations on a single-product view.
+                groupId
+                  ? sql`${schema.logisticsLocations.providerId} IN (
+                      SELECT lp.id FROM logistics_providers lp WHERE lp.group_id = ${groupId}
+                    )`
+                  : undefined,
+              ),
+            );
         })(),
-        this.getGlobalLowStockThreshold(),
+        this.getGlobalLowStockThreshold(groupId),
       ]);
 
     const thresholdByLocation = new Map(
@@ -3343,7 +3361,7 @@ export class InventoryService {
    * with an explicit override should still surface (COALESCE handles it).
    */
   async getLowStockAlerts(groupId?: string | null, effectiveBranchIds?: string[] | null) {
-    const globalThreshold = await this.getGlobalLowStockThreshold();
+    const globalThreshold = await this.getGlobalLowStockThreshold(groupId);
     const hasLocCol = await this.locationThresholdColExists();
 
     // Single raw query that covers BOTH cases:
@@ -3473,7 +3491,7 @@ export class InventoryService {
       effectiveThreshold: number;
     }>;
   }> {
-    const globalThreshold = await this.getGlobalLowStockThreshold();
+    const globalThreshold = await this.getGlobalLowStockThreshold(groupId);
 
     const hasLocCol = await this.locationThresholdColExists();
 

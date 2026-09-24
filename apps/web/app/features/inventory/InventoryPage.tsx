@@ -1006,7 +1006,7 @@ export function InventoryPage(props: InventoryStreamData) {
       )}
 
       {/* Low-stock threshold modal — admin-only.
-       *  Two tiers: org-wide default (top) + per-location overrides (table).
+       *  Two tiers: company default (top) + per-location overrides (table).
        *  A location row with NULL `lowStockThreshold` inherits the org-wide value;
        *  any number set in its row wins for that location only. */}
       {canEditLowStock && showThresholdModal && (
@@ -1027,9 +1027,9 @@ export function InventoryPage(props: InventoryStreamData) {
 
           <ModalFetcherInlineError message={bulkThresholdSurface.rawError} />
 
-          {/* Org-wide default */}
+          {/* Company default */}
           <section className="space-y-2">
-            <h4 className="text-sm font-semibold text-app-fg">Org-wide default</h4>
+            <h4 className="text-sm font-semibold text-app-fg">Company default</h4>
             <div className="flex items-center gap-2">
               <NumberInput
                 id="low-stock-threshold-input"
@@ -1145,7 +1145,7 @@ export function InventoryPage(props: InventoryStreamData) {
                                 wrapperClassName="w-24 inline-block"
                               />
                               {isInheriting && (
-                                <span className="text-micro text-app-fg-muted whitespace-nowrap" title="Using org-wide default">
+                                <span className="text-micro text-app-fg-muted whitespace-nowrap" title="Using company default">
                                   default
                                 </span>
                               )}
