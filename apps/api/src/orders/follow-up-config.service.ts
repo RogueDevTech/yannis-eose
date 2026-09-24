@@ -15,7 +15,7 @@ import { isTransitionAllowed, getAllowedNextStatuses } from './order-state-machi
 import { expandCustomerPhoneSearchDigitRuns } from './orders.service';
 import { isAdminLevel } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
-import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { branchScopeCondition, closerBranchOrAssignedCondition } from '../common/db/branch-scope-condition';
 import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { CacheService } from '../common/cache/cache.service';
@@ -1160,7 +1160,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, branchId ?? input.branchId, effectiveBranchIds);
       const isSelfQuery = viewerCloserId && input.assignedCsId === viewerCloserId;
       if (isSelfQuery && bCond) {
-        conditions.push(or(bCond, eq(schema.followUpOrders.assignedCsId, viewerCloserId))!);
+        conditions.push(closerBranchOrAssignedCondition(bCond, schema.followUpOrders.servicingBranchId, schema.followUpOrders.assignedCsId, viewerCloserId, effectiveBranchIds));
       } else if (bCond) {
         conditions.push(bCond);
       }
@@ -1297,7 +1297,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, branchId, effectiveBranchIds);
       const isSelfQuery = viewerCloserId && assignedCsId === viewerCloserId;
       if (isSelfQuery && bCond) {
-        conditions.push(or(bCond, eq(schema.followUpOrders.assignedCsId, viewerCloserId))!);
+        conditions.push(closerBranchOrAssignedCondition(bCond, schema.followUpOrders.servicingBranchId, schema.followUpOrders.assignedCsId, viewerCloserId, effectiveBranchIds));
       } else if (bCond) {
         conditions.push(bCond);
       }
@@ -1364,7 +1364,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         const bCond = branchScopeCondition(schema.followUpOrders.servicingBranchId, opts?.branchId, opts?.effectiveBranchIds);
         const isSelfQuery = opts?.viewerCloserId && opts?.assignedCsId === opts.viewerCloserId;
         if (isSelfQuery && bCond) {
-          conditions.push(or(bCond, eq(schema.followUpOrders.assignedCsId, opts!.viewerCloserId!))!);
+          conditions.push(closerBranchOrAssignedCondition(bCond, schema.followUpOrders.servicingBranchId, schema.followUpOrders.assignedCsId, opts!.viewerCloserId!, opts?.effectiveBranchIds));
         } else if (bCond) {
           conditions.push(bCond);
         }
