@@ -5710,9 +5710,27 @@ export class OrdersService {
         // CS-closer "my servicing branch OR assigned to me" path — a closer
         // sees the pool of orders their branch services, plus any order
         // assigned to them even if attributed/serviced elsewhere.
+        //
+        // "Elsewhere" is still bounded to the ACTIVE company. A closer who is a
+        // member of a branch in two companies (e.g. Zambia in Yannis Marketing
+        // + Zambia Zarvon in 2B21) otherwise saw the other company's
+        // assignments here, and tapping one hit the detail guard
+        // (`assertOrderInCompanyScope`) with "This order is not in your
+        // company." The bound mirrors that guard exactly — admitted when
+        // either the marketing or servicing branch is in scope — so every row
+        // listed here is one the detail page will open.
+        const companyBound =
+          eIds == null
+            ? undefined
+            : eIds.length === 0
+              ? sql`false`
+              : or(
+                  inArray(schema.orders.servicingBranchId, eIds),
+                  inArray(schema.orders.branchId, eIds),
+                );
         const branchOrAssigned = or(
           eq(schema.orders.servicingBranchId, branchId),
-          eq(schema.orders.assignedCsId, input.assignedCsId),
+          and(eq(schema.orders.assignedCsId, input.assignedCsId), companyBound),
         );
         if (branchOrAssigned) conditions.push(branchOrAssigned);
       } else {
