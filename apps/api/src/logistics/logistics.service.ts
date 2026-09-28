@@ -994,6 +994,15 @@ export class LogisticsService implements OnModuleInit {
      *  Defaults to base NGN when unset (single-country world / no selection). */
     currencyCode?: string | null,
   ) {
+    // A warehouse must belong to a company. With no active company the provider
+    // lookup below matched ANY company's "Our warehouses" row, so the new site
+    // was filed under another company and never showed in the creator's list.
+    if (!groupId) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Select a company before adding a warehouse. Warehouses are company-isolated.',
+      });
+    }
     const providerId = await this.getOrCreateOurWarehouseProvider(actorId, groupId, currencyCode);
     return withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx

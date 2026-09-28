@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { TRPCError } from '@trpc/server';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { canViewAllBranches, canViewAllCountries } from '../common/authz';
 
@@ -241,4 +242,31 @@ export function createContext(req: Request, res: Response): TrpcContext {
     permittedCurrencyCodes,
     currentCurrencyCode,
   };
+}
+
+/**
+ * Country to stamp on a NEW scope-anchoring record (warehouse, logistics
+ * provider). It must be a country the creator can see, or the record is
+ * written and then filtered out of their own list by `effectiveCurrencyCodes`.
+ *
+ * `currentCurrencyCode` alone is not enough: it is null until the user picks a
+ * country in the switcher, and a null fell back to NGN. A country-scoped user
+ * (e.g. assigned KES only) then created an NGN warehouse they could never see.
+ *
+ *  - See-all (scope null): the switcher pick, else null (caller's NGN default).
+ *  - Exactly one visible country: that one.
+ *  - Several, including the base: the base (unchanged behaviour).
+ *  - Several, none the base: ambiguous, so ask rather than guess.
+ */
+export function resolveWriteCurrencyCode(
+  ctx: Pick<TrpcContext, 'effectiveCurrencyCodes' | 'currentCurrencyCode'>,
+): string | null {
+  const scope = ctx.effectiveCurrencyCodes;
+  if (!scope) return ctx.currentCurrencyCode;
+  if (scope.length === 1) return scope[0]!;
+  if (scope.includes(BASE_CURRENCY_CODE)) return BASE_CURRENCY_CODE;
+  throw new TRPCError({
+    code: 'BAD_REQUEST',
+    message: 'Pick a country in the header first, so this is created in the right country.',
+  });
 }
