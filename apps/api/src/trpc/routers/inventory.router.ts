@@ -30,6 +30,7 @@ import type { LogisticsService } from '../../logistics/logistics.service';
 import { getProductsService } from './products.router';
 import { getLogisticsService, invalidateLogisticsOptionsCache } from './logistics.router';
 import { getSettingsService } from './settings.router';
+import { resolveWriteCurrencyCode } from '../context';
 
 let inventoryServiceInstance: InventoryService | null = null;
 let shipmentsServiceInstance: ShipmentsService | null = null;
@@ -731,7 +732,7 @@ export const inventoryRouter = router({
           { name: input.name, address: input.address, coordinates: input.coordinates },
           ctx.user.id,
           ctx.activeGroupId,
-          ctx.currentCurrencyCode,
+          resolveWriteCurrencyCode(ctx),
         );
         // A new warehouse must appear in the Receive-shipment destination picker
         // immediately — that picker reads the cached `logistics.locationOptions`,

@@ -4809,14 +4809,22 @@ export class OrdersService {
   }>> {
     // Check orders table first, then fall back to follow_up_orders
     let orderItems: Array<{ productId: string; quantity: number; productName: string | null }>;
+    // Currency + fulfilling branch of the order, used below to only offer
+    // logistics agents in the same country and company.
+    let orderScope: { currencyCode: string | null; branchId: string | null } | undefined;
 
     const [orderRow] = await this.db
-      .select({ id: schema.orders.id })
+      .select({
+        id: schema.orders.id,
+        currencyCode: schema.orders.currencyCode,
+        branchId: sql<string | null>`COALESCE(${schema.orders.servicingBranchId}, ${schema.orders.branchId})`,
+      })
       .from(schema.orders)
       .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
       .limit(1);
 
     if (orderRow) {
+      orderScope = orderRow;
       orderItems = await this.db
         .select({
           productId: schema.orderItems.productId,
@@ -4829,20 +4837,29 @@ export class OrdersService {
     } else {
       // Fallback: follow-up order
       const [fuRow] = await this.db
-        .select({ id: schema.followUpOrders.id })
+        .select({
+          id: schema.followUpOrders.id,
+          currencyCode: schema.followUpOrders.currencyCode,
+          branchId: sql<string | null>`COALESCE(${schema.followUpOrders.servicingBranchId}, ${schema.followUpOrders.branchId})`,
+        })
         .from(schema.followUpOrders)
         .where(and(eq(schema.followUpOrders.id, orderId), isNull(schema.followUpOrders.deletedAt)))
         .limit(1);
       if (!fuRow) {
         // Fallback: cart order
         const [coRow] = await this.db
-          .select({ id: schema.cartOrders.id })
+          .select({
+            id: schema.cartOrders.id,
+            currencyCode: schema.cartOrders.currencyCode,
+            branchId: sql<string | null>`COALESCE(${schema.cartOrders.servicingBranchId}, ${schema.cartOrders.branchId})`,
+          })
           .from(schema.cartOrders)
           .where(and(eq(schema.cartOrders.id, orderId), isNull(schema.cartOrders.deletedAt)))
           .limit(1);
         if (!coRow) {
           throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
         }
+        orderScope = coRow;
         orderItems = await this.db
           .select({
             productId: schema.cartOrderItems.productId,
@@ -4853,6 +4870,7 @@ export class OrdersService {
           .leftJoin(schema.products, eq(schema.cartOrderItems.productId, schema.products.id))
           .where(eq(schema.cartOrderItems.cartOrderId, orderId));
       } else {
+        orderScope = fuRow;
         orderItems = await this.db
           .select({
             productId: schema.followUpOrderItems.productId,
@@ -4925,6 +4943,30 @@ export class OrdersService {
       }
     }
 
+    // Only offer agents that can actually take this order: same currency
+    // (country) as the order, and inside the order's company. The AGENT_ASSIGNED
+    // transition enforces the currency rule too; filtering here keeps a ZMW
+    // agent from ever showing on an NGN order.
+    const orderCurrency = (orderScope?.currencyCode ?? 'NGN').toUpperCase();
+    let orderGroupId: string | null = null;
+    if (orderScope?.branchId) {
+      const [branchRow] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, orderScope.branchId))
+        .limit(1);
+      orderGroupId = branchRow?.groupId ?? null;
+    }
+    const locationConditions = [
+      eq(schema.logisticsLocations.status, 'ACTIVE'),
+      sql`UPPER(COALESCE(${schema.logisticsProviders.currencyCode}, 'NGN')) = ${orderCurrency}`,
+    ];
+    if (orderGroupId) {
+      locationConditions.push(
+        or(eq(schema.logisticsProviders.groupId, orderGroupId), isNull(schema.logisticsProviders.groupId))!,
+      );
+    }
+
     const locations = await this.db
       .select({
         id: schema.logisticsLocations.id,
@@ -4940,7 +4982,7 @@ export class OrdersService {
         schema.logisticsProviders,
         eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
       )
-      .where(eq(schema.logisticsLocations.status, 'ACTIVE'))
+      .where(and(...locationConditions))
       .orderBy(asc(schema.logisticsLocations.name));
 
     // CS_CLOSER must NOT see remaining-stock numbers (per CEO directive). Hide both the
