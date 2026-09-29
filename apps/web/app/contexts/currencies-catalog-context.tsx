@@ -20,6 +20,31 @@ export function CurrenciesCatalogProvider({ value, children }: { value: Currency
   return <CurrenciesCatalogContext.Provider value={safe}>{children}</CurrenciesCatalogContext.Provider>;
 }
 
+/**
+ * The country a new manually keyed order should default to: the top-bar
+ * country, else the user's only assigned country, else null (use the base).
+ * Keeps a country-scoped closer from creating orders in the base currency.
+ */
+const PreferredCurrencyContext = createContext<string | null>(null);
+
+export function PreferredCurrencyProvider({
+  currentCurrencyCode,
+  currencyCodes,
+  children,
+}: {
+  currentCurrencyCode?: string | null;
+  currencyCodes?: string[] | null;
+  children: ReactNode;
+}) {
+  const assigned = [...new Set((currencyCodes ?? []).map((c) => c.toUpperCase()))];
+  const value = currentCurrencyCode?.toUpperCase() || (assigned.length === 1 ? assigned[0]! : null);
+  return <PreferredCurrencyContext.Provider value={value}>{children}</PreferredCurrencyContext.Provider>;
+}
+
+export function usePreferredCurrencyCode(): string | null {
+  return useContext(PreferredCurrencyContext);
+}
+
 export function useCurrenciesCatalog(): CurrencyCatalogEntry[] {
   return useContext(CurrenciesCatalogContext);
 }
