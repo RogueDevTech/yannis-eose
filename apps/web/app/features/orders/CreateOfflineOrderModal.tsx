@@ -10,8 +10,8 @@ import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
-import { useCurrenciesCatalog, useHasMultipleCurrencies, usePreferredCurrencyCode } from '~/contexts/currencies-catalog-context';
 import { formatMoney } from '~/lib/format-amount';
+import { useOrderCurrencyPricing } from './use-order-currency-pricing';
 
 export interface ProductOption {
   id: string;
@@ -48,14 +48,6 @@ interface CreateOfflineOrderModalProps {
   canEditPrices?: boolean;
 }
 
-const NIGERIAN_STATES = [
-  'Lagos', 'Abuja (FCT)', 'Rivers', 'Oyo', 'Kano', 'Delta', 'Edo', 'Ogun',
-  'Anambra', 'Enugu', 'Kaduna', 'Imo', 'Abia', 'Kwara', 'Osun', 'Ondo',
-  'Ekiti', 'Bayelsa', 'Cross River', 'Akwa Ibom', 'Plateau', 'Benue',
-  'Nasarawa', 'Niger', 'Kogi', 'Taraba', 'Adamawa', 'Bauchi', 'Gombe',
-  'Borno', 'Yobe', 'Jigawa', 'Zamfara', 'Sokoto', 'Kebbi', 'Katsina', 'Ebonyi',
-];
-
 export function CreateOfflineOrderModal({
   open,
   onClose,
@@ -90,29 +82,21 @@ export function CreateOfflineOrderModal({
   const [productId, setProductId] = useState('');
   const [selectedOfferLabel, setSelectedOfferLabel] = useState('');
 
-  // Multi-currency: base + any active currencies (dormant when single-currency).
-  const allCurrencies = useCurrenciesCatalog();
-  const baseCur = allCurrencies.find((c) => c.isDefault && c.active) ?? allCurrencies[0];
-  const showCurrency = useHasMultipleCurrencies();
-  const preferredCurrency = usePreferredCurrencyCode();
-  const [currencyCode, setCurrencyCode] = useState<string>(
-    () =>
-      allCurrencies.find((c) => c.active && c.code.toUpperCase() === preferredCurrency)?.code ?? baseCur?.code ?? 'NGN',
-  );
-
   const selectedProduct = products.find((p) => p.id === productId);
   const offers = selectedProduct?.offers ?? [];
   const selectedOffer = offers.find((o) => o.label === selectedOfferLabel);
-
-  const currentCurrencyInfo = allCurrencies.find((c) => c.code === currencyCode) ?? baseCur;
-  const isBaseCurrency = !baseCur || currencyCode === baseCur.code;
-  /** Price of the selected offer in the chosen currency (base price for the base currency). */
-  const offerPriceInCurrency = (o: { price: string; pricesByCurrency?: Record<string, string> }): number =>
-    isBaseCurrency ? Number(o.price) : Number(o.pricesByCurrency?.[currencyCode] ?? o.price);
-  /** Only currencies that actually price the selected offer appear (hidden-until-priced). */
-  const availableCurrencies = allCurrencies.filter(
-    (c) => c.active && (c.code === baseCur?.code || (selectedOffer?.pricesByCurrency?.[c.code] != null)),
-  );
+  const {
+    showCurrency,
+    currencyCode,
+    setCurrencyCode,
+    currentCurrencyInfo,
+    isBaseCurrency,
+    availableCurrencies,
+    offerPriceInCurrency,
+    pricedOffers,
+    selectedOfferPrice,
+    regionOptions,
+  } = useOrderCurrencyPricing(offers, selectedOfferLabel, () => setSelectedOfferLabel(''));
 
   useFetcherToast(fetcher.data, { successMessage: 'Offline order created', skipErrorToast: open });
 
@@ -179,11 +163,11 @@ export function CreateOfflineOrderModal({
     setProductId(id);
     // Auto-select first offer
     const product = products.find((p) => p.id === id);
-    const firstOffer = product?.offers?.[0];
+    const firstOffer = product?.offers?.find((o) => offerPriceInCurrency(o) != null);
     setSelectedOfferLabel(firstOffer?.label ?? '');
   }
 
-  const totalAmount = selectedOffer ? offerPriceInCurrency(selectedOffer) : 0;
+  const totalAmount = selectedOfferPrice ?? 0;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -192,6 +176,10 @@ export function CreateOfflineOrderModal({
     // `return` here looks identical to a broken button.
     if (!productId || !selectedOffer) {
       setValidationError('Select a product and an offer before creating the order.');
+      return;
+    }
+    if (selectedOfferPrice == null) {
+      setValidationError(`This offer has no ${currencyCode} price. Ask marketing to add one.`);
       return;
     }
     if (!offlineOrderCategory) {
@@ -203,7 +191,7 @@ export function CreateOfflineOrderModal({
     const validItems = [{
       productId,
       quantity: selectedOffer.qty,
-      unitPrice: offerPriceInCurrency(selectedOffer),
+      unitPrice: selectedOfferPrice,
       offerLabel: selectedOffer.label,
     }];
 
@@ -330,7 +318,10 @@ export function CreateOfflineOrderModal({
                 onChange={(e) => setDeliveryState(e.target.value)}
                 options={[
                   { value: '', label: 'Select state' },
-                  ...NIGERIAN_STATES.map((s) => ({ value: s, label: s })),
+                  ...regionOptions.map((s) => ({ value: s, label: s })),
+                  ...(deliveryState && !regionOptions.includes(deliveryState)
+                    ? [{ value: deliveryState, label: deliveryState }]
+                    : []),
                 ]}
               />
               <TextInput
@@ -413,6 +404,12 @@ export function CreateOfflineOrderModal({
                 </div>
               )}
 
+              {productId && offers.length > 0 && pricedOffers.length === 0 && (
+                <p className="text-sm text-amber-600 dark:text-amber-400">
+                  {selectedProduct?.name} has no {currencyCode} price yet. Ask marketing to add one.
+                </p>
+              )}
+
               {productId && offers.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-app-fg-muted mb-2">
@@ -421,12 +418,14 @@ export function CreateOfflineOrderModal({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {offers.map((offer) => {
                       const isSelected = selectedOfferLabel === offer.label;
+                      const price = offerPriceInCurrency(offer);
                       return (
                         <button
                           key={offer.label}
                           type="button"
+                          disabled={price == null}
                           onClick={() => setSelectedOfferLabel(offer.label)}
-                          className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                          className={`rounded-lg border-2 p-3 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                             isSelected
                               ? 'border-brand-500 bg-brand-50/10 dark:bg-brand-900/20'
                               : 'border-app-border bg-app-elevated hover:border-app-fg-muted'
@@ -436,10 +435,12 @@ export function CreateOfflineOrderModal({
                           <div className="flex items-center justify-between gap-2 mt-1">
                             <span className="text-xs text-app-fg-muted">Qty: {offer.qty}</span>
                             <span className="text-sm font-bold text-app-fg tabular-nums">
-                              {isBaseCurrency ? (
-                                <NairaPrice amount={Number(offer.price)} />
+                              {price == null ? (
+                                <span className="text-xs font-medium text-app-fg-muted">No {currencyCode} price</span>
+                              ) : isBaseCurrency ? (
+                                <NairaPrice amount={price} />
                               ) : (
-                                formatMoney(offerPriceInCurrency(offer), currentCurrencyInfo)
+                                formatMoney(price, currentCurrencyInfo)
                               )}
                             </span>
                           </div>

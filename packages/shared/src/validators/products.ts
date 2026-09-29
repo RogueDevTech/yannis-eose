@@ -20,6 +20,8 @@ export const productOfferSchema = z.object({
     .max(MAX_OFFER_TIER_IMAGES)
     .optional()
     .transform((v) => (Array.isArray(v) ? v : [])),
+  /** Non-base currency prices keyed by code (e.g. { ZMW: '1200.00' }). Absent = not priced. */
+  pricesByCurrency: z.record(z.string()).optional(),
 });
 
 export type ProductOffer = z.infer<typeof productOfferSchema>;
