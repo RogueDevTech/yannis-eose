@@ -3802,8 +3802,8 @@ export function OrderDetailPage({
           })() : (
             <>
               <EmptyState
-                title="No locations with enough stock"
-                description="No logistics hub currently has enough free shelf stock for every line on this order (or dispatch is locked). Receive stock (intake or verified transfer) and try again."
+                title={`No ${(order.currencyCode ?? 'NGN').toUpperCase()} logistics agents`}
+                description={`This is a ${(order.currencyCode ?? 'NGN').toUpperCase()} order. Only active agents in the same country and company are listed. If the order currency is wrong, fix it first.`}
                 variant="card"
               />
               <div className="flex gap-2 mt-4 justify-end">

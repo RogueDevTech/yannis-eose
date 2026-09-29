@@ -169,6 +169,35 @@ function getCsOrderRoutingService(): CsOrderRoutingService {
   return csOrderRoutingInstance;
 }
 
+/**
+ * Currency for a manually keyed order (offline / delivered follow-up). The
+ * service falls back to NGN when none is sent, so a Zambia-only closer who left
+ * the picker on its default created an NGN order that no ZMW agent could take.
+ * An omitted currency now follows the top-bar country, or the user's only
+ * country; an explicit one must be a country the user works in.
+ */
+function resolveManualOrderCurrency(
+  requested: string | undefined,
+  ctx: { permittedCurrencyCodes: string[] | null; currentCurrencyCode: string | null },
+): string | undefined {
+  const permitted = ctx.permittedCurrencyCodes?.map((c) => c.toUpperCase()) ?? null;
+  const viewing =
+    ctx.currentCurrencyCode && (!permitted || permitted.includes(ctx.currentCurrencyCode))
+      ? ctx.currentCurrencyCode
+      : undefined;
+  const code =
+    requested?.toUpperCase() ||
+    viewing ||
+    (permitted && new Set(permitted).size === 1 ? permitted[0] : undefined);
+  if (code && permitted && !permitted.includes(code)) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `You can only create ${[...new Set(permitted)].join(' or ')} orders. Change the order currency and try again.`,
+    });
+  }
+  return code;
+}
+
 /** HoCS / Branch Admin branch scope for CS routing settings (mirrors CsOrderRoutingService). */
 function assertCsRoutingBranchAccess(actor: SessionUser, ownerBranchId: string): void {
   if (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN') return;
@@ -507,7 +536,7 @@ export const ordersRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { branchId, ...offlineInput } = input;
       const res = await getOrdersService().createOffline(
-        offlineInput,
+        { ...offlineInput, currencyCode: resolveManualOrderCurrency(offlineInput.currencyCode, ctx) },
         ctx.user.id,
         branchId ?? ctx.currentBranchId,
       );
@@ -525,7 +554,7 @@ export const ordersRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { branchId, ...dfuInput } = input;
       const res = await getOrdersService().createDeliveredFollowUp(
-        dfuInput,
+        { ...dfuInput, currencyCode: resolveManualOrderCurrency(dfuInput.currencyCode, ctx) },
         ctx.user.id,
         branchId ?? ctx.currentBranchId,
       );

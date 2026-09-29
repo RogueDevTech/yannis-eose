@@ -10,7 +10,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
-import { useCurrenciesCatalog, useHasMultipleCurrencies } from '~/contexts/currencies-catalog-context';
+import { useCurrenciesCatalog, useHasMultipleCurrencies, usePreferredCurrencyCode } from '~/contexts/currencies-catalog-context';
 import { formatMoney } from '~/lib/format-amount';
 
 export interface ProductOption {
@@ -94,7 +94,11 @@ export function CreateOfflineOrderModal({
   const allCurrencies = useCurrenciesCatalog();
   const baseCur = allCurrencies.find((c) => c.isDefault && c.active) ?? allCurrencies[0];
   const showCurrency = useHasMultipleCurrencies();
-  const [currencyCode, setCurrencyCode] = useState<string>(() => baseCur?.code ?? 'NGN');
+  const preferredCurrency = usePreferredCurrencyCode();
+  const [currencyCode, setCurrencyCode] = useState<string>(
+    () =>
+      allCurrencies.find((c) => c.active && c.code.toUpperCase() === preferredCurrency)?.code ?? baseCur?.code ?? 'NGN',
+  );
 
   const selectedProduct = products.find((p) => p.id === productId);
   const offers = selectedProduct?.offers ?? [];

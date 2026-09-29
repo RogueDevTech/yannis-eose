@@ -25,7 +25,7 @@ import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 import { BranchScopeGuardProvider } from '~/contexts/branch-scope-action-guard';
 import { ActiveGroupIdProvider, BranchesCatalogProvider, BranchGroupsCatalogProvider } from '~/contexts/branches-catalog-context';
-import { CurrenciesCatalogProvider } from '~/contexts/currencies-catalog-context';
+import { CurrenciesCatalogProvider, PreferredCurrencyProvider } from '~/contexts/currencies-catalog-context';
 import { NGN } from '@yannis/shared';
 import { OnboardingNudge } from './onboarding-nudge';
 import { canAccessGlobalAuditLog, isAdminLevel } from '~/lib/rbac';
@@ -1824,6 +1824,10 @@ function DashboardLayoutInner({
             <BranchGroupsCatalogProvider value={branchGroups ?? []}>
             <ActiveGroupIdProvider value={activeGroupId ?? null}>
             <CurrenciesCatalogProvider value={currencies && currencies.length > 0 ? currencies : [NGN]}>
+            <PreferredCurrencyProvider
+              currentCurrencyCode={(user as { currentCurrencyCode?: string | null })?.currentCurrencyCode ?? null}
+              currencyCodes={(user as { currencyCodes?: string[] })?.currencyCodes ?? null}
+            >
               {/* Cross-route nav swap — when the user clicks a sidebar link, render the
                   destination route's own loading shell (matched by pathname against the
                   registry in `~/lib/route-shells.tsx`) so Skeleton #1 == Skeleton #2 and
@@ -1842,6 +1846,7 @@ function DashboardLayoutInner({
                     },
                   ) ?? <Outlet />)
                 : <Outlet />}
+            </PreferredCurrencyProvider>
             </CurrenciesCatalogProvider>
             </ActiveGroupIdProvider>
             </BranchGroupsCatalogProvider>
