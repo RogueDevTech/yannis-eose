@@ -1683,6 +1683,34 @@ export class OrdersService {
     return params.fallbackBranchId ?? null;
   }
 
+  /**
+   * Servicing branch for closer-created orders (offline, delivered follow-up).
+   * The branch selected in the header wins when the closer is a member of it, so
+   * a closer on Lagos + Ife services Lagos orders from Lagos and Ife orders from
+   * Ife. A non-member session branch (e.g. an admin-level view) or no branch
+   * ("All branches") falls back to the closer's primary branch.
+   */
+  private async resolveCloserServicingBranchId(
+    actorId: string,
+    sessionBranchId: string | null | undefined,
+    fallbackBranchId: string | null,
+  ): Promise<string | null> {
+    if (sessionBranchId) {
+      const [membership] = await this.db
+        .select({ branchId: schema.userBranches.branchId })
+        .from(schema.userBranches)
+        .where(and(eq(schema.userBranches.userId, actorId), eq(schema.userBranches.branchId, sessionBranchId)))
+        .limit(1);
+      if (membership) return sessionBranchId;
+    }
+    const [closer] = await this.db
+      .select({ primaryBranchId: schema.users.primaryBranchId })
+      .from(schema.users)
+      .where(eq(schema.users.id, actorId))
+      .limit(1);
+    return closer?.primaryBranchId ?? sessionBranchId ?? fallbackBranchId;
+  }
+
   /** Edge tamper gate: order lines must match allowlisted tiers for this campaign (templates or legacy base price). */
   private async assertEdgeFormLineItemsAllowlisted(orderInput: CreateOrderInput): Promise<void> {
     const campaignId = orderInput.campaignId;
@@ -3037,16 +3065,9 @@ export class OrdersService {
       fallbackBranchId: sessionBranchId ?? null,
     });
 
-    // Offline orders are manually created by a closer — use the closer's PRIMARY
-    // branch as servicing branch. The session branch can differ when the closer
-    // switches the header branch picker (e.g. to Lagos while belonging to Ile-Ife),
-    // causing orders to land in the wrong branch for dashboard scoping.
-    const closerRow = await this.db
-      .select({ primaryBranchId: schema.users.primaryBranchId })
-      .from(schema.users)
-      .where(eq(schema.users.id, actorId))
-      .limit(1);
-    const servicingBranchId = closerRow[0]?.primaryBranchId ?? sessionBranchId ?? branchId;
+    // Offline orders are manually created by a closer — serviced by the branch
+    // the closer is working in (see resolveCloserServicingBranchId).
+    const servicingBranchId = await this.resolveCloserServicingBranchId(actorId, sessionBranchId, branchId);
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       // Serialize concurrent creates for this phone (blocks; auto-released on
@@ -3685,10 +3706,10 @@ export class OrdersService {
       fallbackBranchId: sessionBranchId ?? null,
     });
 
-    // Delivered follow-up orders are manually created by a closer — the closer's
-    // session branch is the servicing branch. CS routing rules should NOT override
+    // Delivered follow-up orders are manually created by a closer — serviced by
+    // the branch the closer is working in. CS routing rules should NOT override
     // this; routing is for incoming funnel orders, not closer-created orders.
-    const servicingBranchId = sessionBranchId ?? branchId;
+    const servicingBranchId = await this.resolveCloserServicingBranchId(actorId, sessionBranchId, branchId);
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       // Serialize concurrent creates for this phone; held on the same connection
