@@ -11,6 +11,8 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import type { ProductOption } from './CreateOfflineOrderModal';
+import { formatMoney } from '~/lib/format-amount';
+import { useOrderCurrencyPricing } from './use-order-currency-pricing';
 
 interface CreateDeliveredFollowUpModalProps {
   open: boolean;
@@ -19,14 +21,6 @@ interface CreateDeliveredFollowUpModalProps {
   products: ProductOption[];
   branchId?: string;
 }
-
-const NIGERIAN_STATES = [
-  'Lagos', 'Abuja (FCT)', 'Rivers', 'Oyo', 'Kano', 'Delta', 'Edo', 'Ogun',
-  'Anambra', 'Enugu', 'Kaduna', 'Imo', 'Abia', 'Kwara', 'Osun', 'Ondo',
-  'Ekiti', 'Bayelsa', 'Cross River', 'Akwa Ibom', 'Plateau', 'Benue',
-  'Nasarawa', 'Niger', 'Kogi', 'Taraba', 'Adamawa', 'Bauchi', 'Gombe',
-  'Borno', 'Yobe', 'Jigawa', 'Zamfara', 'Sokoto', 'Kebbi', 'Katsina', 'Ebonyi',
-];
 
 export function CreateDeliveredFollowUpModal({
   open,
@@ -57,6 +51,19 @@ export function CreateDeliveredFollowUpModal({
   const selectedProduct = products.find((p) => p.id === productId);
   const offers = selectedProduct?.offers ?? [];
   const selectedOffer = offers.find((o) => o.label === selectedOfferLabel);
+  const {
+    showCurrency,
+    currencyCode,
+    setCurrencyCode,
+    currentCurrencyInfo,
+    isBaseCurrency,
+    availableCurrencies,
+    offerPriceInCurrency,
+    pricedOffers,
+    selectedOfferPrice,
+    regionOptions,
+  } = useOrderCurrencyPricing(offers, selectedOfferLabel, () => setSelectedOfferLabel(''));
+  const [validationError, setValidationError] = useState('');
 
   useFetcherToast(fetcher.data, { successMessage: 'Delivered follow-up order created', skipErrorToast: open });
 
@@ -95,20 +102,25 @@ export function CreateDeliveredFollowUpModal({
   function onProductChange(id: string) {
     setProductId(id);
     const product = products.find((p) => p.id === id);
-    const firstOffer = product?.offers?.[0];
+    const firstOffer = product?.offers?.find((o) => offerPriceInCurrency(o) != null);
     setSelectedOfferLabel(firstOffer?.label ?? '');
   }
 
-  const totalAmount = selectedOffer ? Number(selectedOffer.price) : 0;
+  const totalAmount = selectedOfferPrice ?? 0;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!productId || !selectedOffer) return;
+    if (selectedOfferPrice == null) {
+      setValidationError(`This offer has no ${currencyCode} price. Ask marketing to add one.`);
+      return;
+    }
+    setValidationError('');
 
     const validItems = [{
       productId,
       quantity: selectedOffer.qty,
-      unitPrice: Number(selectedOffer.price),
+      unitPrice: selectedOfferPrice,
       offerLabel: selectedOffer.label,
     }];
 
@@ -119,6 +131,7 @@ export function CreateDeliveredFollowUpModal({
     formData.set('paymentMethod', paymentMethod);
     formData.set('items', JSON.stringify(validItems));
     formData.set('totalAmount', String(totalAmount.toFixed(2)));
+    if (showCurrency && currencyCode) formData.set('currencyCode', currencyCode);
     if (customerAddress.trim()) formData.set('customerAddress', customerAddress.trim());
     if (deliveryAddress.trim()) formData.set('deliveryAddress', deliveryAddress.trim());
     if (deliveryNotes.trim()) formData.set('deliveryNotes', deliveryNotes.trim());
@@ -176,6 +189,14 @@ export function CreateDeliveredFollowUpModal({
                 onDismiss={() => setDismissedError(true)}
               />
             )}
+            {validationError && (
+              <PageNotification
+                variant="error"
+                message={validationError}
+                durationMs={5000}
+                onDismiss={() => setValidationError('')}
+              />
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <TextInput
@@ -223,7 +244,10 @@ export function CreateDeliveredFollowUpModal({
                 onChange={(e) => setDeliveryState(e.target.value)}
                 options={[
                   { value: '', label: 'Select state' },
-                  ...NIGERIAN_STATES.map((s) => ({ value: s, label: s })),
+                  ...regionOptions.map((s) => ({ value: s, label: s })),
+                  ...(deliveryState && !regionOptions.includes(deliveryState)
+                    ? [{ value: deliveryState, label: deliveryState }]
+                    : []),
                 ]}
               />
               <TextInput
@@ -285,6 +309,23 @@ export function CreateDeliveredFollowUpModal({
                 wrapperClassName="w-full"
               />
 
+              {showCurrency && productId && offers.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-app-fg-muted mb-2">Currency</label>
+                  <FormSelect
+                    value={currencyCode}
+                    onChange={(e) => setCurrencyCode(e.target.value)}
+                    options={availableCurrencies.map((c) => ({ value: c.code, label: `${c.symbol} ${c.code}` }))}
+                  />
+                </div>
+              )}
+
+              {productId && offers.length > 0 && pricedOffers.length === 0 && (
+                <p className="text-sm text-amber-600 dark:text-amber-400">
+                  {selectedProduct?.name} has no {currencyCode} price yet. Ask marketing to add one.
+                </p>
+              )}
+
               {productId && offers.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-app-fg-muted mb-2">
@@ -293,12 +334,14 @@ export function CreateDeliveredFollowUpModal({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {offers.map((offer) => {
                       const isSelected = selectedOfferLabel === offer.label;
+                      const price = offerPriceInCurrency(offer);
                       return (
                         <button
                           key={offer.label}
                           type="button"
+                          disabled={price == null}
                           onClick={() => setSelectedOfferLabel(offer.label)}
-                          className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                          className={`rounded-lg border-2 p-3 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                             isSelected
                               ? 'border-brand-500 bg-brand-50/10 dark:bg-brand-900/20'
                               : 'border-app-border bg-app-elevated hover:border-app-fg-muted'
@@ -308,7 +351,13 @@ export function CreateDeliveredFollowUpModal({
                           <div className="flex items-center justify-between gap-2 mt-1">
                             <span className="text-xs text-app-fg-muted">Qty: {offer.qty}</span>
                             <span className="text-sm font-bold text-app-fg tabular-nums">
-                              <NairaPrice amount={Number(offer.price)} />
+                              {price == null ? (
+                                <span className="text-xs font-medium text-app-fg-muted">No {currencyCode} price</span>
+                              ) : isBaseCurrency ? (
+                                <NairaPrice amount={price} />
+                              ) : (
+                                formatMoney(price, currentCurrencyInfo)
+                              )}
                             </span>
                           </div>
                         </button>
@@ -325,7 +374,7 @@ export function CreateDeliveredFollowUpModal({
                     <span className="text-app-fg-muted"> · {selectedOffer.label} · Qty {selectedOffer.qty}</span>
                   </div>
                   <span className="text-sm font-bold text-app-fg tabular-nums">
-                    <NairaPrice amount={totalAmount} />
+                    {isBaseCurrency ? <NairaPrice amount={totalAmount} /> : formatMoney(totalAmount, currentCurrencyInfo)}
                   </span>
                 </div>
               )}

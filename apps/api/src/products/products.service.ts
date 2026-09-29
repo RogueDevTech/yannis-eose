@@ -50,6 +50,7 @@ function legacyEmbeddedOffers(raw: unknown): ProductOffer[] | null {
 
 function templateRowsToOffers(
   rows: Array<{
+    pricesByCurrency?: Record<string, string>;
     name: string;
     price: string;
     quantity: number | null;
@@ -61,6 +62,7 @@ function templateRowsToOffers(
     qty: t.quantity != null && t.quantity >= 1 ? t.quantity : 1,
     price: Number(t.price),
     imageUrls: parseJsonStringArray(t.imageUrls),
+    ...(t.pricesByCurrency ? { pricesByCurrency: t.pricesByCurrency } : {}),
   }));
 }
 
@@ -133,6 +135,7 @@ export class ProductsService {
     const [templateRows, groupItemRows] = await Promise.all([
       this.db
         .select({
+          id: schema.offerTemplates.id,
           productId: schema.offerTemplates.productId,
           name: schema.offerTemplates.name,
           price: schema.offerTemplates.price,
@@ -150,6 +153,7 @@ export class ProductsService {
         .orderBy(desc(schema.offerTemplates.createdAt)),
       this.db
         .select({
+          id: schema.offerGroupItems.id,
           productId: schema.offerGroupItems.productId,
           label: schema.offerGroupItems.label,
           price: schema.offerGroupItems.price,
@@ -169,15 +173,49 @@ export class ProductsService {
         .orderBy(asc(schema.offerGroupItems.sortOrder)),
     ]);
 
+    // Non-base currency prices (e.g. ZMW) live in side tables. Without them a
+    // manually keyed order in another country falls back to the NGN price.
+    const [groupItemPriceRows, templatePriceRows] = await Promise.all([
+      groupItemRows.length > 0
+        ? this.db
+            .select({
+              ownerId: schema.offerGroupItemPrices.offerGroupItemId,
+              currencyCode: schema.offerGroupItemPrices.currencyCode,
+              price: schema.offerGroupItemPrices.price,
+            })
+            .from(schema.offerGroupItemPrices)
+            .where(inArray(schema.offerGroupItemPrices.offerGroupItemId, groupItemRows.map((r) => r.id)))
+        : [],
+      templateRows.length > 0
+        ? this.db
+            .select({
+              ownerId: schema.offerTemplatePrices.offerTemplateId,
+              currencyCode: schema.offerTemplatePrices.currencyCode,
+              price: schema.offerTemplatePrices.price,
+            })
+            .from(schema.offerTemplatePrices)
+            .where(inArray(schema.offerTemplatePrices.offerTemplateId, templateRows.map((r) => r.id)))
+        : [],
+    ]);
+    const pricesByOwner = new Map<string, Record<string, string>>();
+    for (const r of [...groupItemPriceRows, ...templatePriceRows]) {
+      if (!(Number(r.price) > 0)) continue;
+      const m = pricesByOwner.get(r.ownerId) ?? {};
+      m[r.currencyCode.toUpperCase()] = String(r.price);
+      pricesByOwner.set(r.ownerId, m);
+    }
+
     // Build from offer_group_items first (newer, takes precedence)
     const groupByProduct = new Map<string, ProductOffer[]>();
     for (const r of groupItemRows) {
       const arr = groupByProduct.get(r.productId) ?? [];
+      const prices = pricesByOwner.get(r.id);
       arr.push({
         label: r.label,
         qty: r.quantity,
         price: Number(r.price),
         imageUrls: r.imageUrl ? [r.imageUrl] : [],
+        ...(prices ? { pricesByCurrency: prices } : {}),
       });
       groupByProduct.set(r.productId, arr);
     }
@@ -198,7 +236,12 @@ export class ProductsService {
         map.set(pid, groupOffers);
       } else {
         const templates = templateByProduct.get(pid);
-        if (templates) map.set(pid, templateRowsToOffers(templates));
+        if (templates) {
+          map.set(
+            pid,
+            templateRowsToOffers(templates.map((t) => ({ ...t, pricesByCurrency: pricesByOwner.get(t.id) }))),
+          );
+        }
       }
     }
     return map;
