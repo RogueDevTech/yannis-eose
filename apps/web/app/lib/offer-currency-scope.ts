@@ -43,3 +43,9 @@ export function editableOfferCurrencyCodes(user: {
     .filter(Boolean);
   return assigned.length > 0 ? Array.from(new Set(assigned)) : [BASE_CURRENCY_CODE];
 }
+
+/**
+ * Countries the user may VIEW (top-bar country switcher). Same rule as offer
+ * editing, and as the API's `switchCurrency` guard: `null` = every country.
+ */
+export const viewableCountryCodes = editableOfferCurrencyCodes;

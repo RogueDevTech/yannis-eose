@@ -13,6 +13,7 @@ import {
 import { getNotificationLink, getNotificationAction, formatNotificationTime, formatNotificationDate } from '~/lib/notification-links';
 import { clearLoaderCache } from '~/lib/loader-cache';
 import { useNotificationsState } from '~/contexts/notifications-state';
+import { viewableCountryCodes } from '~/lib/offer-currency-scope';
 interface Notification {
   id: string;
   type: string;
@@ -42,6 +43,8 @@ interface HeaderProps {
     name: string;
     role: string;
     email: string;
+    permissions?: string[] | null;
+    currencyCodes?: string[] | null;
   } | null;
   sidebarCollapsed: boolean;
   /** Whether the active app theme uses dark surfaces for theme-aware logo selection. */
@@ -176,9 +179,17 @@ export function Header({
   // Mobile multi-country VIEW switcher — mirrors the desktop HeaderCountrySwitcher
   // (which is `hidden lg:flex`, so mobile otherwise has no way to switch country).
   // Self-hides for single-country users/companies via `mobileCanSwitchCountry`.
+  // Only the countries this user may view: the switch action rejects any other
+  // code, so listing the company's full catalog just offered dead options.
+  const viewableCurrencies = useMemo(() => {
+    const allowed = user ? viewableCountryCodes(user) : null;
+    if (!allowed) return currenciesProp;
+    const allowedSet = new Set(allowed);
+    return (currenciesProp ?? []).filter((c) => allowedSet.has(c.code.toUpperCase()));
+  }, [currenciesProp, user]);
   const mobileActiveCurrencies = useMemo(
-    () => (currenciesProp ?? []).filter((c) => c.active),
-    [currenciesProp],
+    () => (viewableCurrencies ?? []).filter((c) => c.active),
+    [viewableCurrencies],
   );
   // Dedupe by uppercased code — currencies are group-scoped so the same code
   // repeats once per company (see HeaderCountrySwitcher). Without this the sheet
@@ -454,7 +465,7 @@ export function Header({
         <div className="hidden lg:flex items-center shrink-0">
           <HeaderCountrySwitcher
             currentCurrencyCode={currentCurrencyCode ?? null}
-            currencies={currenciesProp}
+            currencies={viewableCurrencies}
           />
         </div>
         {branchesHydrationReady &&
