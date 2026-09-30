@@ -1250,33 +1250,9 @@ function HeaderBranchSwitcher({
   const canSeeAllBranches = canRoleSeeAllBranchesInHeader(userRole);
   const canSwitch = shouldShowHeaderBranchSwitcher(visibleBranches.length, userRole);
 
-  // Org-wide roles (non-branch-eligible, non-admin) see a simplified group-level
-  // switcher instead of individual branch checkboxes.
-  const BRANCH_ELIGIBLE_HEADER = new Set(['MEDIA_BUYER', 'HEAD_OF_MARKETING', 'CS_CLOSER', 'HEAD_OF_CS', 'BRANCH_ADMIN']);
-  const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'SUPPORT']);
-  const isOrgWideRole = !BRANCH_ELIGIBLE_HEADER.has(userRole) && !ADMIN_ROLES.has(userRole);
-
-  // Derive unique groups from the user's branches (for org-wide group switcher)
-  const derivedGroups = useMemo(() => {
-    if (!isOrgWideRole) return [];
-    const groupMap = new Map<string, { id: string; name: string; branchIds: string[] }>();
-    for (const b of visibleBranches) {
-      if (!b.groupId) continue;
-      const existing = groupMap.get(b.groupId);
-      if (existing) {
-        existing.branchIds.push(b.id);
-      } else {
-        // Use activeGroups for name if available, else fallback
-        const groupName = b.groupName ?? activeGroups?.find((g) => g.id === b.groupId)?.name ?? b.groupId;
-        groupMap.set(b.groupId, { id: b.groupId, name: groupName, branchIds: [b.id] });
-      }
-    }
-    return [...groupMap.values()];
-  }, [isOrgWideRole, visibleBranches, activeGroups]);
-
   // When multiple groups exist, toggling a branch must clear branches from other groups
   // to prevent cross-company data mixing.
-  const hasMultipleGroups = (activeGroups?.length ?? 0) > 1 || derivedGroups.length > 1;
+  const hasMultipleGroups = (activeGroups?.length ?? 0) > 1;
 
   // When currentBranchId is set the user explicitly selected ONE branch.
   // The session still carries selectedBranchIds (full company set) for
@@ -1459,12 +1435,7 @@ function HeaderBranchSwitcher({
     }
     return null;
   }, [isMultiBranch, hasMultipleGroups, activeGroups, visibleBranches, visibleSelectedIds]);
-  const appliedSet = useMemo(() => new Set(visibleSelectedIds), [visibleSelectedIds]);
-  const triggerLabel = isOrgWideRole && derivedGroups.length === 1
-    ? derivedGroups[0]!.name
-    : isOrgWideRole && derivedGroups.length > 1
-      ? (derivedGroups.find((g) => g.branchIds.every((id) => appliedSet.has(id)))?.name ?? derivedGroups[0]!.name)
-    : isAllBranches
+  const triggerLabel = isAllBranches
       // Multi-company: show the company name instead of "All Branches" to avoid cross-company ambiguity
     ? (hasMultipleGroups && selectedGroupLabel
         ? selectedGroupLabel
@@ -1520,37 +1491,6 @@ function HeaderBranchSwitcher({
             Filter Branches
           </p>
 
-          {/* Org-wide roles: simplified group-level radio switcher */}
-          {isOrgWideRole && derivedGroups.length > 0 ? (
-            <div className="py-1 max-h-[320px] overflow-y-auto">
-              {derivedGroups.length === 1 ? (
-                <div className="px-3 py-2.5">
-                  <span className="text-xs font-semibold text-app-fg">{derivedGroups[0]!.name}</span>
-                </div>
-              ) : (
-                derivedGroups.map((group) => {
-                  const isSelected = group.branchIds.every((id) => checked.has(id));
-                  return (
-                    <label
-                      key={group.id}
-                      className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-app-hover transition-colors duration-100 cursor-pointer select-none"
-                    >
-                      <input
-                        type="radio"
-                        name="orgwide-group"
-                        checked={isSelected}
-                        onChange={() => {
-                          setChecked(new Set(group.branchIds));
-                        }}
-                        className="w-4 h-4 border-app-border text-brand-600 focus:ring-brand-500 dark:bg-app-bg dark:border-app-border"
-                      />
-                      <span className="text-xs font-semibold text-app-fg">{group.name}</span>
-                    </label>
-                  );
-                })
-              )}
-            </div>
-          ) : (
           <>
           {/* Select All checkbox — shown when 2+ branches visible; hidden when multiple groups exist (group headers serve as select-all) */}
           {visibleBranches.length > 1 && !(activeGroups && activeGroups.length > 1) && (
@@ -1712,7 +1652,6 @@ function HeaderBranchSwitcher({
             )}
           </div>
           </>
-          )}
 
           {/* Apply button */}
           <div className="border-t border-app-border px-3 py-2">
