@@ -1126,6 +1126,13 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               onReject={setRejectingRequestId}
               emptyMessage={transferEmptyMessage}
               canApproveFunding={canSendFunding}
+              canResolveDispute={(entry) =>
+                canReverseFunding &&
+                entry.entryType === 'transfer' &&
+                (isAdminViewer
+                  ? entry.status !== 'REVERSED'
+                  : entry.senderId === currentUserId && (entry.status === 'DISPUTED' || entry.status === 'SENT'))
+              }
               loading={isFundingRouteLoading}
               selection={canSendFunding ? {
                 selectedIds: distribSelectedIds,
@@ -2434,6 +2441,7 @@ function UnifiedDistributingTable({
   onReject,
   emptyMessage,
   canApproveFunding,
+  canResolveDispute,
   loading = false,
   selection,
 }: {
@@ -2448,6 +2456,8 @@ function UnifiedDistributingTable({
   emptyMessage: string;
   /** Phase 21 — gate Approve/Reject on `marketing.funding.approve` or legacy admin/HoM/Finance role. */
   canApproveFunding: boolean;
+  /** Row may be reversed from the Disputes page (mirrors the API's reversal rule). */
+  canResolveDispute: (entry: DistributingFundingEntry) => boolean;
   loading?: boolean;
   selection?: CompactTableSelection<DistributingFundingEntry>;
 }) {
@@ -2622,6 +2632,14 @@ function UnifiedDistributingTable({
                   tone: 'danger',
                   onClick: () => onReject(entry.id),
                   show: isPendingRequest && canApproveFunding,
+                },
+                {
+                  key: 'resolve-dispute',
+                  kind: 'link',
+                  label: entry.status === 'DISPUTED' ? 'Resolve dispute' : 'Reverse',
+                  tone: 'danger',
+                  to: `/admin/marketing/funding/disputes?status=${entry.status}&search=${entry.id}&reverse=${entry.id}`,
+                  show: canResolveDispute(entry),
                 },
                 {
                   key: 'ledger',
