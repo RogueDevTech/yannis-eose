@@ -2250,6 +2250,13 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
               isNull(schema.orders.deletedAt),
               // This follow-up's own graduated copy must never count as a dup.
               sql`${schema.orders.sourceFollowUpOrderId} IS DISTINCT FROM ${followUpOrderId}`,
+              // Nor its frozen SOURCE order: originals stay live (CS_ENGAGED,
+              // CONFIRMED…) by design, so matching them skipped every follow-up
+              // delivered within 14 days of its original and credited the
+              // delivery to nobody.
+              ...(fuOrder.sourceOrderId
+                ? [sql`${schema.orders.id} IS DISTINCT FROM ${fuOrder.sourceOrderId}`]
+                : []),
               gte(schema.orders.createdAt, fourteenDaysAgo),
               inArray(schema.orderItems.productId, productIds),
             ),
