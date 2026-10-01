@@ -81,6 +81,7 @@ describe('importOrderSchema', () => {
       customerPhone: '08031234567',
       items: base.items,
       targetStatus: 'DELIVERED',
+      branchId: '0192f8c4-0000-7000-8000-0000000000b1',
     });
     expect(res.success).toBe(true);
   });
