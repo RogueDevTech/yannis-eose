@@ -11,6 +11,7 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { getMarketingRoleFlags } from '~/lib/marketing-pages.server';
+import { isAdminLevel } from '~/lib/rbac';
 import { FundingDisputesPage } from '~/features/marketing/FundingDisputesPage';
 import type {
   FundingDisputeRecord,
@@ -64,6 +65,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const body = (res.data as { result?: { data?: DisputesResponse } })?.result?.data;
 
   const data: FundingDisputesLoaderData = {
+    canReverseAny: isAdminLevel(user),
     status,
     search,
     records: body?.records ?? [],

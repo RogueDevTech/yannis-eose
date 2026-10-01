@@ -1207,6 +1207,20 @@ export class MarketingService {
           message: 'This is a peer transfer between media buyers and cannot be reversed here.',
         });
       }
+      // Non-admin holders (Head of Marketing) resolve disputes on their OWN sends
+      // only, and only before the receiver accepted the money. Clawing back a
+      // received (COMPLETED) funding stays with Admin.
+      if (!isAdminLevel(actor)) {
+        if (found.senderId !== actor.id) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only reverse funding you sent.' });
+        }
+        if (found.status === 'COMPLETED') {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'The receiver already marked this funding received. Ask an admin to reverse it.',
+          });
+        }
+      }
 
       let receiverBalanceBefore: number | null = null;
       if (found.status === 'COMPLETED') {
@@ -1338,6 +1352,8 @@ export class MarketingService {
         WHERE mft.ledger_entry_id = ${schema.marketingFunding.id}
       )`,
     ];
+    // Non-admin holders (Head of Marketing) work only their own sends.
+    if (!isAdminLevel(actor)) scopeConds.push(eq(schema.marketingFunding.senderId, actor.id));
     if (scopedUserIds) {
       const partyInScope = or(
         inArray(schema.marketingFunding.senderId, scopedUserIds),
