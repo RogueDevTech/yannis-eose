@@ -48,6 +48,9 @@ describe('createOfflineOrderSchema currencyCode is optional + uppercased', () =>
   const offline = {
     customerName: 'Grace Hopper',
     customerPhone: '08030000000',
+    // Required on CS-entry offline orders (matches the public edge form).
+    deliveryAddress: '12 Ring Road, Ibadan',
+    deliveryState: 'Oyo',
     items: baseOrder.items,
     totalAmount: 20000,
   };

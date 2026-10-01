@@ -135,7 +135,7 @@ export type DistributingFundingEntryType = 'transfer' | 'request';
 export interface DistributingFundingTransferEntry {
   id: string;
   entryType: 'transfer';
-  status: 'SENT' | 'COMPLETED' | 'DISPUTED';
+  status: 'SENT' | 'COMPLETED' | 'DISPUTED' | 'REVERSED';
   amount: string;
   createdAt: string;
   senderId: string;
@@ -410,6 +410,8 @@ export interface MarketingFundingLoaderData {
   currentUserId: string;
   currentUserRole: string;
   canSendFunding: boolean;
+  /** Can open the dispute / reversal queue (`marketing.funding.reverse`). */
+  canReverseFunding?: boolean;
   canRequestFunding: boolean;
   /** HoM/Admin: primary tab "Funds I Distribute" + outgoing slices. False for MB. */
   canDistribute: boolean;
@@ -678,4 +680,41 @@ export interface FundingLedgerLoaderData {
   mediaBuyers: Array<{ id: string; name: string }>;
   filters: MarketingDateFilters;
   entryTypeFilter: string;
+}
+
+/** Funding dispute / reversal queue (mig 0348). */
+export type FundingDisputeStatus = 'DISPUTED' | 'SENT' | 'COMPLETED' | 'REVERSED';
+
+export interface FundingDisputeRecord {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  amount: string;
+  status: FundingDisputeStatus;
+  notes: string | null;
+  receiptUrl: string | null;
+  sentAt: string;
+  verifiedAt: string | null;
+  disputeReason: string | null;
+  sourceFundingRequestId: string | null;
+  senderName: string | null;
+  senderRole: string | null;
+  receiverName: string | null;
+  receiverRole: string | null;
+  reversalId: string | null;
+  reversalReason: string | null;
+  reversalPreviousStatus: FundingDisputeStatus | null;
+  reversedAt: string | null;
+  reversedByName: string | null;
+}
+
+export interface FundingDisputesLoaderData {
+  status: FundingDisputeStatus;
+  search: string;
+  records: FundingDisputeRecord[];
+  page: number;
+  limit: number;
+  total: number;
+  filteredTotalAmount: string;
+  statusCounts: Record<FundingDisputeStatus, number>;
 }

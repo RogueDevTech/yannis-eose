@@ -618,6 +618,15 @@ export function getAuditSummaryParts(
     const receiver = lookupName(pickDataField(data, 'receiver_id', 'receiverId'), actorNames, asOf);
     const parties =
       sender && receiver ? ` from ${sender} to ${receiver}` : sender ? ` from ${sender}` : receiver ? ` to ${receiver}` : '';
+    // Only the receiver verifies; an UPDATE by anyone else is an admin reversal
+    // (the history row holds the OLD status, so status alone would misdescribe it).
+    const receiverId = pickDataField(data, 'receiver_id', 'receiverId');
+    if (entry.action === 'UPDATE' && entry.changedBy && receiverId && entry.changedBy !== receiverId) {
+      return { prefix: `${actor} reversed marketing funding back to the sender`, entityLabel: null, suffix: `${parties}${amount}.` };
+    }
+    if (status === 'REVERSED') {
+      return { prefix: `${actor} reversed marketing funding back to the sender`, entityLabel: null, suffix: `${parties}${amount}.` };
+    }
     // For UPDATE rows, old status tells us what transition happened.
     if (entry.action === 'UPDATE' && status === 'SENT') {
       return { prefix: `${actor} confirmed marketing funding was received`, entityLabel: null, suffix: `${parties}${amount}.` };

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useFetcher, useNavigation, useSearchParams, useLocation } from '@remix-run/react';
+import { Link, useFetcher, useNavigation, useSearchParams, useLocation } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
@@ -147,6 +147,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     currentUserId,
     currentUserRole,
     canSendFunding,
+    canReverseFunding = false,
     canRequestFunding,
     canDistribute,
     activeSection,
@@ -713,7 +714,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     const transferEntries: DistributingFundingTransferEntry[] = patchedTransfers.map((t) => ({
       id: t.id,
       entryType: 'transfer' as const,
-      status: t.status as 'SENT' | 'COMPLETED' | 'DISPUTED',
+      status: t.status as 'SENT' | 'COMPLETED' | 'DISPUTED' | 'REVERSED',
       amount: t.amount,
       createdAt: t.sentAt,
       senderId: t.senderId,
@@ -873,6 +874,14 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           >
             Send Funding
           </Button>
+        )}
+        {canReverseFunding && (
+          <Link
+            to="/admin/marketing/funding/disputes"
+            className="btn-secondary btn-sm h-12 md:h-auto inline-flex w-full justify-center md:w-auto"
+          >
+            Disputes
+          </Link>
         )}
         {/* Peer send is MB-only; HoM/Admin already use Send Funding. */}
         {isMediaBuyer && (

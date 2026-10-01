@@ -119,9 +119,23 @@ export const createOfflineOrderSchema = z.object({
   /** Raw phone — API hashes server-side; never send pre-hashed from Sales UI */
   customerPhone: z.string().min(1, 'Customer phone is required').max(50),
   customerAddress: z.string().optional(),
-  deliveryAddress: z.string().optional(),
+  /**
+   * Required, matching the public edge form (CEO directive 2026-05-26, enforced
+   * worker-side in `validateSubmission`).
+   *
+   * These CS-entry paths used a different schema where the address was optional
+   * and the modals did not mark the field required, so ~31% of `offline` and
+   * `delivered_follow_up` orders reached logistics with no address at all,
+   * while the public form produced 0 such orders in 3,149. Two entry systems,
+   * two rules; this closes the gap.
+   *
+   * Bulk import (`importOrderSchema`) is deliberately NOT changed: historical
+   * CRM rows legitimately predate the requirement, and rejecting them would
+   * block the migration rather than improve a live order.
+   */
+  deliveryAddress: z.string().trim().min(1, 'Delivery address is required'),
   deliveryNotes: z.string().optional(),
-  deliveryState: z.string().max(100).optional(),
+  deliveryState: z.string().trim().min(1, 'Delivery state is required').max(100),
   customerGender: z.string().max(50).optional(),
   preferredDeliveryDate: z.string().max(100).optional(),
   items: z.array(orderItemSchema).min(1, 'At least one item is required'),

@@ -22,6 +22,7 @@ const NOTIFICATION_COLORS: Record<string, string> = {
   'transfer:verified': 'bg-success-500',
   'funding:sent': 'bg-brand-500',
   'funding:disputed': 'bg-danger-500',
+  'funding:reversed': 'bg-surface-500',
   'mb_fund_transfer:pending': 'bg-warning-500',
   'mb_fund_transfer:approved': 'bg-info-500',
   'mb_fund_transfer:rejected': 'bg-danger-500',

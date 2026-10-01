@@ -164,7 +164,39 @@ export const marketingFunding = pgTable('marketing_funding', {
   verifiedAt: timestamp('verified_at', { withTimezone: true }),
   /** When set, this ledger row was created by approving the linked funding request. */
   sourceFundingRequestId: uuid('source_funding_request_id').references(() => marketingFundingRequests.id),
+  /** Receiver's reason when marking the funding Not Received (DISPUTED). Mig 0348. */
+  disputeReason: text('dispute_reason'),
   ...temporalColumns,
+});
+
+/**
+ * marketing_funding_reversals — the reversal transaction linked to an erroneous
+ * funding (mig 0348). Append-only: one row per reversed funding (unique
+ * funding_id guards against a double reversal). The original funding row is
+ * kept and flipped to REVERSED, which drops it out of every balance.
+ */
+export const marketingFundingReversals = pgTable('marketing_funding_reversals', {
+  id: uuidv7Pk(),
+  fundingId: uuid('funding_id')
+    .notNull()
+    .references(() => marketingFunding.id),
+  senderId: uuid('sender_id')
+    .notNull()
+    .references(() => users.id),
+  receiverId: uuid('receiver_id')
+    .notNull()
+    .references(() => users.id),
+  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+  /** Status of the original funding when it was reversed. */
+  previousStatus: fundingStatusEnum('previous_status').notNull(),
+  reason: text('reason').notNull(),
+  /** Receiver's available balance just before the reversal; null when never credited. */
+  receiverBalanceBefore: numeric('receiver_balance_before', { precision: 14, scale: 2 }),
+  reversedBy: uuid('reversed_by')
+    .notNull()
+    .references(() => users.id),
+  reversedAt: timestamp('reversed_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Table 15: ad_spend_logs — daily ad spend records

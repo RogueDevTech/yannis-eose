@@ -331,6 +331,8 @@ export type {
 export {
   createFundingSchema,
   verifyFundingSchema,
+  reverseFundingSchema,
+  listFundingDisputesSchema,
   listFundingSchema,
   fundingStatusCountsSchema,
   fundingRequestStatusCountsSchema,
@@ -387,6 +389,8 @@ export {
 export type {
   CreateFundingInput,
   VerifyFundingInput,
+  ReverseFundingInput,
+  ListFundingDisputesInput,
   ListFundingInput,
   FundingStatusCountsInput,
   FundingRequestStatusCountsInput,

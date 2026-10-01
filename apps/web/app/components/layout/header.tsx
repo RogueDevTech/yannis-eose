@@ -99,6 +99,7 @@ const NOTIFICATION_COLORS: Record<string, string> = {
   'mb_fund_transfer:rejected': 'bg-danger-500',
   'mb_fund_transfer:accepted': 'bg-success-500',
   'funding:disputed': 'bg-danger-500',
+  'funding:reversed': 'bg-surface-500',
   'payout:generated': 'bg-success-500',
   'escalation:transfer': 'bg-danger-500',
   'escalation:stuck_order': 'bg-danger-500',

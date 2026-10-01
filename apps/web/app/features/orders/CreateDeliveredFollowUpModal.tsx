@@ -133,9 +133,11 @@ export function CreateDeliveredFollowUpModal({
     formData.set('totalAmount', String(totalAmount.toFixed(2)));
     if (showCurrency && currencyCode) formData.set('currencyCode', currencyCode);
     if (customerAddress.trim()) formData.set('customerAddress', customerAddress.trim());
-    if (deliveryAddress.trim()) formData.set('deliveryAddress', deliveryAddress.trim());
+    // Always sent (both are required): omitting a blank would surface as a
+    // confusing "invalid input" rather than "delivery address is required".
+    formData.set('deliveryAddress', deliveryAddress.trim());
     if (deliveryNotes.trim()) formData.set('deliveryNotes', deliveryNotes.trim());
-    if (deliveryState.trim()) formData.set('deliveryState', deliveryState.trim());
+    formData.set('deliveryState', deliveryState.trim());
     if (customerGender) formData.set('customerGender', customerGender);
     if (preferredDeliveryDate.trim()) formData.set('preferredDeliveryDate', preferredDeliveryDate.trim());
     if (paymentMethod === 'PAY_ONLINE' && customerEmail.trim()) formData.set('customerEmail', customerEmail.trim());
@@ -230,18 +232,23 @@ export function CreateDeliveredFollowUpModal({
               onChange={(e) => setCustomerAddress(e.target.value)}
               placeholder="Address"
             />
+            {/* Required, matching the public form. These CS paths previously
+                let an order through with no address at all, which reached
+                logistics undeliverable. */}
             <TextInput
               type="text"
               label="Delivery address"
               value={deliveryAddress}
               onChange={(e) => setDeliveryAddress(e.target.value)}
-              placeholder="Delivery address"
+              placeholder="House number, street, area / nearest landmark"
+              required
             />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <FormSelect
                 label="Delivery state"
                 value={deliveryState}
                 onChange={(e) => setDeliveryState(e.target.value)}
+                required
                 options={[
                   { value: '', label: 'Select state' },
                   ...regionOptions.map((s) => ({ value: s, label: s })),
@@ -454,7 +461,11 @@ export function CreateDeliveredFollowUpModal({
             <Button type="button" variant="secondary" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" loading={isSubmitting} disabled={isSubmitting || !selectedOffer}>
+            <Button
+              type="submit"
+              loading={isSubmitting}
+              disabled={isSubmitting || !selectedOffer || !deliveryAddress.trim() || !deliveryState.trim()}
+            >
               Create order
             </Button>
           </div>

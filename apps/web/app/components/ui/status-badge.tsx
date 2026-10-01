@@ -57,6 +57,7 @@ const STATUS_VARIANT_MAP: Record<string, BadgeVariant> = {
   sent: 'info',
   received: 'success',
   disputed: 'danger',
+  reversed: 'neutral',
   paid: 'success',
   unpaid: 'warning',
   overdue: 'danger',

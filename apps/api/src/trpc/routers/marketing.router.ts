@@ -1,6 +1,8 @@
 import {
   createFundingSchema,
   verifyFundingSchema,
+  reverseFundingSchema,
+  listFundingDisputesSchema,
   listFundingSchema,
   fundingStatusCountsSchema,
   fundingRequestStatusCountsSchema,
@@ -205,6 +207,20 @@ export const marketingRouter = router({
     .input(verifyFundingSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       return getMarketingService().verifyFunding(input, ctx.user.id);
+    }),
+
+  /** Admin: reverse an erroneous funding back to the sender (mig 0348). */
+  reverseFunding: permissionProcedure('marketing.funding.reverse')
+    .input(reverseFundingSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getMarketingService().reverseFunding(input, ctx.user, ctx.effectiveBranchIds);
+    }),
+
+  /** Admin dispute / reversal queue across the caller's company. */
+  listFundingDisputes: permissionProcedure('marketing.funding.reverse')
+    .input(listFundingDisputesSchema)
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().listFundingDisputes(input, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   listFunding: authedProcedure
