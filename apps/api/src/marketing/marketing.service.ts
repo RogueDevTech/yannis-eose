@@ -29,6 +29,8 @@ import { uuidv7 } from 'uuidv7';
 import type {
   CreateFundingInput,
   VerifyFundingInput,
+  ReverseFundingInput,
+  ListFundingDisputesInput,
   ListFundingInput,
   FundingStatusCountsInput,
   FundingRequestStatusCountsInput,
@@ -236,6 +238,16 @@ export class MarketingService {
   }
 
   /**
+   * Serialise every balance-checked write for one user (sends, spend, peer
+   * transfers, reversals). Each caller checks then writes; without this two
+   * concurrent writes can both pass the check and drive the balance negative.
+   * Transaction-scoped, so it releases on commit/rollback.
+   */
+  private async lockFundingBalanceInTx(tx: MarketingFundingTx, userId: string): Promise<void> {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${'funding-balance:' + userId}))`);
+  }
+
+  /**
    * HoM / marketing-supervisor disbursable pool: COMPLETED funding received minus all outbound
    * ledger rows (SENT, COMPLETED, DISPUTED) minus non-REJECTED ad spend (branch-scoped when branchId is set).
    * Run inside the same transaction as the outbound insert so checks align with concurrent sends.
@@ -246,6 +258,7 @@ export class MarketingService {
     branchId: string | null,
     effectiveBranchIds?: string[] | null,
   ): Promise<number> {
+    await this.lockFundingBalanceInTx(tx, userId);
     const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
 
     // Credits: only COMPLETED — receiver must mark-received before funds count.
@@ -319,6 +332,7 @@ export class MarketingService {
     branchId: string | null,
     effectiveBranchIds?: string[] | null,
   ): Promise<number> {
+    await this.lockFundingBalanceInTx(tx, userId);
     const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
 
     const [receivedRow, outRow] = await Promise.all([
@@ -1041,11 +1055,13 @@ export class MarketingService {
 
   async verifyFunding(input: VerifyFundingInput, receiverId: string) {
     const { funding, updated } = await withActor(this.db, { id: receiverId }, async (tx) => {
+      // Row lock: an admin reversal must not be overwritten by a late verify.
       const rows = await tx
         .select()
         .from(schema.marketingFunding)
         .where(eq(schema.marketingFunding.id, input.fundingId))
-        .limit(1);
+        .limit(1)
+        .for('update');
 
       const found = rows[0];
       if (!found) {
@@ -1059,6 +1075,9 @@ export class MarketingService {
         });
       }
 
+      if (found.status === 'REVERSED') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'This funding was reversed back to the sender' });
+      }
       if (found.status !== 'SENT') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Funding has already been verified' });
       }
@@ -1078,9 +1097,13 @@ export class MarketingService {
         .set({
           status: input.action,
           verifiedAt: new Date(),
+          disputeReason: input.action === 'DISPUTED' ? input.disputeReason?.trim() ?? null : null,
         })
-        .where(eq(schema.marketingFunding.id, input.fundingId))
+        .where(and(eq(schema.marketingFunding.id, input.fundingId), eq(schema.marketingFunding.status, 'SENT')))
         .returning();
+      if (updatedRows.length === 0) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'Funding changed while saving. Refresh and try again.' });
+      }
 
       return { funding: found, updated: updatedRows };
     });
@@ -1113,6 +1136,300 @@ export class MarketingService {
     return updated[0];
   }
 
+  /**
+   * Reverse an erroneous funding (mig 0348). The original row is kept and flipped
+   * to REVERSED, which drops it out of every balance query (they all filter on a
+   * SENT/COMPLETED/DISPUTED allow-list): the sender is credited back and, if the
+   * receiver had marked it received, the receiver is debited. A linked
+   * marketing_funding_reversals row records amount, reason, previous status and
+   * the approving admin.
+   *
+   * Guards: row lock + status check + unique index on funding_id (no double
+   * reversal); company scope on the by-id write; and when the receiver was
+   * already credited (COMPLETED), their available balance must still cover the
+   * amount, so a reversal can never push them negative.
+   */
+  /**
+   * Company scope for the dispute / reversal surfaces, fail-closed: `[]` (company
+   * selected but branches not resolved) and a non-global caller without branches
+   * mean "nothing", never "everything". Only a global caller with no company
+   * selection (null) sees all companies.
+   */
+  private async getReversalScopeUserIds(
+    actor: SessionUser,
+    branchId: string | null,
+    effectiveBranchIds: string[] | null | undefined,
+  ): Promise<string[] | null> {
+    if (!branchId && Array.isArray(effectiveBranchIds) && effectiveBranchIds.length === 0) return [];
+    const ids = await this.getBranchUserIds(branchId, effectiveBranchIds);
+    if (ids === null && !canViewAllBranches(actor)) return [];
+    return ids;
+  }
+
+  async reverseFunding(
+    input: ReverseFundingInput,
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    const reason = input.reason.trim();
+    // Company boundary for a by-id write: one party must be in the caller's company.
+    const scopedUserIds = await this.getReversalScopeUserIds(actor, null, effectiveBranchIds);
+
+    const { original, reversal } = await withActor(this.db, { id: actor.id }, async (tx) => {
+      const [found] = await tx
+        .select()
+        .from(schema.marketingFunding)
+        .where(eq(schema.marketingFunding.id, input.fundingId))
+        .limit(1)
+        .for('update');
+
+      const inScope =
+        !!found &&
+        (!scopedUserIds ||
+          scopedUserIds.includes(found.senderId) ||
+          scopedUserIds.includes(found.receiverId));
+      if (!found || !inScope) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Funding record not found' });
+      }
+      if (found.status === 'REVERSED') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'This funding has already been reversed' });
+      }
+      // Peer transfers own their ledger row via mb_fund_transfers; reversing only
+      // the ledger would leave the transfer ACCEPTED and the two pages disagreeing.
+      const [peer] = await tx
+        .select({ id: schema.mbFundTransfers.id })
+        .from(schema.mbFundTransfers)
+        .where(eq(schema.mbFundTransfers.ledgerEntryId, found.id))
+        .limit(1);
+      if (peer) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This is a peer transfer between media buyers and cannot be reversed here.',
+        });
+      }
+
+      let receiverBalanceBefore: number | null = null;
+      if (found.status === 'COMPLETED') {
+        receiverBalanceBefore = await this.computeMbBalanceInTx(tx, found.receiverId, null, null);
+        const amount = Number(found.amount);
+        if (Math.round(receiverBalanceBefore * 100) < Math.round(amount * 100)) {
+          const fmt = (n: number) =>
+            n.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Cannot reverse ₦${fmt(amount)}: the receiver's available balance is only ₦${fmt(Math.max(0, receiverBalanceBefore))}. They have already spent or passed on part of this funding.`,
+          });
+        }
+      }
+
+      // Conditional on the status we just read, so a concurrent verify/reverse cannot slip in.
+      const flipped = await tx
+        .update(schema.marketingFunding)
+        .set({ status: 'REVERSED' })
+        .where(
+          and(
+            eq(schema.marketingFunding.id, found.id),
+            eq(schema.marketingFunding.status, found.status),
+          ),
+        )
+        .returning({ id: schema.marketingFunding.id });
+      if (flipped.length === 0) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'Funding changed while reversing. Refresh and try again.' });
+      }
+
+      const [inserted] = await tx
+        .insert(schema.marketingFundingReversals)
+        .values({
+          fundingId: found.id,
+          senderId: found.senderId,
+          receiverId: found.receiverId,
+          amount: sql`${found.amount}::numeric`,
+          previousStatus: found.status,
+          reason,
+          receiverBalanceBefore:
+            receiverBalanceBefore == null ? null : sql`${receiverBalanceBefore}::numeric`,
+          reversedBy: actor.id,
+        })
+        .returning();
+      if (!inserted) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to record reversal' });
+      }
+      return { original: found, reversal: inserted };
+    });
+
+    // Funding approved from a request auto-posted a GL expense voucher; offset it.
+    // Non-fatal by contract, same as the original posting.
+    if (original.sourceFundingRequestId) {
+      const requestId = original.sourceFundingRequestId;
+      await runGlPostWithFinanceAlert(
+        this.notifications,
+        this.logger,
+        'Marketing funding reversal',
+        requestId,
+        async () => {
+          const res = await this.generalLedger.reverseVoucher(
+            'EXPENSE',
+            requestId,
+            { id: actor.id },
+            `Funding reversed: ${reason}`,
+          );
+          return res.reversed || res.reason === 'nothing-posted' || res.reason === 'already-reversed'
+            ? { posted: true }
+            : { posted: false, reason: res.reason };
+        },
+      );
+    }
+
+    const nf = Number(original.amount).toLocaleString('en-NG');
+    const data = { fundingId: original.id, reversalId: reversal.id, amount: original.amount };
+    this.notifications.enqueueCreate({
+      userId: original.senderId,
+      type: 'funding:reversed',
+      title: 'Funding reversed',
+      body: `₦${nf} you sent was reversed and credited back to your balance. Reason: ${reason}`,
+      data,
+    });
+    this.notifications.enqueueCreate({
+      userId: original.receiverId,
+      type: 'funding:reversed',
+      title: 'Funding reversed',
+      body:
+        original.status === 'COMPLETED'
+          ? `₦${nf} funding was reversed and deducted from your balance. Reason: ${reason}`
+          : `₦${nf} funding was reversed back to the sender. Reason: ${reason}`,
+      data,
+    });
+    this.events.emitToUser(original.senderId, 'funding:reversed', data);
+    this.events.emitToUser(original.receiverId, 'funding:reversed', data);
+
+    return { fundingId: original.id, reversal };
+  }
+
+  /**
+   * Admin dispute / reversal queue: funding rows across the caller's company
+   * (any sender), filtered to one status. Rows carry the receiver's dispute
+   * reason and, for REVERSED rows, the linked reversal record.
+   */
+  async listFundingDisputes(
+    input: ListFundingDisputesInput,
+    actor: SessionUser,
+    branchId?: string | null,
+    effectiveBranchIds?: string[] | null,
+  ) {
+    const sender = alias(schema.users, 'dispute_sender');
+    const receiver = alias(schema.users, 'dispute_receiver');
+    const reverser = alias(schema.users, 'dispute_reverser');
+    const emptyCounts = { DISPUTED: 0, SENT: 0, COMPLETED: 0, REVERSED: 0 };
+
+    const scopedUserIds = await this.getReversalScopeUserIds(actor, branchId ?? null, effectiveBranchIds);
+    if (scopedUserIds && scopedUserIds.length === 0) {
+      return {
+        records: [],
+        pagination: { page: input.page, limit: input.limit, total: 0 },
+        filteredTotalAmount: '0',
+        statusCounts: emptyCounts,
+      };
+    }
+
+    // Peer transfers are not reversible here (see reverseFunding), so keep them out.
+    const scopeConds: SQL[] = [
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${schema.mbFundTransfers} mft
+        WHERE mft.ledger_entry_id = ${schema.marketingFunding.id}
+      )`,
+    ];
+    if (scopedUserIds) {
+      const partyInScope = or(
+        inArray(schema.marketingFunding.senderId, scopedUserIds),
+        inArray(schema.marketingFunding.receiverId, scopedUserIds),
+      );
+      if (partyInScope) scopeConds.push(partyInScope);
+    }
+    const searchTrimmed = input.search?.trim();
+    if (searchTrimmed) {
+      if (trimmedSearchLooksLikeUuid(searchTrimmed)) {
+        scopeConds.push(eq(schema.marketingFunding.id, searchTrimmed));
+      } else {
+        const searchOr = or(
+          ilike(sender.name, `%${searchTrimmed}%`),
+          ilike(receiver.name, `%${searchTrimmed}%`),
+        );
+        if (searchOr) scopeConds.push(searchOr);
+      }
+    }
+    const whereClause = and(eq(schema.marketingFunding.status, input.status), ...scopeConds);
+    const offset = (input.page - 1) * input.limit;
+    const orderKey =
+      input.status === 'REVERSED'
+        ? desc(schema.marketingFundingReversals.reversedAt)
+        : desc(sql`COALESCE(${schema.marketingFunding.verifiedAt}, ${schema.marketingFunding.sentAt})`);
+
+    const [records, totals, countRows] = await Promise.all([
+      this.db
+        .select({
+          id: schema.marketingFunding.id,
+          senderId: schema.marketingFunding.senderId,
+          receiverId: schema.marketingFunding.receiverId,
+          amount: schema.marketingFunding.amount,
+          status: schema.marketingFunding.status,
+          notes: schema.marketingFunding.notes,
+          receiptUrl: schema.marketingFunding.receiptUrl,
+          sentAt: schema.marketingFunding.sentAt,
+          verifiedAt: schema.marketingFunding.verifiedAt,
+          disputeReason: schema.marketingFunding.disputeReason,
+          sourceFundingRequestId: schema.marketingFunding.sourceFundingRequestId,
+          senderName: sender.name,
+          senderRole: sender.role,
+          receiverName: receiver.name,
+          receiverRole: receiver.role,
+          reversalId: schema.marketingFundingReversals.id,
+          reversalReason: schema.marketingFundingReversals.reason,
+          reversalPreviousStatus: schema.marketingFundingReversals.previousStatus,
+          reversedAt: schema.marketingFundingReversals.reversedAt,
+          reversedByName: reverser.name,
+        })
+        .from(schema.marketingFunding)
+        .leftJoin(sender, eq(sender.id, schema.marketingFunding.senderId))
+        .leftJoin(receiver, eq(receiver.id, schema.marketingFunding.receiverId))
+        .leftJoin(
+          schema.marketingFundingReversals,
+          eq(schema.marketingFundingReversals.fundingId, schema.marketingFunding.id),
+        )
+        .leftJoin(reverser, eq(reverser.id, schema.marketingFundingReversals.reversedBy))
+        .where(whereClause)
+        .orderBy(orderKey, desc(schema.marketingFunding.id))
+        .limit(input.limit)
+        .offset(offset),
+      this.db
+        .select({
+          total: count(),
+          amount: sql<string>`COALESCE(SUM(${schema.marketingFunding.amount}), 0)::text`,
+        })
+        .from(schema.marketingFunding)
+        .leftJoin(sender, eq(sender.id, schema.marketingFunding.senderId))
+        .leftJoin(receiver, eq(receiver.id, schema.marketingFunding.receiverId))
+        .where(whereClause),
+      // Tab counts share the scope + search, not the status filter.
+      this.db
+        .select({ status: schema.marketingFunding.status, c: count() })
+        .from(schema.marketingFunding)
+        .leftJoin(sender, eq(sender.id, schema.marketingFunding.senderId))
+        .leftJoin(receiver, eq(receiver.id, schema.marketingFunding.receiverId))
+        .where(and(...scopeConds))
+        .groupBy(schema.marketingFunding.status),
+    ]);
+
+    const statusCounts = { ...emptyCounts };
+    for (const r of countRows) statusCounts[r.status] = Number(r.c);
+
+    return {
+      records,
+      pagination: { page: input.page, limit: input.limit, total: Number(totals[0]?.total ?? 0) },
+      filteredTotalAmount: totals[0]?.amount ?? '0',
+      statusCounts,
+    };
+  }
+
   async listFunding(input: ListFundingInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
     const fundingSender = alias(schema.users, 'funding_sender');
     const fundingReceiver = alias(schema.users, 'funding_receiver');
@@ -1120,6 +1437,10 @@ export class MarketingService {
     const conditions: SQL[] = [];
     if (input.status) {
       conditions.push(eq(schema.marketingFunding.status, input.status));
+    } else {
+      // Reversed funding lives on the Disputes page; keeping it out of the default
+      // view keeps table totals equal to the SENT+COMPLETED+DISPUTED stat strips.
+      conditions.push(ne(schema.marketingFunding.status, 'REVERSED'));
     }
     if (input.receiverId) {
       conditions.push(eq(schema.marketingFunding.receiverId, input.receiverId));
@@ -1307,6 +1628,7 @@ export class MarketingService {
       if (r.status === 'SENT') out.SENT = n;
       else if (r.status === 'COMPLETED') out.COMPLETED = n;
       else if (r.status === 'DISPUTED') out.DISPUTED = n;
+      else continue; // REVERSED: not part of ALL (matches listFunding's default view)
       out.ALL += n;
     }
     return out;
@@ -2848,6 +3170,7 @@ export class MarketingService {
     // Resolve transfer (with sender + receiver names) — by id or via request linkage.
     const transferSender = alias(schema.users, 'flow_transfer_sender');
     const transferReceiver = alias(schema.users, 'flow_transfer_receiver');
+    const transferReverser = alias(schema.users, 'flow_transfer_reverser');
     const transferQuery = this.db
       .select({
         id: schema.marketingFunding.id,
@@ -2863,10 +3186,22 @@ export class MarketingService {
         verifiedAt: schema.marketingFunding.verifiedAt,
         sourceFundingRequestId: schema.marketingFunding.sourceFundingRequestId,
         receiptUrl: schema.marketingFunding.receiptUrl,
+        disputeReason: schema.marketingFunding.disputeReason,
+        reversalReason: schema.marketingFundingReversals.reason,
+        reversalPreviousStatus: schema.marketingFundingReversals.previousStatus,
+        reversedAt: schema.marketingFundingReversals.reversedAt,
+        reversedBy: schema.marketingFundingReversals.reversedBy,
+        reversedByName: transferReverser.name,
+        reversedByRole: transferReverser.role,
       })
       .from(schema.marketingFunding)
       .leftJoin(transferSender, eq(schema.marketingFunding.senderId, transferSender.id))
-      .leftJoin(transferReceiver, eq(schema.marketingFunding.receiverId, transferReceiver.id));
+      .leftJoin(transferReceiver, eq(schema.marketingFunding.receiverId, transferReceiver.id))
+      .leftJoin(
+        schema.marketingFundingReversals,
+        eq(schema.marketingFundingReversals.fundingId, schema.marketingFunding.id),
+      )
+      .leftJoin(transferReverser, eq(schema.marketingFundingReversals.reversedBy, transferReverser.id));
 
     const transferRow = input.transferId
       ? (await transferQuery.where(eq(schema.marketingFunding.id, input.transferId)).limit(1))[0]
@@ -2930,7 +3265,9 @@ export class MarketingService {
     if (actor.role !== 'SUPER_ADMIN') {
       const perms = actor.permissions ?? [];
       const canViewAllFlows =
-        perms.includes('marketing.funding.approve') || perms.includes('finance.costView');
+        perms.includes('marketing.funding.approve') ||
+        perms.includes('marketing.funding.reverse') ||
+        perms.includes('finance.costView');
       // Confine that "all flows" grant to the caller's own company. Funding
       // rows carry no branch, so company resolves through the counterparties'
       // branch memberships.
@@ -2970,7 +3307,7 @@ export class MarketingService {
     }
 
     type FlowEvent = {
-      kind: 'requested' | 'approved' | 'rejected' | 'sent' | 'received' | 'disputed';
+      kind: 'requested' | 'approved' | 'rejected' | 'sent' | 'received' | 'disputed' | 'reversed';
       at: string;
       actorId: string | null;
       actorName: string | null;
@@ -3018,7 +3355,10 @@ export class MarketingService {
         actorRole: transferRow.senderRole ?? null,
         note: transferRow.receiptUrl ? 'Receipt uploaded' : null,
       });
-      if (transferRow.status === 'COMPLETED') {
+      // A reversed transfer keeps the receiver's step it was reversed from.
+      const settledStatus =
+        transferRow.status === 'REVERSED' ? transferRow.reversalPreviousStatus : transferRow.status;
+      if (settledStatus === 'COMPLETED') {
         events.push({
           kind: 'received',
           at: (transferRow.verifiedAt ?? transferRow.sentAt).toISOString(),
@@ -3027,14 +3367,24 @@ export class MarketingService {
           actorRole: transferRow.receiverRole ?? null,
           note: null,
         });
-      } else if (transferRow.status === 'DISPUTED') {
+      } else if (settledStatus === 'DISPUTED') {
         events.push({
           kind: 'disputed',
           at: (transferRow.verifiedAt ?? transferRow.sentAt).toISOString(),
           actorId: transferRow.receiverId,
           actorName: transferRow.receiverName ?? null,
           actorRole: transferRow.receiverRole ?? null,
-          note: null,
+          note: transferRow.disputeReason ?? null,
+        });
+      }
+      if (transferRow.status === 'REVERSED' && transferRow.reversedAt) {
+        events.push({
+          kind: 'reversed',
+          at: transferRow.reversedAt.toISOString(),
+          actorId: transferRow.reversedBy ?? null,
+          actorName: transferRow.reversedByName ?? null,
+          actorRole: transferRow.reversedByRole ?? null,
+          note: transferRow.reversalReason ?? null,
         });
       }
     }

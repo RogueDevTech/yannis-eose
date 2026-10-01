@@ -119,6 +119,8 @@ export const fundingStatusEnum = pgEnum('funding_status', [
   'SENT',
   'COMPLETED',
   'DISPUTED',
+  /** Erroneous funding undone by an admin (mig 0348). Excluded from every balance. */
+  'REVERSED',
 ]);
 
 export const fundingRequestStatusEnum = pgEnum('funding_request_status', [

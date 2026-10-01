@@ -254,6 +254,7 @@ export function MarketingFundingLoadingShell({
   isAdminViewer,
   canRequestFunding,
   canSendFunding,
+  canReverseFunding = false,
 }: {
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
   canDistribute: boolean;
@@ -261,6 +262,7 @@ export function MarketingFundingLoadingShell({
   isAdminViewer: boolean;
   canRequestFunding: boolean;
   canSendFunding: boolean;
+  canReverseFunding?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedSearch = searchParams.get('search') ?? '';
@@ -363,6 +365,11 @@ export function MarketingFundingLoadingShell({
                 {canSendFunding && (
                   <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                     Send Funding
+                  </Button>
+                )}
+                {canReverseFunding && (
+                  <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
+                    Disputes
                   </Button>
                 )}
               </>

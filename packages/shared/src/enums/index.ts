@@ -80,6 +80,7 @@ export const FUNDING_STATUS = {
   SENT: 'SENT',
   COMPLETED: 'COMPLETED',
   DISPUTED: 'DISPUTED',
+  REVERSED: 'REVERSED',
 } as const;
 
 export type FundingStatus = (typeof FUNDING_STATUS)[keyof typeof FUNDING_STATUS];

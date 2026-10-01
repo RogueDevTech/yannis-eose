@@ -240,7 +240,7 @@ export function toDistributingFundingEntries(
   const transferEntries: DistributingFundingEntry[] = transfers.map((record) => ({
     id: record.id,
     entryType: 'transfer',
-    status: (record.status as 'SENT' | 'COMPLETED' | 'DISPUTED') ?? 'SENT',
+    status: (record.status as 'SENT' | 'COMPLETED' | 'DISPUTED' | 'REVERSED') ?? 'SENT',
     amount: record.amount,
     createdAt: record.sentAt,
     senderId: record.senderId,
@@ -389,6 +389,8 @@ export interface MarketingRoleFlags {
   canRequestFunding: boolean;
   /** Capability — can approve or reject Media Buyer ad-spend submissions. */
   canApproveAdSpend: boolean;
+  /** Capability — can resolve funding disputes by reversing an erroneous funding. */
+  canReverseFunding: boolean;
 }
 
 /**
@@ -443,7 +445,11 @@ export function getMarketingRoleFlags(
     ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'].includes(role) ||
     has('marketing.adSpend.approve') ||
     isMarketingSupervisorOnBranch;
-  return { isMediaBuyer, isFundingAdmin, canRequestFunding, canApproveAdSpend };
+  // Reversing an erroneous funding moves money between balances: permission-first,
+  // Admin by default (SuperAdmin/Support bypass like permissionProcedure).
+  const canReverseFunding =
+    role === 'SUPER_ADMIN' || role === 'SUPPORT' || has('marketing.funding.reverse');
+  return { isMediaBuyer, isFundingAdmin, canRequestFunding, canApproveAdSpend, canReverseFunding };
 }
 
 export async function runMarketingFundingAction(cookie: string, formData: FormData) {

@@ -49,6 +49,8 @@ export function getNotificationAction(notif: NotificationForLink): { link: strin
     }
     if (data.transferId) return { link: '/admin/inventory', label: 'View transfer' };
     if (data.productId) return { link: `/admin/products/${data.productId}`, label: 'View product' };
+    if (data.fundingId && notif.type === 'funding:disputed')
+      return { link: '/admin/marketing/funding/disputes', label: 'Resolve dispute' };
     if (data.fundingId) return { link: '/admin/marketing/funding', label: 'View funding' };
     if (data.payoutId) return { link: '/hr/payroll', label: 'View payroll' };
     if (data.approvalId) return { link: '/admin/finance/overview', label: 'View finance' };

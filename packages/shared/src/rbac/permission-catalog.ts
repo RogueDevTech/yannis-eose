@@ -157,6 +157,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'team.supervise_logistics', resource: 'team', action: 'supervise_logistics', description: 'Supervise logistics roles within branch teams' },
   { code: 'marketing.funding.request', resource: 'marketing.funding', action: 'request', description: 'Submit a funding request (Media Buyer → HoM, or HoM → Finance)' },
   { code: 'marketing.funding.approve', resource: 'marketing.funding', action: 'approve', description: 'Approve or reject a funding request (HoM, Finance, Admin)' },
+  { code: 'marketing.funding.reverse', resource: 'marketing.funding', action: 'reverse', description: 'Resolve funding disputes: reverse an erroneous funding back to the sender (Admin default)' },
   { code: 'marketing.adSpend.approve', resource: 'marketing.ad_spend', action: 'approve', description: 'Approve or reject Media Buyer ad-spend submissions' },
   { code: 'finance.cashRemittance.create', resource: 'finance.cash_remittance', action: 'create', description: 'Record a cash remittance (accountant-led close-out of delivered orders)' },
   { code: 'finance.cashRemittance.markReceived', resource: 'finance.cash_remittance', action: 'mark_received', description: 'Mark a cash remittance Received and cascade orders to COMPLETED' },

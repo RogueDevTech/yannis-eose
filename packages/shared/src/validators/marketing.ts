@@ -38,6 +38,22 @@ export const verifyFundingSchema = z.object({
 });
 export type VerifyFundingInput = z.infer<typeof verifyFundingSchema>;
 
+/** Admin reversal of an erroneous funding (mig 0348). */
+export const reverseFundingSchema = z.object({
+  fundingId: z.string().uuid(),
+  reason: z.string().trim().min(10, 'Reason must be at least 10 characters').max(500),
+});
+export type ReverseFundingInput = z.infer<typeof reverseFundingSchema>;
+
+/** Admin dispute / reversal queue: funding rows across the caller's company. */
+export const listFundingDisputesSchema = z.object({
+  status: z.enum(['DISPUTED', 'SENT', 'COMPLETED', 'REVERSED']).default('DISPUTED'),
+  search: z.string().trim().max(200).optional(),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(100).default(20),
+});
+export type ListFundingDisputesInput = z.infer<typeof listFundingDisputesSchema>;
+
 export const listFundingSchema = z.object({
   status: z.enum(['SENT', 'COMPLETED', 'DISPUTED']).optional(),
   receiverId: z.string().uuid().optional(),

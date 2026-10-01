@@ -21,7 +21,8 @@ type FlowEventKind =
   | 'rejected'
   | 'sent'
   | 'received'
-  | 'disputed';
+  | 'disputed'
+  | 'reversed';
 
 interface FlowEvent {
   kind: FlowEventKind;
@@ -66,6 +67,7 @@ const EVENT_LABEL: Record<FlowEventKind, string> = {
   sent: 'Transfer sent',
   received: 'Marked received',
   disputed: 'Disputed',
+  reversed: 'Reversed to sender',
 };
 
 const EVENT_TONE: Record<FlowEventKind, { dot: string; ring: string; text: string }> = {
@@ -98,6 +100,11 @@ const EVENT_TONE: Record<FlowEventKind, { dot: string; ring: string; text: strin
     dot: 'bg-warning-500',
     ring: 'ring-warning-200 dark:ring-warning-900/40',
     text: 'text-warning-700 dark:text-warning-400',
+  },
+  reversed: {
+    dot: 'bg-surface-500',
+    ring: 'ring-surface-200 dark:ring-surface-700',
+    text: 'text-app-fg',
   },
 };
 
