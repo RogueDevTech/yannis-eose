@@ -205,9 +205,11 @@ export function CreateOfflineOrderModal({
     if (showCurrency && currencyCode) formData.set('currencyCode', currencyCode);
     if (cartPrefill?.cartId) formData.set('cartId', cartPrefill.cartId);
     if (customerAddress.trim()) formData.set('customerAddress', customerAddress.trim());
-    if (deliveryAddress.trim()) formData.set('deliveryAddress', deliveryAddress.trim());
+    // Always sent (both required): omitting a blank would surface as a
+    // confusing "invalid input" rather than "delivery address is required".
+    formData.set('deliveryAddress', deliveryAddress.trim());
     if (deliveryNotes.trim()) formData.set('deliveryNotes', deliveryNotes.trim());
-    if (deliveryState.trim()) formData.set('deliveryState', deliveryState.trim());
+    formData.set('deliveryState', deliveryState.trim());
     if (customerGender) formData.set('customerGender', customerGender);
     if (preferredDeliveryDate.trim()) formData.set('preferredDeliveryDate', preferredDeliveryDate.trim());
     if (paymentMethod === 'PAY_ONLINE' && customerEmail.trim()) formData.set('customerEmail', customerEmail.trim());
@@ -304,18 +306,24 @@ export function CreateOfflineOrderModal({
               onChange={(e) => setCustomerAddress(e.target.value)}
               placeholder="Address"
             />
+            {/* Required, matching the public form. This path previously let an
+                order through with no address, which reached logistics
+                undeliverable. Cart-recovered orders prefill this above, but a
+                cart abandoned before the address step leaves it blank. */}
             <TextInput
               type="text"
               label="Delivery address"
               value={deliveryAddress}
               onChange={(e) => setDeliveryAddress(e.target.value)}
-              placeholder="Delivery address"
+              placeholder="House number, street, area / nearest landmark"
+              required
             />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <FormSelect
                 label="Delivery state"
                 value={deliveryState}
                 onChange={(e) => setDeliveryState(e.target.value)}
+                required
                 options={[
                   { value: '', label: 'Select state' },
                   ...regionOptions.map((s) => ({ value: s, label: s })),
@@ -539,7 +547,11 @@ export function CreateOfflineOrderModal({
             <Button type="button" variant="secondary" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" loading={isSubmitting} disabled={isSubmitting || !selectedOffer}>
+            <Button
+              type="submit"
+              loading={isSubmitting}
+              disabled={isSubmitting || !selectedOffer || !deliveryAddress.trim() || !deliveryState.trim()}
+            >
               Create offline order
             </Button>
           </div>
