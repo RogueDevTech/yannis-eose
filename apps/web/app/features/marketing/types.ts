@@ -709,6 +709,8 @@ export interface FundingDisputeRecord {
 }
 
 export interface FundingDisputesLoaderData {
+  /** Admin: any funding incl. received. HoM: own sends that are not yet received. */
+  canReverseAny: boolean;
   status: FundingDisputeStatus;
   search: string;
   records: FundingDisputeRecord[];

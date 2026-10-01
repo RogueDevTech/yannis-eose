@@ -267,6 +267,47 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — dispute reversal', () => {
     expect(counts.ALL).toBe(counts.SENT + counts.COMPLETED + counts.DISPUTED);
   });
 
+  it('HoM resolves a dispute on their own send', async () => {
+    const svc = mkMarketing();
+    const { hom, mb, funding, branch } = await setup();
+    await svc.verifyFunding(
+      { fundingId: funding.id, action: 'DISPUTED', disputeReason: 'I did not request this funding' },
+      mb.id,
+    );
+    const homActor = { id: hom.id, role: 'HEAD_OF_MARKETING', permissions: ['marketing.funding.reverse'] } as unknown as SessionUser;
+
+    const queue = await svc.listFundingDisputes({ status: 'DISPUTED', page: 1, limit: 20 }, homActor, null, [branch.id]);
+    expect(queue.records.map((r) => r.id)).toEqual([funding.id]);
+
+    await svc.reverseFunding({ fundingId: funding.id, reason: 'Sent to the wrong media buyer' }, homActor, [branch.id]);
+    expect(await balanceOf(svc, hom.id)).toBe(3_000_000);
+  });
+
+  it('HoM cannot see or reverse funding they did not send', async () => {
+    const svc = mkMarketing();
+    const { funding, branch } = await setup();
+    const otherHom = await createTestUser(db as any, { role: 'HEAD_OF_MARKETING' });
+    await db.insert(schema.userBranches).values({ userId: otherHom.id, branchId: branch.id, isPrimary: false });
+    const otherActor = { id: otherHom.id, role: 'HEAD_OF_MARKETING' } as unknown as SessionUser;
+
+    const otherQueue = await svc.listFundingDisputes({ status: 'SENT', page: 1, limit: 20 }, otherActor, null, [branch.id]);
+    expect(otherQueue.records).toHaveLength(0);
+    await expect(
+      svc.reverseFunding({ fundingId: funding.id, reason: 'Not mine but trying anyway' }, otherActor, [branch.id]),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', message: 'You can only reverse funding you sent.' });
+  });
+
+  it('HoM cannot reverse funding the receiver already marked received', async () => {
+    const svc = mkMarketing();
+    const { hom, mb, funding, branch } = await setup();
+    await svc.verifyFunding({ fundingId: funding.id, action: 'COMPLETED' }, mb.id);
+    const homActor = { id: hom.id, role: 'HEAD_OF_MARKETING' } as unknown as SessionUser;
+
+    await expect(
+      svc.reverseFunding({ fundingId: funding.id, reason: 'Sent to the wrong media buyer' }, homActor, [branch.id]),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
   it('lists disputes with the reason, then the reversal record once reversed', async () => {
     const svc = mkMarketing();
     const { adminActor, mb, funding, branch } = await setup();

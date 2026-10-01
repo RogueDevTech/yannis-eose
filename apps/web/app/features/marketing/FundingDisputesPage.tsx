@@ -49,6 +49,7 @@ function rowNote(row: FundingDisputeRecord): string | null {
 }
 
 export function FundingDisputesPage({
+  canReverseAny,
   status,
   search,
   records,
@@ -59,6 +60,11 @@ export function FundingDisputesPage({
   statusCounts,
 }: FundingDisputesLoaderData) {
   const [searchParams, setSearchParams] = useSearchParams();
+  // Mirrors the API rule: received funding is admin-only to claw back.
+  const canReverse = useCallback(
+    (row: FundingDisputeRecord) => row.status !== 'REVERSED' && (canReverseAny || row.status !== 'COMPLETED'),
+    [canReverseAny],
+  );
   const fetcher = useFetcher();
   const surface = useFetcherActionSurface(fetcher);
   const [peekRow, setPeekRow] = useState<FundingDisputeRecord | null>(null);
@@ -146,7 +152,7 @@ export function FundingDisputesPage({
             <TableActionButton onClick={() => setPeekRow(row)} variant="neutral">
               View
             </TableActionButton>
-            {row.status !== 'REVERSED' && (
+            {canReverse(row) && (
               <TableActionButton onClick={() => setReverseRow(row)} variant="danger">
                 Reverse
               </TableActionButton>
@@ -155,7 +161,7 @@ export function FundingDisputesPage({
         ),
       },
     ],
-    [status],
+    [status, canReverse],
   );
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -166,7 +172,7 @@ export function FundingDisputesPage({
         title="Funding Disputes"
         backTo="/admin/marketing/funding"
         mobileInlineActions
-        description="Reverse erroneous funding back to the sender."
+        description={canReverseAny ? 'Reverse erroneous funding back to the sender.' : 'Resolve disputes on funding you sent.'}
         actions={
           <PageHeaderMobileTools
             sheetTitle="Tools"
@@ -250,7 +256,7 @@ export function FundingDisputesPage({
           </div>
           <FundingFlowTimeline transferId={peekRow.id} hideSummary />
           <div className="flex gap-2">
-            {peekRow.status !== 'REVERSED' && (
+            {canReverse(peekRow) && (
               <Button variant="danger" size="sm" onClick={() => setReverseRow(peekRow)}>
                 Reverse
               </Button>
