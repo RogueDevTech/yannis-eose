@@ -68,7 +68,12 @@ export function FundingDisputesPage({
   const fetcher = useFetcher();
   const surface = useFetcherActionSurface(fetcher);
   const [peekRow, setPeekRow] = useState<FundingDisputeRecord | null>(null);
-  const [reverseRow, setReverseRow] = useState<FundingDisputeRecord | null>(null);
+  // `?reverse=<id>` (from the Funding page row action) opens the confirm modal directly.
+  const [reverseRow, setReverseRow] = useState<FundingDisputeRecord | null>(() => {
+    const id = searchParams.get('reverse');
+    const row = id ? records.find((r) => r.id === id) : undefined;
+    return row && row.status !== 'REVERSED' && (canReverseAny || row.status !== 'COMPLETED') ? row : null;
+  });
 
   useFetcherToast(fetcher.data, { successMessage: 'Funding reversed', skipErrorToast: reverseRow != null });
   const handleSuccess = useCallback(() => {
