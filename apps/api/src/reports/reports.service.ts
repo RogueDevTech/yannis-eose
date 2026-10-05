@@ -438,6 +438,8 @@ export class ReportsService {
         branches: '—', // listFundingBalances doesn't include branch memberships; left blank for now
         totalReceived: b.totalReceived,
         totalSpend: b.totalSpend,
+        // Matches the page's "Ad spend" column: period-scoped leaderboard spend.
+        adSpend: lb?.totalSpend ?? 0,
         balance: b.balance,
         totalOrders: lb?.totalOrders ?? 0,
         deliveredOrders: lb?.deliveredOrders ?? 0,
@@ -466,7 +468,8 @@ export class ReportsService {
       { key: 'role', label: 'Role' },
       { key: 'branches', label: 'Branches' },
       { key: 'totalReceived', label: 'Total received' },
-      { key: 'totalSpend', label: 'Total ad spend' },
+      { key: 'totalSpend', label: 'Total spent' },
+      { key: 'adSpend', label: 'Ad spend' },
       { key: 'balance', label: 'Balance' },
       { key: 'totalOrders', label: 'Total orders (period)' },
       { key: 'deliveredOrders', label: 'Delivered orders (period)' },
@@ -949,19 +952,44 @@ export class ReportsService {
         throw new TRPCError({ code: 'BAD_REQUEST', message: `Export limited to ${EXPORT_MAX_PAGES * EXPORT_PAGE_LIMIT} rows.` });
       }
     }
-    const rows = all.map((o) => ({
+    // Reconciliation columns: only queried when selected (one batched query each).
+    const RECON_COLUMNS = ['matchedOrder', 'matchedOrderStatus', 'matchedOrderSource', 'matchType'] as const;
+    const wantsMatch = input.columns.some((c) => (RECON_COLUMNS as readonly string[]).includes(c));
+    const ids = all.map((o) => o.id as string);
+    const [matches, cartStatuses] = await Promise.all([
+      wantsMatch ? this.cartOrdersService.findRealOrderMatches(ids) : Promise.resolve(new Map()),
+      input.columns.includes('sourceCartStatus') ? this.cartOrdersService.getSourceCartStatuses(ids) : Promise.resolve(new Map<string, string>()),
+    ]);
+    const MATCH_TYPE_LABEL: Record<string, string> = {
+      CART_LINK: 'Order placed from this cart',
+      CART_CONVERTED: 'Cart converted to order',
+      SAME_PRODUCT: 'Same phone, same product',
+      SAME_SESSION: 'Same phone, same session',
+    };
+    const rows = all.map((o) => {
+      const m = matches.get(o.id);
+      return {
       id: o.id,
       orderNumber: o.orderNumber ?? '',
       customer: o.customerName ?? '',
+      sourceCartStatus: cartStatuses.get(o.id) ?? '',
+      matchedOrder: m?.orderLabel ?? '',
+      matchedOrderStatus: m?.order_status ?? '',
+      matchedOrderSource: m ? (m.order_source ?? 'edge-form') : '',
+      matchType: m ? MATCH_TYPE_LABEL[m.match_type] ?? m.match_type : 'None (genuine cart)',
+      duplicateFlag: o.isDuplicate === 'CART_EDGE_FORM_DUPE' ? 'Yes' : '',
       phone: o.customerPhone ?? '',
       status: o.status,
       amount: o.totalAmount ?? '',
-      product: (o.orderItems ?? []).map((i: { productName?: string }) => i.productName).filter(Boolean).join(', ') || '—',
+      // cart_order_items share the follow-up `items` shape ({ productName, quantity, offerLabel }).
+      product: formatProductsOrdered({ items: o.orderItems }),
+      quantity: totalOrderQuantity({ items: o.orderItems }),
       assignedCs: o.assignedCsName ?? '—',
       mediaBuyer: o.mediaBuyerName ?? '—',
       campaign: o.campaignName ?? '—',
       created: o.createdAt ? new Date(o.createdAt).toLocaleDateString() : '',
-    }));
+      };
+    });
     const columns = [
       { key: 'id', label: 'Order ID' },
       { key: 'orderNumber', label: 'Order Number' },
@@ -969,11 +997,18 @@ export class ReportsService {
       { key: 'phone', label: 'Phone' },
       { key: 'status', label: 'Status' },
       { key: 'amount', label: 'Amount' },
-      { key: 'product', label: 'Product' },
+      { key: 'product', label: 'Products Ordered' },
+      { key: 'quantity', label: 'Quantity' },
       { key: 'assignedCs', label: 'Assigned CS' },
       { key: 'mediaBuyer', label: 'Media Buyer' },
       { key: 'campaign', label: 'Campaign' },
       { key: 'created', label: 'Created' },
+      { key: 'sourceCartStatus', label: 'Cart status' },
+      { key: 'matchedOrder', label: 'Matched real order' },
+      { key: 'matchedOrderStatus', label: 'Matched order status' },
+      { key: 'matchedOrderSource', label: 'Matched order source' },
+      { key: 'matchType', label: 'Match type' },
+      { key: 'duplicateFlag', label: 'Flagged duplicate' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
     return { filename: `cart-orders-${date}.csv`, csvContent: toCsv(rows, columns) };
   }
@@ -1031,7 +1066,8 @@ export class ReportsService {
       { key: 'customer', label: 'Customer' },
       { key: 'status', label: 'Status' },
       { key: 'amount', label: 'Amount' },
-      { key: 'product', label: 'Product' },
+      { key: 'product', label: 'Products Ordered' },
+      { key: 'quantity', label: 'Quantity' },
       { key: 'assignedCs', label: 'Assigned CS' },
       { key: 'mediaBuyer', label: 'Media Buyer' },
       { key: 'campaign', label: 'Campaign' },
