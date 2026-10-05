@@ -38,6 +38,7 @@ function resolveSessionBranchIdFromMemberships(
 }
 
 const RATE_LIMIT_PREFIX = 'login_rate:';
+const ACCOUNT_RATE_LIMIT_PREFIX = 'login_rate_acct:';
 const RESET_TOKEN_PREFIX = 'pwd_reset:';
 const SALT_ROUNDS = 12;
 const RESET_TOKEN_TTL = 1800; // 30 minutes
@@ -98,6 +99,7 @@ export function resolveSessionTtlSeconds(rememberMe = false): number {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly maxLoginAttempts: number;
+  private readonly maxAccountLoginAttempts: number;
   private readonly rateLimitWindow: number;
 
   constructor(
@@ -109,6 +111,8 @@ export class AuthService {
     private readonly permissions: PermissionsService,
   ) {
     this.maxLoginAttempts = 5;
+    // Per-account ceiling across all IPs: stops brute force via spoofed X-Forwarded-For.
+    this.maxAccountLoginAttempts = 20;
     this.rateLimitWindow = 900; // 15 minutes in seconds
   }
 
@@ -122,11 +126,11 @@ export class AuthService {
     clientIp: string,
     rememberMe = false,
   ): Promise<{ token: string; user: SessionUser; ttlSeconds: number }> {
-    // Rate limit check
-    await this.checkRateLimit(clientIp);
-
     // Emails are stored lowercase — normalize so `User@Company.com` still matches.
     const normalizedEmail = email.trim().toLowerCase();
+
+    // Rate limit check (per IP+email, so one user's typos never lock out colleagues)
+    await this.checkRateLimit(clientIp, normalizedEmail);
 
     // Find user by email
     const [user] = await this.db
@@ -151,7 +155,7 @@ export class AuthService {
       .limit(1);
 
     if (!user) {
-      await this.recordFailedAttempt(clientIp);
+      await this.recordFailedAttempt(clientIp, normalizedEmail);
       throw new UnauthorizedException('Invalid email or password');
     }
 
@@ -172,14 +176,17 @@ export class AuthService {
     // Verify password
     const isValid = await bcrypt.compare(password, user.passwordHash);
     if (!isValid) {
-      await this.recordFailedAttempt(clientIp);
+      await this.recordFailedAttempt(clientIp, normalizedEmail);
       throw new UnauthorizedException('Invalid email or password');
     }
 
     // Clear rate limit on successful login. Best-effort — if Redis is unreachable the rate-limit
     // entry will simply expire on its own; we must not 500 the login over it.
     try {
-      await this.redis.del(`${RATE_LIMIT_PREFIX}${clientIp}`);
+      await this.redis.del(
+        this.ipRateLimitKey(clientIp, normalizedEmail),
+        `${ACCOUNT_RATE_LIMIT_PREFIX}${normalizedEmail}`,
+      );
     } catch (err) {
       this.logger.warn(`rate_limit_clear_failed ip=${clientIp} reason=${(err as Error).message}`);
     }
@@ -1223,31 +1230,43 @@ export class AuthService {
     await this.sessionStore.updateSession(sessionToken, { ...session, activeGroupId: groupId }, ttl);
   }
 
+  private ipRateLimitKey(ip: string, email: string): string {
+    return `${RATE_LIMIT_PREFIX}${ip}:${email}`;
+  }
+
   /**
-   * Check if an IP has exceeded the login attempt rate limit.
+   * Check if an IP+email pair, or the account across all IPs, has exceeded the login attempt limit.
+   * Keyed per IP+email because offices share one public IP: a per-IP-only key let five typos from
+   * anyone lock out the whole company.
    * Rate limiting is best-effort: if Redis is unreachable we log + skip the check rather than
    * 500 the login. Otherwise a transient Redis hiccup turns into "Internal server error" for
    * every signed-out user trying to log in.
    */
-  private async checkRateLimit(ip: string): Promise<void> {
-    const key = `${RATE_LIMIT_PREFIX}${ip}`;
-    let attempts: string | null;
+  private async checkRateLimit(ip: string, email: string): Promise<void> {
+    const ipKey = this.ipRateLimitKey(ip, email);
+    const accountKey = `${ACCOUNT_RATE_LIMIT_PREFIX}${email}`;
+    let ipAttempts: string | null | undefined;
+    let accountAttempts: string | null | undefined;
     try {
-      attempts = await this.redis.get(key);
+      [ipAttempts, accountAttempts] = await this.redis.mget(ipKey, accountKey);
     } catch (err) {
       this.logger.warn(`rate_limit_check_skipped ip=${ip} reason=${(err as Error).message}`);
       return;
     }
 
-    if (attempts && parseInt(attempts, 10) >= this.maxLoginAttempts) {
+    let blockedKey: string | null = null;
+    if (ipAttempts && parseInt(ipAttempts, 10) >= this.maxLoginAttempts) blockedKey = ipKey;
+    else if (accountAttempts && parseInt(accountAttempts, 10) >= this.maxAccountLoginAttempts) blockedKey = accountKey;
+
+    if (blockedKey) {
       let ttl = this.rateLimitWindow;
       try {
-        ttl = await this.redis.ttl(key);
+        ttl = await this.redis.ttl(blockedKey);
       } catch (err) {
         this.logger.warn(`rate_limit_ttl_unavailable ip=${ip} reason=${(err as Error).message}`);
       }
       throw new ForbiddenException(
-        `Too many login attempts. Try again in ${Math.ceil(ttl / 60)} minute(s).`,
+        `Too many login attempts. Try again in ${Math.max(1, Math.ceil(ttl / 60))} minute(s).`,
       );
     }
   }
@@ -1256,12 +1275,13 @@ export class AuthService {
    * Record a failed login attempt for rate limiting.
    * Best-effort — Redis errors must not turn a wrong-password attempt into a 500.
    */
-  private async recordFailedAttempt(ip: string): Promise<void> {
-    const key = `${RATE_LIMIT_PREFIX}${ip}`;
+  private async recordFailedAttempt(ip: string, email: string): Promise<void> {
     try {
-      const current = await this.redis.incr(key);
-      if (current === 1) {
-        await this.redis.expire(key, this.rateLimitWindow);
+      for (const key of [this.ipRateLimitKey(ip, email), `${ACCOUNT_RATE_LIMIT_PREFIX}${email}`]) {
+        const current = await this.redis.incr(key);
+        if (current === 1) {
+          await this.redis.expire(key, this.rateLimitWindow);
+        }
       }
     } catch (err) {
       this.logger.warn(`rate_limit_record_skipped ip=${ip} reason=${(err as Error).message}`);

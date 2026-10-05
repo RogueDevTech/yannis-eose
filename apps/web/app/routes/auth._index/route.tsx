@@ -1,7 +1,7 @@
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getCurrentUser, safeStatus } from '~/lib/api.server';
+import { apiRequest, clientIpHeaders, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { AuthPage } from '~/features/auth/AuthPage';
 
 const ALLOWED_REDIRECT_PREFIXES = ['/admin', '/tpl'] as const;
@@ -117,6 +117,7 @@ async function handleLogin(request: Request, formData: FormData) {
     }>('/auth/login', {
       method: 'POST',
       body: { email, password, rememberMe },
+      headers: clientIpHeaders(request),
       timeoutMs: 20_000,
     });
   } catch (err) {
@@ -236,6 +237,7 @@ async function handleSetup(request: Request, formData: FormData) {
   const loginRes = await apiRequest<{ message: string }>('/auth/login', {
     method: 'POST',
     body: { email, password },
+    headers: clientIpHeaders(request),
   });
 
   if (loginRes.ok && loginRes.setCookies.length > 0) {
