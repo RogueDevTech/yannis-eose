@@ -222,6 +222,8 @@ interface ApiOptions {
    * creation, fund disbursement).
    */
   forceFetchRetry?: boolean;
+  /** Extra request headers (e.g. `X-Forwarded-For` so the API sees the browser's IP, not this server's). */
+  headers?: Record<string, string>;
 }
 
 interface ApiResponse<T> {
@@ -280,6 +282,7 @@ export async function apiRequest<T = unknown>(
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...options.headers,
   };
 
   if (cookie) {
@@ -338,6 +341,25 @@ export async function apiRequest<T = unknown>(
     data,
     setCookies: getSetCookieValues(response.headers),
   };
+}
+
+/**
+ * The browser's IP as seen by Cloudflare / nginx in front of Remix.
+ * Server-to-server calls to the API otherwise all arrive from this host's address,
+ * which collapses every user into one login rate-limit bucket.
+ */
+export function getClientIp(request: Request): string | undefined {
+  const cf = request.headers.get('CF-Connecting-IP')?.trim();
+  if (cf) return cf;
+  const xff = request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim();
+  if (xff) return xff;
+  return request.headers.get('X-Real-IP')?.trim() || undefined;
+}
+
+/** `X-Forwarded-For` header carrying the browser's IP, for auth calls that rate-limit by IP. */
+export function clientIpHeaders(request: Request): Record<string, string> {
+  const ip = getClientIp(request);
+  return ip ? { 'X-Forwarded-For': ip } : {};
 }
 
 /**
