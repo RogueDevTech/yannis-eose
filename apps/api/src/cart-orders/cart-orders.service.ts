@@ -553,7 +553,7 @@ export class CartOrdersService {
       const { customerPhone, customerPhoneHash, ...rest } = o;
       return {
         ...rest,
-        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, customerPhoneHash),
+        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, customerPhoneHash, o.currencyCode),
         assignedCsName: o.assignedCsId ? userMap.get(o.assignedCsId) ?? null : null,
         mediaBuyerName: o.mediaBuyerId ? userMap.get(o.mediaBuyerId) ?? null : null,
         campaignName: o.campaignId ? campaignMap.get(o.campaignId) ?? null : null,
@@ -1997,7 +1997,7 @@ export class CartOrdersService {
     const { customerPhone, customerPhoneHash, ...orderRest } = order;
     return {
       ...orderRest,
-      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, customerPhoneHash),
+      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, customerPhoneHash, order.currencyCode),
       assignedCsName: order.assignedCsId ? userMap.get(order.assignedCsId) ?? null : null,
       mediaBuyerName: order.mediaBuyerId ? userMap.get(order.mediaBuyerId) ?? null : null,
       pendingOrderLinePriceRequestId: prReq?.id ?? null,

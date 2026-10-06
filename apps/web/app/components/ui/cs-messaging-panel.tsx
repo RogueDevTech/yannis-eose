@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useFetcher } from '@remix-run/react';
+import { formatPhoneForClipboardPaste } from '@yannis/shared';
 import { Modal } from './modal';
 import { SearchableSelect } from './searchable-select';
 import { Textarea } from './textarea';
@@ -31,6 +32,8 @@ interface CSMessagingPanelProps {
   orderId: string;
   /** Passed to order route actions for branch-scoped tRPC when session has no active branch */
   orderBranchId?: string | null;
+  /** Order currency = order country; drives the dial code for local numbers. */
+  currencyCode?: string | null;
   customerName?: string | null;
   deliveryAddress?: string | null;
   productName?: string | null;
@@ -69,6 +72,7 @@ function ChannelIcon({ channel }: { channel: 'sms' | 'whatsapp' | 'call' }) {
 export function CSMessagingPanel({
   orderId,
   orderBranchId,
+  currencyCode,
   customerName,
   deliveryAddress,
   productName,
@@ -200,18 +204,16 @@ export function CSMessagingPanel({
   }, [whatsappPrepareFetcher.state, whatsappPrepareFetcher.data]);
 
   const toSmsUrl = (phone: string, message: string): string => {
-    const digitsOnly = phone.replace(/[^\d+]/g, '');
+    const digitsOnly = formatPhoneForClipboardPaste(phone, currencyCode).replace(/[^\d+]/g, '');
     const encoded = encodeURIComponent(message);
     return `sms:${digitsOnly}?body=${encoded}`;
   };
 
   const toWhatsappUrl = (phone: string, message: string): string => {
-    const digitsOnly = phone.replace(/[^\d+]/g, '');
-    let waPhone = digitsOnly.startsWith('+') ? digitsOnly.slice(1) : digitsOnly;
-    // Local fallback normalization for Nigeria numbers entered as 0XXXXXXXXXX
-    if (waPhone.startsWith('0')) {
-      waPhone = `234${waPhone.slice(1)}`;
-    }
+    // The order's country decides the dial code (Nigerian 0[789]… → 234 only as a
+    // fallback). A blanket 0 → 234 turned a Tanzanian 07… into a stranger's chat.
+    const digitsOnly = formatPhoneForClipboardPaste(phone, currencyCode).replace(/[^\d+]/g, '');
+    const waPhone = digitsOnly.startsWith('+') ? digitsOnly.slice(1) : digitsOnly;
     const encoded = encodeURIComponent(message);
     return `https://wa.me/${waPhone}?text=${encoded}`;
   };

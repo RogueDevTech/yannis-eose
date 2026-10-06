@@ -123,6 +123,8 @@ export interface PendingCart {
    * lists, only in the detail modal opened by an authorized actor.
    */
   customerPhone?: string | null;
+  /** Cart country (currency). Drives the dial code on Call / WhatsApp. */
+  currencyCode?: string | null;
   productId?: string | null;
   productName: string | null;
   campaignName: string | null;

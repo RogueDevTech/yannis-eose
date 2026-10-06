@@ -4,6 +4,7 @@ import { Modal } from '~/components/ui/modal';
 import { Spinner } from '~/components/ui/spinner';
 import { DetailRow } from '~/components/ui/live-activity-card';
 import { useToast } from '~/components/ui/toast';
+import { formatCustomerPhoneForDisplay, formatPhoneForClipboardPaste } from '@yannis/shared';
 import type { PendingCart } from './types';
 
 type RevealResult = { ok: boolean; phone?: string; isDialable?: boolean; error?: string };
@@ -122,7 +123,7 @@ export function AbandonedCartDetailModal({
     if (!cart) return;
     const lines: Array<string | null> = [
       `Customer: ${cart.customerName}`,
-      `Phone: ${phone ?? cart.customerPhoneDisplay}`,
+      `Phone: ${phone ? formatCustomerPhoneForDisplay(phone, cart.currencyCode ?? null) : cart.customerPhoneDisplay}`,
       cart.customerEmail ? `Email: ${cart.customerEmail}` : null,
       `Product: ${cart.productName ?? 'No product yet'}`,
       cart.quantity ? `Quantity: ${cart.quantity}` : null,
@@ -160,8 +161,13 @@ export function AbandonedCartDetailModal({
     }
   };
 
-  const whatsappHref = phone
-    ? `https://wa.me/${phone.replace(/^\+/, '').replace(/\D/g, '')}`
+  // Stored phone stays raw; only the dial links and the on-screen form use the
+  // cart's country code.
+  const cartCurrency = cart?.currencyCode ?? null;
+  const dialPhone = phone ? formatPhoneForClipboardPaste(phone, cartCurrency) : null;
+  const shownPhone = phone ? formatCustomerPhoneForDisplay(phone, cartCurrency) : null;
+  const whatsappHref = dialPhone
+    ? `https://wa.me/${dialPhone.replace(/\D/g, '')}`
     : null;
 
   return (
@@ -188,7 +194,7 @@ export function AbandonedCartDetailModal({
                   </span>
                 )}
                 {phoneState === 'idle' && phone && (
-                  <span className="text-white tracking-wide select-all">{phone}</span>
+                  <span className="text-white tracking-wide select-all">{shownPhone}</span>
                 )}
                 {phoneState === 'masked' && (
                   <span className="text-white/70 tracking-wide">{cart.customerPhoneDisplay}</span>
@@ -282,7 +288,7 @@ export function AbandonedCartDetailModal({
             {phoneState === 'idle' && phone && (
               <div className="grid grid-cols-3 gap-2 mb-3">
                 <a
-                  href={`tel:${phone}`}
+                  href={`tel:${dialPhone}`}
                   className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-white bg-success-600 hover:bg-success-700 transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

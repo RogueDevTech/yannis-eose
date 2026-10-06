@@ -49,8 +49,8 @@ function stripNulDeep<T>(value: T): T {
  * Best-effort display from cart row: digit mask when raw phone is present,
  * otherwise "Hidden" / "—" when only a hash or nothing (never hash fragments as a "phone").
  */
-function maskCartPhone(rawPhone: string | null, phoneHash: string): string {
-  return formatOrderCustomerPhoneDisplay(rawPhone, phoneHash);
+function maskCartPhone(rawPhone: string | null, phoneHash: string, currencyCode?: string | null): string {
+  return formatOrderCustomerPhoneDisplay(rawPhone, phoneHash, currencyCode);
 }
 
 @Injectable()
@@ -516,6 +516,7 @@ export class CartService {
       customerName: string;
       customerPhoneHash: string;
       customerPhone: string | null;
+      currencyCode: string | null;
       productId: string | null;
       productName: string | null;
       campaignId: string;
@@ -528,6 +529,7 @@ export class CartService {
         ca.customer_name   AS "customerName",
         ca.customer_phone_hash AS "customerPhoneHash",
         ca.customer_phone  AS "customerPhone",
+        ca.currency_code   AS "currencyCode",
         ca.product_id      AS "productId",
         p.name             AS "productName",
         ca.campaign_id     AS "campaignId",
@@ -546,7 +548,7 @@ export class CartService {
     return rows.map((r) => ({
       id: r.id,
       customerName: r.customerName,
-      customerPhoneDisplay: maskCartPhone(r.customerPhone, r.customerPhoneHash),
+      customerPhoneDisplay: maskCartPhone(r.customerPhone, r.customerPhoneHash, r.currencyCode),
       productId: r.productId,
       productName: r.productName ?? null,
       campaignId: r.campaignId,
@@ -597,6 +599,8 @@ export class CartService {
       customerName: string;
       customerPhoneDisplay: string;
       customerPhone: string | null;
+      /** Cart country (NULL on pre-0338 rows). Clients format dial links from it. */
+      currencyCode: string | null;
       productId: string | null;
       productName: string | null;
       campaignId: string;
@@ -666,6 +670,7 @@ export class CartService {
         customerName: schema.cartAbandonments.customerName,
         customerPhoneHash: schema.cartAbandonments.customerPhoneHash,
         customerPhone: schema.cartAbandonments.customerPhone,
+        currencyCode: schema.cartAbandonments.currencyCode,
         productId: schema.cartAbandonments.productId,
         productName: schema.products.name,
         campaignId: schema.cartAbandonments.campaignId,
@@ -721,8 +726,11 @@ export class CartService {
       items: rows.map((r) => ({
         id: r.id,
         customerName: r.customerName,
-        customerPhoneDisplay: maskCartPhone(r.customerPhone, r.customerPhoneHash),
+        customerPhoneDisplay: maskCartPhone(r.customerPhone, r.customerPhoneHash, r.currencyCode),
+        // Raw, never reformatted: "Convert to order" copies it into a new order
+        // whose phone hash must match the edge-form hash. Dial formatting is client-side.
         customerPhone: opts.includeRawPhone ? r.customerPhone ?? null : null,
+        currencyCode: r.currencyCode ?? null,
         productId: r.productId,
         productName: r.productName ?? null,
         campaignId: r.campaignId,
@@ -805,6 +813,7 @@ export class CartService {
     customerName: string;
     customerPhoneDisplay: string;
     customerPhone: string | null;
+    currencyCode: string | null;
     productId: string | null;
     productName: string | null;
     campaignId: string;
@@ -829,6 +838,7 @@ export class CartService {
         customerName: schema.cartAbandonments.customerName,
         customerPhoneHash: schema.cartAbandonments.customerPhoneHash,
         customerPhone: schema.cartAbandonments.customerPhone,
+        currencyCode: schema.cartAbandonments.currencyCode,
         productId: schema.cartAbandonments.productId,
         productName: schema.products.name,
         campaignId: schema.cartAbandonments.campaignId,
@@ -864,8 +874,10 @@ export class CartService {
     return {
       id: r.id,
       customerName: r.customerName,
-      customerPhoneDisplay: maskCartPhone(r.customerPhone, r.customerPhoneHash),
+      customerPhoneDisplay: maskCartPhone(r.customerPhone, r.customerPhoneHash, r.currencyCode),
+      // Raw, never reformatted (see listAbandoned).
       customerPhone: opts.includeRawPhone ? r.customerPhone ?? null : null,
+      currencyCode: r.currencyCode ?? null,
       productId: r.productId,
       productName: r.productName ?? null,
       campaignId: r.campaignId,
@@ -1032,13 +1044,14 @@ export class CartService {
     cartId: string,
     actorId: string,
     effectiveBranchIds?: string[] | null,
-  ): Promise<{ phone: string; isDialable: boolean }> {
+  ): Promise<{ phone: string; isDialable: boolean; currencyCode?: string | null }> {
     await this.assertAbandonedCartInScope(cartId, effectiveBranchIds);
     const rows = await this.db
       .select({
         id: schema.cartAbandonments.id,
         status: schema.cartAbandonments.status,
         customerPhone: schema.cartAbandonments.customerPhone,
+        currencyCode: schema.cartAbandonments.currencyCode,
       })
       .from(schema.cartAbandonments)
       .where(eq(schema.cartAbandonments.id, cartId))
@@ -1069,7 +1082,7 @@ export class CartService {
       );
     });
 
-    return { phone, isDialable: true };
+    return { phone, isDialable: true, currencyCode: row.currencyCode ?? null };
   }
 
   /**

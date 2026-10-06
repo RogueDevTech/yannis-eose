@@ -1,3 +1,5 @@
+import { formatInternationalPhone, toInternationalPhone } from '../currency/phone-format';
+
 /**
  * Order customer phone as shown in admin / Sales UIs and list rows.
  * - When `customer_phone` is stored: classic digit mask (first 4 + **** + last 4 digits).
@@ -7,9 +9,20 @@
 export function formatOrderCustomerPhoneDisplay(
   rawPhone: string | null | undefined,
   phoneHash: string | null | undefined,
+  /** Order currency = order country. Non-NGN numbers mask in international form. */
+  currencyCode?: string | null,
 ): string {
   const raw = rawPhone?.trim();
   if (raw) {
+    // Non-Nigerian orders: mask the international form so CS sees the country
+    // code ('+255 97****552'). Nigeria keeps the legacy local mask unchanged.
+    const isNgn = !currencyCode || currencyCode.trim().toUpperCase() === 'NGN';
+    const intl = isNgn ? null : toInternationalPhone(raw, currencyCode);
+    if (intl) {
+      // Short plans (≤8 national digits) stay fully masked, like the legacy rule.
+      if (intl.national.length <= 8) return `+${intl.dialCode} ****`;
+      return `+${intl.dialCode} ${intl.national.slice(0, 2)}****${intl.national.slice(-3)}`;
+    }
     let digits = raw.replace(/\D+/g, '');
     // Normalize Nigeria country code to local leading 0 for a consistent digit mask.
     if (digits.startsWith('234') && digits.length >= 13) {
@@ -89,4 +102,23 @@ export function resolveOrderClipboardPhone(input: {
     if (hit) return hit;
   }
   return null;
+}
+
+/**
+ * Country-aware clipboard / WhatsApp handoff phone: E.164 for the order's
+ * country ('+255976372552'), falling back to the Nigerian rules above, then the
+ * trimmed raw value.
+ */
+export function formatPhoneForClipboardPaste(phone: string, currencyCode: string | null | undefined): string {
+  return toInternationalPhone(phone, currencyCode)?.e164 ?? formatNigerianPhoneForClipboardPaste(phone);
+}
+
+/**
+ * Full customer phone for screens, exports and message templates. Non-Nigerian
+ * orders get the grouped international form ('+255 976 372 552'); Nigerian
+ * orders keep the stored local form that staff, riders and 3PLs already use.
+ */
+export function formatCustomerPhoneForDisplay(phone: string, currencyCode: string | null | undefined): string {
+  const isNgn = !currencyCode || currencyCode.trim().toUpperCase() === 'NGN';
+  return isNgn ? phone.trim() : formatInternationalPhone(phone, currencyCode);
 }

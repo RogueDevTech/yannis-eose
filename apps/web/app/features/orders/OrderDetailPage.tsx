@@ -3,7 +3,7 @@ import { Link, useFetcher, useNavigate, useRevalidator, useSearchParams } from '
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { invalidateCachedLoader } from '~/lib/loader-cache';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
-import { EDGE_FORM_ACTOR_ID, formatOrderNumber, RETRACK_CATEGORY_OPTIONS, isPriceAffectingRetrackCategory, retrackCategoryLabel, RETRACK_CATEGORY_META, formatMoney, symbolForCurrencyCode } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, formatOrderNumber, RETRACK_CATEGORY_OPTIONS, isPriceAffectingRetrackCategory, retrackCategoryLabel, RETRACK_CATEGORY_META, formatMoney, symbolForCurrencyCode, countryForCurrency } from '@yannis/shared';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
 import { Spinner } from '~/components/ui/spinner';
@@ -1800,8 +1800,14 @@ export function OrderDetailPage({
         <div className="min-w-0">
           <h1 className="text-xl sm:text-2xl font-bold text-app-fg truncate">{order.customerName}</h1>
           <p className="text-sm text-app-fg-muted font-mono mt-0.5 break-all">
-            {callablePhone?.phone ? callablePhone.phone : order.customerPhoneDisplay}
+            {/* Hash-only orders return isDialable=false with the hash in `phone`: never show it. */}
+            {callablePhone?.isDialable && callablePhone.phone ? (callablePhone.display ?? callablePhone.phone) : order.customerPhoneDisplay}
           </p>
+          {callablePhone?.prefixMismatch && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+              Check number: it does not look like a {countryForCurrency(order.currencyCode ?? 'NGN')?.country ?? 'local'} mobile.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <PageRefreshButton />
@@ -3220,6 +3226,7 @@ export function OrderDetailPage({
               <CSMessagingPanel
                 orderId={order.id}
                 orderBranchId={order.branchId ?? null}
+                currencyCode={order.currencyCode ?? 'NGN'}
                 customerName={order.customerName}
                 deliveryAddress={order.deliveryAddress}
                 productName={order.orderItems[0]?.productName ?? null}

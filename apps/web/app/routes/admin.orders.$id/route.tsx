@@ -17,6 +17,7 @@ import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { hasFinanceAccess } from '~/lib/rbac';
 import type {
+  CallablePhone,
   CallLogEntry,
   OrderDetail,
   OrderDetailLoaderResult,
@@ -135,7 +136,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Cart/follow-up detail APIs seal the raw phone (Lead Fortress), so the Call
   // Customer modal must fetch it here. Backend applies the VOIP + marketing-role
   // gate and looks the id up across orders / cart_orders / follow_up_orders.
-  const fetchCallablePhone = (): Promise<{ phone: string; isDialable: boolean } | null> =>
+  const fetchCallablePhone = (): Promise<CallablePhone | null> =>
     apiRequest<unknown>(
       `/trpc/orders.getCallablePhone?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
       deferredOpt,
@@ -143,7 +144,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       .then((phoneRes) => {
         if (!phoneRes.ok) return null;
         const phoneData = phoneRes.data as {
-          result?: { data?: { phone: string; isDialable: boolean } | null };
+          result?: { data?: CallablePhone | null };
         };
         return phoneData?.result?.data ?? null;
       })

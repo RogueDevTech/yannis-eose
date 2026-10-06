@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { eq, and, desc, or, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type Redis from 'ioredis';
-import { db as schema, canonicalPermissionCode } from '@yannis/shared';
+import { db as schema, canonicalPermissionCode, toInternationalPhone } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { isReadThroughCacheEnabled } from '../common/cache/cache.service';
@@ -406,7 +406,7 @@ export class VoipService {
   async lookupCustomerPhoneByCallToken(callToken: string): Promise<string | null> {
     if (!callToken) return null;
     const [row] = await this.db
-      .select({ customerPhone: schema.orders.customerPhone })
+      .select({ customerPhone: schema.orders.customerPhone, currencyCode: schema.orders.currencyCode })
       .from(schema.callLogs)
       .innerJoin(schema.orders, eq(schema.callLogs.orderId, schema.orders.id))
       .where(eq(schema.callLogs.callToken, callToken))
@@ -414,9 +414,9 @@ export class VoipService {
 
     const raw = row?.customerPhone?.trim();
     if (!raw) return null;
-    // Reuse Nigerian E.164 normalization (kept as a static helper below) so the customer
-    // number going into the Dial XML is always +234... — AT requires this.
-    return toE164Nigeria(raw);
+    // AT requires E.164 in the Dial XML. Use the ORDER's country (a Tanzanian 07…
+    // must become +255…, not +234…); Nigerian rule stays as the fallback.
+    return toInternationalPhone(raw, row?.currencyCode)?.e164 ?? toE164Nigeria(raw);
   }
 
   // ─── Webhook ───────────────────────────────────────────────────
