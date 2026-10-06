@@ -1,3 +1,7 @@
+import type { CallablePhone } from '@yannis/shared';
+
+export type { CallablePhone };
+
 export interface Order {
   id: string;
   orderNumber?: number | null;
@@ -263,7 +267,8 @@ export interface OrderDetailStreamData {
   /** All active products with offers — powers product-swap in the Adjust order items modal. */
   productsForAdjust?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string | number; qty: number }> }>;
   /** Pre-loaded callable phone when VOIP is off and viewer is authorised — no separate reveal fetch. */
-  callablePhone?: { phone: string; isDialable: boolean } | null;
+  /** `phone` = E.164 for the order's country (dial/copy); `display` = grouped form. */
+  callablePhone?: CallablePhone | null;
   /** True when this is a follow-up order (lives in follow_up_orders, not orders). */
   isFollowUpOrder?: boolean;
   /** True when this is a cart order (lives in cart_orders, not orders). */
@@ -369,3 +374,4 @@ export interface OrderInvoice {
    */
   markedPaid?: boolean;
 }
+

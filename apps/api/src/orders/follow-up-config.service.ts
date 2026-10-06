@@ -1448,7 +1448,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     const { customerPhone, customerPhoneHash, ...orderRest } = order;
     return {
       ...orderRest,
-      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, customerPhoneHash),
+      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, customerPhoneHash, order.currencyCode),
       assignedCsName: order.assignedCsId ? (userMap.get(order.assignedCsId) ?? null) : null,
       mediaBuyerName: order.mediaBuyerId ? (userMap.get(order.mediaBuyerId) ?? null) : null,
       pendingOrderLinePriceRequestId: prReq?.id ?? null,

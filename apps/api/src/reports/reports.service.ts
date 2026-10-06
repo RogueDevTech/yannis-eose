@@ -18,6 +18,7 @@ import {
   listShipmentsSchema,
   listLocationsSchema,
   listProvidersSchema,
+  formatCustomerPhoneForDisplay,
 } from '@yannis/shared';
 import type { ExportReportInput, ExportDateRange, ListOrdersInput } from '@yannis/shared';
 import { OrdersService } from '../orders/orders.service';
@@ -298,7 +299,12 @@ export class ReportsService {
       id: o.id,
       customer: o.customerName,
       assignedCs: o.assignedCsName ?? '—',
-      phone: (o as unknown as { customerPhone?: string }).customerPhone ?? o.customerPhoneDisplay ?? '',
+      // Non-Nigerian orders export in international form ('+255 976 372 552'),
+      // spaced so spreadsheets keep the '+'. Nigerian numbers stay as stored.
+      phone: (() => {
+        const raw = (o as unknown as { customerPhone?: string }).customerPhone;
+        return raw ? formatCustomerPhoneForDisplay(raw, o.currencyCode) : o.customerPhoneDisplay ?? '';
+      })(),
       status: o.status,
       amount: o.totalAmount ?? '',
       // Every line item on the order, e.g. "Vitamin C x2; Collagen x1", so
@@ -978,7 +984,7 @@ export class ReportsService {
       matchedOrderSource: m ? (m.order_source ?? 'edge-form') : '',
       matchType: m ? MATCH_TYPE_LABEL[m.match_type] ?? m.match_type : 'None (genuine cart)',
       duplicateFlag: o.isDuplicate === 'CART_EDGE_FORM_DUPE' ? 'Yes' : '',
-      phone: o.customerPhone ?? '',
+      phone: o.customerPhone ? formatCustomerPhoneForDisplay(o.customerPhone, o.currencyCode) : '',
       status: o.status,
       amount: o.totalAmount ?? '',
       // cart_order_items share the follow-up `items` shape ({ productName, quantity, offerLabel }).

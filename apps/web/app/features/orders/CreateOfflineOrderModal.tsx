@@ -7,6 +7,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
+import { CustomerPhoneInput } from '~/components/ui/customer-phone-input';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
@@ -284,18 +285,10 @@ export function CreateOfflineOrderModal({
                 onChange={(e) => setCustomerName(e.target.value)}
                 placeholder="Full name"
               />
-              <TextInput
-                type="tel"
-                inputMode="numeric"
-                label="Customer phone *"
-                required
-                minLength={10}
-                maxLength={15}
+              <CustomerPhoneInput
                 value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value.replace(/[^\d+\-\s()]/g, ''))}
-                placeholder="e.g. 08012345678"
-                pattern="[0-9+\-\s()]{10,15}"
-                title="Phone number must be 10–15 digits"
+                onChange={setCustomerPhone}
+                currencyCode={currencyCode}
               />
             </div>
 

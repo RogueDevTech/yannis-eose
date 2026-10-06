@@ -23,7 +23,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, formatCustomerPhoneForDisplay, toInternationalPhone, type CallablePhone, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch, type Tx } from '../common/db/with-actor';
 
@@ -174,6 +174,21 @@ const DELIVERY_OVERDUE_EXCLUDED_STATUSES = [
   'WRITTEN_OFF',
   'PARTIALLY_DELIVERED',
 ] as const;
+
+/**
+ * Revealed phone for the order's country: `phone` dials/copies (E.164 when the
+ * stored number fits the country, Nigerian 0… → +234 fallback, else as stored);
+ * `display` keeps Nigerian numbers in their stored local form.
+ */
+function toCallablePhone(rawPhone: string, currencyCode: string | null | undefined): CallablePhone {
+  const intl = toInternationalPhone(rawPhone, currencyCode);
+  return {
+    phone: formatPhoneForClipboardPaste(rawPhone, currencyCode),
+    isDialable: true,
+    display: formatCustomerPhoneForDisplay(rawPhone, currencyCode),
+    prefixMismatch: intl ? !intl.prefixMatchesCountry : false,
+  };
+}
 
 /**
  * Parse a caller-supplied createdAt override, rejecting anything outside a
@@ -4699,7 +4714,7 @@ export class OrdersService {
     const { customerPhone: _rawPhone, ...orderSafe } = order;
     return {
       ...orderSafe,
-      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(order.customerPhone, order.customerPhoneHash),
+      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(order.customerPhone, order.customerPhoneHash, order.currencyCode),
       orderItems: items,
       callLogs: calls,
       allowedTransitions,
@@ -5158,7 +5173,7 @@ export class OrdersService {
    * When the order was created via the edge form, customer_phone_hash stores a one-way hash,
    * so the real number cannot be revealed; we return isDialable: false and the UI shows a message.
    */
-  async revealPhoneForManualCall(orderId: string, actor: SessionUser): Promise<{ phone: string; isDialable: boolean }> {
+  async revealPhoneForManualCall(orderId: string, actor: SessionUser): Promise<CallablePhone> {
     const voipSetting = await this.settingsService.get('VOIP_ENABLED');
     const isVoipEnabled = voipSetting?.['enabled'] === true;
     if (isVoipEnabled) {
@@ -5222,7 +5237,7 @@ export class OrdersService {
     // Prefer stored raw phone (set by Edge on create) so CS can copy/dial when VOIP is off
     const rawPhone = order.customerPhone?.trim();
     if (rawPhone) {
-      return { phone: rawPhone, isDialable: true };
+      return toCallablePhone(rawPhone, order.currencyCode);
     }
 
     const value = order.customerPhoneHash;
@@ -5239,7 +5254,7 @@ export class OrdersService {
   async getCallablePhoneForViewer(
     orderId: string,
     actor: SessionUser,
-  ): Promise<{ phone: string; isDialable: boolean } | null> {
+  ): Promise<CallablePhone | null> {
     const voipSetting = await this.settingsService.get('VOIP_ENABLED');
     if (voipSetting?.['enabled'] === true) return null;
 
@@ -5265,6 +5280,7 @@ export class OrdersService {
         branchId: schema.orders.branchId,
         servicingBranchId: schema.orders.servicingBranchId,
         mediaBuyerId: schema.orders.mediaBuyerId,
+        currencyCode: schema.orders.currencyCode,
       })
       .from(schema.orders)
       .where(eq(schema.orders.id, orderId))
@@ -5276,6 +5292,7 @@ export class OrdersService {
           branchId: string | null;
           servicingBranchId: string | null;
           mediaBuyerId: string | null;
+          currencyCode: string | null;
         }
       | undefined = regular;
 
@@ -5287,6 +5304,7 @@ export class OrdersService {
           branchId: schema.cartOrders.branchId,
           servicingBranchId: schema.cartOrders.servicingBranchId,
           mediaBuyerId: schema.cartOrders.mediaBuyerId,
+          currencyCode: schema.cartOrders.currencyCode,
         })
         .from(schema.cartOrders)
         .where(eq(schema.cartOrders.id, orderId))
@@ -5302,6 +5320,7 @@ export class OrdersService {
           branchId: schema.followUpOrders.branchId,
           servicingBranchId: schema.followUpOrders.servicingBranchId,
           mediaBuyerId: schema.followUpOrders.mediaBuyerId,
+          currencyCode: schema.followUpOrders.currencyCode,
         })
         .from(schema.followUpOrders)
         .where(eq(schema.followUpOrders.id, orderId))
@@ -5333,7 +5352,7 @@ export class OrdersService {
     // Phone is always visible once loaded — no status restriction.
     // VOIP gate + marketing-role gate above are sufficient.
     const rawPhone = phoneRow.customerPhone?.trim();
-    if (rawPhone) return { phone: rawPhone, isDialable: true };
+    if (rawPhone) return toCallablePhone(rawPhone, phoneRow.currencyCode);
 
     const value = phoneRow.customerPhoneHash;
     const isDialable = !/^[a-f0-9]{64}$/i.test(value ?? '');
@@ -5379,7 +5398,7 @@ export class OrdersService {
 
     const phoneForPaste =
       resolved != null
-        ? formatNigerianPhoneForClipboardPaste(resolved.trim())
+        ? formatPhoneForClipboardPaste(resolved.trim(), detail.currencyCode)
         : 'Not available — full phone was not found on this order. Use VOIP from the order screen to contact the customer.';
 
     return buildOrderClipboardSummaryText({
@@ -5429,7 +5448,7 @@ export class OrdersService {
       customFields: fu.customFields as Record<string, unknown> | null | undefined,
     });
     const phoneForPaste = resolved != null
-      ? formatNigerianPhoneForClipboardPaste(resolved.trim())
+      ? formatPhoneForClipboardPaste(resolved.trim(), fu.currencyCode)
       : 'Not available';
 
     return buildOrderClipboardSummaryText({
@@ -5479,7 +5498,7 @@ export class OrdersService {
       customFields: co.customFields as Record<string, unknown> | null | undefined,
     });
     const phoneForPaste = resolved != null
-      ? formatNigerianPhoneForClipboardPaste(resolved.trim())
+      ? formatPhoneForClipboardPaste(resolved.trim(), co.currencyCode)
       : 'Not available';
 
     return buildOrderClipboardSummaryText({
@@ -6035,7 +6054,7 @@ export class OrdersService {
         const lastComment = lastCommentByOrder.get(order.id) ?? null;
         return {
           ...orderRest,
-          customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash),
+          customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash, order.currencyCode),
           ...(listOpts?.includeRawPhone ? { customerPhone } : {}),
           mediaBuyerName: order.mediaBuyerId ? userNamesById.get(order.mediaBuyerId) ?? null : null,
           assignedCsName: order.assignedCsId ? userNamesById.get(order.assignedCsId) ?? null : null,
@@ -7047,7 +7066,7 @@ export class OrdersService {
     const { customerPhone: transitionPhone, ...updatedSafe } = updated;
     return {
       ...updatedSafe,
-      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(transitionPhone, updated.customerPhoneHash),
+      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(transitionPhone, updated.customerPhoneHash, updated.currencyCode),
       allowedTransitions: getAllowedNextStatuses(newStatus),
     };
   }
@@ -7315,7 +7334,7 @@ export class OrdersService {
     const { customerPhone: updatedPhone, ...updatedForResponse } = updated;
     return {
       ...updatedForResponse,
-      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(updatedPhone, updated.customerPhoneHash),
+      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(updatedPhone, updated.customerPhoneHash, updated.currencyCode),
     };
   }
 
@@ -11394,7 +11413,7 @@ export class OrdersService {
       const { customerPhone, ...rest } = order;
       return {
         ...rest,
-        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash),
+        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash, order.currencyCode),
       };
     });
   }
@@ -11427,7 +11446,7 @@ export class OrdersService {
       const { customerPhone, ...rest } = order;
       return {
         ...rest,
-        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash),
+        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash, order.currencyCode),
       };
     });
   }
@@ -11612,14 +11631,14 @@ export class OrdersService {
         const { customerPhone, ...o } = origRow;
         return {
           ...o,
-          customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, origRow.customerPhoneHash),
+          customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, origRow.customerPhoneHash, origRow.currencyCode),
         };
       })();
       const { customerPhone: dupPhone, ...dupRest } = dup;
       return {
         duplicate: {
           ...dupRest,
-          customerPhoneDisplay: formatOrderCustomerPhoneDisplay(dupPhone, dup.customerPhoneHash),
+          customerPhoneDisplay: formatOrderCustomerPhoneDisplay(dupPhone, dup.customerPhoneHash, dup.currencyCode),
         },
         original,
         flagKind: (dup.isDuplicate === 'POSSIBLY_DUPLICATE' ? 'POSSIBLY_DUPLICATE' : 'FLAGGED') as
@@ -11777,7 +11796,7 @@ export class OrdersService {
       const { customerPhone, ...rest } = order;
       return {
         ...rest,
-        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash),
+        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash, order.currencyCode),
       };
     });
   }

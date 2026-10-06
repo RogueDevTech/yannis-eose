@@ -21,7 +21,7 @@ import { db as schema, canonicalPermissionCode } from '@yannis/shared';
 import { CacheService } from '../../common/cache/cache.service';
 import { withActor } from '../../common/db/with-actor';
 import { assertEntityInScopeAny } from '../../common/db/assert-entity-in-scope';
-import { formatOrderNumber } from '@yannis/shared';
+import { formatOrderNumber, formatCustomerPhoneForDisplay, formatPhoneForClipboardPaste } from '@yannis/shared';
 
 /** Injected from {@link TrpcModule}; Redis cache for {@link messagingRouter}.templates.list */
 let messagingCacheService: CacheService | null = null;
@@ -111,6 +111,8 @@ function resolvePlaceholders(body: string, order: {
   orderNumber?: number | null;
   customerName: string | null;
   customerPhone?: string | null;
+  /** Order currency = order country; renders {{customer_phone}} with its dial code. */
+  currencyCode?: string | null;
   deliveryAddress: string | null;
   totalAmount?: string | number | null;
   paymentStatus?: string | null;
@@ -129,7 +131,7 @@ function resolvePlaceholders(body: string, order: {
     : order.id.slice(0, 8).toUpperCase();
   return body
     .replace(/\{\{customer_name\}\}/g, order.customerName ?? '')
-    .replace(/\{\{customer_phone\}\}/g, order.customerPhone ?? '')
+    .replace(/\{\{customer_phone\}\}/g, order.customerPhone ? formatCustomerPhoneForDisplay(order.customerPhone, order.currencyCode) : '')
     .replace(/\{\{order_id\}\}/g, orderDisplay)
     .replace(/\{\{product_name\}\}/g, productName)
     .replace(/\{\{delivery_address\}\}/g, order.deliveryAddress ?? '')
@@ -347,6 +349,7 @@ export const messagingRouter = router({
           id: schema.orders.id,
           customerName: schema.orders.customerName,
           customerPhone: schema.orders.customerPhone,
+          currencyCode: schema.orders.currencyCode,
           deliveryAddress: schema.orders.deliveryAddress,
           status: schema.orders.status,
           branchId: schema.orders.branchId,
@@ -391,6 +394,7 @@ export const messagingRouter = router({
           id: order.id,
           customerName: order.customerName,
           customerPhone: order.customerPhone,
+          currencyCode: order.currencyCode,
           deliveryAddress: order.deliveryAddress,
         });
         templateId = template.id;
@@ -405,7 +409,7 @@ export const messagingRouter = router({
       const result =
         input.channel === 'WHATSAPP'
           ? { success: true as const, error: undefined }
-          : await dispatchMessage(order.customerPhone, input.channel, renderedBody);
+          : await dispatchMessage(formatPhoneForClipboardPaste(order.customerPhone, order.currencyCode), input.channel, renderedBody);
 
       // Log to outbound_messages and order timeline together.
       const timelineEventType = input.channel === 'WHATSAPP' ? 'WHATSAPP_SENT' : 'SMS_SENT';
@@ -479,6 +483,7 @@ export const messagingRouter = router({
             orderNumber: schema.orders.orderNumber,
             customerName: schema.orders.customerName,
             customerPhone: schema.orders.customerPhone,
+            currencyCode: schema.orders.currencyCode,
             deliveryAddress: schema.orders.deliveryAddress,
             totalAmount: schema.orders.totalAmount,
             paymentStatus: schema.orders.paymentStatus,
@@ -516,6 +521,7 @@ export const messagingRouter = router({
             orderNumber: schema.followUpOrders.orderNumber,
             customerName: schema.followUpOrders.customerName,
             customerPhone: schema.followUpOrders.customerPhone,
+            currencyCode: schema.followUpOrders.currencyCode,
             deliveryAddress: schema.followUpOrders.deliveryAddress,
             totalAmount: schema.followUpOrders.totalAmount,
             paymentStatus: schema.followUpOrders.paymentStatus,
@@ -571,6 +577,7 @@ export const messagingRouter = router({
         orderNumber: order.orderNumber,
         customerName: order.customerName,
         customerPhone: order.customerPhone,
+        currencyCode: order.currencyCode,
         deliveryAddress: order.deliveryAddress,
         totalAmount: order.totalAmount,
         paymentStatus: order.paymentStatus,
