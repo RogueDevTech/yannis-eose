@@ -72,6 +72,12 @@ import { emitOrderAutomationEvents } from '../automation/automation-hooks';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
 import { DuplicateRulesService } from '../settings/duplicate-rules.service';
+import {
+  UNSUBMITTED_FORM_CAPTURE_SOURCE,
+  FULL_FORM_CART_SQL,
+  CONVERT_AFTER_ABANDONED_MINUTES,
+  CONVERT_LOOKBACK_HOURS,
+} from '../cart-orders/unsubmitted-form';
 import { InventoryService } from '../inventory/inventory.service';
 import {
   isTransitionAllowed,
@@ -2418,7 +2424,8 @@ export class OrdersService {
     input: CreateOrderInput & { cartId?: string },
     actorId: string | null,
     orderSource?: 'edge-form' | 'offline' | null,
-    opts?: { isFollowUp?: boolean },
+    /** captureSource: internal marker, see orders.capture_source (migration 0353). */
+    opts?: { isFollowUp?: boolean; captureSource?: typeof UNSUBMITTED_FORM_CAPTURE_SOURCE },
   ): Promise<{ id?: string; authorizationUrl?: string; duplicateRecorded?: true; alreadySubmitted?: true }> {
     const { cartId, ...orderInput } = input;
     const paymentMethod = orderInput.paymentMethod ?? 'PAY_ON_DELIVERY';
@@ -2611,6 +2618,44 @@ export class OrdersService {
           await this.cartService.convert(cartId, recentSameForm.id, actorId ?? undefined).catch(() => {});
         }
         return { id: recentSameForm.id, alreadySubmitted: true };
+      }
+    }
+
+    // The customer's properly filled form was already created as an order because
+    // they had not pressed submit (capture_source UNSUBMITTED_FORM). If the same
+    // browser now submits the same form, return that order: they see "already
+    // submitted" and CS keeps one order (owner decision 2026-10-07). Never
+    // rejects; an idempotent return like the double-tap guard above.
+    if (orderSource === 'edge-form' && !opts?.captureSource && orderInput.sessionId && orderInput.campaignId) {
+      const [captured] = await this.db
+        .select({ id: schema.orders.id })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.sessionId, orderInput.sessionId),
+            eq(schema.orders.campaignId, orderInput.campaignId),
+            eq(schema.orders.captureSource, UNSUBMITTED_FORM_CAPTURE_SOURCE),
+            isNull(schema.orders.deletedAt),
+            notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
+            gte(schema.orders.createdAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)),
+          ),
+        )
+        .orderBy(desc(schema.orders.createdAt))
+        .limit(1);
+      if (captured) {
+        if (cartId) {
+          await this.cartService.convert(cartId, captured.id, actorId ?? undefined).catch(() => {});
+        }
+        void this.writeTimelineEvent({
+          orderId: captured.id,
+          eventType: 'CS_ORDER_COMMENT',
+          actorId: null,
+          actorName: 'System',
+          description: 'The customer has now also pressed submit on the form.',
+          metadata: { reason: 'UNSUBMITTED_FORM_LATER_SUBMITTED' },
+          branchId: branchId ?? null,
+        });
+        return { id: captured.id, alreadySubmitted: true };
       }
     }
 
@@ -2845,6 +2890,8 @@ export class OrdersService {
             : {}),
           // "Check price": the submit did not match an active offer (never rejected).
           offerCheck: offerCheck?.code ?? null,
+          // Internal capture marker (never a UI badge): see migration 0353.
+          captureSource: opts?.captureSource ?? null,
         })
         .returning();
       const created = rows[0];
@@ -4477,6 +4524,176 @@ export class OrdersService {
       if (embMatch?.price != null) return Number(embMatch.price);
     }
     return Number(product?.baseSalePrice ?? 0);
+  }
+
+  // ── Unsubmitted properly filled forms → orders (owner decision 2026-10-07) ──
+
+  private convertingUnsubmittedForms = false;
+
+  /**
+   * Every 2 minutes: a cart whose customer filled every required field and chose
+   * an offer, but never pressed submit, is created as a NORMAL order ~30 min
+   * after they went quiet (orders.capture_source = 'UNSUBMITTED_FORM', internal
+   * only, no badge). Going forward only (recently abandoned carts). Anything it
+   * cannot convert cleanly is left for the cart pull, which takes it as a cart
+   * order after PULL_HOLD_MINUTES. Never throws.
+   */
+  @Cron('30 */2 * * * *')
+  async convertUnsubmittedFullForms(): Promise<number> {
+    if (this.convertingUnsubmittedForms) return 0;
+    this.convertingUnsubmittedForms = true;
+    let converted = 0;
+    try {
+      const rows = (await this.db.execute(sql.raw(`
+        SELECT ca.id FROM cart_abandonments ca
+        WHERE ${FULL_FORM_CART_SQL}
+          AND ca.converted_order_id IS NULL
+          AND ca.skip_reason IS NULL
+          AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
+          AND ca.updated_at <= now() - INTERVAL '${CONVERT_AFTER_ABANDONED_MINUTES} minutes'
+          AND ca.updated_at > now() - INTERVAL '${CONVERT_LOOKBACK_HOURS} hours'
+        ORDER BY ca.updated_at
+        LIMIT 50
+      `))) as unknown as Array<{ id: string }>;
+      for (const row of rows) {
+        try {
+          if (await this.convertUnsubmittedCart(row.id)) converted++;
+        } catch (err) {
+          this.logger.warn(`Unsubmitted form ${row.id} not converted (falls back to cart order): ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (converted > 0) this.logger.log(`Created ${converted} order(s) from properly filled forms that were not submitted`);
+    } catch (err) {
+      this.logger.error(`convertUnsubmittedFullForms failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      this.convertingUnsubmittedForms = false;
+    }
+    return converted;
+  }
+
+  /** Create the order for one unsubmitted full-form cart. False = left for the cart pull. */
+  private async convertUnsubmittedCart(cartId: string): Promise<boolean> {
+    const [cart] = await this.db
+      .select()
+      .from(schema.cartAbandonments)
+      .where(eq(schema.cartAbandonments.id, cartId))
+      .limit(1);
+    if (!cart || cart.status !== 'ABANDONED' || !cart.campaignId || !cart.productId || !cart.customerPhoneHash) return false;
+
+    // The customer already has a real order from this visit (another browser,
+    // or a submit we have not linked): this cart is that order, not a new one.
+    const since = new Date(new Date(cart.createdAt).getTime() - 2 * 60 * 60 * 1000);
+    const [existing] = await this.db
+      .select({ id: schema.orders.id })
+      .from(schema.orders)
+      .where(
+        and(
+          or(
+            eq(schema.orders.customerPhoneHash, cart.customerPhoneHash),
+            ...(cart.sessionId ? [eq(schema.orders.sessionId, cart.sessionId)] : []),
+          ),
+          gte(schema.orders.createdAt, since),
+          isNull(schema.orders.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (existing) return false;
+
+    const currency = (cart.currencyCode ?? 'NGN').toUpperCase();
+    if (currency !== 'NGN') return false; // per-currency tier prices: leave for CS
+    const tier = await this.resolveOfferTierByLabel(cart.campaignId, cart.productId, cart.offerLabel ?? '');
+    if (!tier) return false;
+
+    const result = await this.create(
+      {
+        cartId: cart.id,
+        campaignId: cart.campaignId,
+        mediaBuyerId: cart.mediaBuyerId ?? undefined,
+        customerName: cart.customerName,
+        customerPhoneHash: cart.customerPhoneHash,
+        customerPhone: cart.customerPhone ?? undefined,
+        customerAddress: cart.customerAddress ?? undefined,
+        deliveryAddress: cart.deliveryAddress ?? cart.customerAddress ?? undefined,
+        deliveryState: cart.deliveryState ?? undefined,
+        deliveryNotes: cart.deliveryNotes ?? undefined,
+        customerGender: cart.customerGender ?? undefined,
+        preferredDeliveryDate: cart.preferredDeliveryDate ?? undefined,
+        customerEmail: cart.customerEmail ?? undefined,
+        // Never start an online payment for a customer who is not on the page.
+        paymentMethod: 'PAY_ON_DELIVERY',
+        items: [{ productId: cart.productId, quantity: tier.quantity, unitPrice: tier.price, offerLabel: tier.label }],
+        totalAmount: tier.price,
+        currencyCode: currency,
+        customFields: (cart.customFieldValues as Record<string, unknown> | null) ?? undefined,
+        sessionId: cart.sessionId ?? undefined,
+      } as CreateOrderInput & { cartId: string },
+      null,
+      'edge-form',
+      { captureSource: UNSUBMITTED_FORM_CAPTURE_SOURCE },
+    );
+    return !!result.id && !result.alreadySubmitted && !result.duplicateRecorded;
+  }
+
+  /**
+   * The base-currency tier a cart's offer label names, for this campaign's
+   * product: offer group items, else the campaign's offer templates, else the
+   * product's embedded offers. Null when the label matches no tier, or more than
+   * one (no guessing a price).
+   */
+  private async resolveOfferTierByLabel(
+    campaignId: string,
+    productId: string,
+    offerLabel: string,
+  ): Promise<{ label: string; price: number; quantity: number } | null> {
+    const label = offerLabel.trim();
+    if (!label) return null;
+    const pick = (list: Array<{ label: string; price: number; quantity: number }>) => {
+      const hits = list.filter((t) => t.label.trim() === label);
+      return hits.length === 1 ? hits[0]! : null;
+    };
+    const [camp] = await this.db
+      .select({ offerGroupId: schema.campaigns.offerGroupId, formConfig: schema.campaigns.formConfig })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, campaignId))
+      .limit(1);
+    if (camp?.offerGroupId) {
+      const items = await this.db
+        .select({ label: schema.offerGroupItems.label, price: schema.offerGroupItems.price, quantity: schema.offerGroupItems.quantity })
+        .from(schema.offerGroupItems)
+        .where(
+          and(
+            eq(schema.offerGroupItems.offerGroupId, camp.offerGroupId),
+            eq(schema.offerGroupItems.productId, productId),
+            eq(schema.offerGroupItems.status, 'ACTIVE'),
+          ),
+        );
+      return pick(items.map((i) => ({ label: i.label, price: Number(i.price), quantity: i.quantity ?? 1 })));
+    }
+    const selectedIds = (camp?.formConfig as { selectedOfferTemplateIds?: string[] } | null | undefined)?.selectedOfferTemplateIds;
+    const templates = await this.db
+      .select({ name: schema.offerTemplates.name, price: schema.offerTemplates.price, quantity: schema.offerTemplates.quantity })
+      .from(schema.offerTemplates)
+      .where(
+        and(
+          eq(schema.offerTemplates.productId, productId),
+          eq(schema.offerTemplates.status, 'ACTIVE'),
+          ...(selectedIds?.length ? [inArray(schema.offerTemplates.id, selectedIds)] : []),
+        ),
+      );
+    if (templates.length > 0) {
+      return pick(templates.map((t) => ({ label: t.name, price: Number(t.price), quantity: t.quantity ?? 1 })));
+    }
+    const [product] = await this.db
+      .select({ offers: schema.products.offers })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId))
+      .limit(1);
+    const embedded = (product?.offers as Array<{ label?: string; qty?: number; price?: string | number }> | null) ?? [];
+    return pick(
+      embedded
+        .filter((o) => typeof o.label === 'string' && o.price != null)
+        .map((o) => ({ label: o.label as string, price: Number(o.price), quantity: typeof o.qty === 'number' && o.qty >= 1 ? o.qty : 1 })),
+    );
   }
 
   /**

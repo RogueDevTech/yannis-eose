@@ -131,6 +131,13 @@ export const orders = pgTable('orders', {
    */
   offerCheck: text('offer_check'),
   /**
+   * How the order was captured (migration 0353). NULL = submitted by the
+   * customer (or created by staff). 'UNSUBMITTED_FORM' = a properly filled form
+   * the customer never submitted, created as an order ~30 min after they went
+   * quiet (owner decision 2026-10-07). INTERNAL: never render as a badge.
+   */
+  captureSource: text('capture_source'),
+  /**
    * Unique key from the source CRM export, supplied per row on bulk import. A
    * PARTIAL UNIQUE INDEX (orders_import_external_id_uidx, mig 0332) enforces
    * uniqueness and is the ON CONFLICT target for the idempotent import upsert:

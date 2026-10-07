@@ -24,6 +24,7 @@ import { expandCustomerPhoneSearchDigitRuns } from '../orders/orders.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { DuplicateRulesService } from '../settings/duplicate-rules.service';
+import { FULL_FORM_CART_SQL, PULL_HOLD_MINUTES } from './unsubmitted-form';
 import { parseOrderNumberSearch } from '../common/utils/parse-order-number';
 // Raw SQL pull/backfill calls PostgreSQL uuidv7().
 // PG 18 has it natively; older DBs get a polyfill via migration 0275.
@@ -3181,6 +3182,10 @@ export class CartOrdersService {
         AND ca.product_id IS NOT NULL
         AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
         AND ca.skip_reason IS NULL
+        -- Properly filled forms become ORDERS, not cart orders (see
+        -- unsubmitted-form.ts): hold them back while the converter handles them;
+        -- anything it could not convert falls back to Cart Orders after the hold.
+        AND NOT (${FULL_FORM_CART_SQL} AND ca.updated_at > now() - INTERVAL '${PULL_HOLD_MINUTES} minutes')
       ORDER BY b.group_id NULLS FIRST, ca.id
       LIMIT 5000
     `);
