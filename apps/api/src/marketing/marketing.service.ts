@@ -8596,7 +8596,13 @@ export class MarketingService {
     const campaignIds = perForm.map((r) => r.campaignId);
     const orderCounts = new Map<string, number>();
     if (campaignIds.length > 0) {
-      const oConds: SQL[] = [inArray(schema.orders.campaignId, campaignIds), eq(schema.orders.orderSource, 'edge-form')];
+      // Same definition as "Later ordered": submitted (not auto-created), not deleted.
+      const oConds: SQL[] = [
+        inArray(schema.orders.campaignId, campaignIds),
+        eq(schema.orders.orderSource, 'edge-form'),
+        isNull(schema.orders.deletedAt),
+        isNull(schema.orders.captureSource),
+      ];
       if (input.startDate) oConds.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
       if (input.endDate) oConds.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
       const rows = await this.db

@@ -290,9 +290,15 @@ export class CartOrdersService {
     const offGroups = [...byGroup.entries()].filter(([, r]) => r.cartReconcile.mode === 'OFF').map(([g]) => g);
     if (fallback.cartReconcile.mode === 'OFF' && offGroups.length === byGroup.size) return 0;
     // Keep switched-off companies out of the LIMIT so they cannot starve the rest.
-    const notOff = offGroups.length > 0
+    const notOffCompany = offGroups.length > 0
       ? sql` AND NOT EXISTS (SELECT 1 FROM branches rb WHERE rb.id = co.branch_id AND rb.group_id IN (${sql.join(offGroups.map((g) => sql`${g}::uuid`), sql`, `)}))`
       : sql``;
+    // Cart orders with no company use the fallback; when that is OFF keep them
+    // out of the LIMIT too, or they can fill it every tick.
+    const notOffFallback = fallback.cartReconcile.mode === 'OFF'
+      ? sql` AND EXISTS (SELECT 1 FROM branches fbb WHERE fbb.id = co.branch_id AND fbb.group_id IS NOT NULL)`
+      : sql``;
+    const notOff = sql`${notOffCompany}${notOffFallback}`;
     // In a FLAG-mode company an early-stage cart order it already flagged is
     // settled, so skip it (no re-flagging every tick). A company back on DELETE
     // still sees those rows and deletes them.

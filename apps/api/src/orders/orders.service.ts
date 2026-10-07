@@ -2628,14 +2628,15 @@ export class OrdersService {
     // submitted" and CS keeps one order (owner decision 2026-10-07). Never
     // rejects; an idempotent return like the double-tap guard above. No
     // timeline note: the order must look like any other order to CS (owner).
-    // Only the SAME order counts: same form, same customer (browser session, or
-    // phone hash / last 9 digits), same product and quantity, within 24h, and the
+    // Only the SAME order counts: same form, same customer (phone hash or last 9
+    // digits), same product and quantity, within 24h, and the
     // captured order not yet confirmed. Anything different is a real new order
     // and is created normally (nothing a customer submits is dropped).
     if (orderSource === 'edge-form' && !opts?.captureSource && orderInput.campaignId && orderInput.items.length > 0) {
       const tail = (orderInput.customerPhone ?? '').replace(/\D/g, '').slice(-9);
+      // Same PHONE is required (hash or last 9 digits). The browser session alone
+      // is not enough: the same browser can order for a relative or fix a typo.
       const samePerson = [
-        ...(orderInput.sessionId ? [eq(schema.orders.sessionId, orderInput.sessionId)] : []),
         ...(orderInput.customerPhoneHash ? [eq(schema.orders.customerPhoneHash, orderInput.customerPhoneHash)] : []),
         ...(tail.length === 9 ? [sql`right(regexp_replace(coalesce(${schema.orders.customerPhone}, ''), '\\D', '', 'g'), 9) = ${tail}`] : []),
       ];
@@ -4119,21 +4120,16 @@ export class OrdersService {
     // link the cart to the existing order so it leaves the abandonment queue.
     // NOTE: do NOT skipCartOrders here — unlike the edge-form path, recovery must
     // treat an existing cart order as a genuine duplicate, not something to beat.
-    // Per-company DUPLICATE_RULES.manualOrderBlock: OFF skips this lookup.
-    const recoveryBranchId = cart.campaignId
-      ? (await this.db.select({ branchId: schema.campaigns.branchId }).from(schema.campaigns)
-          .where(eq(schema.campaigns.id, cart.campaignId)).limit(1))[0]?.branchId ?? null
-      : null;
-    const manualBlock = (await this.duplicateRulesFor(recoveryBranchId)).manualOrderBlock;
-    const existing = manualBlock.mode === 'BLOCK'
-      ? await this.findExistingOrderForDedup(
-          phoneHash,
-          items.map((i) => i.productId),
-          // Recovery is a "which order did this cart become?" lookup, not a dedup
-          // rejection — a DELIVERED/REMITTED order must still be found and linked.
-          { includeCompleted: true, windowDays: manualBlock.windowDays },
-        )
-      : null;
+    // NOT a duplicate rule (always on): recovery asks "which order did this cart
+    // become?" and links to it, so a recovered cart can never become a second
+    // order for a purchase that already exists.
+    const existing = await this.findExistingOrderForDedup(
+      phoneHash,
+      items.map((i) => i.productId),
+      // Recovery is a "which order did this cart become?" lookup, not a dedup
+      // rejection — a DELIVERED/REMITTED order must still be found and linked.
+      { includeCompleted: true },
+    );
     if (existing) {
       try {
         await this.cartService.convert(cartId, existing.id, actorId);
@@ -4286,18 +4282,16 @@ export class OrdersService {
     // phone+product would create a second live order. Link those carts to the
     // existing order and skip them instead of creating a duplicate.
     let skipped = 0;
-    // Per-company DUPLICATE_RULES.manualOrderBlock: OFF skips this lookup.
+    // Always on (not a duplicate rule): see recoverFromCart.
     const dedupChecks = await Promise.all(
-      prepared.map(async (p) => {
-        const manualBlock = (await this.duplicateRulesFor(p.branchId)).manualOrderBlock;
-        if (manualBlock.mode !== 'BLOCK') return null;
-        return this.findExistingOrderForDedup(
+      prepared.map((p) =>
+        this.findExistingOrderForDedup(
           p.phoneHash,
           p.items.map((i) => i.productId),
           // See above: recovery must still match completed orders.
-          { includeCompleted: true, windowDays: manualBlock.windowDays },
-        ).catch(() => null);
-      }),
+          { includeCompleted: true },
+        ).catch(() => null),
+      ),
     );
     const deduped: PreparedCart[] = [];
     for (let i = 0; i < prepared.length; i++) {
@@ -4627,6 +4621,24 @@ export class OrdersService {
     if (currency !== 'NGN') return false; // per-currency tier prices: leave for CS
     const tier = await this.resolveOfferTierByLabel(cart.campaignId, cart.productId, cart.offerLabel ?? '');
     if (!tier) return false;
+
+    // Respect the company's repeat-order rule. If it is on and this customer
+    // already has an order for the product inside its window, do not create one
+    // (and do not let create() log a Cross-funnel attempt or notify the MB about
+    // a submission that never happened). The cart stays for the pull.
+    const [camp] = await this.db
+      .select({ branchId: schema.campaigns.branchId })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, cart.campaignId))
+      .limit(1);
+    const intakeBlock = (await this.duplicateRulesFor(camp?.branchId ?? null)).intakeBlock;
+    if (intakeBlock.mode !== 'OFF') {
+      const winner = await this.findExistingOrderForDedup(cart.customerPhoneHash, [cart.productId], {
+        skipCartOrders: true,
+        windowDays: intakeBlock.windowDays,
+      });
+      if (winner) return false;
+    }
 
     const result = await this.create(
       {
@@ -7848,10 +7860,15 @@ export class OrdersService {
         }
       }
 
+      // Online-pay orders skip create(), so run the offer/price check here too.
+      // Flag only (the customer has paid): CS checks the price before CONFIRMED.
+      const paidOfferCheck = orderInput.campaignId ? await this.checkEdgeFormLineItems(orderInput) : null;
+
       const order = await withActor(this.db, { id: actorId }, async (tx) => {
         const rows = await tx
           .insert(schema.orders)
           .values({
+            offerCheck: paidOfferCheck?.code ?? null,
             campaignId: orderInput.campaignId ?? null,
             mediaBuyerId: orderInput.mediaBuyerId ?? null,
             branchId: paystackBranchId ?? null,
@@ -7895,6 +7912,18 @@ export class OrdersService {
 
       if (!order) {
         return null;
+      }
+
+      if (paidOfferCheck) {
+        void this.writeTimelineEvent({
+          orderId: order.id,
+          eventType: 'OFFER_CHECK_FLAGGED',
+          actorId: null,
+          actorName: 'System',
+          description: `Check price before confirming (paid online). ${paidOfferCheck.detail}`,
+          metadata: { reason: 'OFFER_CHECK', offerCheck: paidOfferCheck.code, paidOnline: true },
+          branchId: order.branchId ?? null,
+        });
       }
 
       await this.redis.del(pendingKey);
