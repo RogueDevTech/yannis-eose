@@ -157,9 +157,11 @@ interface Props {
   liveEvents?: string[];
   /** Detail mode: scoped to one form. Hides the forms table + cross-funnel (global-only). */
   detail?: { campaignId: string; formLabel: string };
+  /** Show the Form failures link (admin-level / HoM / marketing.teamOverview). */
+  canSeeFailures?: boolean;
 }
 
-export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail }: Props) {
+export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail, canSeeFailures }: Props) {
   const chartUid = useId().replace(/:/g, '');
   const { statStrip, funnel, topForms, forms, crossFunnel } = analytics;
   // Default to the data (table) view; the toggle switches to charts.
@@ -373,7 +375,7 @@ export function MarketingAnalyticsPage({ analytics, filters, liveEvents, detail 
 
           {/* Data tables — funnel (Stage/Count/Drop-off) + top forms — always shown
               below the charts. */}
-          <FunnelDataTables funnelStages={funnelStages} topForms={topFive} topFormsTotal={topFormsTotal} crossFunnel={crossFunnel} formViews={funnel.formViews} filters={filters} />
+          <FunnelDataTables funnelStages={funnelStages} topForms={topFive} topFormsTotal={topFormsTotal} crossFunnel={crossFunnel} formViews={funnel.formViews} filters={filters} canSeeFailures={canSeeFailures} />
 
         </>
       </>
@@ -390,7 +392,9 @@ function FunnelDataTables({
   crossFunnel,
   formViews,
   filters,
+  canSeeFailures,
 }: {
+  canSeeFailures?: boolean;
   funnelStages: Array<{ stage: string; short: string; count: number; dropPct: number | null }>;
   topForms: FormAnalytics['topForms'];
   topFormsTotal: number;
@@ -485,7 +489,15 @@ function FunnelDataTables({
             )}
           </tbody>
         </table>
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex justify-end gap-4">
+          {canSeeFailures && (
+            <Link
+              to={allFormsHref(filters).replace('/analytics/forms', '/analytics/failures')}
+              className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+            >
+              Form failures →
+            </Link>
+          )}
           <Link
             to={allFormsHref(filters)}
             className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"

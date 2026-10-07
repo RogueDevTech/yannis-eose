@@ -1254,6 +1254,69 @@ function getFormScript(
       var selectedOffer = null;
       var products = ${safeJsonForScript(products)};
       var card = form ? form.closest('.yannis-form-card') : null;
+
+      // ── Submit-attempt beacon (fire-and-forget, owner sign-off 2026-10-07) ──
+      // Records every submit that does NOT go through, so a blocked customer
+      // leaves a trace: a field the browser refused (invalid event), an error
+      // our own checks showed before sending, or an error shown after sending.
+      // It only WATCHES: sendBeacon only (never fetch/await), every line wrapped,
+      // no validation logic touched. If anything here throws, the form behaves
+      // exactly as before.
+      var __ySubmitSent = false;
+      var __ySubmitTrack = function(outcome, reason) {
+        try {
+          if (!navigator.sendBeacon) return;
+          navigator.sendBeacon(${JSON.stringify(endpointBase)} + '/track-submit', JSON.stringify({
+            sessionId: window.__yannisSessionId || null,
+            campaignId: ${campaignIdJson},
+            outcome: outcome,
+            reason: String(reason || '').slice(0, 200),
+            deploymentType: ${JSON.stringify(formMode)}
+          }));
+        } catch (e) {}
+      };
+      try {
+        if (form) {
+          var __yInvalid = [];
+          // invalid does not bubble; a capture listener on the form still sees it.
+          form.addEventListener('invalid', function(ev) {
+            try {
+              var t = ev.target;
+              var name = (t && (t.name || t.id)) || 'field';
+              if (__yInvalid.indexOf(name) === -1) __yInvalid.push(name);
+              if (__yInvalid.length === 1) {
+                setTimeout(function() {
+                  try { __ySubmitTrack('BROWSER_BLOCKED', __yInvalid.join(',')); } catch (e) {}
+                  __yInvalid = [];
+                }, 0);
+              }
+            } catch (e) {}
+          }, true);
+        }
+        if (msg && window.MutationObserver) {
+          var __yLastErr = '';
+          var __yLastErrAt = 0;
+          var __yMsgQueued = false;
+          new MutationObserver(function() {
+            if (__yMsgQueued) return;
+            __yMsgQueued = true;
+            // Read after the handler finishes setting class + text in the same tick.
+            setTimeout(function() {
+              __yMsgQueued = false;
+              try {
+                if ((msg.className || '').indexOf('msg-error') === -1) return;
+                var text = (msg.textContent || '').trim();
+                if (!text) return;
+                var now = Date.now();
+                if (text === __yLastErr && now - __yLastErrAt < 1500) return;
+                __yLastErr = text;
+                __yLastErrAt = now;
+                __ySubmitTrack(__ySubmitSent ? 'SERVER_REJECTED' : 'FORM_BLOCKED', text);
+              } catch (e) {}
+            }, 0);
+          }).observe(msg, { attributes: true, attributeFilter: ['class'], childList: true, characterData: true, subtree: true });
+        }
+      } catch (e) { /* tracking must never break the form */ }
       var singleProductId = form ? form.dataset.singleProduct : null;
 
       // ── Multi-currency (additive; no-op when single-currency) ──────────────
@@ -2050,6 +2113,7 @@ function getFormScript(
 
       form.addEventListener('submit', function(e) {
         e.preventDefault();
+        __ySubmitSent = false;
         // Flush any pending cart save so the cart row exists before the order
         // is created — this ensures savedCartId is populated and the API can
         // link the order to the cart. The flush is fire-and-forget (we don't
@@ -2287,6 +2351,7 @@ function getFormScript(
         }
 
         function submitOrder(data) {
+          __ySubmitSent = true;
           return fetch('${endpointBase}/submit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3211,6 +3276,10 @@ export default {
       return handleTrackView(request, env, ctx);
     }
 
+    if (url.pathname === '/track-submit' && request.method === 'POST') {
+      return handleTrackSubmit(request, env);
+    }
+
     if (url.pathname === '/cart' && request.method === 'POST') {
       return handleCart(request, env);
     }
@@ -3429,6 +3498,56 @@ async function handleTrackView(request: Request, env: Env, _ctx: ExecutionContex
     }
   } catch {
     // Absolutely nothing here may affect the response — telemetry is best-effort.
+  }
+  return noContent;
+}
+
+/**
+ * Submit-attempt beacon: a submit that did not go through (browser-blocked
+ * field, form check, or an error after sending). Same contract as
+ * handleTrackView: always 204, awaited forward bounded by the abort timeout,
+ * nothing here can affect the order path.
+ */
+const SUBMIT_OUTCOMES = new Set(['BROWSER_BLOCKED', 'FORM_BLOCKED', 'SERVER_REJECTED']);
+
+async function handleTrackSubmit(request: Request, env: Env): Promise<Response> {
+  const noContent = new Response(null, { status: 204, headers: CORS_HEADERS });
+  try {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return noContent;
+    }
+    const b = body as Record<string, unknown>;
+    const campaignId = typeof b['campaignId'] === 'string' ? b['campaignId'] : null;
+    const outcome = typeof b['outcome'] === 'string' ? b['outcome'] : null;
+    if (!campaignId || !outcome || !SUBMIT_OUTCOMES.has(outcome)) return noContent;
+
+    const payload: Record<string, unknown> = { campaignId, outcome };
+    if (typeof b['sessionId'] === 'string') payload['sessionId'] = b['sessionId'].slice(0, 128);
+    if (typeof b['reason'] === 'string') payload['reason'] = b['reason'].slice(0, 200);
+    if (typeof b['deploymentType'] === 'string') payload['deploymentType'] = b['deploymentType'].slice(0, 32);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), getApiTimeoutMs(env.API_URL));
+    try {
+      const headers = apiForwardHeaders(env);
+      const country = request.headers.get('CF-IPCountry');
+      const ua = request.headers.get('User-Agent');
+      if (country) headers['CF-IPCountry'] = country;
+      if (ua) headers['User-Agent'] = ua;
+      await fetch(`${env.API_URL}/trpc/marketing.trackSubmitAttempt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  } catch {
+    // Telemetry is best-effort.
   }
   return noContent;
 }

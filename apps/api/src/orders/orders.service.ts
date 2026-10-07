@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { randomUUID, createHash } from 'crypto';
@@ -23,7 +23,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, formatCustomerPhoneForDisplay, toInternationalPhone, type CallablePhone, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode, STRICT_PHONE_MODE_KEY, isStrictPhoneModeOn, isStrictPhoneModeRole } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, formatCustomerPhoneForDisplay, toInternationalPhone, type CallablePhone, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode, STRICT_PHONE_MODE_KEY, isStrictPhoneModeOn, isStrictPhoneModeRole, resolveDuplicateRules, type DuplicateRules } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch, type Tx } from '../common/db/with-actor';
 
@@ -31,6 +31,12 @@ import { withActor, withActorAndBranch, type Tx } from '../common/db/with-actor'
 type DbOrTx = PostgresJsDatabase<typeof schema> | Tx;
 
 /** The winning (existing) order returned by the duplicate check. */
+/** Order-form offer/price check outcome (orders.offer_check, migration 0351). */
+type OfferCheckResult = {
+  code: 'PRICE_NOT_IN_OFFERS' | 'NO_ACTIVE_OFFERS' | 'PRODUCT_NOT_ON_FORM' | 'PRODUCT_MISSING' | 'CHECK_UNAVAILABLE';
+  detail: string;
+};
+
 type DedupWinner = {
   id: string;
   mediaBuyerId: string | null;
@@ -65,6 +71,7 @@ import { EventsService } from '../events/events.service';
 import { emitOrderAutomationEvents } from '../automation/automation-hooks';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
+import { DuplicateRulesService } from '../settings/duplicate-rules.service';
 import { InventoryService } from '../inventory/inventory.service';
 import {
   isTransitionAllowed,
@@ -229,7 +236,22 @@ export class OrdersService {
     private readonly cache: CacheService,
     private readonly csOrderRouting: CsOrderRoutingService,
     private readonly generalLedger: GeneralLedgerService,
+    // Optional so hand-built test instances keep compiling; absent = the defaults (all rules off).
+    @Optional() private readonly duplicateRules?: DuplicateRulesService,
   ) {}
+
+  /**
+   * Per-company duplicate rules for a create path. NEVER throws: on any error
+   * (or no service) it returns the defaults (all rules off), so a settings problem can
+   * never be the reason an order is lost on the public intake path.
+   */
+  private async duplicateRulesFor(branchId: string | null | undefined): Promise<DuplicateRules> {
+    try {
+      return this.duplicateRules ? await this.duplicateRules.forBranch(branchId) : resolveDuplicateRules(null);
+    } catch {
+      return resolveDuplicateRules(null);
+    }
+  }
 
   /** Per-order detail cache key used by `getById`. Kept here so the router-side
    *  invalidator (`invalidateOrderDetailCache`) can target the same key without
@@ -1727,10 +1749,34 @@ export class OrdersService {
     return closer?.primaryBranchId ?? sessionBranchId ?? fallbackBranchId;
   }
 
-  /** Edge tamper gate: order lines must match allowlisted tiers for this campaign (templates or legacy base price). */
-  private async assertEdgeFormLineItemsAllowlisted(orderInput: CreateOrderInput): Promise<void> {
+  /**
+   * Offer/price check for order-form lines: each line must match an active tier
+   * for this campaign (offer group, templates, or legacy base price).
+   *
+   * NEVER THROWS and never blocks an order (owner decision 2026-10-07: catch
+   * first, check after). It used to reject the submit, which sent fully filled
+   * orders to Carts. A mismatch now returns a reason; the order is created with
+   * orders.offer_check set and CS must clear it ("Price checked") before
+   * CONFIRMED. An error inside the check returns CHECK_UNAVAILABLE.
+   */
+  private async checkEdgeFormLineItems(orderInput: CreateOrderInput): Promise<OfferCheckResult | null> {
+    try {
+      return await this.runEdgeFormLineItemCheck(orderInput);
+    } catch (err) {
+      this.logger.warn(
+        { campaignId: orderInput.campaignId ?? null, err: err instanceof Error ? err.message : String(err) },
+        'offer check errored, order accepted and flagged CHECK_UNAVAILABLE',
+      );
+      return { code: 'CHECK_UNAVAILABLE', detail: 'The offer check could not run. Verify the price with the customer.' };
+    }
+  }
+
+  private async runEdgeFormLineItemCheck(orderInput: CreateOrderInput): Promise<OfferCheckResult | null> {
     const campaignId = orderInput.campaignId;
-    if (!campaignId) return;
+    if (!campaignId) return null;
+    // Human-readable submitted line, for the CS timeline note.
+    const describeLine = (item: CreateOrderInput['items'][number]) =>
+      `${item.offerLabel?.trim() ? `"${item.offerLabel.trim()}" ` : ''}x${item.quantity} at ${Number(item.unitPrice)}`;
 
     const [camp] = await this.db
       .select({
@@ -1779,10 +1825,7 @@ export class OrdersService {
         );
 
       if (rows.length === 0) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'This campaign offer has no active items.',
-        });
+        return { code: 'NO_ACTIVE_OFFERS', detail: 'This form has no active offers. Agree the price with the customer.' };
       }
 
       // For a non-base currency, load each item's per-currency price so the
@@ -1813,17 +1856,22 @@ export class OrdersService {
         }
 
         if (!ok) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Offer selection does not match this form.',
-          });
+          const active = rows
+            .filter((r) => r.productId === item.productId)
+            .slice(0, 6)
+            .map((r) => `"${r.label.trim()}" x${r.quantity ?? 1} at ${tierPrice(r)}`)
+            .join('; ');
+          return {
+            code: 'PRICE_NOT_IN_OFFERS',
+            detail: `Submitted ${describeLine(item)}. Active offers: ${active || 'none for this product'}.`,
+          };
         }
       }
-      return;
+      return null;
     }
 
     const campaignProductId = ((camp?.productIds ?? []) as string[])[0];
-    if (!campaignProductId) return;
+    if (!campaignProductId) return null;
 
     const selectedIds = (
       camp?.formConfig as { selectedOfferTemplateIds?: string[] } | null | undefined
@@ -1862,10 +1910,7 @@ export class OrdersService {
         .where(eq(schema.products.id, campaignProductId))
         .limit(1);
       if (!p) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Product not found for this campaign.',
-        });
+        return { code: 'PRODUCT_MISSING', detail: "This form's product no longer exists. Check the product and price." };
       }
       const embedded = p.offers as Array<{ label?: string; qty?: number; price?: string | number }> | null;
       if (Array.isArray(embedded) && embedded.length > 0) {
@@ -1896,10 +1941,7 @@ export class OrdersService {
 
     for (const item of orderInput.items) {
       if (item.productId !== campaignProductId) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Product does not match this campaign.',
-        });
+        return { code: 'PRODUCT_NOT_ON_FORM', detail: `Submitted a product that is not this form's product (${describeLine(item)}).` };
       }
 
       const unitNum = Number(item.unitPrice);
@@ -1919,12 +1961,17 @@ export class OrdersService {
       }
 
       if (!ok) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Offer selection does not match this form.',
-        });
+        const active = tiers
+          .slice(0, 6)
+          .map((t) => `"${t.name.trim()}" x${t.quantity ?? 1} at ${tplPrice(t)}`)
+          .join('; ');
+        return {
+          code: 'PRICE_NOT_IN_OFFERS',
+          detail: `Submitted ${describeLine(item)}. Active offers: ${active || 'none'}.`,
+        };
       }
     }
+    return null;
   }
 
   /**
@@ -2033,7 +2080,7 @@ export class OrdersService {
    * "select an offer" picker in the Adjust order items modal — picking a tier
    * sets quantity + unit price together so a bundled discount applies instead
    * of hand-editing the amount. Tier resolution mirrors the edge-form tamper
-   * gate (`assertEdgeFormLineItemsAllowlisted`): offer group → campaign-selected
+   * check (`checkEdgeFormLineItems`): offer group → campaign-selected
    * offer templates → embedded product offers → a single "Standard" base tier.
    * Returns an empty tier list for products with no offers (UI falls back to
    * manual "Custom" entry).
@@ -2421,9 +2468,7 @@ export class OrdersService {
       }
     }
 
-    if (orderSource === 'edge-form' && orderInput.campaignId) {
-      await this.assertEdgeFormLineItemsAllowlisted(orderInput);
-    }
+
 
     // Idempotency check for edge-form orders — duplicate-order protection is
     // the API's job (the edge worker no longer keeps its own KV dedup). A
@@ -2447,6 +2492,10 @@ export class OrdersService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let order!: any;
     let servicingBranchId: string | null = null;
+    // Set when the company's duplicate rules say "create and flag": the order is still created.
+    let intakeFlagWinner: DedupWinner | null = null;
+    // "Check price" result, set after the early-return guards below.
+    let offerCheck: OfferCheckResult | null = null;
     if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
       const hashHex = orderInput.customerPhoneHash.slice(0, 16);
       advisoryLockKey1 = parseInt(hashHex.slice(0, 8), 16) | 0;
@@ -2518,6 +2567,11 @@ export class OrdersService {
       }
     }
 
+    // Per-company duplicate rules (DUPLICATE_RULES): intakeBlock. Default OFF;
+    // BLOCK = the previous behaviour. The same-form 2-minute guard below is NOT a
+    // setting: a double tap or refresh is never a new order (owner, 2026-10-07).
+    const intakeRules = orderSource === 'edge-form' ? await this.duplicateRulesFor(branchId) : null;
+
     // Same-form rapid resubmit guard (double-tap / refresh within 2 minutes).
     // Same phone + same campaign + same products = idempotent return.
     // This is distinct from the 14-day universal dedup below: that one records
@@ -2564,7 +2618,9 @@ export class OrdersService {
     // Same phone + any overlapping product within 14 days = duplicate.
     // Duplicates are recorded in cross_funnel_attempts for MB visibility.
     // No order is created. Customer still sees success (pixel fires, redirect works).
-    if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
+    // Per-company intakeBlock: BLOCK (this), FLAG (order created + flagged), OFF.
+    const intakeMode = intakeRules?.intakeBlock.mode ?? 'BLOCK';
+    if (orderSource === 'edge-form' && orderInput.customerPhoneHash && intakeMode !== 'OFF') {
       const productIds = orderInput.items.map((i) => i.productId);
       const winner = await this.findExistingOrderForDedup(
         orderInput.customerPhoneHash,
@@ -2574,13 +2630,16 @@ export class OrdersService {
         // 5-min abandonment cron — otherwise the cron "steals" the submission
         // and the customer ends up in the cart pipeline instead of orders.
         // After the order is created we supersede any matching cart order below.
-        { skipCartOrders: true },
+        { skipCartOrders: true, windowDays: intakeRules?.intakeBlock.windowDays },
       );
       this.logger.log(
-        { phoneHash: orderInput.customerPhoneHash.slice(0, 12) + '…', productIds, winnerFound: !!winner, winnerId: winner?.id },
+        { phoneHash: orderInput.customerPhoneHash.slice(0, 12) + '…', productIds, winnerFound: !!winner, winnerId: winner?.id, intakeMode },
         'universal dedup check result',
       );
-      if (winner) {
+      if (winner && intakeMode === 'FLAG') {
+        // Create the order anyway; it is flagged below for CS to review.
+        intakeFlagWinner = winner;
+      } else if (winner) {
         // Always record the cross-funnel attempt — even without mediaBuyerId.
         // orderInput.mediaBuyerId is now campaign-derived (see the guarantee
         // above), so for any campaign submission it is set; winner's MB is a
@@ -2693,6 +2752,14 @@ export class OrdersService {
       }
     }
 
+    // Offer/price check: never rejects (see checkEdgeFormLineItems). Runs after
+    // the double-tap and duplicate guards so a replay that returns early does not
+    // pay for it. A mismatch flags the order "Check price"; CS clears it before
+    // CONFIRMED.
+    if (orderSource === 'edge-form' && orderInput.campaignId) {
+      offerCheck = await this.checkEdgeFormLineItems(orderInput);
+    }
+
     // Strip null bytes (\0) from all string fields — Postgres rejects 0x00 in
     // UTF-8 text columns. Edge-form submissions occasionally carry null bytes
     // from malformed form data or copy-paste artefacts, which causes
@@ -2771,6 +2838,13 @@ export class OrdersService {
           sessionId: orderInput.sessionId ?? null,
           // Cart-recovered orders are follow-up from birth — never appear in main CS queue.
           ...(opts?.isFollowUp ? { isFollowUp: true } : {}),
+          // intakeBlock = FLAG: possible duplicate, created and flagged for CS.
+          // duplicate_of_id only links an `orders` winner (the Compare view reads orders).
+          ...(intakeFlagWinner
+            ? { isDuplicate: 'FLAGGED', duplicateOfId: intakeFlagWinner.source === 'orders' ? intakeFlagWinner.id : null }
+            : {}),
+          // "Check price": the submit did not match an active offer (never rejected).
+          offerCheck: offerCheck?.code ?? null,
         })
         .returning();
       const created = rows[0];
@@ -2910,6 +2984,33 @@ export class OrdersService {
       branchId: order.branchId ?? null,
     });
 
+    if (offerCheck) {
+      void this.writeTimelineEvent({
+        orderId: order.id,
+        eventType: 'OFFER_CHECK_FLAGGED',
+        actorId: null,
+        actorName: 'System',
+        description: `Check price before confirming. ${offerCheck.detail}`,
+        metadata: { reason: 'OFFER_CHECK', offerCheck: offerCheck.code },
+        branchId: order.branchId ?? null,
+      });
+    }
+
+    if (intakeFlagWinner) {
+      const winnerRef = intakeFlagWinner.orderNumber != null
+        ? formatOrderNumber(intakeFlagWinner.orderNumber, await this.resolveOrderPrefix(order).catch(() => null))
+        : intakeFlagWinner.id.slice(0, 8);
+      void this.writeTimelineEvent({
+        orderId: order.id,
+        eventType: 'ORDER_DUPLICATE_FLAGGED',
+        actorId: null,
+        actorName: 'System',
+        description: `Possible duplicate: same phone and product as ${winnerRef}. Created and flagged because duplicate rules are set to flag, not block.`,
+        metadata: { reason: 'INTAKE_FLAG', winnerId: intakeFlagWinner.id, winnerSource: intakeFlagWinner.source },
+        branchId: order.branchId ?? null,
+      });
+    }
+
     // Mark cart as CONVERTED — use cartId if available, otherwise fall back to
     // phone+product lookup so the live activity feed shows "Order placed" even
     // when the edge worker's cart save didn't complete before submission.
@@ -2994,7 +3095,9 @@ export class OrdersService {
     }
 
     let authorizationUrl: string | undefined;
-    if (paymentMethod === 'PAY_ONLINE' && orderInput.customerEmail && this.paystackService.isConfigured()) {
+    // A "Check price" order never starts an online payment at the unchecked
+    // submitted amount: the customer sees "order received" and CS agrees the price.
+    if (paymentMethod === 'PAY_ONLINE' && orderInput.customerEmail && this.paystackService.isConfigured() && !offerCheck) {
       const totalAmount = orderInput.totalAmount != null ? Number(orderInput.totalAmount) : 0;
       const amountInKobo = Math.round(totalAmount * 100); // NGN to kobo
       const callbackBase = process.env.PAYSTACK_CALLBACK_API_URL || process.env.API_URL || 'http://localhost:4444';
@@ -3084,6 +3187,7 @@ export class OrdersService {
     // Offline orders are manually created by a closer — serviced by the branch
     // the closer is working in (see resolveCloserServicingBranchId).
     const servicingBranchId = await this.resolveCloserServicingBranchId(actorId, sessionBranchId, branchId);
+    const manualBlock = (await this.duplicateRulesFor(branchId)).manualOrderBlock;
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       // Serialize concurrent creates for this phone (blocks; auto-released on
@@ -3093,7 +3197,10 @@ export class OrdersService {
 
       // Dedup runs INSIDE the locked transaction so a concurrent create that
       // committed while we waited on the lock is visible here.
-      const dup = await this.findExistingOrderForDedup(customerPhoneHash, productIds, { executor: tx });
+      // Per-company DUPLICATE_RULES.manualOrderBlock (BLOCK / OFF + window).
+      const dup = manualBlock.mode === 'BLOCK'
+        ? await this.findExistingOrderForDedup(customerPhoneHash, productIds, { executor: tx, windowDays: manualBlock.windowDays })
+        : null;
       if (dup) {
         // Unwind the tx (nothing has been inserted yet) and let the caller record
         // the cross-funnel attempt + surface the duplicate error outside the tx.
@@ -3726,13 +3833,17 @@ export class OrdersService {
     // the branch the closer is working in. CS routing rules should NOT override
     // this; routing is for incoming funnel orders, not closer-created orders.
     const servicingBranchId = await this.resolveCloserServicingBranchId(actorId, sessionBranchId, branchId);
+    const manualBlock = (await this.duplicateRulesFor(branchId)).manualOrderBlock;
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       // Serialize concurrent creates for this phone; held on the same connection
       // as the dedup SELECT + INSERT so check-then-insert is atomic.
       await this.acquirePhoneXactLock(tx, customerPhoneHash);
 
-      const dup = await this.findExistingOrderForDedup(customerPhoneHash, productIds, { executor: tx });
+      // Per-company DUPLICATE_RULES.manualOrderBlock (BLOCK / OFF + window).
+      const dup = manualBlock.mode === 'BLOCK'
+        ? await this.findExistingOrderForDedup(customerPhoneHash, productIds, { executor: tx, windowDays: manualBlock.windowDays })
+        : null;
       if (dup) {
         throw new DedupBlock(dup);
       }
@@ -3925,11 +4036,10 @@ export class OrdersService {
     if (overrides.items && overrides.items.length > 0) {
       items = overrides.items;
     } else if (cart.productId) {
-      // No CS override — synthesize from the cart. We MUST resolve the real tier price,
-      // otherwise create() rejects it: orderSource='edge-form' runs
-      // `assertEdgeFormLineItemsAllowlisted`, which compares item.unitPrice against the
-      // campaign's allowlisted tiers; a placeholder 0 never matches and the recovery fails
-      // with "Offer selection does not match this form."
+      // No CS override — synthesize from the cart. Resolve the real tier price: a
+      // placeholder 0 would not match the campaign's allowlisted tiers in
+      // `checkEdgeFormLineItems` (edge-form source), and the order would be
+      // created flagged "Check price" instead of clean.
       const quantity = cart.quantity ?? 1;
       const unitPrice = await this.resolveCartTierPrice({
         campaignId: cart.campaignId,
@@ -3953,13 +4063,21 @@ export class OrdersService {
     // link the cart to the existing order so it leaves the abandonment queue.
     // NOTE: do NOT skipCartOrders here — unlike the edge-form path, recovery must
     // treat an existing cart order as a genuine duplicate, not something to beat.
-    const existing = await this.findExistingOrderForDedup(
-      phoneHash,
-      items.map((i) => i.productId),
-      // Recovery is a "which order did this cart become?" lookup, not a dedup
-      // rejection — a DELIVERED/REMITTED order must still be found and linked.
-      { includeCompleted: true },
-    );
+    // Per-company DUPLICATE_RULES.manualOrderBlock: OFF skips this lookup.
+    const recoveryBranchId = cart.campaignId
+      ? (await this.db.select({ branchId: schema.campaigns.branchId }).from(schema.campaigns)
+          .where(eq(schema.campaigns.id, cart.campaignId)).limit(1))[0]?.branchId ?? null
+      : null;
+    const manualBlock = (await this.duplicateRulesFor(recoveryBranchId)).manualOrderBlock;
+    const existing = manualBlock.mode === 'BLOCK'
+      ? await this.findExistingOrderForDedup(
+          phoneHash,
+          items.map((i) => i.productId),
+          // Recovery is a "which order did this cart become?" lookup, not a dedup
+          // rejection — a DELIVERED/REMITTED order must still be found and linked.
+          { includeCompleted: true, windowDays: manualBlock.windowDays },
+        )
+      : null;
     if (existing) {
       try {
         await this.cartService.convert(cartId, existing.id, actorId);
@@ -4112,15 +4230,18 @@ export class OrdersService {
     // phone+product would create a second live order. Link those carts to the
     // existing order and skip them instead of creating a duplicate.
     let skipped = 0;
+    // Per-company DUPLICATE_RULES.manualOrderBlock: OFF skips this lookup.
     const dedupChecks = await Promise.all(
-      prepared.map((p) =>
-        this.findExistingOrderForDedup(
+      prepared.map(async (p) => {
+        const manualBlock = (await this.duplicateRulesFor(p.branchId)).manualOrderBlock;
+        if (manualBlock.mode !== 'BLOCK') return null;
+        return this.findExistingOrderForDedup(
           p.phoneHash,
           p.items.map((i) => i.productId),
           // See above: recovery must still match completed orders.
-          { includeCompleted: true },
-        ).catch(() => null),
-      ),
+          { includeCompleted: true, windowDays: manualBlock.windowDays },
+        ).catch(() => null);
+      }),
     );
     const deduped: PreparedCart[] = [];
     for (let i = 0; i < prepared.length; i++) {
@@ -4264,7 +4385,7 @@ export class OrdersService {
 
   /**
    * Cart recovery: pull the tier price for (campaign, product, offerLabel, quantity).
-   * Mirrors the source-of-truth lookup in `assertEdgeFormLineItemsAllowlisted` so the
+   * Mirrors the source-of-truth lookup in `checkEdgeFormLineItems` so the
    * synthesized line items pass the same allowlist gate.
    *
    * Lookup order matches the gate: campaign offer_group → product offer_templates →
@@ -5967,6 +6088,8 @@ export class OrdersService {
       cartId: schema.orders.cartId,
       // Duplicate flag — shown as a badge on the orders list table.
       isDuplicate: schema.orders.isDuplicate,
+      // "Check price" flag (offer_check) — shown as a badge; blocks Confirm.
+      offerCheck: schema.orders.offerCheck,
       // Follow-up flag — shown as a badge when order was reopened via Follow Up page.
       isFollowUp: schema.orders.isFollowUp,
       // Frozen flag — order pulled into follow-up pipeline, no further mutations.
@@ -6443,6 +6566,16 @@ export class OrdersService {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: `Cannot transition from ${currentStatus} to ${newStatus}. Allowed: ${getAllowedNextStatuses(currentStatus).join(', ') || 'none'}`,
+      });
+    }
+
+    // "Check price" (orders.offer_check): the form submit did not match an active
+    // offer. The order was accepted; it cannot be confirmed until CS has agreed
+    // the price with the customer and cleared the flag (clearOfferCheck).
+    if (newStatus === 'CONFIRMED' && order.offerCheck) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Check the price first. This order did not match an active offer on the form. Agree the price with the customer, fix it if needed, then press "Price checked".',
       });
     }
 
@@ -7400,6 +7533,8 @@ export class OrdersService {
           actorId: actor.id,
         });
       } catch { /* invoice sync is best-effort */ }
+      // Items edited to a valid offer clear "Check price" automatically.
+      if (order.offerCheck) await this.autoClearOfferCheckIfMatched(input.orderId, actor);
     }
 
     const { customerPhone: updatedPhone, ...updatedForResponse } = updated;
@@ -8879,6 +9014,7 @@ export class OrdersService {
         updatedAt: schema.orders.updatedAt,
         totalAmount: schema.orders.totalAmount,
         currencyCode: schema.orders.currencyCode,
+        offerCheck: schema.orders.offerCheck,
       })
       .from(schema.orders)
       .where(and(...conditions))
@@ -11461,6 +11597,117 @@ export class OrdersService {
   }
 
   /**
+   * Re-run the offer/price check against an order's CURRENT items (after CS
+   * edits). Null = every line now matches an active offer.
+   */
+  private async offerCheckForPersistedOrder(order: { id: string; campaignId: string | null; currencyCode: string | null }): Promise<OfferCheckResult | null> {
+    if (!order.campaignId) return null;
+    const items = await this.db
+      .select({
+        productId: schema.orderItems.productId,
+        quantity: schema.orderItems.quantity,
+        unitPrice: schema.orderItems.unitPrice,
+        offerLabel: schema.orderItems.offerLabel,
+      })
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, order.id));
+    return this.checkEdgeFormLineItems({
+      campaignId: order.campaignId,
+      currencyCode: order.currencyCode ?? undefined,
+      items: items.map((it) => ({
+        productId: it.productId,
+        quantity: it.quantity,
+        unitPrice: Number(it.unitPrice),
+        offerLabel: it.offerLabel ?? undefined,
+      })),
+    } as CreateOrderInput);
+  }
+
+  /**
+   * Clear the "Check price" flag (orders.offer_check). The current items are
+   * re-checked: if they now match an active offer anyone allowed to update the
+   * order may clear it; if they still do not, only Head of CS or admin-level may
+   * approve the off-offer price (a closer typing "ok" must not wave through a
+   * tampered price). Audited via withActor + an OFFER_CHECK_CLEARED event.
+   */
+  async clearOfferCheck(orderId: string, actor: SessionUser, body: { note: string }) {
+    const note = body.note.trim();
+    if (note.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Say what price was agreed.' });
+    }
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+    if (!order.offerCheck) return { success: true as const };
+
+    await this.assertActorMayUpdateOrder(actor, {
+      branchId: order.branchId ?? null,
+      assignedCsId: order.assignedCsId ?? null,
+      status: order.status,
+    });
+
+    const stillOff = await this.offerCheckForPersistedOrder(order);
+    const canApproveOffOffer = isAdminLevel(actor) || actor.role === 'HEAD_OF_CS';
+    if (stillOff && !canApproveOffOffer) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'The items still do not match an active offer. Edit the items to the agreed price, or ask Head of CS to approve this price.',
+      });
+    }
+
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.orders)
+        .set({ offerCheck: null, updatedAt: new Date() })
+        .where(eq(schema.orders.id, orderId));
+      await tx.insert(schema.orderTimelineEvents).values({
+        orderId,
+        eventType: 'OFFER_CHECK_CLEARED',
+        actorId: actor.id,
+        actorName: actor.name ?? null,
+        description: stillOff
+          ? `Price approved outside the form's offers: ${note}`
+          : `Price checked: ${note}`,
+        metadata: { reason: 'OFFER_CHECK_CLEARED', previous: order.offerCheck, note, offOffer: !!stillOff },
+        branchId: order.branchId ?? null,
+      });
+    });
+    return { success: true as const };
+  }
+
+  /** After an item edit: clear "Check price" if the items now match an active offer. Never throws. */
+  private async autoClearOfferCheckIfMatched(orderId: string, actor: SessionUser): Promise<void> {
+    try {
+      const [order] = await this.db
+        .select({ id: schema.orders.id, campaignId: schema.orders.campaignId, currencyCode: schema.orders.currencyCode, offerCheck: schema.orders.offerCheck, branchId: schema.orders.branchId })
+        .from(schema.orders)
+        .where(eq(schema.orders.id, orderId))
+        .limit(1);
+      if (!order?.offerCheck) return;
+      if ((await this.offerCheckForPersistedOrder(order)) !== null) return;
+      await withActor(this.db, actor, async (tx) => {
+        await tx.update(schema.orders).set({ offerCheck: null, updatedAt: new Date() }).where(eq(schema.orders.id, orderId));
+        await tx.insert(schema.orderTimelineEvents).values({
+          orderId,
+          eventType: 'OFFER_CHECK_CLEARED',
+          actorId: actor.id,
+          actorName: actor.name ?? null,
+          description: 'Price checked: items now match an active offer.',
+          metadata: { reason: 'OFFER_CHECK_CLEARED', previous: order.offerCheck, auto: true },
+          branchId: order.branchId ?? null,
+        });
+      });
+    } catch (err) {
+      this.logger.warn(`autoClearOfferCheckIfMatched failed for ${orderId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
    * Get orders due for callback (callbackScheduledAt <= now).
    */
   async getCallbackQueue() {
@@ -11892,7 +12139,7 @@ export class OrdersService {
   private async findExistingOrderForDedup(
     phoneHash: string,
     productIds: string[],
-    opts?: { skipCartOrders?: boolean; executor?: DbOrTx; includeCompleted?: boolean },
+    opts?: { skipCartOrders?: boolean; executor?: DbOrTx; includeCompleted?: boolean; windowDays?: number },
   ): Promise<DedupWinner | null> {
     if (!phoneHash || productIds.length === 0) return null;
 
@@ -11914,8 +12161,9 @@ export class OrdersService {
       opts?.includeCompleted ?? false,
     ) as unknown as (typeof schema.orders.$inferSelect)['status'][];
 
-    // 14-day window: same phone + overlapping product within 14 days = duplicate.
-    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    // 14-day window (DUPLICATE_RULES windowDays when the caller passes one):
+    // same phone + overlapping product inside the window = duplicate.
+    const fourteenDaysAgo = new Date(Date.now() - (opts?.windowDays ?? 14) * 24 * 60 * 60 * 1000);
 
     // Step 1: find candidates across orders, cart_orders, and follow_up_orders.
     type Candidate = {
@@ -12260,7 +12508,7 @@ export class OrdersService {
       'ORDER_CANCELLED', 'ADDRESS_UPDATED', 'QUANTITY_UPDATED', 'CALLBACK_SCHEDULED',
       'SUPERVISOR_WATCHING', 'PAYMENT_RECEIVED', 'ORDER_ARCHIVED',
       'LINE_PRICE_CHANGE_REQUESTED', 'LINE_PRICE_CHANGE_APPROVED', 'LINE_PRICE_CHANGE_REJECTED',
-      'CS_ORDER_COMMENT',
+      'CS_ORDER_COMMENT', 'OFFER_CHECK_FLAGGED', 'OFFER_CHECK_CLEARED',
     ]);
     const LOGISTICS_EVENTS = new Set([
       'ORDER_ALLOCATED', 'ORDER_DISPATCHED', 'ORDER_IN_TRANSIT', 'ORDER_DELIVERED',

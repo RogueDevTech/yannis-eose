@@ -44,6 +44,7 @@ import {
   type ListFundingInput,
   type ListFundingRequestsInput,
   dateOrDateTimeOptional,
+  canonicalPermissionCode,
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -2365,6 +2366,54 @@ export const marketingRouter = router({
             country: headerStr(headers['cf-ipcountry']),
           });
         }
+      } catch {
+        // Telemetry must never fail the caller.
+      }
+      return { ok: true as const };
+    }),
+
+  /**
+   * Form failures report: public-form submits that did not go through.
+   * Admin-level and full-team marketing viewers only (HoM); scoped by
+   * branch + company like Form Analytics.
+   */
+  submitFailures: authedProcedure
+    .input(z.object({ startDate: dateOrDateTimeOptional, endDate: dateOrDateTimeOptional }))
+    .query(async ({ input, ctx }) => {
+      // Same rule as the web loader: admin-level, HoM, or marketing.teamOverview
+      // in either its alias or canonical form (snapshots store canonical codes).
+      const teamOverview = canonicalPermissionCode('marketing.teamOverview');
+      const hasTeamOverview = (ctx.user.permissions ?? []).some((p) => canonicalPermissionCode(p) === teamOverview);
+      if (!seesFullMarketingTeamSurfaces(ctx.user) && !hasTeamOverview) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Missing marketing analytics access.' });
+      }
+      return getMarketingService().getSubmitFailures(input, ctx.currentBranchId, ctx.effectiveBranchIds);
+    }),
+
+  /**
+   * Submit-attempt beacon from the edge worker (/track-submit): a public-form
+   * submit that did not go through. Telemetry only, never fails the caller.
+   */
+  trackSubmitAttempt: publicProcedure
+    .input(
+      z.object({
+        campaignId: z.string().uuid(),
+        outcome: z.enum(['BROWSER_BLOCKED', 'FORM_BLOCKED', 'SERVER_REJECTED']),
+        reason: z.string().max(200).optional(),
+        sessionId: z.string().min(1).max(128).optional(),
+        deploymentType: z.string().max(32).optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      try {
+        const headers = ctx.req.headers;
+        const headerStr = (v: string | string[] | undefined): string | null =>
+          Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
+        await getMarketingService().recordSubmitAttempt({
+          ...input,
+          userAgent: headerStr(headers['user-agent']),
+          country: headerStr(headers['cf-ipcountry']),
+        });
       } catch {
         // Telemetry must never fail the caller.
       }

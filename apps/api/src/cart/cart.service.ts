@@ -12,6 +12,7 @@ import { withActor } from '../common/db/with-actor';
 import { assertEntityInScope } from '../common/db/assert-entity-in-scope';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { CartOrdersService } from '../cart-orders/cart-orders.service';
+import { DuplicateRulesService } from '../settings/duplicate-rules.service';
 
 type CartDbOrTx =
   | PostgresJsDatabase<typeof schema>
@@ -59,6 +60,7 @@ export class CartService {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly events: EventsService,
     private readonly cartOrdersService: CartOrdersService,
+    private readonly duplicateRules: DuplicateRulesService,
   ) {}
 
   private async getCampaignBranchId(campaignId: string): Promise<string | null> {
@@ -421,17 +423,37 @@ export class CartService {
    * from save races or cross-campaign submissions never linger.
    *
    * CONVERTED carts are never touched — they are the audit link to a real order.
+   *
+   * Per-company switch: DUPLICATE_RULES.cartMerge. A cart whose campaign's
+   * company switched it off is never removed, and carts are only merged with
+   * newer carts in the same company.
    */
   async mergeDuplicateAbandonedCarts(actorId?: string | null): Promise<number> {
+    const { byGroup, fallback } = await this.duplicateRules.allCompanies();
+    const offGroups = [...byGroup.entries()].filter(([, r]) => !r.cartMerge.enabled).map(([g]) => g);
+    if (!fallback.cartMerge.enabled && offGroups.length === byGroup.size) return 0;
+    const companyOf = sql`(SELECT b.group_id FROM campaigns c JOIN branches b ON b.id = c.branch_id WHERE c.id = ca.campaign_id)`;
+    const keep: SQL[] = [];
+    if (offGroups.length > 0) {
+      const offList = sql.join(offGroups.map((g) => sql`${g}::uuid`), sql`, `);
+      keep.push(sql`AND (${companyOf} IS NULL OR ${companyOf} NOT IN (${offList}))`);
+    }
+    // Carts with no company fall back to the default rule.
+    if (!fallback.cartMerge.enabled) keep.push(sql`AND ${companyOf} IS NOT NULL`);
     const run = async (db: CartDbOrTx) => {
       const rows = await db.execute<{ id: string }>(sql`
         DELETE FROM cart_abandonments AS ca
         WHERE ca.status IN ('PENDING', 'ABANDONED')
+          ${sql.join(keep, sql` `)}
           AND EXISTS (
             SELECT 1 FROM cart_abandonments AS newer
             WHERE newer.customer_phone_hash = ca.customer_phone_hash
               AND newer.status IN ('PENDING', 'ABANDONED')
               AND (newer.updated_at, newer.id) > (ca.updated_at, ca.id)
+              -- One open cart per customer PER COMPANY: a newer cart in another
+              -- company never removes this one (company isolation).
+              AND (SELECT nb.group_id FROM campaigns nc JOIN branches nb ON nb.id = nc.branch_id WHERE nc.id = newer.campaign_id)
+                  IS NOT DISTINCT FROM ${companyOf}
           )
         RETURNING ca.id
       `);
