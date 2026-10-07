@@ -85,6 +85,15 @@ No state skipping. CANCELLED is legacy-only — use DELETED. CS never marks REMI
 - Never change `normalizePhoneForHash` to fix hash drift (breaks every NG hash). Never move this logic into the edge-form intake path (frozen).
 - Called-but-unconfirmed (CS_ENGAGED) cart orders stay as they are: no auto-close (user decision).
 
+## Order Capture: catch first, check after (CEO 2026-10-07, LOCKED)
+CEO escalation: CPA up, "orders stuck in Carts". Rule: every customer who presses submit must become an order; duplicates and prices are checked AFTER the order exists. Only customers who never pressed submit (or whose submit failed) may end up in Carts.
+- **Nothing may reject a submitted order** on the intake path (`orders.create`, edge worker). New checks must flag, never throw. A rejection is a lost order: 4xx is not buffered by QStash.
+- **Duplicate rules**: per-company setting `DUPLICATE_RULES` (Settings > Duplicate rules), **ALL OFF by default**. Never re-hardcode a duplicate rule or change the defaults without the owner. Always on, not settings: double-tap guard (same phone + same form within 2 min returns the first order), pull/graduate once, a cart's own same-session order.
+- **Offer/price check never rejects**: a mismatch creates the order with `orders.offer_check` ("Check price" badge). CONFIRMED is blocked until `orders.clearOfferCheck`; a price outside the active offers needs Head of CS / admin. Editing items to a valid offer clears it automatically. A flagged PAY_ONLINE order never starts Paystack. Flagged orders are not pulled into follow-up.
+- **Every failed submit is recorded** in `form_submit_attempts` (edge worker `/track-submit` beacon, sendBeacon only): `BROWSER_BLOCKED` (reason = field names), `FORM_BLOCKED` / `SERVER_REJECTED` (reason = message shown). Never store typed values. A path that stops a customer must leave a trace.
+- **Form failures report** (`/admin/marketing/analytics/failures`, `marketing.submitFailures`): failures per form + what each customer did next, joined on the browser `session_id` (persisted per browser, sent with the failure, the cart and the order): **Later ordered** = an order with that session_id created after the first failure; **Became cart order** = no order, but a cart_orders row whose source cart has that session_id; **Abandoned** = neither. Failures with no session_id are counted as untraceable. Keep these three definitions; do not invent parallel ones.
+- Data from the Oct 7 investigation: the drop was mostly fewer visitors to top campaigns; same MB on identical forms got 99% vs 49% completion, so form setup was not the cause; huge offer menus (26 to 65 offers) stall customers at "select an offer".
+
 ## Export Columns
 - Every column key in `EXPORT_CONFIGS` (`apps/web/app/lib/export-config.ts`) must exist in `reportColumnsByKey` (`packages/shared/src/validators/reports.ts`), or the whole export fails with an invalid enum error. Enforced by `export-config.spec.ts`. When adding a column: validator enum + export-config + the `reports.service.ts` row and column list, all three.
 

@@ -3,6 +3,8 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 
 export interface FormFailuresData {
   totals: { browserBlocked: number; formBlocked: number; serverRejected: number; total: number };
+  /** Customers (one per browser) who hit a failure, and what they did next. */
+  outcomes?: { customers: number; ordered: number; cartOrder: number; abandoned: number; untraceableFailures: number };
   forms: Array<{
     campaignId: string;
     campaignName: string;
@@ -13,6 +15,10 @@ export interface FormFailuresData {
     total: number;
     topReason: string | null;
     orders: number;
+    customers?: number;
+    laterOrdered?: number;
+    becameCartOrder?: number;
+    abandoned?: number;
   }>;
   topReasons: Array<{ outcome: string; reason: string | null; count: number }>;
 }
@@ -52,6 +58,25 @@ export function FormFailuresView({ data }: { data: FormFailuresData }) {
         ]}
       />
 
+      {data.outcomes && data.outcomes.customers > 0 && (
+        <div className="space-y-1">
+          <p className="text-sm font-semibold text-app-fg">What happened next</p>
+          <OverviewStatStrip
+            items={[
+              { label: 'Customers who hit a failure', value: data.outcomes.customers },
+              { label: 'Later ordered', value: data.outcomes.ordered, title: 'An order from the same browser was created after the failure.' },
+              { label: 'Became cart order', value: data.outcomes.cartOrder, title: 'No order, but their cart was pulled into Cart Orders.' },
+              { label: 'Abandoned', value: data.outcomes.abandoned, title: 'No order and no cart order (yet).' },
+            ]}
+          />
+          {data.outcomes.untraceableFailures > 0 && (
+            <p className="text-xs text-app-fg-muted">
+              {data.outcomes.untraceableFailures} failed submits came from browsers that block tracking and cannot be followed.
+            </p>
+          )}
+        </div>
+      )}
+
       <CompactTable<FormRow>
         caption="Failed submits per form"
         rows={data.forms}
@@ -72,6 +97,9 @@ export function FormFailuresView({ data }: { data: FormFailuresData }) {
           },
           { key: 'total', header: 'Failed', align: 'right', render: (r) => <span className="font-semibold">{r.total}</span> },
           { key: 'orders', header: 'Orders', align: 'right', render: (r) => r.orders },
+          { key: 'laterOrdered', header: 'Later ordered', align: 'right', render: (r) => r.laterOrdered ?? 0 },
+          { key: 'becameCart', header: 'Cart order', align: 'right', hideOnMobile: true, render: (r) => r.becameCartOrder ?? 0 },
+          { key: 'abandoned', header: 'Abandoned', align: 'right', render: (r) => r.abandoned ?? 0 },
           { key: 'browser', header: 'Field refused', align: 'right', hideOnMobile: true, render: (r) => r.browserBlocked },
           { key: 'formCheck', header: 'Form check', align: 'right', hideOnMobile: true, render: (r) => r.formBlocked },
           { key: 'server', header: 'After sending', align: 'right', hideOnMobile: true, render: (r) => r.serverRejected },

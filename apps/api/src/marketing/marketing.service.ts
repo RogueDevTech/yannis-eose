@@ -8544,6 +8544,39 @@ export class MarketingService {
         .limit(15),
     ]);
 
+    // What happened AFTER a failure, per customer session (one browser visit):
+    //  ordered    = an order from the same session was created after the first failure
+    //  cartOrder  = no order, but the session's cart was pulled into Cart Orders
+    //  abandoned  = neither (yet)
+    // The form sends one sessionId with the failure beacon, the cart and the order,
+    // so they join on session_id. Failures without a sessionId (storage blocked)
+    // cannot be followed and are counted as untraceable.
+    const outcomeRows = (await this.db.execute(sql`
+      WITH f AS (
+        SELECT ${fsa.sessionId} AS session_id, ${fsa.campaignId} AS campaign_id, min(${fsa.attemptedAt}) AS first_fail
+        FROM ${fsa}
+        WHERE ${fsa.sessionId} IS NOT NULL ${where ? sql`AND ${where}` : sql``}
+        GROUP BY 1, 2
+      ), o AS (
+        SELECT f.campaign_id,
+          EXISTS (SELECT 1 FROM orders ord WHERE ord.session_id = f.session_id AND ord.created_at >= f.first_fail) AS ordered,
+          EXISTS (SELECT 1 FROM cart_orders co JOIN cart_abandonments ca ON ca.id = co.source_cart_id
+                  WHERE ca.session_id = f.session_id) AS cart_order
+        FROM f
+      )
+      SELECT campaign_id,
+        count(*)::int AS sessions,
+        count(*) FILTER (WHERE ordered)::int AS ordered,
+        count(*) FILTER (WHERE NOT ordered AND cart_order)::int AS cart_order,
+        count(*) FILTER (WHERE NOT ordered AND NOT cart_order)::int AS abandoned
+      FROM o GROUP BY campaign_id
+    `)) as unknown as Array<{ campaign_id: string; sessions: number; ordered: number; cart_order: number; abandoned: number }>;
+    const [untraceableRow] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(fsa)
+      .where(and(isNull(fsa.sessionId), ...(where ? [where] : [])));
+    const outcomeByForm = new Map(outcomeRows.map((r) => [r.campaign_id, r]));
+
     const campaignIds = perForm.map((r) => r.campaignId);
     const orderCounts = new Map<string, number>();
     if (campaignIds.length > 0) {
@@ -8566,7 +8599,25 @@ export class MarketingService {
         serverRejected: byOutcome['SERVER_REJECTED'] ?? 0,
         total: totals.reduce((n, t) => n + t.count, 0),
       },
-      forms: perForm.map((r) => ({ ...r, orders: orderCounts.get(r.campaignId) ?? 0 })),
+      // Customers (sessions) who hit at least one failure, and what they did next.
+      outcomes: {
+        customers: outcomeRows.reduce((n, r) => n + r.sessions, 0),
+        ordered: outcomeRows.reduce((n, r) => n + r.ordered, 0),
+        cartOrder: outcomeRows.reduce((n, r) => n + r.cart_order, 0),
+        abandoned: outcomeRows.reduce((n, r) => n + r.abandoned, 0),
+        untraceableFailures: untraceableRow?.count ?? 0,
+      },
+      forms: perForm.map((r) => {
+        const o = outcomeByForm.get(r.campaignId);
+        return {
+          ...r,
+          orders: orderCounts.get(r.campaignId) ?? 0,
+          customers: o?.sessions ?? 0,
+          laterOrdered: o?.ordered ?? 0,
+          becameCartOrder: o?.cart_order ?? 0,
+          abandoned: o?.abandoned ?? 0,
+        };
+      }),
       topReasons,
     };
   }
