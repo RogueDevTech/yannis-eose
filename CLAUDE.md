@@ -76,6 +76,8 @@ No state skipping. CANCELLED is legacy-only — use DELETED. CS never marks REMI
 - `approveTransfer` also goes straight to RECEIVED (deducts source + adds destination in one tx).
 
 ## Cart Orders Classification (2026-10-05)
+- **Duplicate rules are per-company settings, ALL OFF by default (2026-10-07):** Settings > Duplicate rules (`DUPLICATE_RULES`, `packages/shared/src/validators/duplicate-rules.ts`). The pull guard, reconcile cron, cleanup cron, intake block, delivery check and graduation guard below only act when a company switches them on. Always on: double-tap guard (same phone + form, 2 min), pull/graduate once, a cart's own same-session order. Never re-hardcode a duplicate rule.
+- **Order-form offer/price check never rejects (2026-10-07):** a mismatch creates the order with `orders.offer_check` ("Check price"); CONFIRMED is blocked until `orders.clearOfferCheck` (off-offer price needs Head of CS / admin). Failed submits are recorded in `form_submit_attempts`.
 - "Is this cart order really a real order?" has ONE definition: `cartRealOrderMatchesQuery` in `apps/api/src/cart-orders/cart-order-real-order-match.ts`. Pull guard, reconcile cron and export all use it. Never add a parallel phone_hash + exact-product check.
 - Match types: `CART_LINK` (orders.cart_id), `CART_CONVERTED` (source cart CONVERTED), `SAME_PRODUCT` (same phone + product, 14d), `SAME_SESSION` (same phone, any product, ±2h). "Same phone" = phone_hash OR last 9 raw digits (`803…` vs `0803…` hash differently).
 - Reconcile cron: UNPROCESSED/CS_ASSIGNED/CS_ENGAGED matches are soft-deleted; CONFIRMED+ are only flagged `is_duplicate='CART_EDGE_FORM_DUPE'`, never deleted. Every write has a timeline event naming the real order.

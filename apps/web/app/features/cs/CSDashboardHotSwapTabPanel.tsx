@@ -9,6 +9,7 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StripToolbar } from '~/components/ui/strip-toolbar';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import type { AgentWorkload, CSOrder } from './types';
+import { CheckPriceBadge } from '~/components/ui/check-price-badge';
 
 export function CSDashboardHotSwapTabPanel({
   hotSwapFrom,
@@ -185,6 +186,7 @@ export function CSDashboardHotSwapTabPanel({
                             </div>
                             <div className="flex items-center gap-1.5 mb-1 min-w-0">
                               <OrderStatusBadge status={order.status} />
+                              <CheckPriceBadge offerCheck={order.offerCheck} />
                               <span className="text-micro font-medium text-app-fg-muted truncate">
                                 {new Date(order.createdAt).toLocaleString('en-NG', {
                                   month: 'short',

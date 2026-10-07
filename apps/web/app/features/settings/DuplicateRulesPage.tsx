@@ -29,8 +29,10 @@ interface RuleDef {
   modes?: ModeOption[];
   /** Field holding the window, if the rule has one. */
   window?: { field: 'windowDays'; unit: string; max: number };
-  /** Shown while the rule is loosened from its default. */
+  /** Shown while the rule is off or flag-only. */
   warning?: string;
+  /** Protects money (double-counted deliveries), so its warning is always shown when off. */
+  critical?: boolean;
 }
 
 interface Section {
@@ -131,6 +133,7 @@ const SECTIONS: Section[] = [
         ],
         window: { field: 'windowDays', unit: 'days', max: 90 },
         warning: 'The same delivery can be recorded twice.',
+        critical: true,
       },
       {
         key: 'graduationGuard',
@@ -138,6 +141,7 @@ const SECTIONS: Section[] = [
         description: 'A delivered cart or follow-up order is not copied into Orders when a matching order exists.',
         window: { field: 'windowDays', unit: 'days', max: 90 },
         warning: 'Duplicate deliveries count twice in orders, revenue and payroll.',
+        critical: true,
       },
     ],
   },
@@ -254,7 +258,7 @@ export function DuplicateRulesPage({ data }: { data: DuplicateRulesData }) {
       <p className="mb-4 text-xs text-app-fg-muted">
         {data.updatedAt
           ? `Last saved ${new Date(data.updatedAt).toLocaleString()}${data.updatedByName ? ` by ${data.updatedByName}` : ''}.`
-          : 'Using defaults. Nothing saved for this company yet.'}
+          : 'Using defaults: every rule off. Nothing saved for this company yet.'}
       </p>
 
       {draft.intakeBlock.mode !== 'BLOCK' && draft.cleanupCron.mode === 'DELETE' && (
@@ -273,8 +277,9 @@ export function DuplicateRulesPage({ data }: { data: DuplicateRulesData }) {
                 const value = ruleValue(draft, def.key);
                 const defaults = ruleValue(data.defaults, def.key);
                 const active = isActive(def, value);
-                // Warn whenever a rule is off or only flagging, default or not.
-                const loosened = !active || value.mode === 'FLAG';
+                // Defaults are all off, so only the money-protecting rules warn
+                // when off; the rest would just be noise.
+                const loosened = !!def.critical && !active;
                 return (
                   <li key={def.key} className="space-y-3 px-4 py-3">
                     <div className="flex items-start justify-between gap-3">

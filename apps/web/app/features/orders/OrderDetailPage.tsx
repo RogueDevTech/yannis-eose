@@ -5067,8 +5067,13 @@ function OfferCheckBanner({ order, canClear }: { order: { id: string; branchId?:
   const fetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState('');
-  useFetcherToast(fetcher.data);
-  useCloseOnFetcherSuccess(fetcher, () => setOpen(false));
+  const { errorMatchingIntent } = useFetcherActionSurface(fetcher);
+  // Errors show inline in the modal (one surface); success shows as a toast.
+  useFetcherToast(fetcher.data, { skipErrorToast: open });
+  useCloseOnFetcherSuccess(fetcher, () => {
+    setOpen(false);
+    setNote('');
+  });
   const saving = fetcher.state !== 'idle';
   return (
     <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
@@ -5076,8 +5081,8 @@ function OfferCheckBanner({ order, canClear }: { order: { id: string; branchId?:
         <div className="text-sm text-warning-900 dark:text-warning-100">
           <p className="font-semibold">Check price before confirming</p>
           <p className="mt-0.5 text-warning-800 dark:text-warning-200/90">
-            The price on this order did not match an active offer on the form. Agree the price with the customer
-            (the timeline shows what was submitted), fix the items if needed, then mark it checked.
+            The price did not match an active offer on the form (see the timeline). Agree it with the customer and
+            fix the items if needed. A price outside the offers needs Head of CS approval.
           </p>
         </div>
         {canClear && (
@@ -5101,7 +5106,7 @@ function OfferCheckBanner({ order, canClear }: { order: { id: string; branchId?:
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
-            {fetcher.data?.error && <p className="text-sm text-danger-600">{fetcher.data.error}</p>}
+            <ModalFetcherInlineError message={errorMatchingIntent('clearOfferCheck')} />
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={saving}>
                 Cancel

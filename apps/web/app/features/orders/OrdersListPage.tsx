@@ -86,6 +86,7 @@ import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { Order } from './types';
 import { AbandonedCartDetailModal } from '~/features/cs/AbandonedCartDetailModal';
 import type { PendingCart } from '~/features/cs/types';
+import { CheckPriceBadge } from '~/components/ui/check-price-badge';
 import {
   isPreferredDeliveryDueToday,
   isPreferredDeliveryOverdue,
@@ -1363,11 +1364,7 @@ function OrdersListPageImpl({
                   Duplicate
                 </span>
               )}
-              {order.offerCheck && (
-                <span className="inline-flex items-center rounded-full bg-warning-100 px-1.5 py-0.5 text-[10px] font-semibold text-warning-700 dark:bg-warning-900/30 dark:text-warning-300">
-                  Check price
-                </span>
-              )}
+              <CheckPriceBadge offerCheck={order.offerCheck} />
             </span>
           );
         },
@@ -1504,11 +1501,7 @@ function OrdersListPageImpl({
                     Duplicate
                   </span>
                 )}
-                {order.offerCheck && (
-                  <span className="inline-flex items-center rounded-full bg-warning-100 px-1.5 py-0.5 text-[10px] font-semibold text-warning-700 dark:bg-warning-900/30 dark:text-warning-300">
-                    Check price
-                  </span>
-                )}
+                <CheckPriceBadge offerCheck={order.offerCheck} />
               </span>
             )}
             <span className="whitespace-nowrap text-xs text-app-fg-muted">
