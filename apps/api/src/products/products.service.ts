@@ -664,6 +664,42 @@ export class ProductsService {
   }
 
   /**
+   * Offer labels for one product, for the export Offer filter. Union of the
+   * configured offers (templates + offer-group items) and every label actually
+   * stamped on order / cart / follow-up lines, since renamed or offline labels
+   * only live on the lines. De-duplicated case-insensitively, catalog spelling
+   * wins. Company-gated through the product.
+   */
+  async listOfferLabels(productId: string, groupId?: string | null): Promise<string[]> {
+    await this.assertProductInCompany(productId, groupId);
+    const rows = await this.db.execute<{ label: string }>(sql`
+      SELECT label FROM (
+        SELECT trim(name) AS label, 0 AS rank FROM offer_templates WHERE product_id = ${productId}
+        UNION ALL
+        SELECT trim(label), 0 FROM offer_group_items WHERE product_id = ${productId}
+        UNION ALL
+        SELECT DISTINCT trim(offer_label), 1 FROM order_items WHERE product_id = ${productId} AND offer_label IS NOT NULL
+        UNION ALL
+        SELECT DISTINCT trim(offer_label), 1 FROM cart_order_items WHERE product_id = ${productId} AND offer_label IS NOT NULL
+        UNION ALL
+        SELECT DISTINCT trim(offer_label), 1 FROM follow_up_order_items WHERE product_id = ${productId} AND offer_label IS NOT NULL
+      ) t
+      WHERE label <> ''
+      ORDER BY rank, label
+      LIMIT 1000
+    `);
+    const seen = new Set<string>();
+    const labels: string[] = [];
+    for (const r of rows as unknown as Array<{ label: string }>) {
+      const key = r.label.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      labels.push(r.label);
+    }
+    return labels.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  }
+
+  /**
    * Update product details.
    */
   async update(input: UpdateProductInput, actor: SessionUser, groupId?: string | null) {

@@ -26,7 +26,7 @@ const REPORT_TYPES: ReportTypeDef[] = [
     description: 'Funnel + offline orders with customer, closer, status, and amount columns.',
     icon: <OrdersIcon />,
     requiredPermissions: ['orders.read', 'orders.export'],
-    picklists: ['csClosers'],
+    picklists: ['csClosers', 'products'],
   },
   {
     key: 'cs_team',
@@ -106,7 +106,7 @@ const REPORT_TYPES: ReportTypeDef[] = [
     description: 'Cart recovery orders with customer, status, amount, and closer.',
     icon: <CartIcon />,
     requiredPermissions: ['orders.read', 'orders.export'],
-    picklists: [],
+    picklists: ['products'],
   },
   {
     key: 'follow_up_orders',
@@ -114,7 +114,7 @@ const REPORT_TYPES: ReportTypeDef[] = [
     description: 'Follow-up orders with source, closer, and delivery status.',
     icon: <OrdersIcon />,
     requiredPermissions: ['orders.read', 'orders.export'],
-    picklists: [],
+    picklists: ['products'],
   },
   {
     key: 'delivery_remittances',
@@ -327,6 +327,7 @@ export function ExportPage({ permissions, picklists }: ExportPageProps) {
           onClose={() => setSelectedKey(null)}
           config={selectedConfig}
           picklists={selectedPicklists}
+          productOfferFilter
         />
       )}
     </div>

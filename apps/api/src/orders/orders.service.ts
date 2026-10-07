@@ -60,6 +60,7 @@ import { permissionRequestTypeTextEq } from '../common/db/permission-request-typ
 import { branchScopeCondition, closerBranchOrAssignedCondition } from '../common/db/branch-scope-condition';
 import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
+import { offerLabelMatches } from '../common/db/offer-label-match';
 import { EventsService } from '../events/events.service';
 import { emitOrderAutomationEvents } from '../automation/automation-hooks';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -5659,7 +5660,9 @@ export class OrdersService {
     if (input.campaignId) {
       conditions.push(eq(schema.orders.campaignId, input.campaignId));
     }
-    if (input.productId) {
+    if (input.productId || input.offerLabel) {
+      // Both filters must hold on the SAME line, so "Product X, offer Buy 2"
+      // never matches an order with X on one line and "Buy 2" of Y on another.
       conditions.push(
         exists(
           this.db
@@ -5668,7 +5671,8 @@ export class OrdersService {
             .where(
               and(
                 eq(schema.orderItems.orderId, schema.orders.id),
-                eq(schema.orderItems.productId, input.productId),
+                input.productId ? eq(schema.orderItems.productId, input.productId) : undefined,
+                input.offerLabel ? offerLabelMatches(schema.orderItems.offerLabel, input.offerLabel) : undefined,
               ),
             ),
         ),

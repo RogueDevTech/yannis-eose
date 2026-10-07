@@ -10,6 +10,7 @@ import { TextInput } from './text-input';
 import { useToast } from './toast';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { EXPORT_DATE_PRESET_OPTIONS, type ExportConfig } from '~/lib/export-config';
+import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
 import type { ExportReportActionData } from '~/lib/export-report.server';
 
 export type ExportModalPicklists = {
@@ -27,7 +28,12 @@ type Props = {
   initialFilters?: Record<string, unknown>;
   /** Optional per-page picklists used by advanced report filters (merged with initialFilters). */
   picklists?: Partial<ExportModalPicklists>;
+  /** Product + Offer filter for order exports. Only the Export page turns this on. */
+  productOfferFilter?: boolean;
 };
+
+/** Order exports get the shared Product + Offer filter (line-item match). */
+const PRODUCT_OFFER_REPORT_KEYS = new Set<string>(['cs_orders', 'marketing_orders', 'cart_orders', 'follow_up_orders']);
 
 function triggerCsvDownload(filename: string, csvContent: string) {
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
@@ -86,7 +92,8 @@ async function toXlsxFromCsv(filename: string, csvContent: string) {
   );
 }
 
-export function ExportModal({ open, onClose, config, initialFilters = {}, picklists }: Props) {
+export function ExportModal({ open, onClose, config, initialFilters = {}, picklists, productOfferFilter = false }: Props) {
+  const showProductOffer = productOfferFilter && PRODUCT_OFFER_REPORT_KEYS.has(config.reportKey);
   const fetcher = useFetcher<ExportReportActionData>();
   const exportSurface = useFetcherActionSurface(fetcher);
   const { toast } = useToast();
@@ -98,6 +105,9 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
   const [includeCurrentFilters, setIncludeCurrentFilters] = useState(false);
   const [exportMediaBuyerId, setExportMediaBuyerId] = useState('');
   const [exportProductId, setExportProductId] = useState('');
+  const [exportOfferLabel, setExportOfferLabel] = useState('');
+  const [offerLabels, setOfferLabels] = useState<string[]>([]);
+  const [offerLabelsLoading, setOfferLabelsLoading] = useState(false);
   const [exportCampaignId, setExportCampaignId] = useState('');
   const [exportStatus, setExportStatus] = useState('');
   const [exportMinAmount, setExportMinAmount] = useState('');
@@ -125,6 +135,7 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
     setIncludeCurrentFilters(false);
     setExportMediaBuyerId('');
     setExportProductId('');
+    setExportOfferLabel('');
     setExportCampaignId('');
     setExportStatus('');
     setExportMinAmount('');
@@ -159,6 +170,10 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
     if (exportReceiverId) base.receiverId = exportReceiverId;
     if (exportRole) base.role = exportRole;
 
+    if (showProductOffer) {
+      if (exportProductId) base.productId = exportProductId;
+      if (exportProductId && exportOfferLabel) base.offerLabel = exportOfferLabel;
+    }
     if (config.reportKey === 'marketing_orders') {
       if (exportProductId) base.productId = exportProductId;
       if (exportCampaignId) base.campaignId = exportCampaignId;
@@ -184,7 +199,9 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
     includeCurrentFilters,
     initialFilters,
     config.reportKey,
+    showProductOffer,
     exportProductId,
+    exportOfferLabel,
     exportCampaignId,
     exportMediaBuyerId,
     exportStatus,
@@ -269,6 +286,36 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
     if (!picklists?.products) return [];
     return [{ value: '', label: 'Any product' }, ...picklists.products.map((p) => ({ value: p.id, label: p.name }))];
   }, [picklists?.products]);
+
+  // Offers depend on the product, so load them when one is picked.
+  useEffect(() => {
+    setExportOfferLabel('');
+    setOfferLabels([]);
+    if (!exportProductId || !showProductOffer) return;
+    const controller = new AbortController();
+    setOfferLabelsLoading(true);
+    const input = encodeURIComponent(JSON.stringify({ productId: exportProductId }));
+    fetch(`${getBrowserApiBaseUrl()}/trpc/products.offerLabels?input=${input}`, {
+      credentials: 'include',
+      signal: controller.signal,
+    })
+      .then((r) => r.json())
+      .then((res: { result?: { data?: string[] } }) => {
+        if (!controller.signal.aborted) setOfferLabels(res?.result?.data ?? []);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setOfferLabels([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setOfferLabelsLoading(false);
+      });
+    return () => controller.abort();
+  }, [exportProductId, showProductOffer]);
+
+  const offerOptions = useMemo(
+    () => [{ value: '', label: 'Any offer' }, ...offerLabels.map((l) => ({ value: l, label: l }))],
+    [offerLabels],
+  );
 
   const campaignOptions = useMemo(() => {
     if (!picklists?.campaigns) return [];
@@ -392,6 +439,29 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
           )}
         </div>
 
+        {showProductOffer && productOptions.length > 0 && (
+          <div className="space-y-3 rounded-md border border-app-border bg-app-hover/40 p-3">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Product and offer (optional)</p>
+            <SearchableSelect
+              label="Product"
+              value={exportProductId}
+              onChange={setExportProductId}
+              options={productOptions}
+              placeholder="Any product"
+              controlSize="sm"
+            />
+            <SearchableSelect
+              label="Offer"
+              value={exportOfferLabel}
+              onChange={setExportOfferLabel}
+              options={offerOptions}
+              placeholder={!exportProductId ? 'Pick a product first' : offerLabelsLoading ? 'Loading offers...' : 'Any offer'}
+              disabled={!exportProductId || offerLabelsLoading}
+              controlSize="sm"
+            />
+          </div>
+        )}
+
         {config.reportKey === 'cs_orders' && (
           <div className="space-y-3 rounded-md border border-app-border bg-app-hover/40 p-3">
             <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">CS order filters (optional)</p>
@@ -443,14 +513,16 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
               placeholder="Use page filter / all"
               controlSize="sm"
             />
-            <SearchableSelect
-              label="Product"
-              value={exportProductId}
-              onChange={setExportProductId}
-              options={productOptions}
-              placeholder="Any product"
-              controlSize="sm"
-            />
+            {!showProductOffer && (
+              <SearchableSelect
+                label="Product"
+                value={exportProductId}
+                onChange={setExportProductId}
+                options={productOptions}
+                placeholder="Any product"
+                controlSize="sm"
+              />
+            )}
             <SearchableSelect
               label="Campaign"
               value={exportCampaignId}

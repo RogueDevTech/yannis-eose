@@ -82,6 +82,13 @@ export const productsRouter = router({
       );
     }),
 
+  /** Offer labels for one product (export Product + Offer filter). */
+  offerLabels: authedProcedure
+    .input(z.object({ productId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      return getProductsService().listOfferLabels(input.productId, ctx.activeGroupId);
+    }),
+
   /**
    * Get single product by ID.
    * Finance fields are stripped automatically by CLS middleware.

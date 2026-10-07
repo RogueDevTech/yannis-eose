@@ -1,7 +1,8 @@
 import { Injectable, Inject, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, notInArray, or, sql, asc } from 'drizzle-orm';
+import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, notInArray, or, sql, asc, exists } from 'drizzle-orm';
+import { offerLabelMatches } from '../common/db/offer-label-match';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay, formatOrderNumber } from '@yannis/shared';
 import type {
@@ -1125,6 +1126,23 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (input.assignedCsId) conditions.push(eq(schema.followUpOrders.assignedCsId, input.assignedCsId));
     if (input.unassignedOnly) conditions.push(isNull(schema.followUpOrders.assignedCsId));
     if (input.ruleId) conditions.push(eq(schema.followUpOrders.followUpRuleId, input.ruleId));
+    if (input.productId || input.offerLabel) {
+      // Product and offer must match on the SAME line item.
+      conditions.push(
+        exists(
+          this.db
+            .select({ one: sql`1` })
+            .from(schema.followUpOrderItems)
+            .where(
+              and(
+                eq(schema.followUpOrderItems.followUpOrderId, schema.followUpOrders.id),
+                input.productId ? eq(schema.followUpOrderItems.productId, input.productId) : undefined,
+                input.offerLabel ? offerLabelMatches(schema.followUpOrderItems.offerLabel, input.offerLabel) : undefined,
+              ),
+            ),
+        ),
+      );
+    }
     if (input.currencyCode) conditions.push(eq(schema.followUpOrders.currencyCode, input.currencyCode));
     if (input.search) {
       const trimmed = input.search.trim();

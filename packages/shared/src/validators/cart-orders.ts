@@ -12,6 +12,9 @@ export const listCartOrdersSchema = z.object({
   unassignedOnly: z.boolean().optional(),
   branchId: z.string().uuid().optional(),
   search: z.string().optional(),
+  /** Line-item filters: orders containing this product and/or offer label. */
+  productId: z.string().uuid().optional(),
+  offerLabel: z.string().trim().min(1).max(100).optional(),
   sortBy: z.enum(['createdAt', 'orderNumber', 'status']).optional().default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
   startDate: z.string().optional(),

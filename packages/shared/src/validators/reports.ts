@@ -289,6 +289,8 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
     dateRange: exportDateRangeSchema.optional(),
     filters: z
       .object({
+        productId: z.string().uuid().optional(),
+        offerLabel: z.string().trim().min(1).max(100).optional(),
         status: z.string().optional(),
         search: z.string().optional(),
         assignedCsId: z.string().uuid().optional(),
@@ -320,6 +322,7 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
     dateRange: exportDateRangeSchema.optional(),
     filters: z
       .object({
+        offerLabel: z.string().trim().min(1).max(100).optional(),
         status: z.string().optional(),
         search: z.string().optional(),
         mediaBuyerId: z.string().uuid().optional(),
@@ -435,6 +438,8 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
     dateRange: exportDateRangeSchema.optional(),
     filters: z
       .object({
+        productId: z.string().uuid().optional(),
+        offerLabel: z.string().trim().min(1).max(100).optional(),
         status: z.string().optional(),
         search: z.string().optional(),
         startDate: z.string().date().optional(),
@@ -449,6 +454,8 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
     dateRange: exportDateRangeSchema.optional(),
     filters: z
       .object({
+        productId: z.string().uuid().optional(),
+        offerLabel: z.string().trim().min(1).max(100).optional(),
         status: z.string().optional(),
         search: z.string().optional(),
         startDate: z.string().date().optional(),
