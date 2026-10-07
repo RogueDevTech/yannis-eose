@@ -25,6 +25,7 @@ import { EventsService } from '../events/events.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
+import { DuplicateRulesService } from '../settings/duplicate-rules.service';
 import { parseOrderNumberSearch } from '../common/utils/parse-order-number';
 import { randomUUID } from 'node:crypto';
 
@@ -79,6 +80,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     private readonly events: EventsService,
     private readonly inventoryService: InventoryService,
     private readonly generalLedger: GeneralLedgerService,
+    private readonly duplicateRules: DuplicateRulesService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -1886,14 +1888,18 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     // Broader dedup guard: block delivery if ANY order with the same
     // customer phone + product already exists as DELIVERED/REMITTED within 14 days.
     // Prevents follow-up orders from graduating into duplicates.
-    if (newStatus === 'DELIVERED' && order.customerPhoneHash) {
+    // Per-company switch: DUPLICATE_RULES.preDeliveryCheck (BLOCK / OFF + window).
+    const preDelivery = newStatus === 'DELIVERED' && order.customerPhoneHash
+      ? (await this.duplicateRules.forBranch(order.branchId)).preDeliveryCheck
+      : null;
+    if (newStatus === 'DELIVERED' && order.customerPhoneHash && preDelivery?.mode === 'BLOCK') {
       const fuItems = await this.db
         .select()
         .from(schema.followUpOrderItems)
         .where(eq(schema.followUpOrderItems.followUpOrderId, orderId));
       const productIds = fuItems.map((i) => i.productId).filter(Boolean) as string[];
       if (productIds.length > 0) {
-        const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+        const fourteenDaysAgo = new Date(Date.now() - preDelivery.windowDays * 24 * 60 * 60 * 1000);
         const [existing] = await this.db
           .select({ id: schema.orders.id, orderNumber: schema.orders.orderNumber })
           .from(schema.orders)
@@ -2250,8 +2256,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     // from DELIVERED/REMITTED-only to ANY live status so an in-flight duplicate
     // (e.g. edge-form order still at CS_ENGAGED) also blocks a graduating copy.
     // Excludes this follow-up's own graduated copy (source_follow_up_order_id).
-    if (fuOrder.customerPhoneHash && fuItems.length > 0) {
-      const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    // Per-company switch: DUPLICATE_RULES.graduationGuard (on/off + window).
+    const graduationGuard = (await this.duplicateRules.forBranch(fuOrder.branchId)).graduationGuard;
+    if (graduationGuard.enabled && fuOrder.customerPhoneHash && fuItems.length > 0) {
+      const fourteenDaysAgo = new Date(Date.now() - graduationGuard.windowDays * 24 * 60 * 60 * 1000);
       const productIds = fuItems.map((i) => i.productId).filter(Boolean) as string[];
       if (productIds.length > 0) {
         // Check all 3 tables for existing live orders with same phone+product.

@@ -9,6 +9,7 @@ import { withActor } from '../common/db/with-actor';
 import { CacheService } from '../common/cache/cache.service';
 import { FollowUpConfigService } from './follow-up-config.service';
 import { CartOrdersService } from '../cart-orders/cart-orders.service';
+import { DuplicateRulesService } from '../settings/duplicate-rules.service';
 
 /**
  * Order statuses that have NOT moved any inventory yet. Test orders past
@@ -87,6 +88,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     private readonly cache: CacheService,
     private readonly followUpService: FollowUpConfigService,
     private readonly cartOrdersService: CartOrdersService,
+    private readonly duplicateRules: DuplicateRulesService,
   ) {}
 
   /**
@@ -510,6 +512,10 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
    * Late-stage losers (CONFIRMED+): FLAGGED only — stock may be allocated.
    * CFA row recorded for MB visibility. Completed (already-delivered) winners
    * that pre-date the loser are excluded so legitimate repeat purchases survive.
+   *
+   * Per-company switch: DUPLICATE_RULES.cleanupCron (mode + window), resolved by
+   * the loser's branch company. OFF skips the company; FLAG never deletes and
+   * leaves already-flagged / dismissed / merged orders alone.
    */
   async purgeUniversalDuplicates(
     allDates = false,
@@ -517,6 +523,21 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     const dateFilter = allDates
       ? sql`TRUE`
       : sql`loser.created_at >= NOW() - INTERVAL '48 hours'`;
+
+    const { byGroup, fallback } = await this.duplicateRules.allCompanies();
+    const companyRules = [...byGroup.entries()];
+    if (fallback.cleanupCron.mode === 'OFF' && companyRules.every(([, r]) => r.cleanupCron.mode === 'OFF')) {
+      return { deleted: 0, skipped: 0 };
+    }
+    // One row per company that has its own setting; everyone else uses the fallback.
+    const cfgRows = companyRules.length > 0
+      ? sql.join(
+          companyRules.map(([groupId, r]) => sql`(${groupId}::uuid, ${r.cleanupCron.mode}::text, ${r.cleanupCron.windowDays}::int)`),
+          sql`, `,
+        )
+      : sql`(NULL::uuid, NULL::text, NULL::int)`;
+    const fallbackMode = fallback.cleanupCron.mode;
+    const fallbackWindow = fallback.cleanupCron.windowDays;
 
     // Find losers: orders that have a better match (higher lifecycle rank or
     // older at same rank) on same phone + overlapping product within 14 days.
@@ -533,8 +554,10 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       winner_mb_id: string | null;
       winner_order_number: number | null;
       product_id: string;
+      rule_mode: 'DELETE' | 'FLAG';
     }>(sql`
-      WITH status_rank AS (
+      WITH cfg(group_id, mode, window_days) AS (VALUES ${cfgRows}),
+      status_rank AS (
         SELECT unnest(ARRAY[
           'REMITTED', 'DELIVERED', 'PARTIALLY_DELIVERED', 'IN_TRANSIT',
           'DISPATCHED', 'AGENT_ASSIGNED', 'CONFIRMED', 'CS_ENGAGED',
@@ -554,8 +577,11 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         winner.id             AS winner_id,
         winner.media_buyer_id AS winner_mb_id,
         winner.order_number   AS winner_order_number,
-        oi_loser.product_id   AS product_id
+        oi_loser.product_id   AS product_id,
+        COALESCE(cfg.mode, ${fallbackMode}) AS rule_mode
       FROM orders loser
+      LEFT JOIN branches loser_branch ON loser_branch.id = loser.branch_id
+      LEFT JOIN cfg ON cfg.group_id = loser_branch.group_id
       JOIN order_items oi_loser ON oi_loser.order_id = loser.id
       JOIN order_items oi_winner ON oi_winner.product_id = oi_loser.product_id
       JOIN orders winner ON winner.id = oi_winner.order_id
@@ -568,7 +594,10 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         AND loser.deleted_at IS NULL
         AND winner.status NOT IN ('CANCELLED', 'DELETED')
         AND winner.deleted_at IS NULL
-        AND ABS(EXTRACT(EPOCH FROM (loser.created_at - winner.created_at))) <= 14 * 86400
+        AND COALESCE(cfg.mode, ${fallbackMode}) <> 'OFF'
+        AND ABS(EXTRACT(EPOCH FROM (loser.created_at - winner.created_at))) <= COALESCE(cfg.window_days, ${fallbackWindow}) * 86400
+        -- Flag-only companies: an order already flagged, dismissed or merged is settled.
+        AND NOT (COALESCE(cfg.mode, ${fallbackMode}) = 'FLAG' AND loser.is_duplicate IS NOT NULL)
         -- A completed order is a finished transaction, not an open duplicate.
         -- If the winner was already delivered before the loser was even created,
         -- the loser is a legitimate repeat purchase (customer re-ordering the same
@@ -607,6 +636,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       winnerMbId: string | null;
       winnerOrderNumber: number | null;
       productIds: string[];
+      ruleMode: 'DELETE' | 'FLAG';
     }>();
     for (const row of losers) {
       const existing = loserMap.get(row.loser_id);
@@ -628,6 +658,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           winnerMbId: row.winner_mb_id,
           winnerOrderNumber: row.winner_order_number,
           productIds: [row.product_id],
+          ruleMode: row.rule_mode,
         });
       }
     }
@@ -642,12 +673,11 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     const now = new Date();
     // Early-stage statuses where no stock has moved — safe to soft-delete.
     const SAFE_TO_DELETE_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'];
-    const softDeleteIds = loserEntries
-      .filter((e) => SAFE_TO_DELETE_STATUSES.includes(e.status))
-      .map((e) => e.loserId);
-    const flagOnlyIds = loserEntries
-      .filter((e) => !SAFE_TO_DELETE_STATUSES.includes(e.status))
-      .map((e) => e.loserId);
+    // Delete only in DELETE-mode companies; FLAG-mode companies flag every stage.
+    const willDelete = (e: { status: string; ruleMode: 'DELETE' | 'FLAG' }) =>
+      e.ruleMode === 'DELETE' && SAFE_TO_DELETE_STATUSES.includes(e.status);
+    const softDeleteIds = loserEntries.filter(willDelete).map((e) => e.loserId);
+    const flagOnlyIds = loserEntries.filter((e) => !willDelete(e)).map((e) => e.loserId);
 
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
       // 1a. Soft-delete early-stage duplicates — removes them from CS queues
@@ -658,7 +688,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         // per loser, so update each group of losers sharing a winner separately.
         const byWinner = new Map<string, string[]>();
         for (const e of loserEntries) {
-          if (!SAFE_TO_DELETE_STATUSES.includes(e.status)) continue;
+          if (!willDelete(e)) continue;
           const ids = byWinner.get(e.winnerId) ?? [];
           ids.push(e.loserId);
           byWinner.set(e.winnerId, ids);
@@ -687,7 +717,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       if (flagOnlyIds.length > 0) {
         const byWinner = new Map<string, string[]>();
         for (const e of loserEntries) {
-          if (SAFE_TO_DELETE_STATUSES.includes(e.status)) continue;
+          if (willDelete(e)) continue;
           const ids = byWinner.get(e.winnerId) ?? [];
           ids.push(e.loserId);
           byWinner.set(e.winnerId, ids);
@@ -720,15 +750,15 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           const winnerLabel = e.winnerOrderNumber
             ? formatOrderNumber(e.winnerOrderNumber, prefixByLoser.get(e.loserId))
             : e.winnerId.slice(0, 8);
-          const wasSoftDeleted = SAFE_TO_DELETE_STATUSES.includes(e.status);
+          const wasSoftDeleted = willDelete(e);
           return {
             orderId: e.loserId,
             eventType: 'ORDER_DUPLICATE_FLAGGED' as const,
             actorId: null,
             actorName: 'System' as const,
             description: wasSoftDeleted
-              ? `Auto-deleted duplicate: same phone + product within 14 days (winner: ${winnerLabel})`
-              : `Flagged as duplicate: same phone + product within 14 days (winner: ${winnerLabel})`,
+              ? `Auto-deleted duplicate: same phone + product within the duplicate window (winner: ${winnerLabel})`
+              : `Flagged as duplicate: same phone + product within the duplicate window (winner: ${winnerLabel})`,
             metadata: { reason: 'DUPLICATE_RULE', winnerId: e.winnerId },
             branchId: e.branchId ?? null,
           };

@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, ne, notInArray, or, sql, asc, exists } from 'drizzle-orm';
 import { offerLabelMatches } from '../common/db/offer-label-match';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay, formatOrderNumber, type OrderStatus } from '@yannis/shared';
+import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay, formatOrderNumber, type OrderStatus, type DuplicateRules } from '@yannis/shared';
 import type { ListCartOrdersInput, UpdateCartOrderInput, CreateCartOrderRoutingRuleInput, UpdateCartOrderRoutingRuleInput } from '@yannis/shared';
 import { DRIZZLE, PG_CLIENT_RAW } from '../database/database.module';
 import type postgres from 'postgres';
@@ -23,6 +23,7 @@ import { isTransitionAllowed } from '../orders/order-state-machine';
 import { expandCustomerPhoneSearchDigitRuns } from '../orders/orders.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
+import { DuplicateRulesService } from '../settings/duplicate-rules.service';
 import { parseOrderNumberSearch } from '../common/utils/parse-order-number';
 // Raw SQL pull/backfill calls PostgreSQL uuidv7().
 // PG 18 has it natively; older DBs get a polyfill via migration 0275.
@@ -73,6 +74,7 @@ export class CartOrdersService {
     @Inject(PG_CLIENT_RAW) private readonly pg: ReturnType<typeof postgres>,
     private readonly inventoryService: InventoryService,
     private readonly generalLedger: GeneralLedgerService,
+    private readonly duplicateRules: DuplicateRulesService,
   ) {
     // One-time backfill: set media_buyer_id on cart_orders that are missing it
     // by looking up the source cart abandonment's campaign → mediaBuyerId.
@@ -279,27 +281,47 @@ export class CartOrdersService {
    *    is a repeat purchase, not a duplicate, so it is not flagged.
    *  - Every write runs through withActor() with a timeline event naming the
    *    real order (Pillar 4).
+   *  - Per-company switch DUPLICATE_RULES.cartReconcile: DELETE (above), FLAG
+   *    (early stages are flagged like progressed ones, never deleted), OFF.
    */
   async reconcileDuplicateCartOrders(): Promise<number> {
+    const { byGroup, fallback } = await this.duplicateRules.allCompanies();
+    const offGroups = [...byGroup.entries()].filter(([, r]) => r.cartReconcile.mode === 'OFF').map(([g]) => g);
+    if (fallback.cartReconcile.mode === 'OFF' && offGroups.length === byGroup.size) return 0;
+    // Keep switched-off companies out of the LIMIT so they cannot starve the rest.
+    const notOff = offGroups.length > 0
+      ? sql` AND NOT EXISTS (SELECT 1 FROM branches rb WHERE rb.id = co.branch_id AND rb.group_id IN (${sql.join(offGroups.map((g) => sql`${g}::uuid`), sql`, `)}))`
+      : sql``;
+    // An early-stage cart order already flagged (FLAG mode) is settled; DELETE mode
+    // never leaves an early-stage row flagged, so this filter is neutral there.
     const early = (await this.db.execute(sql`
-      ${cartRealOrderMatchesQuery(sql.raw(`co.status IN ('UNPROCESSED','CS_ASSIGNED','CS_ENGAGED')`))}
+      ${cartRealOrderMatchesQuery(sql`co.status IN ('UNPROCESSED','CS_ASSIGNED','CS_ENGAGED') AND co.is_duplicate IS DISTINCT FROM 'CART_EDGE_FORM_DUPE'${notOff}`)}
       LIMIT 500
     `)) as unknown as CartRealOrderMatch[];
     const progressed = (await this.db.execute(sql`
       SELECT * FROM (
-        ${cartRealOrderMatchesQuery(sql.raw(`co.status NOT IN ('UNPROCESSED','CS_ASSIGNED','CS_ENGAGED') AND co.is_duplicate IS NULL`))}
+        ${cartRealOrderMatchesQuery(sql`co.status NOT IN ('UNPROCESSED','CS_ASSIGNED','CS_ENGAGED') AND co.is_duplicate IS NULL${notOff}`)}
       ) m
       WHERE m.match_type <> 'SAME_PRODUCT' OR m.hours_from_cart_order <= 14 * 24
       LIMIT 500
     `)) as unknown as CartRealOrderMatch[];
     if (early.length === 0 && progressed.length === 0) return 0;
 
-    const all = [...early, ...progressed];
     const cartRows = await this.db
       .select({ id: schema.cartOrders.id, branchId: schema.cartOrders.branchId })
       .from(schema.cartOrders)
-      .where(inArray(schema.cartOrders.id, all.map((m) => m.cart_order_id)));
+      .where(inArray(schema.cartOrders.id, [...early, ...progressed].map((m) => m.cart_order_id)));
     const branchByCartOrder = new Map(cartRows.map((r) => [r.id, r.branchId ?? null]));
+    const rulesFor = await this.duplicateRules.forBranches(cartRows.map((r) => r.branchId));
+    const modeOf = (m: CartRealOrderMatch) => rulesFor(branchByCartOrder.get(m.cart_order_id)).cartReconcile.mode;
+    const toDelete = early.filter((m) => modeOf(m) === 'DELETE');
+    const toFlag = [
+      ...early.filter((m) => modeOf(m) === 'FLAG'),
+      ...progressed.filter((m) => modeOf(m) !== 'OFF'),
+    ];
+    if (toDelete.length === 0 && toFlag.length === 0) return 0;
+
+    const all = [...toDelete, ...toFlag];
     // Real-order labels carry the real order's own company prefix.
     const prefixOf = this.memoizedOrderPrefix();
     const labelByOrder = new Map<string, string>();
@@ -318,20 +340,20 @@ export class CartOrdersService {
 
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
       const now = new Date();
-      for (const m of early) {
+      for (const m of toDelete) {
         await tx
           .update(schema.cartOrders)
           .set({ status: 'DELETED', deletedAt: now, updatedAt: now, isDuplicate: 'CART_EDGE_FORM_DUPE', duplicateOfId: m.order_id })
           .where(and(eq(schema.cartOrders.id, m.cart_order_id), isNull(schema.cartOrders.deletedAt)));
       }
-      for (const m of progressed) {
+      for (const m of toFlag) {
         await tx
           .update(schema.cartOrders)
           .set({ isDuplicate: 'CART_EDGE_FORM_DUPE', duplicateOfId: m.order_id, updatedAt: now })
           .where(and(eq(schema.cartOrders.id, m.cart_order_id), isNull(schema.cartOrders.isDuplicate)));
       }
       await tx.insert(schema.cartOrderTimelineEvents).values([
-        ...early.map((m) => ({
+        ...toDelete.map((m) => ({
           cartOrderId: m.cart_order_id,
           eventType: 'ORDER_DELETED',
           actorId: null,
@@ -340,21 +362,35 @@ export class CartOrdersService {
           metadata: { reason: 'RECONCILED_DUPLICATE_OF_ORDER', matchType: m.match_type, orderId: m.order_id },
           branchId: branchByCartOrder.get(m.cart_order_id) ?? null,
         })),
-        ...progressed.map((m) => ({
+        ...toFlag.map((m) => ({
           cartOrderId: m.cart_order_id,
           eventType: 'CS_COMMENT',
           actorId: null,
           actorName: 'System',
-          description: `Possible duplicate: ${reasonText(m)}. Flagged for review, not deleted because this cart order has already progressed.`,
+          description: early.includes(m)
+            ? `Possible duplicate: ${reasonText(m)}. Flagged for review, not deleted (duplicate rules are set to flag only).`
+            : `Possible duplicate: ${reasonText(m)}. Flagged for review, not deleted because this cart order has already progressed.`,
           metadata: { reason: 'FLAGGED_POSSIBLE_DUPLICATE_OF_ORDER', matchType: m.match_type, orderId: m.order_id },
           branchId: branchByCartOrder.get(m.cart_order_id) ?? null,
         })),
       ]);
     });
     this.logger.log(
-      `Reconciled cart orders against live orders: ${early.length} deleted, ${progressed.length} flagged as possible duplicates`,
+      `Reconciled cart orders against live orders: ${toDelete.length} deleted, ${toFlag.length} flagged as possible duplicates`,
     );
-    return early.length + progressed.length;
+    return toDelete.length + toFlag.length;
+  }
+
+  /** DUPLICATE_RULES.cartPullGuard for each cart, by its campaign's company. */
+  private async pullGuardForCarts(cartIds: string[]): Promise<Map<string, DuplicateRules['cartPullGuard']>> {
+    const rows = await this.db
+      .select({ id: schema.cartAbandonments.id, branchId: schema.campaigns.branchId })
+      .from(schema.cartAbandonments)
+      .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.cartAbandonments.campaignId))
+      .where(inArray(schema.cartAbandonments.id, cartIds));
+    const branchByCart = new Map(rows.map((r) => [r.id, r.branchId ?? null]));
+    const rulesFor = await this.duplicateRules.forBranches(rows.map((r) => r.branchId));
+    return new Map(cartIds.map((id) => [id, rulesFor(branchByCart.get(id)).cartPullGuard]));
   }
 
   /** Source cart status (PENDING / ABANDONED / CONVERTED) per cart order, for the export. */
@@ -929,7 +965,11 @@ export class CartOrdersService {
     // never have a delivered cart order that can't graduate. The same check runs
     // in graduateToOrders() as a safety net, but this blocks the transition
     // entirely rather than silently converting to CONVERTED after delivery.
-    if (newStatus === 'DELIVERED' && order.customerPhoneHash) {
+    // Per-company switch: DUPLICATE_RULES.preDeliveryCheck (BLOCK / OFF + window).
+    const preDelivery = newStatus === 'DELIVERED' && order.customerPhoneHash
+      ? (await this.duplicateRules.forBranch(order.branchId)).preDeliveryCheck
+      : null;
+    if (newStatus === 'DELIVERED' && order.customerPhoneHash && preDelivery?.mode === 'BLOCK') {
       const coItems = await this.db
         .select()
         .from(schema.cartOrderItems)
@@ -937,7 +977,7 @@ export class CartOrdersService {
       const productIds = coItems.map((i) => i.productId).filter(Boolean) as string[];
       const itemPrices = coItems.map((i) => String(i.unitPrice)).filter(Boolean);
       if (productIds.length > 0) {
-        const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+        const fourteenDaysAgo = new Date(Date.now() - preDelivery.windowDays * 24 * 60 * 60 * 1000);
         const existing = await this.db
           .select({ id: schema.orders.id })
           .from(schema.orders)
@@ -1517,8 +1557,10 @@ export class CartOrdersService {
     // purchase) and still 14-day-windowed so legitimate re-orders graduate.
     // Excludes any order that graduated FROM this same cart (source_cart_order_id)
     // so a partial re-run can't mistake its own copy for a duplicate.
-    if (co.customerPhoneHash && coItems.length > 0) {
-      const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    // Per-company switch: DUPLICATE_RULES.graduationGuard (on/off + window).
+    const graduationGuard = (await this.duplicateRules.forBranch(co.branchId)).graduationGuard;
+    if (graduationGuard.enabled && co.customerPhoneHash && coItems.length > 0) {
+      const fourteenDaysAgo = new Date(Date.now() - graduationGuard.windowDays * 24 * 60 * 60 * 1000);
       const productIds = coItems.map((i) => i.productId).filter(Boolean) as string[];
       const itemPrices = coItems.map((i) => String(i.unitPrice)).filter(Boolean);
       if (productIds.length > 0) {
@@ -2291,6 +2333,27 @@ export class CartOrdersService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid branch ID format' });
     }
 
+    // Per-company duplicate rule DUPLICATE_RULES.cartPullGuard. A batch can span
+    // companies (the auto-sync cron sweeps all due carts), so split it by the
+    // rule each cart's company uses and pull each part with its own setting.
+    const guardByCart = await this.pullGuardForCarts(cartIds);
+    const guardKey = (id: string) => {
+      const g = guardByCart.get(id)!;
+      return `${g.enabled}:${g.windowDays}`;
+    };
+    const guardKeys = new Set(cartIds.map(guardKey));
+    if (guardKeys.size > 1) {
+      let pulled = 0;
+      for (const key of guardKeys) {
+        const res = await this.pullFromAbandonedCarts(cartIds.filter((id) => guardKey(id) === key), targetBranchId, _actor, effectiveBranchIds);
+        pulled += res.pulled;
+      }
+      return { pulled };
+    }
+    const pullGuard = guardByCart.get(cartIds[0]!)!;
+    // windowDays is a validated integer (1-90), safe to inline.
+    const guardWindowSql = `INTERVAL '${Math.trunc(pullGuard.windowDays)} days'`;
+
     // Country-scoped routing: when the caller did NOT pin an explicit branch, the
     // servicing branch is resolved from currency rules — which can differ per
     // currency. A single pull batch may span currencies (e.g. an auto-pull cron
@@ -2391,11 +2454,65 @@ export class CartOrdersService {
         FROM orders o
         WHERE o.deleted_at IS NULL
           AND o.status NOT IN ('DELETED', 'CANCELLED')
-          AND o.created_at >= (SELECT min(created_at) FROM cart_abandonments WHERE id IN (${safeIdList})) - INTERVAL '14 days'
+          AND o.created_at >= (SELECT min(created_at) FROM cart_abandonments WHERE id IN (${safeIdList})) - ${guardWindowSql}
       )`;
     const caTail = tailSql('ca.customer_phone');
     const samePhone = (alias: string) =>
       `(${alias}.customer_phone_hash = ca.customer_phone_hash OR (length(${caTail}) = ${PHONE_TAIL_DIGITS} AND ${alias}.p_tail = ${caTail}))`;
+
+    // Skip carts whose customer already ordered (orders, cart orders, follow-ups).
+    // Empty when the company switched the pull guard off; the idempotency,
+    // one-per-session and twin-in-batch guards below always apply.
+    const orderDedupGuardSql = pullGuard.enabled ? `
+        -- Dedup: skip if order already exists for same customer + product inside the
+        -- window, across orders, cart_orders, and follow_up_orders.
+        AND NOT EXISTS (
+          SELECT 1
+          FROM orders o
+          JOIN order_items oi ON oi.order_id = o.id
+          WHERE o.customer_phone_hash = ca.customer_phone_hash
+            AND oi.product_id = ca.product_id
+            AND o.deleted_at IS NULL
+            AND o.status NOT IN ('DELETED', 'CANCELLED')
+            AND o.created_at >= (ca.created_at - ${guardWindowSql})
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM cart_orders co2
+          JOIN cart_order_items coi ON coi.cart_order_id = co2.id
+          WHERE co2.customer_phone_hash = ca.customer_phone_hash
+            AND coi.product_id = ca.product_id
+            AND co2.deleted_at IS NULL
+            AND co2.status NOT IN ('DELETED', 'CANCELLED')
+            AND co2.created_at >= (ca.created_at - ${guardWindowSql})
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM follow_up_orders fu
+          JOIN follow_up_order_items fui ON fui.follow_up_order_id = fu.id
+          WHERE fu.customer_phone_hash = ca.customer_phone_hash
+            AND fui.product_id = ca.product_id
+            AND fu.deleted_at IS NULL
+            AND fu.status NOT IN ('DELETED', 'CANCELLED')
+            AND fu.created_at >= (ca.created_at - ${guardWindowSql})
+        )
+        -- A live order carries this cart's id (orders.cart_id).
+        AND NOT EXISTS (
+          SELECT 1 FROM ro WHERE ro.cart_id = ca.id AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL}
+        )
+        -- Same phone (hash or raw digits) ordered anything in this cart's session:
+        -- the customer switched product before submitting.
+        AND NOT EXISTS (
+          SELECT 1 FROM ro WHERE ${samePhone('ro')} AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL}
+        )
+        -- Same raw phone + same product inside the window (hash drift version of the first guard).
+        AND NOT EXISTS (
+          SELECT 1 FROM ro JOIN order_items oi ON oi.order_id = ro.id
+          WHERE length(${caTail}) = ${PHONE_TAIL_DIGITS} AND ro.p_tail = ${caTail}
+            AND oi.product_id = ca.product_id
+            AND ro.created_at >= ca.created_at - ${guardWindowSql}
+        )
+    ` : '';
 
     const inserted = await this.pg.unsafe<Array<{ id: string; source_cart_id: string }>>(`
       ${actorSetSql}
@@ -2425,54 +2542,7 @@ export class CartOrdersService {
         AND ca.product_id IS NOT NULL
         AND (ca.customer_phone IS NOT NULL OR ca.customer_phone_hash IS NOT NULL)
         AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
-        -- Dedup: skip if order already exists for same customer + product within 14 days
-        -- across orders, cart_orders, and follow_up_orders.
-        AND NOT EXISTS (
-          SELECT 1
-          FROM orders o
-          JOIN order_items oi ON oi.order_id = o.id
-          WHERE o.customer_phone_hash = ca.customer_phone_hash
-            AND oi.product_id = ca.product_id
-            AND o.deleted_at IS NULL
-            AND o.status NOT IN ('DELETED', 'CANCELLED')
-            AND o.created_at >= (ca.created_at - INTERVAL '14 days')
-        )
-        AND NOT EXISTS (
-          SELECT 1
-          FROM cart_orders co2
-          JOIN cart_order_items coi ON coi.cart_order_id = co2.id
-          WHERE co2.customer_phone_hash = ca.customer_phone_hash
-            AND coi.product_id = ca.product_id
-            AND co2.deleted_at IS NULL
-            AND co2.status NOT IN ('DELETED', 'CANCELLED')
-            AND co2.created_at >= (ca.created_at - INTERVAL '14 days')
-        )
-        AND NOT EXISTS (
-          SELECT 1
-          FROM follow_up_orders fu
-          JOIN follow_up_order_items fui ON fui.follow_up_order_id = fu.id
-          WHERE fu.customer_phone_hash = ca.customer_phone_hash
-            AND fui.product_id = ca.product_id
-            AND fu.deleted_at IS NULL
-            AND fu.status NOT IN ('DELETED', 'CANCELLED')
-            AND fu.created_at >= (ca.created_at - INTERVAL '14 days')
-        )
-        -- A live order carries this cart's id (orders.cart_id).
-        AND NOT EXISTS (
-          SELECT 1 FROM ro WHERE ro.cart_id = ca.id AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL}
-        )
-        -- Same phone (hash or raw digits) ordered anything in this cart's session:
-        -- the customer switched product before submitting.
-        AND NOT EXISTS (
-          SELECT 1 FROM ro WHERE ${samePhone('ro')} AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL}
-        )
-        -- Same raw phone + same product within 14 days (hash drift version of the first guard).
-        AND NOT EXISTS (
-          SELECT 1 FROM ro JOIN order_items oi ON oi.order_id = ro.id
-          WHERE length(${caTail}) = ${PHONE_TAIL_DIGITS} AND ro.p_tail = ${caTail}
-            AND oi.product_id = ca.product_id
-            AND ro.created_at >= ca.created_at - INTERVAL '14 days'
-        )
+        ${orderDedupGuardSql}
         -- One cart order per customer per session: skip if they already have a live
         -- cart order from this session (any product) ...
         AND NOT EXISTS (
@@ -2505,68 +2575,70 @@ export class CartOrdersService {
     const skippedIds = cartIds.filter((id) => !insertedSourceIds.has(id));
     if (skippedIds.length > 0) {
       const skippedIdList = skippedIds.map((id) => `'${id}'`).join(', ');
-      // Tag: duplicate in orders table
-      await this.pg.unsafe(`
-        UPDATE cart_abandonments ca
-        SET skip_reason = 'DUPLICATE_ORDER',
-            duplicate_of_order_id = sub.order_id,
-            skip_tagged_at = now()
-        FROM (
-          SELECT DISTINCT ON (ca2.id) ca2.id AS cart_id, o.id AS order_id
-          FROM cart_abandonments ca2
-          JOIN orders o ON o.customer_phone_hash = ca2.customer_phone_hash
-            AND o.deleted_at IS NULL
-            AND o.status NOT IN ('DELETED', 'CANCELLED')
-            AND o.created_at >= (ca2.created_at - INTERVAL '14 days')
-          JOIN order_items oi ON oi.order_id = o.id AND oi.product_id = ca2.product_id
-          WHERE ca2.id IN (${skippedIdList})
-            AND ca2.skip_reason IS NULL
-          ORDER BY ca2.id, o.created_at DESC
-        ) sub
-        WHERE ca.id = sub.cart_id
-      `).catch((e) => this.logger.warn(`[pull] skip-tag orders failed: ${e instanceof Error ? e.message : e}`));
+      if (pullGuard.enabled) {
+        // Tag: duplicate in orders table
+        await this.pg.unsafe(`
+          UPDATE cart_abandonments ca
+          SET skip_reason = 'DUPLICATE_ORDER',
+              duplicate_of_order_id = sub.order_id,
+              skip_tagged_at = now()
+          FROM (
+            SELECT DISTINCT ON (ca2.id) ca2.id AS cart_id, o.id AS order_id
+            FROM cart_abandonments ca2
+            JOIN orders o ON o.customer_phone_hash = ca2.customer_phone_hash
+              AND o.deleted_at IS NULL
+              AND o.status NOT IN ('DELETED', 'CANCELLED')
+              AND o.created_at >= (ca2.created_at - ${guardWindowSql})
+            JOIN order_items oi ON oi.order_id = o.id AND oi.product_id = ca2.product_id
+            WHERE ca2.id IN (${skippedIdList})
+              AND ca2.skip_reason IS NULL
+            ORDER BY ca2.id, o.created_at DESC
+          ) sub
+          WHERE ca.id = sub.cart_id
+        `).catch((e) => this.logger.warn(`[pull] skip-tag orders failed: ${e instanceof Error ? e.message : e}`));
 
-      // Tag: duplicate in cart_orders table
-      await this.pg.unsafe(`
-        UPDATE cart_abandonments ca
-        SET skip_reason = 'DUPLICATE_CART_ORDER',
-            duplicate_of_cart_order_id = sub.co_id,
-            skip_tagged_at = now()
-        FROM (
-          SELECT DISTINCT ON (ca2.id) ca2.id AS cart_id, co2.id AS co_id
-          FROM cart_abandonments ca2
-          JOIN cart_orders co2 ON co2.customer_phone_hash = ca2.customer_phone_hash
-            AND co2.deleted_at IS NULL
-            AND co2.status NOT IN ('DELETED', 'CANCELLED')
-            AND co2.created_at >= (ca2.created_at - INTERVAL '14 days')
-          JOIN cart_order_items coi ON coi.cart_order_id = co2.id AND coi.product_id = ca2.product_id
-          WHERE ca2.id IN (${skippedIdList})
-            AND ca2.skip_reason IS NULL
-          ORDER BY ca2.id, co2.created_at DESC
-        ) sub
-        WHERE ca.id = sub.cart_id
-      `).catch((e) => this.logger.warn(`[pull] skip-tag cart_orders failed: ${e instanceof Error ? e.message : e}`));
+        // Tag: duplicate in cart_orders table
+        await this.pg.unsafe(`
+          UPDATE cart_abandonments ca
+          SET skip_reason = 'DUPLICATE_CART_ORDER',
+              duplicate_of_cart_order_id = sub.co_id,
+              skip_tagged_at = now()
+          FROM (
+            SELECT DISTINCT ON (ca2.id) ca2.id AS cart_id, co2.id AS co_id
+            FROM cart_abandonments ca2
+            JOIN cart_orders co2 ON co2.customer_phone_hash = ca2.customer_phone_hash
+              AND co2.deleted_at IS NULL
+              AND co2.status NOT IN ('DELETED', 'CANCELLED')
+              AND co2.created_at >= (ca2.created_at - ${guardWindowSql})
+            JOIN cart_order_items coi ON coi.cart_order_id = co2.id AND coi.product_id = ca2.product_id
+            WHERE ca2.id IN (${skippedIdList})
+              AND ca2.skip_reason IS NULL
+            ORDER BY ca2.id, co2.created_at DESC
+          ) sub
+          WHERE ca.id = sub.cart_id
+        `).catch((e) => this.logger.warn(`[pull] skip-tag cart_orders failed: ${e instanceof Error ? e.message : e}`));
 
-      // Tag: duplicate in follow_up_orders table
-      await this.pg.unsafe(`
-        UPDATE cart_abandonments ca
-        SET skip_reason = 'DUPLICATE_FOLLOW_UP',
-            duplicate_of_follow_up_order_id = sub.fu_id,
-            skip_tagged_at = now()
-        FROM (
-          SELECT DISTINCT ON (ca2.id) ca2.id AS cart_id, fu.id AS fu_id
-          FROM cart_abandonments ca2
-          JOIN follow_up_orders fu ON fu.customer_phone_hash = ca2.customer_phone_hash
-            AND fu.deleted_at IS NULL
-            AND fu.status NOT IN ('DELETED', 'CANCELLED')
-            AND fu.created_at >= (ca2.created_at - INTERVAL '14 days')
-          JOIN follow_up_order_items fui ON fui.follow_up_order_id = fu.id AND fui.product_id = ca2.product_id
-          WHERE ca2.id IN (${skippedIdList})
-            AND ca2.skip_reason IS NULL
-          ORDER BY ca2.id, fu.created_at DESC
-        ) sub
-        WHERE ca.id = sub.cart_id
-      `).catch((e) => this.logger.warn(`[pull] skip-tag follow_up_orders failed: ${e instanceof Error ? e.message : e}`));
+        // Tag: duplicate in follow_up_orders table
+        await this.pg.unsafe(`
+          UPDATE cart_abandonments ca
+          SET skip_reason = 'DUPLICATE_FOLLOW_UP',
+              duplicate_of_follow_up_order_id = sub.fu_id,
+              skip_tagged_at = now()
+          FROM (
+            SELECT DISTINCT ON (ca2.id) ca2.id AS cart_id, fu.id AS fu_id
+            FROM cart_abandonments ca2
+            JOIN follow_up_orders fu ON fu.customer_phone_hash = ca2.customer_phone_hash
+              AND fu.deleted_at IS NULL
+              AND fu.status NOT IN ('DELETED', 'CANCELLED')
+              AND fu.created_at >= (ca2.created_at - ${guardWindowSql})
+            JOIN follow_up_order_items fui ON fui.follow_up_order_id = fu.id AND fui.product_id = ca2.product_id
+            WHERE ca2.id IN (${skippedIdList})
+              AND ca2.skip_reason IS NULL
+            ORDER BY ca2.id, fu.created_at DESC
+          ) sub
+          WHERE ca.id = sub.cart_id
+        `).catch((e) => this.logger.warn(`[pull] skip-tag follow_up_orders failed: ${e instanceof Error ? e.message : e}`));
+      }
 
       // Tag: already pulled (source_cart_id exists in cart_orders)
       await this.pg.unsafe(`
@@ -2584,29 +2656,31 @@ export class CartOrdersService {
         WHERE ca.id = sub.cart_id
       `).catch((e) => this.logger.warn(`[pull] skip-tag already-pulled failed: ${e instanceof Error ? e.message : e}`));
 
-      // Tag: real order by the wider match (cart_id link, raw-phone match, same
-      // session). Every skipped cart must get a reason, or runAutoSync re-tries it
-      // on every tick.
-      await this.pg.unsafe(`
-        WITH ${recentOrdersCte}
-        UPDATE cart_abandonments ca
-        SET skip_reason = 'DUPLICATE_ORDER',
-            duplicate_of_order_id = sub.order_id,
-            skip_tagged_at = now()
-        FROM (
-          SELECT DISTINCT ON (ca.id) ca.id AS cart_id, ro.id AS order_id
-          FROM cart_abandonments ca
-          JOIN ro ON (ro.cart_id = ca.id AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL})
-                  OR (${samePhone('ro')} AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL})
-                  OR (length(${caTail}) = ${PHONE_TAIL_DIGITS} AND ro.p_tail = ${caTail}
-                      AND ro.created_at >= ca.created_at - INTERVAL '14 days'
-                      AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = ro.id AND oi.product_id = ca.product_id))
-          WHERE ca.id IN (${skippedIdList})
-            AND ca.skip_reason IS NULL
-          ORDER BY ca.id, (ro.cart_id = ca.id) DESC, ro.created_at DESC
-        ) sub
-        WHERE ca.id = sub.cart_id
-      `).catch((e) => this.logger.warn(`[pull] skip-tag wider order match failed: ${e instanceof Error ? e.message : e}`));
+      if (pullGuard.enabled) {
+        // Tag: real order by the wider match (cart_id link, raw-phone match, same
+        // session). Every skipped cart must get a reason, or runAutoSync re-tries it
+        // on every tick.
+        await this.pg.unsafe(`
+          WITH ${recentOrdersCte}
+          UPDATE cart_abandonments ca
+          SET skip_reason = 'DUPLICATE_ORDER',
+              duplicate_of_order_id = sub.order_id,
+              skip_tagged_at = now()
+          FROM (
+            SELECT DISTINCT ON (ca.id) ca.id AS cart_id, ro.id AS order_id
+            FROM cart_abandonments ca
+            JOIN ro ON (ro.cart_id = ca.id AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL})
+                    OR (${samePhone('ro')} AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL})
+                    OR (length(${caTail}) = ${PHONE_TAIL_DIGITS} AND ro.p_tail = ${caTail}
+                        AND ro.created_at >= ca.created_at - ${guardWindowSql}
+                        AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = ro.id AND oi.product_id = ca.product_id))
+            WHERE ca.id IN (${skippedIdList})
+              AND ca.skip_reason IS NULL
+            ORDER BY ca.id, (ro.cart_id = ca.id) DESC, ro.created_at DESC
+          ) sub
+          WHERE ca.id = sub.cart_id
+        `).catch((e) => this.logger.warn(`[pull] skip-tag wider order match failed: ${e instanceof Error ? e.message : e}`));
+      }
 
       // Tag: customer already has a live cart order from this session (any product,
       // including one inserted by this batch).

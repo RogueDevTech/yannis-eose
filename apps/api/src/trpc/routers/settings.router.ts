@@ -3,6 +3,10 @@ import {
   notificationEmailConfigSchema,
   CLIENT_UI_CONFIG_KEY,
   clientUiConfigSchema,
+  DUPLICATE_RULES_SETTING_KEY,
+  DEFAULT_DUPLICATE_RULES,
+  resolveDuplicateRules,
+  updateDuplicateRulesSchema,
   updateClientUiConfigSchema,
   type AppThemeId,
 } from '@yannis/shared';
@@ -12,7 +16,8 @@ import {
   MANDATORY_EMAIL_TYPES,
   NOTIFICATION_TYPE_META,
 } from '@yannis/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
+import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure, publicProcedure } from '../trpc';
 import type { SettingsService } from '../../settings/settings.service';
 import { db as schema } from '@yannis/shared';
@@ -186,6 +191,47 @@ export const settingsRouter = router({
       );
       await invalidateSystemSettingsCache();
       await invalidateNotificationEmailConfigCache();
+      return { success: true };
+    }),
+
+  /**
+   * Duplicate rules for the active company (DUPLICATE_RULES). Values not yet
+   * saved show today's defaults. Writes are audited through system_settings
+   * history (withActor).
+   */
+  getDuplicateRules: permissionProcedure('settings.write').query(async ({ ctx }) => {
+    const gId = ctx.activeGroupId;
+    if (!gId) {
+      return { companySelected: false as const, rules: DEFAULT_DUPLICATE_RULES, defaults: DEFAULT_DUPLICATE_RULES, updatedAt: null, updatedByName: null };
+    }
+    const [row] = await getSettingsDb()
+      .select({
+        value: schema.systemSettings.value,
+        updatedAt: schema.systemSettings.updatedAt,
+        updatedByName: schema.users.name,
+      })
+      .from(schema.systemSettings)
+      .leftJoin(schema.users, eq(schema.users.id, schema.systemSettings.updatedBy))
+      .where(and(eq(schema.systemSettings.key, DUPLICATE_RULES_SETTING_KEY), eq(schema.systemSettings.groupId, gId)))
+      .limit(1);
+    return {
+      companySelected: true as const,
+      rules: resolveDuplicateRules(row?.value ?? null),
+      defaults: DEFAULT_DUPLICATE_RULES,
+      updatedAt: row?.updatedAt ?? null,
+      updatedByName: row?.updatedByName ?? null,
+    };
+  }),
+
+  updateDuplicateRules: permissionProcedure('settings.write')
+    .input(updateDuplicateRulesSchema)
+    .mutation(async ({ input, ctx }) => {
+      // Without a company, SettingsService.set would match every company's row.
+      if (!ctx.activeGroupId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Select a company first. Duplicate rules are set per company.' });
+      }
+      await getSettingsService().set(DUPLICATE_RULES_SETTING_KEY, input, ctx.user.id, undefined, ctx.activeGroupId);
+      await invalidateSystemSettingsCache();
       return { success: true };
     }),
 
