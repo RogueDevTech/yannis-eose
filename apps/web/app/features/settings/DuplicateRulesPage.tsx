@@ -28,7 +28,7 @@ interface RuleDef {
   /** Select modes. Omitted = on/off toggle (`enabled`). */
   modes?: ModeOption[];
   /** Field holding the window, if the rule has one. */
-  window?: { field: 'windowDays' | 'windowMinutes'; unit: string; max: number };
+  window?: { field: 'windowDays'; unit: string; max: number };
   /** Shown while the rule is loosened from its default. */
   warning?: string;
 }
@@ -53,13 +53,6 @@ const SECTIONS: Section[] = [
         ],
         window: { field: 'windowDays', unit: 'days', max: 90 },
         warning: 'Repeat submissions become orders. CS sees them flagged as possible duplicates.',
-      },
-      {
-        key: 'doubleSubmitGuard',
-        title: 'Double-tap guard',
-        description: 'Same phone on the same form inside the window returns the first order.',
-        window: { field: 'windowMinutes', unit: 'minutes', max: 60 },
-        warning: 'A double tap or page refresh can create two orders.',
       },
     ],
   },

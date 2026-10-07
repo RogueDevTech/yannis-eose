@@ -6,7 +6,8 @@ import { z } from 'zod';
  *
  * DEFAULTS ARE ALL OFF (owner decision 2026-10-07, CEO: "capture every
  * legitimate order first"): a company with no saved row, or a corrupt row, runs
- * with no duplicate rules. The windows keep their old values so switching a rule
+ * with no duplicate rules. The double-tap guard (same phone + form within 2
+ * minutes returns the first order) is NOT here: it is always on, not a setting. The windows keep their old values so switching a rule
  * on restores the previous behaviour. Every read goes through
  * `resolveDuplicateRules`, which never throws: a settings problem must never be
  * the reason an order fails or a cron stops.
@@ -21,11 +22,6 @@ export const duplicateRulesSchema = z.object({
     /** BLOCK = no order, recorded in Cross-funnel. FLAG = order created + flagged. OFF = no check. */
     mode: z.enum(['BLOCK', 'FLAG', 'OFF']),
     windowDays,
-  }),
-  /** Public order form: same phone + form resubmitted inside the window returns the first order. */
-  doubleSubmitGuard: z.object({
-    enabled: z.boolean(),
-    windowMinutes: z.number().int().min(1).max(60),
   }),
   /** CS-created orders (offline, delivered follow-up, cart recovery). */
   manualOrderBlock: z.object({
@@ -69,13 +65,12 @@ export type DuplicateRuleKey = keyof DuplicateRules;
 /**
  * Every rule off. Changing a value here changes production for every company
  * without a saved row. The previous hard-coded behaviour was: intakeBlock BLOCK,
- * doubleSubmitGuard on, manualOrderBlock BLOCK, cleanupCron DELETE, cartPullGuard
+ * manualOrderBlock BLOCK, cleanupCron DELETE, cartPullGuard
  * on, cartReconcile DELETE, cartMerge on, preDeliveryCheck BLOCK,
  * graduationGuard on (windows as below).
  */
 export const DEFAULT_DUPLICATE_RULES: DuplicateRules = {
   intakeBlock: { mode: 'OFF', windowDays: 14 },
-  doubleSubmitGuard: { enabled: false, windowMinutes: 2 },
   manualOrderBlock: { mode: 'OFF', windowDays: 14 },
   cleanupCron: { mode: 'OFF', windowDays: 14 },
   cartPullGuard: { enabled: false, windowDays: 14 },

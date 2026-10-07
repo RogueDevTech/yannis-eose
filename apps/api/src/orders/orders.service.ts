@@ -2536,19 +2536,17 @@ export class OrdersService {
       }
     }
 
-    // Per-company duplicate rules (DUPLICATE_RULES): doubleSubmitGuard +
-    // intakeBlock. Defaults are both off; BLOCK + on = the previous behaviour.
+    // Per-company duplicate rules (DUPLICATE_RULES): intakeBlock. Default OFF;
+    // BLOCK = the previous behaviour. The same-form 2-minute guard below is NOT a
+    // setting: a double tap or refresh is never a new order (owner, 2026-10-07).
     const intakeRules = orderSource === 'edge-form' ? await this.duplicateRulesFor(branchId) : null;
 
     // Same-form rapid resubmit guard (double-tap / refresh within 2 minutes).
     // Same phone + same campaign + same products = idempotent return.
     // This is distinct from the 14-day universal dedup below: that one records
     // CFA rows and blocks creating a second order. This one returns early.
-    if (
-      orderSource === 'edge-form' && orderInput.customerPhoneHash && orderInput.campaignId &&
-      (intakeRules?.doubleSubmitGuard.enabled ?? true)
-    ) {
-      const twoMinAgo = new Date(Date.now() - (intakeRules?.doubleSubmitGuard.windowMinutes ?? 2) * 60 * 1000);
+    if (orderSource === 'edge-form' && orderInput.customerPhoneHash && orderInput.campaignId) {
+      const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
       const productIds = orderInput.items.map((i) => i.productId);
       const [recentSameForm] = await this.db
         .select({ id: schema.orders.id })

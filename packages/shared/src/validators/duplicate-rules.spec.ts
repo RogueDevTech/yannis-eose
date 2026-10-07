@@ -5,7 +5,6 @@ describe('resolveDuplicateRules', () => {
   it('defaults are every rule off (owner decision 2026-10-07)', () => {
     expect(DEFAULT_DUPLICATE_RULES).toEqual({
       intakeBlock: { mode: 'OFF', windowDays: 14 },
-      doubleSubmitGuard: { enabled: false, windowMinutes: 2 },
       manualOrderBlock: { mode: 'OFF', windowDays: 14 },
       cleanupCron: { mode: 'OFF', windowDays: 14 },
       cartPullGuard: { enabled: false, windowDays: 14 },
