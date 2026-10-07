@@ -664,39 +664,82 @@ export class ProductsService {
   }
 
   /**
-   * Offer labels for one product, for the export Offer filter. Union of the
-   * configured offers (templates + offer-group items) and every label actually
-   * stamped on order / cart / follow-up lines, since renamed or offline labels
-   * only live on the lines. De-duplicated case-insensitively, catalog spelling
-   * wins. Company-gated through the product.
+   * Offers for one product, for the export Offer filter, each with its price
+   * per currency. Labels are the union of the configured offers (templates +
+   * offer-group items) and every label stamped on order / cart / follow-up
+   * lines, since renamed or offline labels only live on the lines.
+   * De-duplicated case-insensitively (catalog spelling wins).
+   *
+   * Price: the configured price (base NGN + per-currency rows) when the label
+   * is in the catalog; otherwise the price most often charged on lines, in the
+   * parent order's currency. Line unit_price IS the offer price.
+   * Company-gated through the product.
    */
-  async listOfferLabels(productId: string, groupId?: string | null): Promise<string[]> {
+  async listOfferLabels(
+    productId: string,
+    groupId?: string | null,
+  ): Promise<Array<{ label: string; prices: Array<{ currencyCode: string; amount: number }> }>> {
     await this.assertProductInCompany(productId, groupId);
-    const rows = await this.db.execute<{ label: string }>(sql`
-      SELECT label FROM (
-        SELECT trim(name) AS label, 0 AS rank FROM offer_templates WHERE product_id = ${productId}
+    const rows = (await this.db.execute(sql`
+      WITH catalog AS (
+        SELECT trim(t.name) AS label, 'NGN' AS currency_code, t.price AS amount
+          FROM offer_templates t WHERE t.product_id = ${productId}
         UNION ALL
-        SELECT trim(label), 0 FROM offer_group_items WHERE product_id = ${productId}
+        SELECT trim(t.name), tp.currency_code, tp.price
+          FROM offer_templates t JOIN offer_template_prices tp ON tp.offer_template_id = t.id
+         WHERE t.product_id = ${productId} AND tp.price > 0
         UNION ALL
-        SELECT DISTINCT trim(offer_label), 1 FROM order_items WHERE product_id = ${productId} AND offer_label IS NOT NULL
+        SELECT trim(g.label), 'NGN', g.price
+          FROM offer_group_items g WHERE g.product_id = ${productId}
         UNION ALL
-        SELECT DISTINCT trim(offer_label), 1 FROM cart_order_items WHERE product_id = ${productId} AND offer_label IS NOT NULL
+        SELECT trim(g.label), gp.currency_code, gp.price
+          FROM offer_group_items g JOIN offer_group_item_prices gp ON gp.offer_group_item_id = g.id
+         WHERE g.product_id = ${productId} AND gp.price > 0
+      ),
+      lines AS (
+        SELECT trim(i.offer_label) AS label, o.currency_code, i.unit_price AS amount
+          FROM order_items i JOIN orders o ON o.id = i.order_id
+         WHERE i.product_id = ${productId} AND i.offer_label IS NOT NULL
         UNION ALL
-        SELECT DISTINCT trim(offer_label), 1 FROM follow_up_order_items WHERE product_id = ${productId} AND offer_label IS NOT NULL
-      ) t
-      WHERE label <> ''
-      ORDER BY rank, label
-      LIMIT 1000
-    `);
-    const seen = new Set<string>();
-    const labels: string[] = [];
-    for (const r of rows as unknown as Array<{ label: string }>) {
+        SELECT trim(i.offer_label), o.currency_code, i.unit_price
+          FROM cart_order_items i JOIN cart_orders o ON o.id = i.cart_order_id
+         WHERE i.product_id = ${productId} AND i.offer_label IS NOT NULL
+        UNION ALL
+        SELECT trim(i.offer_label), o.currency_code, i.unit_price
+          FROM follow_up_order_items i JOIN follow_up_orders o ON o.id = i.follow_up_order_id
+         WHERE i.product_id = ${productId} AND i.offer_label IS NOT NULL
+      ),
+      line_price AS (
+        SELECT DISTINCT ON (lower(label), currency_code) label, currency_code, amount
+          FROM (SELECT label, currency_code, amount, count(*) AS n FROM lines GROUP BY 1, 2, 3) x
+         WHERE label <> ''
+         ORDER BY lower(label), currency_code, n DESC, amount DESC
+      )
+      SELECT label, currency_code, amount::float8 AS amount, 0 AS rank FROM catalog WHERE label <> ''
+      UNION ALL
+      SELECT label, currency_code, amount::float8, 1 FROM line_price
+       WHERE lower(label) NOT IN (SELECT lower(label) FROM catalog)
+      ORDER BY rank, label, currency_code, amount
+      LIMIT 2000
+    `)) as unknown as Array<{ label: string; currency_code: string | null; amount: number | null }>;
+
+    const byKey = new Map<string, { label: string; prices: Array<{ currencyCode: string; amount: number }> }>();
+    for (const r of rows) {
       const key = r.label.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      labels.push(r.label);
+      let entry = byKey.get(key);
+      if (!entry) {
+        entry = { label: r.label, prices: [] };
+        byKey.set(key, entry);
+      }
+      const amount = Number(r.amount);
+      const currencyCode = r.currency_code ?? 'NGN';
+      if (!Number.isFinite(amount) || amount <= 0) continue;
+      if (entry.prices.some((p) => p.currencyCode === currencyCode && p.amount === amount)) continue;
+      entry.prices.push({ currencyCode, amount });
     }
-    return labels.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    return [...byKey.values()].sort((a, b) =>
+      a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }),
+    );
   }
 
   /**
