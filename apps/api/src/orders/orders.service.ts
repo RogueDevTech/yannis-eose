@@ -2625,7 +2625,8 @@ export class OrdersService {
     // they had not pressed submit (capture_source UNSUBMITTED_FORM). If the same
     // browser now submits the same form, return that order: they see "already
     // submitted" and CS keeps one order (owner decision 2026-10-07). Never
-    // rejects; an idempotent return like the double-tap guard above.
+    // rejects; an idempotent return like the double-tap guard above. No
+    // timeline note: the order must look like any other order to CS (owner).
     if (orderSource === 'edge-form' && !opts?.captureSource && orderInput.sessionId && orderInput.campaignId) {
       const [captured] = await this.db
         .select({ id: schema.orders.id })
@@ -2646,15 +2647,6 @@ export class OrdersService {
         if (cartId) {
           await this.cartService.convert(cartId, captured.id, actorId ?? undefined).catch(() => {});
         }
-        void this.writeTimelineEvent({
-          orderId: captured.id,
-          eventType: 'CS_ORDER_COMMENT',
-          actorId: null,
-          actorName: 'System',
-          description: 'The customer has now also pressed submit on the form.',
-          metadata: { reason: 'UNSUBMITTED_FORM_LATER_SUBMITTED' },
-          branchId: branchId ?? null,
-        });
         return { id: captured.id, alreadySubmitted: true };
       }
     }
