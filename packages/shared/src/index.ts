@@ -29,6 +29,7 @@ export * from './accounting/chart-of-accounts';
 export * from './orders/order-clipboard-summary';
 export * from './orders/retrack-category-meta';
 export * from './orders/customer-phone-display';
+export * from './orders/strict-phone-mode';
 export * from './orders/format-order-number';
 export * from './users/format-user-number';
 export * as db from './db/index';

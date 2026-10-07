@@ -24,6 +24,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { NumberInput } from '~/components/ui/number-input';
 import { Collapsible } from '~/components/ui/collapsible';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { STRICT_PHONE_MODE_KEY, isStrictPhoneModeOn } from '@yannis/shared';
 
 interface SettingsUser {
   id: string;
@@ -381,6 +382,10 @@ export function SettingsPage({
   const strictAdSpendSetting = systemSettings.find((s) => s.key === 'STRICT_AD_SPEND_MODE');
   const isStrictAdSpendEnabled = strictAdSpendSetting?.value?.['enabled'] !== false;
   const [localStrictAdSpend, setLocalStrictAdSpend] = useState(isStrictAdSpendEnabled);
+  const isStrictPhoneEnabled = isStrictPhoneModeOn(
+    systemSettings.find((s) => s.key === STRICT_PHONE_MODE_KEY)?.value,
+  );
+  const [localStrictPhone, setLocalStrictPhone] = useState(isStrictPhoneEnabled);
 
   // Local state for notification email toggles (configurable types only)
   const [enabledTypes, setEnabledTypes] = useState<Record<string, boolean>>({});
@@ -479,6 +484,9 @@ export function SettingsPage({
   useEffect(() => {
     setLocalStrictAdSpend(isStrictAdSpendEnabled);
   }, [isStrictAdSpendEnabled]);
+  useEffect(() => {
+    setLocalStrictPhone(isStrictPhoneEnabled);
+  }, [isStrictPhoneEnabled]);
 
   useEffect(() => {
     if (location.hash !== '#install-app') return;
@@ -495,7 +503,8 @@ export function SettingsPage({
     localClaimCap !== claimCapFromSettings ||
     localProfitabilityTarget !== profitabilityTargetSaved ||
     localProfitabilityThreshold !== profitabilityThresholdSaved ||
-    localStrictAdSpend !== isStrictAdSpendEnabled;
+    localStrictAdSpend !== isStrictAdSpendEnabled ||
+    localStrictPhone !== isStrictPhoneEnabled;
 
   return (
     <div className="space-y-4">
@@ -1017,6 +1026,7 @@ export function SettingsPage({
                 value={String(localProfitabilityThreshold)}
               />
               <input type="hidden" name="strictAdSpendEnabled" value={String(localStrictAdSpend)} />
+              <input type="hidden" name="strictPhoneEnabled" value={String(localStrictPhone)} />
 
               {/* VOIP Integration */}
               <div className="card lg:col-span-2">
@@ -1398,6 +1408,61 @@ export function SettingsPage({
                       <span
                         className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
                           localStrictAdSpend ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+                </Collapsible>
+              </div>
+
+              {/* Strict Phone Mode */}
+              <div className="card lg:col-span-2">
+                <Collapsible
+                  contentClassName="mt-4"
+                  trigger={
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-app-fg">Strict phone mode</h3>
+                        <p className="text-sm text-app-fg-muted">
+                          Hide customer phone numbers from Media Buyers and Heads of Marketing.
+                        </p>
+                      </div>
+                    </div>
+                  }
+                >
+                <div className="rounded-lg border border-app-border p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-1">
+                        <p className="text-sm font-semibold text-app-fg">Hide phones from marketing</p>
+                        <StatusBadge status={localStrictPhone ? 'Enabled' : 'Disabled'} />
+                      </div>
+                      <p className="text-xs text-app-fg-muted leading-relaxed">
+                        {localStrictPhone
+                          ? 'Media Buyers and Heads of Marketing see masked numbers on order pages. Applies to this company only. Exports are not affected.'
+                          : 'Media Buyers and Heads of Marketing see the full number on orders they can open. Applies to this company only. Exports are not affected.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLocalStrictPhone(!localStrictPhone)}
+                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 dark:focus:ring-offset-surface-900 ${
+                        localStrictPhone ? 'bg-brand-600' : 'bg-app-border'
+                      }`}
+                      disabled={fetcher.state === 'submitting'}
+                      role="switch"
+                      aria-checked={localStrictPhone}
+                      aria-label="Toggle strict phone mode"
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          localStrictPhone ? 'translate-x-5' : 'translate-x-0'
                         }`}
                       />
                     </button>
