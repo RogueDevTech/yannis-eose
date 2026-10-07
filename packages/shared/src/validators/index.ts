@@ -587,6 +587,17 @@ export type {
   NotificationEmailConfig,
 } from './settings';
 
+// Duplicate rules (per-company system setting)
+export {
+  DUPLICATE_RULES_SETTING_KEY,
+  duplicateRulesSchema,
+  updateDuplicateRulesSchema,
+  DEFAULT_DUPLICATE_RULES,
+  resolveDuplicateRules,
+} from './duplicate-rules';
+
+export type { DuplicateRules, DuplicateRuleKey } from './duplicate-rules';
+
 // UI / client config
 export {
   APP_THEME_IDS,

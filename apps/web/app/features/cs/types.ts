@@ -26,6 +26,8 @@ export interface CloserWorkloadOrder {
   totalAmount: string | null;
   /** Frozen order currency (default NGN) for money display. */
   currencyCode?: string;
+  /** "Check price": form submit matched no active offer; blocks Confirm until cleared. */
+  offerCheck?: string | null;
   items: CloserWorkloadOrderItem[];
 }
 
@@ -54,6 +56,8 @@ export interface CSOrder {
   callbackNotes?: string | null;
   isDuplicate?: string | null;
   duplicateOfId?: string | null;
+  /** "Check price": form submit matched no active offer; blocks Confirm until cleared. */
+  offerCheck?: string | null;
   items?: unknown;
 }
 

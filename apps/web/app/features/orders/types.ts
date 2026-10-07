@@ -42,6 +42,8 @@ export interface Order {
   cartId?: string | null;
   /** Duplicate flag: FLAGGED | POSSIBLY_DUPLICATE | MERGED | DISMISSED | null */
   isDuplicate?: string | null;
+  /** "Check price": form submit matched no active offer; blocks Confirm until cleared. */
+  offerCheck?: string | null;
   /** When true, order is frozen — no status transitions, assignments, or edits allowed. */
   frozenForFollowUp?: boolean;
   /** Last CS comment left on the order — shown as an icon + tooltip on the list. */
@@ -134,6 +136,8 @@ export interface OrderDetail {
   callbackNotes?: string | null;
   isDuplicate?: string | null;
   duplicateOfId?: string | null;
+  /** "Check price": form submit matched no active offer; blocks Confirm until cleared. */
+  offerCheck?: string | null;
   lockedUntil?: string | null;
   lockedBy?: string | null;
   landedCost?: string | null;

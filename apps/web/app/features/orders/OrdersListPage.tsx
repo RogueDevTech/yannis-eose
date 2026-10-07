@@ -86,6 +86,7 @@ import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { Order } from './types';
 import { AbandonedCartDetailModal } from '~/features/cs/AbandonedCartDetailModal';
 import type { PendingCart } from '~/features/cs/types';
+import { CheckPriceBadge } from '~/components/ui/check-price-badge';
 import {
   isPreferredDeliveryDueToday,
   isPreferredDeliveryOverdue,
@@ -1363,6 +1364,7 @@ function OrdersListPageImpl({
                   Duplicate
                 </span>
               )}
+              <CheckPriceBadge offerCheck={order.offerCheck} />
             </span>
           );
         },
@@ -1499,6 +1501,7 @@ function OrdersListPageImpl({
                     Duplicate
                   </span>
                 )}
+                <CheckPriceBadge offerCheck={order.offerCheck} />
               </span>
             )}
             <span className="whitespace-nowrap text-xs text-app-fg-muted">

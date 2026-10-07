@@ -8454,6 +8454,124 @@ export class MarketingService {
   }
 
   /**
+   * Record a public-form submit that did not go through (form_submit_attempts).
+   * Telemetry: never throws, unknown campaigns are dropped. Branch/MB come from
+   * the campaign, never from the beacon.
+   */
+  async recordSubmitAttempt(input: {
+    campaignId: string;
+    outcome: string;
+    reason?: string | null;
+    sessionId?: string | null;
+    deploymentType?: string | null;
+    userAgent?: string | null;
+    country?: string | null;
+  }): Promise<void> {
+    try {
+      const [campaign] = await this.db
+        .select({ mediaBuyerId: schema.campaigns.mediaBuyerId, branchId: schema.campaigns.branchId })
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.id, input.campaignId))
+        .limit(1);
+      if (!campaign) return;
+      await this.db.insert(schema.formSubmitAttempts).values({
+        id: uuidv7(),
+        campaignId: input.campaignId,
+        mediaBuyerId: campaign.mediaBuyerId ?? null,
+        branchId: campaign.branchId ?? null,
+        sessionId: input.sessionId ?? null,
+        outcome: input.outcome,
+        reason: input.reason ?? null,
+        deploymentType: input.deploymentType ?? null,
+        userAgent: input.userAgent ? input.userAgent.slice(0, 300) : null,
+        country: input.country ?? null,
+      });
+    } catch (err) {
+      this.logger.debug(`recordSubmitAttempt swallowed error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Failed public-form submits (form_submit_attempts) for the Form failures
+   * report. Scoped like Form Analytics: campaign branch via branchScopeCondition
+   * (company isolation through effectiveBranchIds). Orders column = edge-form
+   * orders on the same forms in the same window, for a fail-vs-ordered ratio.
+   */
+  async getSubmitFailures(
+    input: { startDate?: string; endDate?: string },
+    branchId: string | null | undefined,
+    effectiveBranchIds: string[] | null | undefined,
+  ) {
+    const fsa = schema.formSubmitAttempts;
+    const conds: SQL[] = [];
+    const bCond = branchScopeCondition(fsa.branchId, branchId, effectiveBranchIds);
+    if (bCond) conds.push(bCond);
+    if (input.startDate) conds.push(gte(fsa.attemptedAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) conds.push(lte(fsa.attemptedAt, nigeriaDayEnd(input.endDate)));
+    const where = conds.length > 0 ? and(...conds) : undefined;
+
+    // Independent reads: run together (CLAUDE.md, never waterfall).
+    const [totals, perForm, topReasons] = await Promise.all([
+      this.db
+        .select({ outcome: fsa.outcome, count: sql<number>`count(*)::int` })
+        .from(fsa)
+        .where(where)
+        .groupBy(fsa.outcome),
+      this.db
+        .select({
+          campaignId: fsa.campaignId,
+          campaignName: schema.campaigns.name,
+          mediaBuyerName: schema.users.name,
+          browserBlocked: sql<number>`count(*) FILTER (WHERE ${fsa.outcome} = 'BROWSER_BLOCKED')::int`,
+          formBlocked: sql<number>`count(*) FILTER (WHERE ${fsa.outcome} = 'FORM_BLOCKED')::int`,
+          serverRejected: sql<number>`count(*) FILTER (WHERE ${fsa.outcome} = 'SERVER_REJECTED')::int`,
+          total: sql<number>`count(*)::int`,
+          topReason: sql<string | null>`mode() WITHIN GROUP (ORDER BY ${fsa.reason})`,
+        })
+        .from(fsa)
+        .innerJoin(schema.campaigns, eq(schema.campaigns.id, fsa.campaignId))
+        .leftJoin(schema.users, eq(schema.users.id, schema.campaigns.mediaBuyerId))
+        .where(where)
+        .groupBy(fsa.campaignId, schema.campaigns.name, schema.users.name)
+        .orderBy(desc(sql`count(*)`))
+        .limit(200),
+      this.db
+        .select({ outcome: fsa.outcome, reason: fsa.reason, count: sql<number>`count(*)::int` })
+        .from(fsa)
+        .where(where)
+        .groupBy(fsa.outcome, fsa.reason)
+        .orderBy(desc(sql`count(*)`))
+        .limit(15),
+    ]);
+
+    const campaignIds = perForm.map((r) => r.campaignId);
+    const orderCounts = new Map<string, number>();
+    if (campaignIds.length > 0) {
+      const oConds: SQL[] = [inArray(schema.orders.campaignId, campaignIds), eq(schema.orders.orderSource, 'edge-form')];
+      if (input.startDate) oConds.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
+      if (input.endDate) oConds.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
+      const rows = await this.db
+        .select({ campaignId: schema.orders.campaignId, count: sql<number>`count(*)::int` })
+        .from(schema.orders)
+        .where(and(...oConds))
+        .groupBy(schema.orders.campaignId);
+      for (const r of rows) if (r.campaignId) orderCounts.set(r.campaignId, r.count);
+    }
+
+    const byOutcome = Object.fromEntries(totals.map((t) => [t.outcome, t.count])) as Record<string, number>;
+    return {
+      totals: {
+        browserBlocked: byOutcome['BROWSER_BLOCKED'] ?? 0,
+        formBlocked: byOutcome['FORM_BLOCKED'] ?? 0,
+        serverRejected: byOutcome['SERVER_REJECTED'] ?? 0,
+        total: totals.reduce((n, t) => n + t.count, 0),
+      },
+      forms: perForm.map((r) => ({ ...r, orders: orderCounts.get(r.campaignId) ?? 0 })),
+      topReasons,
+    };
+  }
+
+  /**
    * Form Analytics ingestion — record one form-landing telemetry row.
    *
    * Called (fire-and-forget) by the edge worker's /track-view beacon on form load.

@@ -124,6 +124,13 @@ export const orders = pgTable('orders', {
    */
   sessionId: text('session_id'),
   /**
+   * "Check price" flag (migration 0351). Set when an order-form submit did not
+   * match an active offer: the order is created anyway and CS must clear this
+   * before CONFIRMED. NULL = matched. Values: PRICE_NOT_IN_OFFERS,
+   * NO_ACTIVE_OFFERS, PRODUCT_NOT_ON_FORM, PRODUCT_MISSING, CHECK_UNAVAILABLE.
+   */
+  offerCheck: text('offer_check'),
+  /**
    * Unique key from the source CRM export, supplied per row on bulk import. A
    * PARTIAL UNIQUE INDEX (orders_import_external_id_uidx, mig 0332) enforces
    * uniqueness and is the ON CONFLICT target for the idempotent import upsert:
