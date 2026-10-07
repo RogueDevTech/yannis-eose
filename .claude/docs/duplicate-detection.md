@@ -1,5 +1,11 @@
 # Duplicate Order Detection System
 
+> **2026-10-07: every rule below is now a per-company setting, and ALL are OFF by default.**
+> Settings > Duplicate rules (`DUPLICATE_RULES` system setting, `packages/shared/src/validators/duplicate-rules.ts`).
+> This document describes what each rule does when a company switches it on. Always on regardless:
+> idempotency (a cart is pulled once, an order graduates once), the cart's own same-session order
+> (cart_id link / same phone within the session), and a follow-up whose own source order is delivered.
+
 How Yannis EOSE detects and handles duplicate orders across all order types.
 
 ## Overview

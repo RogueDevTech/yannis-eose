@@ -280,7 +280,8 @@ export function DuplicateRulesPage({ data }: { data: DuplicateRulesData }) {
                 const value = ruleValue(draft, def.key);
                 const defaults = ruleValue(data.defaults, def.key);
                 const active = isActive(def, value);
-                const loosened = !sameValue(value, defaults) && (!active || value.mode === 'FLAG');
+                // Warn whenever a rule is off or only flagging, default or not.
+                const loosened = !active || value.mode === 'FLAG';
                 return (
                   <li key={def.key} className="space-y-3 px-4 py-3">
                     <div className="flex items-start justify-between gap-3">

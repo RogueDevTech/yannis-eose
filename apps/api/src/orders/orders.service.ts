@@ -230,13 +230,13 @@ export class OrdersService {
     private readonly cache: CacheService,
     private readonly csOrderRouting: CsOrderRoutingService,
     private readonly generalLedger: GeneralLedgerService,
-    // Optional so hand-built test instances keep compiling; absent = today's defaults.
+    // Optional so hand-built test instances keep compiling; absent = the defaults (all rules off).
     @Optional() private readonly duplicateRules?: DuplicateRulesService,
   ) {}
 
   /**
    * Per-company duplicate rules for a create path. NEVER throws: on any error
-   * (or no service) it returns today's defaults, so a settings problem can
+   * (or no service) it returns the defaults (all rules off), so a settings problem can
    * never be the reason an order is lost on the public intake path.
    */
   private async duplicateRulesFor(branchId: string | null | undefined): Promise<DuplicateRules> {
@@ -2537,7 +2537,7 @@ export class OrdersService {
     }
 
     // Per-company duplicate rules (DUPLICATE_RULES): doubleSubmitGuard +
-    // intakeBlock. Defaults = the behaviour below as it always was.
+    // intakeBlock. Defaults are both off; BLOCK + on = the previous behaviour.
     const intakeRules = orderSource === 'edge-form' ? await this.duplicateRulesFor(branchId) : null;
 
     // Same-form rapid resubmit guard (double-tap / refresh within 2 minutes).

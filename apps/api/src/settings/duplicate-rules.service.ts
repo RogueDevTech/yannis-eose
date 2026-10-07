@@ -24,7 +24,7 @@ const RULES_TTL_MS = 60 * 1000;
 /**
  * Per-company duplicate rules (system setting DUPLICATE_RULES).
  *
- * FAIL-SAFE BY CONTRACT: every method returns today's defaults on any error.
+ * FAIL-SAFE BY CONTRACT: every method returns the defaults (all rules off) on any error.
  * Resolved rules are memoised per company for RULES_TTL_MS (missing rows
  * included), so the per-call cost on the order form is an in-memory hit.
  */

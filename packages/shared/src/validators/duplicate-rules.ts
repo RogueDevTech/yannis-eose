@@ -4,8 +4,10 @@ import { z } from 'zod';
  * Duplicate rules — one per-company `system_settings` row (key below) that
  * switches every duplicate rule on the order pipeline. CEO request 2026-10-07.
  *
- * The defaults ARE today's hard-coded behaviour, so a company with no row (or a
- * corrupt row) runs exactly as before. Every read goes through
+ * DEFAULTS ARE ALL OFF (owner decision 2026-10-07, CEO: "capture every
+ * legitimate order first"): a company with no saved row, or a corrupt row, runs
+ * with no duplicate rules. The windows keep their old values so switching a rule
+ * on restores the previous behaviour. Every read goes through
  * `resolveDuplicateRules`, which never throws: a settings problem must never be
  * the reason an order fails or a cron stops.
  */
@@ -64,17 +66,23 @@ export const duplicateRulesSchema = z.object({
 export type DuplicateRules = z.infer<typeof duplicateRulesSchema>;
 export type DuplicateRuleKey = keyof DuplicateRules;
 
-/** Today's behaviour. Changing a value here changes production for every company without a row. */
+/**
+ * Every rule off. Changing a value here changes production for every company
+ * without a saved row. The previous hard-coded behaviour was: intakeBlock BLOCK,
+ * doubleSubmitGuard on, manualOrderBlock BLOCK, cleanupCron DELETE, cartPullGuard
+ * on, cartReconcile DELETE, cartMerge on, preDeliveryCheck BLOCK,
+ * graduationGuard on (windows as below).
+ */
 export const DEFAULT_DUPLICATE_RULES: DuplicateRules = {
-  intakeBlock: { mode: 'BLOCK', windowDays: 14 },
-  doubleSubmitGuard: { enabled: true, windowMinutes: 2 },
-  manualOrderBlock: { mode: 'BLOCK', windowDays: 14 },
-  cleanupCron: { mode: 'DELETE', windowDays: 14 },
-  cartPullGuard: { enabled: true, windowDays: 14 },
-  cartReconcile: { mode: 'DELETE' },
-  cartMerge: { enabled: true },
-  preDeliveryCheck: { mode: 'BLOCK', windowDays: 14 },
-  graduationGuard: { enabled: true, windowDays: 14 },
+  intakeBlock: { mode: 'OFF', windowDays: 14 },
+  doubleSubmitGuard: { enabled: false, windowMinutes: 2 },
+  manualOrderBlock: { mode: 'OFF', windowDays: 14 },
+  cleanupCron: { mode: 'OFF', windowDays: 14 },
+  cartPullGuard: { enabled: false, windowDays: 14 },
+  cartReconcile: { mode: 'OFF' },
+  cartMerge: { enabled: false },
+  preDeliveryCheck: { mode: 'OFF', windowDays: 14 },
+  graduationGuard: { enabled: false, windowDays: 14 },
 };
 
 /**

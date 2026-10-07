@@ -207,7 +207,7 @@ export const settingsRouter = router({
 
   /**
    * Duplicate rules for the active company (DUPLICATE_RULES). Values not yet
-   * saved show today's defaults. Writes are audited through system_settings
+   * saved show the defaults (all off). Writes are audited through system_settings
    * history (withActor).
    */
   getDuplicateRules: permissionProcedure('settings.write').query(async ({ ctx }) => {
