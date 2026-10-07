@@ -48,7 +48,7 @@ import {
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { router, publicProcedure, authedProcedure, permissionProcedure } from '../trpc';
+import { router, publicProcedure, authedProcedure, permissionProcedure, edgeProcedure } from '../trpc';
 import { MarketingService } from '../../marketing/marketing.service';
 import { getBranchTeamsService, listBranchesForUser } from './branches.router';
 import {
@@ -2394,7 +2394,10 @@ export const marketingRouter = router({
    * Submit-attempt beacon from the edge worker (/track-submit): a public-form
    * submit that did not go through. Telemetry only, never fails the caller.
    */
-  trackSubmitAttempt: publicProcedure
+  // edgeProcedure: only the edge worker (X-Edge-Api-Key) may write telemetry,
+  // so the CEO's report cannot be flooded with fake rows. Fail-open when the
+  // key is unconfigured (see edgeProcedure). Telemetry only: never intake.
+  trackSubmitAttempt: edgeProcedure
     .input(
       z.object({
         campaignId: z.string().uuid(),

@@ -72,6 +72,13 @@ import { emitOrderAutomationEvents } from '../automation/automation-hooks';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
 import { DuplicateRulesService } from '../settings/duplicate-rules.service';
+import {
+  UNSUBMITTED_FORM_CAPTURE_SOURCE,
+  FULL_FORM_CART_SQL,
+  CONVERT_AFTER_ABANDONED_MINUTES,
+  CONVERT_WINDOW_END_MINUTES,
+  LATER_SUBMIT_WINDOW_HOURS,
+} from '../cart-orders/unsubmitted-form';
 import { InventoryService } from '../inventory/inventory.service';
 import {
   isTransitionAllowed,
@@ -2418,7 +2425,8 @@ export class OrdersService {
     input: CreateOrderInput & { cartId?: string },
     actorId: string | null,
     orderSource?: 'edge-form' | 'offline' | null,
-    opts?: { isFollowUp?: boolean },
+    /** captureSource: internal marker, see orders.capture_source (migration 0353). */
+    opts?: { isFollowUp?: boolean; captureSource?: typeof UNSUBMITTED_FORM_CAPTURE_SOURCE },
   ): Promise<{ id?: string; authorizationUrl?: string; duplicateRecorded?: true; alreadySubmitted?: true }> {
     const { cartId, ...orderInput } = input;
     const paymentMethod = orderInput.paymentMethod ?? 'PAY_ON_DELIVERY';
@@ -2611,6 +2619,53 @@ export class OrdersService {
           await this.cartService.convert(cartId, recentSameForm.id, actorId ?? undefined).catch(() => {});
         }
         return { id: recentSameForm.id, alreadySubmitted: true };
+      }
+    }
+
+    // The customer's properly filled form was already created as an order because
+    // they had not pressed submit (capture_source UNSUBMITTED_FORM). If the same
+    // browser now submits the same form, return that order: they see "already
+    // submitted" and CS keeps one order (owner decision 2026-10-07). Never
+    // rejects; an idempotent return like the double-tap guard above. No
+    // timeline note: the order must look like any other order to CS (owner).
+    // Only the SAME order counts: same form, same customer (phone hash or last 9
+    // digits), same product and quantity, within 24h, and the
+    // captured order not yet confirmed. Anything different is a real new order
+    // and is created normally (nothing a customer submits is dropped).
+    if (orderSource === 'edge-form' && !opts?.captureSource && orderInput.campaignId && orderInput.items.length > 0) {
+      const tail = (orderInput.customerPhone ?? '').replace(/\D/g, '').slice(-9);
+      // Same PHONE is required (hash or last 9 digits). The browser session alone
+      // is not enough: the same browser can order for a relative or fix a typo.
+      const samePerson = [
+        ...(orderInput.customerPhoneHash ? [eq(schema.orders.customerPhoneHash, orderInput.customerPhoneHash)] : []),
+        ...(tail.length === 9 ? [sql`right(regexp_replace(coalesce(${schema.orders.customerPhone}, ''), '\\D', '', 'g'), 9) = ${tail}`] : []),
+      ];
+      const candidates = samePerson.length === 0 ? [] : await this.db
+        .select({ id: schema.orders.id })
+        .from(schema.orders)
+        .where(
+          and(
+            or(...samePerson),
+            eq(schema.orders.campaignId, orderInput.campaignId),
+            eq(schema.orders.captureSource, UNSUBMITTED_FORM_CAPTURE_SOURCE),
+            isNull(schema.orders.deletedAt),
+            inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
+            gte(schema.orders.createdAt, new Date(Date.now() - LATER_SUBMIT_WINDOW_HOURS * 60 * 60 * 1000)),
+          ),
+        )
+        .orderBy(desc(schema.orders.createdAt))
+        .limit(5);
+      const wanted = orderInput.items.map((it) => `${it.productId}:${it.quantity}`).sort().join('|');
+      for (const cand of candidates) {
+        const lines = await this.db
+          .select({ productId: schema.orderItems.productId, quantity: schema.orderItems.quantity })
+          .from(schema.orderItems)
+          .where(eq(schema.orderItems.orderId, cand.id));
+        if (lines.map((l) => `${l.productId}:${l.quantity}`).sort().join('|') !== wanted) continue;
+        if (cartId) {
+          await this.cartService.convert(cartId, cand.id, actorId ?? undefined).catch(() => {});
+        }
+        return { id: cand.id, alreadySubmitted: true };
       }
     }
 
@@ -2845,6 +2900,8 @@ export class OrdersService {
             : {}),
           // "Check price": the submit did not match an active offer (never rejected).
           offerCheck: offerCheck?.code ?? null,
+          // Internal capture marker (never a UI badge): see migration 0353.
+          captureSource: opts?.captureSource ?? null,
         })
         .returning();
       const created = rows[0];
@@ -4063,21 +4120,16 @@ export class OrdersService {
     // link the cart to the existing order so it leaves the abandonment queue.
     // NOTE: do NOT skipCartOrders here — unlike the edge-form path, recovery must
     // treat an existing cart order as a genuine duplicate, not something to beat.
-    // Per-company DUPLICATE_RULES.manualOrderBlock: OFF skips this lookup.
-    const recoveryBranchId = cart.campaignId
-      ? (await this.db.select({ branchId: schema.campaigns.branchId }).from(schema.campaigns)
-          .where(eq(schema.campaigns.id, cart.campaignId)).limit(1))[0]?.branchId ?? null
-      : null;
-    const manualBlock = (await this.duplicateRulesFor(recoveryBranchId)).manualOrderBlock;
-    const existing = manualBlock.mode === 'BLOCK'
-      ? await this.findExistingOrderForDedup(
-          phoneHash,
-          items.map((i) => i.productId),
-          // Recovery is a "which order did this cart become?" lookup, not a dedup
-          // rejection — a DELIVERED/REMITTED order must still be found and linked.
-          { includeCompleted: true, windowDays: manualBlock.windowDays },
-        )
-      : null;
+    // NOT a duplicate rule (always on): recovery asks "which order did this cart
+    // become?" and links to it, so a recovered cart can never become a second
+    // order for a purchase that already exists.
+    const existing = await this.findExistingOrderForDedup(
+      phoneHash,
+      items.map((i) => i.productId),
+      // Recovery is a "which order did this cart become?" lookup, not a dedup
+      // rejection — a DELIVERED/REMITTED order must still be found and linked.
+      { includeCompleted: true },
+    );
     if (existing) {
       try {
         await this.cartService.convert(cartId, existing.id, actorId);
@@ -4230,18 +4282,16 @@ export class OrdersService {
     // phone+product would create a second live order. Link those carts to the
     // existing order and skip them instead of creating a duplicate.
     let skipped = 0;
-    // Per-company DUPLICATE_RULES.manualOrderBlock: OFF skips this lookup.
+    // Always on (not a duplicate rule): see recoverFromCart.
     const dedupChecks = await Promise.all(
-      prepared.map(async (p) => {
-        const manualBlock = (await this.duplicateRulesFor(p.branchId)).manualOrderBlock;
-        if (manualBlock.mode !== 'BLOCK') return null;
-        return this.findExistingOrderForDedup(
+      prepared.map((p) =>
+        this.findExistingOrderForDedup(
           p.phoneHash,
           p.items.map((i) => i.productId),
           // See above: recovery must still match completed orders.
-          { includeCompleted: true, windowDays: manualBlock.windowDays },
-        ).catch(() => null);
-      }),
+          { includeCompleted: true },
+        ).catch(() => null),
+      ),
     );
     const deduped: PreparedCart[] = [];
     for (let i = 0; i < prepared.length; i++) {
@@ -4477,6 +4527,209 @@ export class OrdersService {
       if (embMatch?.price != null) return Number(embMatch.price);
     }
     return Number(product?.baseSalePrice ?? 0);
+  }
+
+  // ── Unsubmitted properly filled forms → orders (owner decision 2026-10-07) ──
+
+  private convertingUnsubmittedForms = false;
+  /** Carts the converter already tried and left for the pull (in-process, per window). */
+  private readonly unsubmittedFormsTried = new Map<string, number>();
+
+  /**
+   * Every 2 minutes: a cart whose customer filled every required field and chose
+   * an offer, but never pressed submit, is created as a NORMAL order ~30 min
+   * after they went quiet (orders.capture_source = 'UNSUBMITTED_FORM', internal
+   * only, no badge). Going forward only (recently abandoned carts). Anything it
+   * cannot convert cleanly is left for the cart pull, which takes it as a cart
+   * order after PULL_HOLD_MINUTES. Never throws.
+   */
+  @Cron('30 */2 * * * *')
+  async convertUnsubmittedFullForms(): Promise<number> {
+    if (this.convertingUnsubmittedForms) return 0;
+    this.convertingUnsubmittedForms = true;
+    let converted = 0;
+    try {
+      // Window 25..55 min after ABANDONED: never overlaps the pull (60 min hold).
+      const rows = (await this.db.execute(sql.raw(`
+        SELECT ca.id FROM cart_abandonments ca
+        WHERE ${FULL_FORM_CART_SQL}
+          AND ca.converted_order_id IS NULL
+          AND ca.skip_reason IS NULL
+          AND NOT EXISTS (SELECT 1 FROM cart_orders co WHERE co.source_cart_id = ca.id)
+          AND ca.updated_at <= now() - INTERVAL '${CONVERT_AFTER_ABANDONED_MINUTES} minutes'
+          AND ca.updated_at > now() - INTERVAL '${CONVERT_WINDOW_END_MINUTES} minutes'
+        ORDER BY ca.updated_at DESC
+        LIMIT 200
+      `))) as unknown as Array<{ id: string }>;
+      // Newest first, skipping carts already tried, so unconvertible carts can
+      // never crowd out new ones.
+      const now = Date.now();
+      for (const [id, at] of this.unsubmittedFormsTried) {
+        if (now - at > 2 * 60 * 60 * 1000) this.unsubmittedFormsTried.delete(id);
+      }
+      const todo = rows.filter((r) => !this.unsubmittedFormsTried.has(r.id)).slice(0, 50);
+      for (const row of todo) {
+        this.unsubmittedFormsTried.set(row.id, now);
+        try {
+          if (await this.convertUnsubmittedCart(row.id)) converted++;
+        } catch (err) {
+          this.logger.warn(`Unsubmitted form ${row.id} not converted (falls back to cart order): ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (converted > 0) this.logger.log(`Created ${converted} order(s) from properly filled forms that were not submitted`);
+    } catch (err) {
+      this.logger.error(`convertUnsubmittedFullForms failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      this.convertingUnsubmittedForms = false;
+    }
+    return converted;
+  }
+
+  /** Create the order for one unsubmitted full-form cart. False = left for the cart pull. */
+  private async convertUnsubmittedCart(cartId: string): Promise<boolean> {
+    const [cart] = await this.db
+      .select()
+      .from(schema.cartAbandonments)
+      .where(eq(schema.cartAbandonments.id, cartId))
+      .limit(1);
+    if (!cart || cart.status !== 'ABANDONED' || !cart.campaignId || !cart.productId || !cart.customerPhoneHash) return false;
+
+    // The customer already has a real order from this visit (another browser,
+    // or a submit we have not linked): this cart is that order, not a new one.
+    const since = new Date(new Date(cart.createdAt).getTime() - 2 * 60 * 60 * 1000);
+    const [existing] = await this.db
+      .select({ id: schema.orders.id })
+      .from(schema.orders)
+      .where(
+        and(
+          // "Same phone" = hash OR last 9 raw digits (CLAUDE.md: 803… vs 0803…).
+          or(
+            eq(schema.orders.customerPhoneHash, cart.customerPhoneHash),
+            ...(cart.sessionId ? [eq(schema.orders.sessionId, cart.sessionId)] : []),
+            ...((cart.customerPhone ?? '').replace(/\D/g, '').length >= 9
+              ? [sql`right(regexp_replace(coalesce(${schema.orders.customerPhone}, ''), '\\D', '', 'g'), 9) = ${(cart.customerPhone ?? '').replace(/\D/g, '').slice(-9)}`]
+              : []),
+          ),
+          gte(schema.orders.createdAt, since),
+          isNull(schema.orders.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (existing) return false;
+
+    const currency = (cart.currencyCode ?? 'NGN').toUpperCase();
+    if (currency !== 'NGN') return false; // per-currency tier prices: leave for CS
+    const tier = await this.resolveOfferTierByLabel(cart.campaignId, cart.productId, cart.offerLabel ?? '');
+    if (!tier) return false;
+
+    // Respect the company's repeat-order rule. If it is on and this customer
+    // already has an order for the product inside its window, do not create one
+    // (and do not let create() log a Cross-funnel attempt or notify the MB about
+    // a submission that never happened). The cart stays for the pull.
+    const [camp] = await this.db
+      .select({ branchId: schema.campaigns.branchId })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, cart.campaignId))
+      .limit(1);
+    const intakeBlock = (await this.duplicateRulesFor(camp?.branchId ?? null)).intakeBlock;
+    if (intakeBlock.mode !== 'OFF') {
+      const winner = await this.findExistingOrderForDedup(cart.customerPhoneHash, [cart.productId], {
+        skipCartOrders: true,
+        windowDays: intakeBlock.windowDays,
+      });
+      if (winner) return false;
+    }
+
+    const result = await this.create(
+      {
+        cartId: cart.id,
+        campaignId: cart.campaignId,
+        mediaBuyerId: cart.mediaBuyerId ?? undefined,
+        customerName: cart.customerName,
+        customerPhoneHash: cart.customerPhoneHash,
+        customerPhone: cart.customerPhone ?? undefined,
+        customerAddress: cart.customerAddress ?? undefined,
+        deliveryAddress: cart.deliveryAddress ?? cart.customerAddress ?? undefined,
+        deliveryState: cart.deliveryState ?? undefined,
+        deliveryNotes: cart.deliveryNotes ?? undefined,
+        customerGender: cart.customerGender ?? undefined,
+        preferredDeliveryDate: cart.preferredDeliveryDate ?? undefined,
+        customerEmail: cart.customerEmail ?? undefined,
+        // Never start an online payment for a customer who is not on the page.
+        paymentMethod: 'PAY_ON_DELIVERY',
+        items: [{ productId: cart.productId, quantity: tier.quantity, unitPrice: tier.price, offerLabel: tier.label }],
+        totalAmount: tier.price,
+        currencyCode: currency,
+        customFields: (cart.customFieldValues as Record<string, unknown> | null) ?? undefined,
+        sessionId: cart.sessionId ?? undefined,
+      } as CreateOrderInput & { cartId: string },
+      null,
+      'edge-form',
+      { captureSource: UNSUBMITTED_FORM_CAPTURE_SOURCE },
+    );
+    return !!result.id && !result.alreadySubmitted && !result.duplicateRecorded;
+  }
+
+  /**
+   * The base-currency tier a cart's offer label names, for this campaign's
+   * product: offer group items, else the campaign's offer templates, else the
+   * product's embedded offers. Null when the label matches no tier, or more than
+   * one (no guessing a price).
+   */
+  private async resolveOfferTierByLabel(
+    campaignId: string,
+    productId: string,
+    offerLabel: string,
+  ): Promise<{ label: string; price: number; quantity: number } | null> {
+    const label = offerLabel.trim();
+    if (!label) return null;
+    const pick = (list: Array<{ label: string; price: number; quantity: number }>) => {
+      const hits = list.filter((t) => t.label.trim() === label);
+      return hits.length === 1 ? hits[0]! : null;
+    };
+    const [camp] = await this.db
+      .select({ offerGroupId: schema.campaigns.offerGroupId, formConfig: schema.campaigns.formConfig })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, campaignId))
+      .limit(1);
+    if (camp?.offerGroupId) {
+      const items = await this.db
+        .select({ label: schema.offerGroupItems.label, price: schema.offerGroupItems.price, quantity: schema.offerGroupItems.quantity })
+        .from(schema.offerGroupItems)
+        .where(
+          and(
+            eq(schema.offerGroupItems.offerGroupId, camp.offerGroupId),
+            eq(schema.offerGroupItems.productId, productId),
+            eq(schema.offerGroupItems.status, 'ACTIVE'),
+          ),
+        );
+      return pick(items.map((i) => ({ label: i.label, price: Number(i.price), quantity: i.quantity ?? 1 })));
+    }
+    const selectedIds = (camp?.formConfig as { selectedOfferTemplateIds?: string[] } | null | undefined)?.selectedOfferTemplateIds;
+    const templates = await this.db
+      .select({ name: schema.offerTemplates.name, price: schema.offerTemplates.price, quantity: schema.offerTemplates.quantity })
+      .from(schema.offerTemplates)
+      .where(
+        and(
+          eq(schema.offerTemplates.productId, productId),
+          eq(schema.offerTemplates.status, 'ACTIVE'),
+          ...(selectedIds?.length ? [inArray(schema.offerTemplates.id, selectedIds)] : []),
+        ),
+      );
+    if (templates.length > 0) {
+      return pick(templates.map((t) => ({ label: t.name, price: Number(t.price), quantity: t.quantity ?? 1 })));
+    }
+    const [product] = await this.db
+      .select({ offers: schema.products.offers })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId))
+      .limit(1);
+    const embedded = (product?.offers as Array<{ label?: string; qty?: number; price?: string | number }> | null) ?? [];
+    return pick(
+      embedded
+        .filter((o) => typeof o.label === 'string' && o.price != null)
+        .map((o) => ({ label: o.label as string, price: Number(o.price), quantity: typeof o.qty === 'number' && o.qty >= 1 ? o.qty : 1 })),
+    );
   }
 
   /**
@@ -7607,10 +7860,15 @@ export class OrdersService {
         }
       }
 
+      // Online-pay orders skip create(), so run the offer/price check here too.
+      // Flag only (the customer has paid): CS checks the price before CONFIRMED.
+      const paidOfferCheck = orderInput.campaignId ? await this.checkEdgeFormLineItems(orderInput) : null;
+
       const order = await withActor(this.db, { id: actorId }, async (tx) => {
         const rows = await tx
           .insert(schema.orders)
           .values({
+            offerCheck: paidOfferCheck?.code ?? null,
             campaignId: orderInput.campaignId ?? null,
             mediaBuyerId: orderInput.mediaBuyerId ?? null,
             branchId: paystackBranchId ?? null,
@@ -7654,6 +7912,18 @@ export class OrdersService {
 
       if (!order) {
         return null;
+      }
+
+      if (paidOfferCheck) {
+        void this.writeTimelineEvent({
+          orderId: order.id,
+          eventType: 'OFFER_CHECK_FLAGGED',
+          actorId: null,
+          actorName: 'System',
+          description: `Check price before confirming (paid online). ${paidOfferCheck.detail}`,
+          metadata: { reason: 'OFFER_CHECK', offerCheck: paidOfferCheck.code, paidOnline: true },
+          branchId: order.branchId ?? null,
+        });
       }
 
       await this.redis.del(pendingKey);

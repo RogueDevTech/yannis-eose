@@ -64,7 +64,7 @@ const SECTIONS: Section[] = [
       {
         key: 'manualOrderBlock',
         title: 'Manual order block',
-        description: 'Offline, delivered follow-up and cart recovery orders for a customer who already has one.',
+        description: 'Offline and delivered follow-up orders for a customer who already has one.',
         modes: [
           { value: 'BLOCK', label: 'Block' },
           { value: 'OFF', label: 'Off' },

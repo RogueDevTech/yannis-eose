@@ -8544,10 +8544,65 @@ export class MarketingService {
         .limit(15),
     ]);
 
+    // What happened AFTER a failure, per customer (browser session_id, which the
+    // form sends with the failure beacon, the cart and the order):
+    //  ordered    = the customer's own order (submitted, not auto-created) after the first failure
+    //  autoOrder  = no submitted order, but their properly filled form was auto-created
+    //               as an order (orders.capture_source = 'UNSUBMITTED_FORM')
+    //  cartOrder  = neither, but their cart was pulled into Cart Orders after the failure
+    //  abandoned  = none of these (yet)
+    // Failures without a sessionId (storage blocked) cannot be followed: untraceable.
+    const outcomeSql = (groupByForm: boolean) => sql`
+      WITH f AS (
+        SELECT ${fsa.sessionId} AS session_id,
+               ${groupByForm ? sql`${fsa.campaignId}` : sql`NULL::uuid`} AS campaign_id,
+               min(${fsa.attemptedAt}) AS first_fail
+        FROM ${fsa}
+        WHERE ${fsa.sessionId} IS NOT NULL ${where ? sql`AND ${where}` : sql``}
+        GROUP BY 1, 2
+      ), o AS (
+        SELECT f.campaign_id,
+          EXISTS (SELECT 1 FROM orders ord WHERE ord.session_id = f.session_id AND ord.created_at >= f.first_fail
+                  AND ord.deleted_at IS NULL AND ord.capture_source IS NULL) AS ordered,
+          EXISTS (SELECT 1 FROM orders ord WHERE ord.session_id = f.session_id AND ord.created_at >= f.first_fail
+                  AND ord.deleted_at IS NULL AND ord.capture_source = 'UNSUBMITTED_FORM') AS auto_order,
+          EXISTS (SELECT 1 FROM cart_orders co JOIN cart_abandonments ca ON ca.id = co.source_cart_id
+                  WHERE ca.session_id = f.session_id AND co.created_at >= f.first_fail) AS cart_order
+        FROM f
+      )
+      SELECT campaign_id,
+        count(*)::int AS sessions,
+        count(*) FILTER (WHERE ordered)::int AS ordered,
+        count(*) FILTER (WHERE NOT ordered AND auto_order)::int AS auto_order,
+        count(*) FILTER (WHERE NOT ordered AND NOT auto_order AND cart_order)::int AS cart_order,
+        count(*) FILTER (WHERE NOT ordered AND NOT auto_order AND NOT cart_order)::int AS abandoned
+      FROM o GROUP BY campaign_id
+    `;
+    type OutcomeRow = { campaign_id: string | null; sessions: number; ordered: number; auto_order: number; cart_order: number; abandoned: number };
+    // Independent reads: run together. Totals count each customer once even if
+    // they failed on several forms; the per-form rows count them per form.
+    const [outcomeRows, outcomeTotalRows, untraceableRows] = await Promise.all([
+      this.db.execute(outcomeSql(true)) as unknown as Promise<OutcomeRow[]>,
+      this.db.execute(outcomeSql(false)) as unknown as Promise<OutcomeRow[]>,
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(fsa)
+        .where(and(isNull(fsa.sessionId), ...(where ? [where] : []))),
+    ]);
+    const outcomeTotal = outcomeTotalRows[0];
+    const untraceableRow = untraceableRows[0];
+    const outcomeByForm = new Map(outcomeRows.map((r) => [r.campaign_id ?? '', r]));
+
     const campaignIds = perForm.map((r) => r.campaignId);
     const orderCounts = new Map<string, number>();
     if (campaignIds.length > 0) {
-      const oConds: SQL[] = [inArray(schema.orders.campaignId, campaignIds), eq(schema.orders.orderSource, 'edge-form')];
+      // Same definition as "Later ordered": submitted (not auto-created), not deleted.
+      const oConds: SQL[] = [
+        inArray(schema.orders.campaignId, campaignIds),
+        eq(schema.orders.orderSource, 'edge-form'),
+        isNull(schema.orders.deletedAt),
+        isNull(schema.orders.captureSource),
+      ];
       if (input.startDate) oConds.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
       if (input.endDate) oConds.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
       const rows = await this.db
@@ -8566,7 +8621,27 @@ export class MarketingService {
         serverRejected: byOutcome['SERVER_REJECTED'] ?? 0,
         total: totals.reduce((n, t) => n + t.count, 0),
       },
-      forms: perForm.map((r) => ({ ...r, orders: orderCounts.get(r.campaignId) ?? 0 })),
+      // Customers (sessions) who hit at least one failure, and what they did next.
+      outcomes: {
+        customers: outcomeTotal?.sessions ?? 0,
+        ordered: outcomeTotal?.ordered ?? 0,
+        autoOrder: outcomeTotal?.auto_order ?? 0,
+        cartOrder: outcomeTotal?.cart_order ?? 0,
+        abandoned: outcomeTotal?.abandoned ?? 0,
+        untraceableFailures: untraceableRow?.count ?? 0,
+      },
+      forms: perForm.map((r) => {
+        const o = outcomeByForm.get(r.campaignId);
+        return {
+          ...r,
+          orders: orderCounts.get(r.campaignId) ?? 0,
+          customers: o?.sessions ?? 0,
+          laterOrdered: o?.ordered ?? 0,
+          autoOrder: o?.auto_order ?? 0,
+          becameCartOrder: o?.cart_order ?? 0,
+          abandoned: o?.abandoned ?? 0,
+        };
+      }),
       topReasons,
     };
   }

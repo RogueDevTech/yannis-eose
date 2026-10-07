@@ -432,28 +432,32 @@ export class CartService {
     const { byGroup, fallback } = await this.duplicateRules.allCompanies();
     const offGroups = [...byGroup.entries()].filter(([, r]) => !r.cartMerge.enabled).map(([g]) => g);
     if (!fallback.cartMerge.enabled && offGroups.length === byGroup.size) return 0;
-    const companyOf = sql`(SELECT b.group_id FROM campaigns c JOIN branches b ON b.id = c.branch_id WHERE c.id = ca.campaign_id)`;
+    // Each open cart's company is resolved ONCE in the CTE (no per-row subqueries).
+    const offList = offGroups.length > 0 ? sql.join(offGroups.map((g) => sql`${g}::uuid`), sql`, `) : null;
     const keep: SQL[] = [];
-    if (offGroups.length > 0) {
-      const offList = sql.join(offGroups.map((g) => sql`${g}::uuid`), sql`, `);
-      keep.push(sql`AND (${companyOf} IS NULL OR ${companyOf} NOT IN (${offList}))`);
-    }
+    if (offList) keep.push(sql`AND (me.group_id IS NULL OR me.group_id NOT IN (${offList}))`);
     // Carts with no company fall back to the default rule.
-    if (!fallback.cartMerge.enabled) keep.push(sql`AND ${companyOf} IS NOT NULL`);
+    if (!fallback.cartMerge.enabled) keep.push(sql`AND me.group_id IS NOT NULL`);
     const run = async (db: CartDbOrTx) => {
       const rows = await db.execute<{ id: string }>(sql`
+        WITH open_carts AS MATERIALIZED (
+          SELECT ca.id, ca.customer_phone_hash, ca.updated_at, b.group_id
+          FROM cart_abandonments ca
+          LEFT JOIN campaigns c ON c.id = ca.campaign_id
+          LEFT JOIN branches b ON b.id = c.branch_id
+          WHERE ca.status IN ('PENDING', 'ABANDONED')
+        )
         DELETE FROM cart_abandonments AS ca
-        WHERE ca.status IN ('PENDING', 'ABANDONED')
+        USING open_carts me
+        WHERE ca.id = me.id
           ${sql.join(keep, sql` `)}
+          -- One open cart per customer PER COMPANY: a newer cart in another
+          -- company never removes this one (company isolation).
           AND EXISTS (
-            SELECT 1 FROM cart_abandonments AS newer
-            WHERE newer.customer_phone_hash = ca.customer_phone_hash
-              AND newer.status IN ('PENDING', 'ABANDONED')
-              AND (newer.updated_at, newer.id) > (ca.updated_at, ca.id)
-              -- One open cart per customer PER COMPANY: a newer cart in another
-              -- company never removes this one (company isolation).
-              AND (SELECT nb.group_id FROM campaigns nc JOIN branches nb ON nb.id = nc.branch_id WHERE nc.id = newer.campaign_id)
-                  IS NOT DISTINCT FROM ${companyOf}
+            SELECT 1 FROM open_carts newer
+            WHERE newer.customer_phone_hash = me.customer_phone_hash
+              AND (newer.updated_at, newer.id) > (me.updated_at, me.id)
+              AND newer.group_id IS NOT DISTINCT FROM me.group_id
           )
         RETURNING ca.id
       `);
