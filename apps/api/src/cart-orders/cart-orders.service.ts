@@ -292,10 +292,15 @@ export class CartOrdersService {
     const notOff = offGroups.length > 0
       ? sql` AND NOT EXISTS (SELECT 1 FROM branches rb WHERE rb.id = co.branch_id AND rb.group_id IN (${sql.join(offGroups.map((g) => sql`${g}::uuid`), sql`, `)}))`
       : sql``;
-    // An early-stage cart order already flagged (FLAG mode) is settled; DELETE mode
-    // never leaves an early-stage row flagged, so this filter is neutral there.
+    // In a FLAG-mode company an early-stage cart order it already flagged is
+    // settled, so skip it (no re-flagging every tick). A company back on DELETE
+    // still sees those rows and deletes them.
+    const flagGroups = [...byGroup.entries()].filter(([, r]) => r.cartReconcile.mode === 'FLAG').map(([g]) => g);
+    const notSettled = flagGroups.length > 0
+      ? sql` AND NOT (co.is_duplicate = 'CART_EDGE_FORM_DUPE' AND EXISTS (SELECT 1 FROM branches fb WHERE fb.id = co.branch_id AND fb.group_id IN (${sql.join(flagGroups.map((g) => sql`${g}::uuid`), sql`, `)})))`
+      : sql``;
     const early = (await this.db.execute(sql`
-      ${cartRealOrderMatchesQuery(sql`co.status IN ('UNPROCESSED','CS_ASSIGNED','CS_ENGAGED') AND co.is_duplicate IS DISTINCT FROM 'CART_EDGE_FORM_DUPE'${notOff}`)}
+      ${cartRealOrderMatchesQuery(sql`co.status IN ('UNPROCESSED','CS_ASSIGNED','CS_ENGAGED')${notSettled}${notOff}`)}
       LIMIT 500
     `)) as unknown as CartRealOrderMatch[];
     const progressed = (await this.db.execute(sql`
@@ -2460,9 +2465,12 @@ export class CartOrdersService {
     const samePhone = (alias: string) =>
       `(${alias}.customer_phone_hash = ca.customer_phone_hash OR (length(${caTail}) = ${PHONE_TAIL_DIGITS} AND ${alias}.p_tail = ${caTail}))`;
 
-    // Skip carts whose customer already ordered (orders, cart orders, follow-ups).
-    // Empty when the company switched the pull guard off; the idempotency,
-    // one-per-session and twin-in-batch guards below always apply.
+    // Skip carts whose customer already ordered the same product inside the window
+    // (orders, cart orders, follow-ups). Empty when the company switched the pull
+    // guard off. The same-session guards (this cart became a real order: cart_id
+    // link or same phone within the session) are NOT a duplicate rule but the
+    // cart's own order, so they always apply, as do idempotency, one cart order
+    // per session and twin-in-batch.
     const orderDedupGuardSql = pullGuard.enabled ? `
         -- Dedup: skip if order already exists for same customer + product inside the
         -- window, across orders, cart_orders, and follow_up_orders.
@@ -2495,15 +2503,6 @@ export class CartOrdersService {
             AND fu.deleted_at IS NULL
             AND fu.status NOT IN ('DELETED', 'CANCELLED')
             AND fu.created_at >= (ca.created_at - ${guardWindowSql})
-        )
-        -- A live order carries this cart's id (orders.cart_id).
-        AND NOT EXISTS (
-          SELECT 1 FROM ro WHERE ro.cart_id = ca.id AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL}
-        )
-        -- Same phone (hash or raw digits) ordered anything in this cart's session:
-        -- the customer switched product before submitting.
-        AND NOT EXISTS (
-          SELECT 1 FROM ro WHERE ${samePhone('ro')} AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL}
         )
         -- Same raw phone + same product inside the window (hash drift version of the first guard).
         AND NOT EXISTS (
@@ -2543,6 +2542,15 @@ export class CartOrdersService {
         AND (ca.customer_phone IS NOT NULL OR ca.customer_phone_hash IS NOT NULL)
         AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
         ${orderDedupGuardSql}
+        -- A live order carries this cart's id (orders.cart_id).
+        AND NOT EXISTS (
+          SELECT 1 FROM ro WHERE ro.cart_id = ca.id AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL}
+        )
+        -- Same phone (hash or raw digits) ordered anything in this cart's session:
+        -- the customer switched product before submitting.
+        AND NOT EXISTS (
+          SELECT 1 FROM ro WHERE ${samePhone('ro')} AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL}
+        )
         -- One cart order per customer per session: skip if they already have a live
         -- cart order from this session (any product) ...
         AND NOT EXISTS (
@@ -2656,31 +2664,30 @@ export class CartOrdersService {
         WHERE ca.id = sub.cart_id
       `).catch((e) => this.logger.warn(`[pull] skip-tag already-pulled failed: ${e instanceof Error ? e.message : e}`));
 
-      if (pullGuard.enabled) {
-        // Tag: real order by the wider match (cart_id link, raw-phone match, same
-        // session). Every skipped cart must get a reason, or runAutoSync re-tries it
-        // on every tick.
-        await this.pg.unsafe(`
-          WITH ${recentOrdersCte}
-          UPDATE cart_abandonments ca
-          SET skip_reason = 'DUPLICATE_ORDER',
-              duplicate_of_order_id = sub.order_id,
-              skip_tagged_at = now()
-          FROM (
-            SELECT DISTINCT ON (ca.id) ca.id AS cart_id, ro.id AS order_id
-            FROM cart_abandonments ca
-            JOIN ro ON (ro.cart_id = ca.id AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL})
-                    OR (${samePhone('ro')} AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL})
-                    OR (length(${caTail}) = ${PHONE_TAIL_DIGITS} AND ro.p_tail = ${caTail}
-                        AND ro.created_at >= ca.created_at - ${guardWindowSql}
-                        AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = ro.id AND oi.product_id = ca.product_id))
-            WHERE ca.id IN (${skippedIdList})
-              AND ca.skip_reason IS NULL
-            ORDER BY ca.id, (ro.cart_id = ca.id) DESC, ro.created_at DESC
-          ) sub
-          WHERE ca.id = sub.cart_id
-        `).catch((e) => this.logger.warn(`[pull] skip-tag wider order match failed: ${e instanceof Error ? e.message : e}`));
-      }
+      // Tag: real order by the wider match (cart_id link, raw-phone match, same
+      // session). Every skipped cart must get a reason, or runAutoSync re-tries it
+      // on every tick.
+      await this.pg.unsafe(`
+        WITH ${recentOrdersCte}
+        UPDATE cart_abandonments ca
+        SET skip_reason = 'DUPLICATE_ORDER',
+            duplicate_of_order_id = sub.order_id,
+            skip_tagged_at = now()
+        FROM (
+          SELECT DISTINCT ON (ca.id) ca.id AS cart_id, ro.id AS order_id
+          FROM cart_abandonments ca
+          JOIN ro ON (ro.cart_id = ca.id AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL})
+                  OR (${samePhone('ro')} AND ro.created_at >= ca.created_at - ${CART_SESSION_WINDOW_SQL})
+                  ${pullGuard.enabled ? `OR (length(${caTail}) = ${PHONE_TAIL_DIGITS} AND ro.p_tail = ${caTail}
+                      AND ro.created_at >= ca.created_at - ${guardWindowSql}
+                      AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = ro.id AND oi.product_id = ca.product_id))` : ''}
+          WHERE ca.id IN (${skippedIdList})
+            AND ca.skip_reason IS NULL
+          ORDER BY ca.id, (ro.cart_id = ca.id) DESC, ro.created_at DESC
+        ) sub
+        WHERE ca.id = sub.cart_id
+      `).catch((e) => this.logger.warn(`[pull] skip-tag wider order match failed: ${e instanceof Error ? e.message : e}`));
+    
 
       // Tag: customer already has a live cart order from this session (any product,
       // including one inserted by this batch).

@@ -20,6 +20,7 @@ import { and, eq } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure, publicProcedure } from '../trpc';
 import type { SettingsService } from '../../settings/settings.service';
+import type { DuplicateRulesService } from '../../settings/duplicate-rules.service';
 import { db as schema } from '@yannis/shared';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { CacheService } from '../../common/cache/cache.service';
@@ -44,6 +45,16 @@ export function setSettingsDb(db: PostgresJsDatabase<typeof schema>) {
 
 export function setSettingsCacheService(service: CacheService) {
   settingsCacheService = service;
+}
+
+let duplicateRulesServiceInstance: DuplicateRulesService | null = null;
+
+export function setDuplicateRulesService(service: DuplicateRulesService) {
+  duplicateRulesServiceInstance = service;
+}
+
+function getDuplicateRulesService(): DuplicateRulesService | null {
+  return duplicateRulesServiceInstance;
 }
 
 async function invalidateSystemSettingsCache(): Promise<void> {
@@ -232,6 +243,7 @@ export const settingsRouter = router({
       }
       await getSettingsService().set(DUPLICATE_RULES_SETTING_KEY, input, ctx.user.id, undefined, ctx.activeGroupId);
       await invalidateSystemSettingsCache();
+      getDuplicateRulesService()?.invalidate(ctx.activeGroupId);
       return { success: true };
     }),
 
@@ -242,6 +254,10 @@ export const settingsRouter = router({
   updateSystemSetting: permissionProcedure('settings.write')
     .input(updateSystemSettingSchema)
     .mutation(async ({ input, ctx }) => {
+      // Duplicate rules have their own validated, company-required endpoint.
+      if (input.key === DUPLICATE_RULES_SETTING_KEY) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Use Settings > Duplicate rules to change duplicate rules.' });
+      }
       await getSettingsService().set(input.key, input.value, ctx.user.id, undefined, ctx.activeGroupId);
       await invalidateSystemSettingsCache();
       return { success: true };

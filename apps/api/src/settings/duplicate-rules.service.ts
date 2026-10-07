@@ -12,18 +12,28 @@ import { SettingsService } from './settings.service';
 
 /** branch → company lookups change only when a branch moves company. */
 const BRANCH_GROUP_TTL_MS = 5 * 60 * 1000;
+/**
+ * Resolved rules per company, in process. SettingsService.get only caches rows
+ * that exist, so without this every order-form submit for a company with no
+ * saved row (every company today) would pay a DB read. Saving through
+ * settings.updateDuplicateRules calls invalidate(); other instances pick the
+ * change up within this TTL.
+ */
+const RULES_TTL_MS = 60 * 1000;
 
 /**
  * Per-company duplicate rules (system setting DUPLICATE_RULES).
  *
  * FAIL-SAFE BY CONTRACT: every method returns today's defaults on any error.
- * The value is read through SettingsService (Redis read-through, invalidated by
- * SettingsService.set), so the per-call cost is a cache hit.
+ * Resolved rules are memoised per company for RULES_TTL_MS (missing rows
+ * included), so the per-call cost on the order form is an in-memory hit.
  */
 @Injectable()
 export class DuplicateRulesService {
   private readonly logger = new Logger(DuplicateRulesService.name);
   private readonly branchGroup = new Map<string, { groupId: string | null; at: number }>();
+  private readonly rulesByGroup = new Map<string, { rules: DuplicateRules; at: number }>();
+  private groupIds: { ids: string[]; at: number } | null = null;
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
@@ -33,8 +43,12 @@ export class DuplicateRulesService {
   /** Rules for a company. A null company (legacy data) gets the defaults. */
   async forGroup(groupId: string | null | undefined): Promise<DuplicateRules> {
     if (!groupId) return resolveDuplicateRules(null);
+    const hit = this.rulesByGroup.get(groupId);
+    if (hit && Date.now() - hit.at < RULES_TTL_MS) return hit.rules;
     try {
-      return resolveDuplicateRules(await this.settings.get(DUPLICATE_RULES_SETTING_KEY, groupId));
+      const rules = resolveDuplicateRules(await this.settings.get(DUPLICATE_RULES_SETTING_KEY, groupId));
+      this.rulesByGroup.set(groupId, { rules, at: Date.now() });
+      return rules;
     } catch (err) {
       this.logger.warn(`Duplicate rules read failed for group ${groupId}, using defaults: ${(err as Error)?.message ?? err}`);
       return resolveDuplicateRules(null);
@@ -92,12 +106,21 @@ export class DuplicateRulesService {
     const fallback = resolveDuplicateRules(null);
     const byGroup = new Map<string, DuplicateRules>();
     try {
-      const groups = await this.db.select({ id: schema.branchGroups.id }).from(schema.branchGroups);
-      for (const g of groups) byGroup.set(g.id, await this.forGroup(g.id));
+      if (!this.groupIds || Date.now() - this.groupIds.at >= BRANCH_GROUP_TTL_MS) {
+        const groups = await this.db.select({ id: schema.branchGroups.id }).from(schema.branchGroups);
+        this.groupIds = { ids: groups.map((g) => g.id), at: Date.now() };
+      }
+      const resolved = await Promise.all(this.groupIds.ids.map((id) => this.forGroup(id)));
+      this.groupIds.ids.forEach((id, i) => byGroup.set(id, resolved[i]!));
     } catch (err) {
       this.logger.warn(`Duplicate rules company sweep failed, using defaults: ${(err as Error)?.message ?? err}`);
     }
     return { byGroup, fallback };
+  }
+
+  /** Drop a company's memoised rules (called after a save). */
+  invalidate(groupId: string | null | undefined): void {
+    if (groupId) this.rulesByGroup.delete(groupId);
   }
 
   private async groupOfBranch(branchId: string): Promise<string | null> {

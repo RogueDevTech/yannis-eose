@@ -425,7 +425,8 @@ export class CartService {
    * CONVERTED carts are never touched — they are the audit link to a real order.
    *
    * Per-company switch: DUPLICATE_RULES.cartMerge. A cart whose campaign's
-   * company switched it off is never removed.
+   * company switched it off is never removed, and carts are only merged with
+   * newer carts in the same company.
    */
   async mergeDuplicateAbandonedCarts(actorId?: string | null): Promise<number> {
     const { byGroup, fallback } = await this.duplicateRules.allCompanies();
@@ -449,6 +450,10 @@ export class CartService {
             WHERE newer.customer_phone_hash = ca.customer_phone_hash
               AND newer.status IN ('PENDING', 'ABANDONED')
               AND (newer.updated_at, newer.id) > (ca.updated_at, ca.id)
+              -- One open cart per customer PER COMPANY: a newer cart in another
+              -- company never removes this one (company isolation).
+              AND (SELECT nb.group_id FROM campaigns nc JOIN branches nb ON nb.id = nc.branch_id WHERE nc.id = newer.campaign_id)
+                  IS NOT DISTINCT FROM ${companyOf}
           )
         RETURNING ca.id
       `);

@@ -44,6 +44,7 @@ import {
   type ListFundingInput,
   type ListFundingRequestsInput,
   dateOrDateTimeOptional,
+  canonicalPermissionCode,
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -2379,7 +2380,11 @@ export const marketingRouter = router({
   submitFailures: authedProcedure
     .input(z.object({ startDate: dateOrDateTimeOptional, endDate: dateOrDateTimeOptional }))
     .query(async ({ input, ctx }) => {
-      if (!isAdminLevel(ctx.user) && !seesFullMarketingTeamSurfaces(ctx.user)) {
+      // Same rule as the web loader: admin-level, HoM, or marketing.teamOverview
+      // in either its alias or canonical form (snapshots store canonical codes).
+      const teamOverview = canonicalPermissionCode('marketing.teamOverview');
+      const hasTeamOverview = (ctx.user.permissions ?? []).some((p) => canonicalPermissionCode(p) === teamOverview);
+      if (!seesFullMarketingTeamSurfaces(ctx.user) && !hasTeamOverview) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Missing marketing analytics access.' });
       }
       return getMarketingService().getSubmitFailures(input, ctx.currentBranchId, ctx.effectiveBranchIds);

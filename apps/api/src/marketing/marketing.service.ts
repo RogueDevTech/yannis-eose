@@ -8454,19 +8454,6 @@ export class MarketingService {
   }
 
   /**
-   * Form Analytics ingestion — record one form-landing telemetry row.
-   *
-   * Called (fire-and-forget) by the edge worker's /track-view beacon on form load.
-   * NON-temporal telemetry: a bare insert (no withActor) is intentional — this is
-   * not an auditable business write and must stay off the intake hot path's cost
-   * profile. media_buyer_id / branch_id are resolved from the campaign so reporting
-   * can scope without a join.
-   *
-   * NEVER throws: any failure (bad campaignId, DB down) is swallowed and logged at
-   * debug. This method is called adjacent to the frozen intake surface; it must not
-   * be able to surface an error to the worker.
-   */
-  /**
    * Record a public-form submit that did not go through (form_submit_attempts).
    * Telemetry: never throws, unknown campaigns are dropped. Branch/MB come from
    * the campaign, never from the beacon.
@@ -8523,30 +8510,39 @@ export class MarketingService {
     if (input.endDate) conds.push(lte(fsa.attemptedAt, nigeriaDayEnd(input.endDate)));
     const where = conds.length > 0 ? and(...conds) : undefined;
 
-    const totals = await this.db
-      .select({ outcome: fsa.outcome, count: sql<number>`count(*)::int` })
-      .from(fsa)
-      .where(where)
-      .groupBy(fsa.outcome);
-
-    const perForm = await this.db
-      .select({
-        campaignId: fsa.campaignId,
-        campaignName: schema.campaigns.name,
-        mediaBuyerName: schema.users.name,
-        browserBlocked: sql<number>`count(*) FILTER (WHERE ${fsa.outcome} = 'BROWSER_BLOCKED')::int`,
-        formBlocked: sql<number>`count(*) FILTER (WHERE ${fsa.outcome} = 'FORM_BLOCKED')::int`,
-        serverRejected: sql<number>`count(*) FILTER (WHERE ${fsa.outcome} = 'SERVER_REJECTED')::int`,
-        total: sql<number>`count(*)::int`,
-        topReason: sql<string | null>`mode() WITHIN GROUP (ORDER BY ${fsa.reason})`,
-      })
-      .from(fsa)
-      .innerJoin(schema.campaigns, eq(schema.campaigns.id, fsa.campaignId))
-      .leftJoin(schema.users, eq(schema.users.id, schema.campaigns.mediaBuyerId))
-      .where(where)
-      .groupBy(fsa.campaignId, schema.campaigns.name, schema.users.name)
-      .orderBy(desc(sql`count(*)`))
-      .limit(200);
+    // Independent reads: run together (CLAUDE.md, never waterfall).
+    const [totals, perForm, topReasons] = await Promise.all([
+      this.db
+        .select({ outcome: fsa.outcome, count: sql<number>`count(*)::int` })
+        .from(fsa)
+        .where(where)
+        .groupBy(fsa.outcome),
+      this.db
+        .select({
+          campaignId: fsa.campaignId,
+          campaignName: schema.campaigns.name,
+          mediaBuyerName: schema.users.name,
+          browserBlocked: sql<number>`count(*) FILTER (WHERE ${fsa.outcome} = 'BROWSER_BLOCKED')::int`,
+          formBlocked: sql<number>`count(*) FILTER (WHERE ${fsa.outcome} = 'FORM_BLOCKED')::int`,
+          serverRejected: sql<number>`count(*) FILTER (WHERE ${fsa.outcome} = 'SERVER_REJECTED')::int`,
+          total: sql<number>`count(*)::int`,
+          topReason: sql<string | null>`mode() WITHIN GROUP (ORDER BY ${fsa.reason})`,
+        })
+        .from(fsa)
+        .innerJoin(schema.campaigns, eq(schema.campaigns.id, fsa.campaignId))
+        .leftJoin(schema.users, eq(schema.users.id, schema.campaigns.mediaBuyerId))
+        .where(where)
+        .groupBy(fsa.campaignId, schema.campaigns.name, schema.users.name)
+        .orderBy(desc(sql`count(*)`))
+        .limit(200),
+      this.db
+        .select({ outcome: fsa.outcome, reason: fsa.reason, count: sql<number>`count(*)::int` })
+        .from(fsa)
+        .where(where)
+        .groupBy(fsa.outcome, fsa.reason)
+        .orderBy(desc(sql`count(*)`))
+        .limit(15),
+    ]);
 
     const campaignIds = perForm.map((r) => r.campaignId);
     const orderCounts = new Map<string, number>();
@@ -8562,14 +8558,6 @@ export class MarketingService {
       for (const r of rows) if (r.campaignId) orderCounts.set(r.campaignId, r.count);
     }
 
-    const topReasons = await this.db
-      .select({ outcome: fsa.outcome, reason: fsa.reason, count: sql<number>`count(*)::int` })
-      .from(fsa)
-      .where(where)
-      .groupBy(fsa.outcome, fsa.reason)
-      .orderBy(desc(sql`count(*)`))
-      .limit(15);
-
     const byOutcome = Object.fromEntries(totals.map((t) => [t.outcome, t.count])) as Record<string, number>;
     return {
       totals: {
@@ -8583,6 +8571,19 @@ export class MarketingService {
     };
   }
 
+  /**
+   * Form Analytics ingestion — record one form-landing telemetry row.
+   *
+   * Called (fire-and-forget) by the edge worker's /track-view beacon on form load.
+   * NON-temporal telemetry: a bare insert (no withActor) is intentional — this is
+   * not an auditable business write and must stay off the intake hot path's cost
+   * profile. media_buyer_id / branch_id are resolved from the campaign so reporting
+   * can scope without a join.
+   *
+   * NEVER throws: any failure (bad campaignId, DB down) is swallowed and logged at
+   * debug. This method is called adjacent to the frozen intake surface; it must not
+   * be able to surface an error to the worker.
+   */
   async recordFormView(input: {
     sessionId: string;
     campaignId: string;

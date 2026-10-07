@@ -100,7 +100,8 @@ import { setPermissionsCacheService, setPermissionsDb } from './routers/permissi
 import { OnboardingModule } from '../onboarding/onboarding.module';
 import { OnboardingService } from '../onboarding/onboarding.service';
 import { setOnboardingService } from './routers/onboarding.router';
-import { setSettingsCacheService } from './routers/settings.router';
+import { setSettingsCacheService, setDuplicateRulesService } from './routers/settings.router';
+import { DuplicateRulesService } from '../settings/duplicate-rules.service';
 import { CartOrdersModule } from '../cart-orders/cart-orders.module';
 import { CartOrdersService } from '../cart-orders/cart-orders.service';
 import { setCartOrdersService } from './routers/cart-orders.router';
@@ -168,6 +169,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly importHistoryService: ImportHistoryService,
     private readonly voipService: VoipService,
     private readonly settingsService: SettingsService,
+    private readonly duplicateRulesService: DuplicateRulesService,
     private readonly cartService: CartService,
     private readonly sessionStore: SessionStoreService,
     private readonly cacheService: CacheService,
@@ -230,6 +232,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setSettingsService(this.settingsService);
     setSettingsDb(this.db as Parameters<typeof setSettingsDb>[0]);
     setSettingsCacheService(this.cacheService);
+    setDuplicateRulesService(this.duplicateRulesService);
     setCartService(this.cartService);
     setBranchesDb(this.db as Parameters<typeof setBranchesDb>[0]);
     setBranchesCacheService(this.cacheService);

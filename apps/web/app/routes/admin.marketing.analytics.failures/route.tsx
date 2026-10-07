@@ -8,6 +8,8 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { FormFailuresView, type FormFailuresData } from '~/features/marketing/FormFailuresPage';
+import { EmptyState } from '~/components/ui/empty-state';
+import { extractApiErrorMessage } from '~/lib/api-error';
 
 export const meta: MetaFunction = () => [{ title: 'Form failures — Analytics — Yannis EOSE' }];
 
@@ -40,8 +42,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const input = encodeURIComponent(JSON.stringify({ ...(startDate && { startDate }), ...(endDate && { endDate }) }));
+  // An API error must never read as "no failed submits": surface it instead.
   const failures = apiRequest<unknown>(`/trpc/marketing.submitFailures?input=${input}`, { method: 'GET', cookie }).then(
-    (res) => (res.ok ? ((res.data as { result?: { data?: FormFailuresData } })?.result?.data ?? EMPTY) : EMPTY),
+    (res) => {
+      const data = res.ok ? (res.data as { result?: { data?: FormFailuresData } })?.result?.data : undefined;
+      return data
+        ? { data, error: null }
+        : { data: EMPTY, error: extractApiErrorMessage(res.data, 'Could not load form failures.') };
+    },
   );
 
   return defer({ filters: { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime }, failures });
@@ -80,7 +88,13 @@ export default function FormFailuresRoute() {
           </div>
         }
       >
-        {(data) => <FormFailuresView data={data as FormFailuresData} />}
+        {(result) =>
+          result.error ? (
+            <EmptyState variant="card" title="Could not load form failures" description={result.error} />
+          ) : (
+            <FormFailuresView data={result.data as FormFailuresData} />
+          )
+        }
       </CachedAwait>
     </div>
   );

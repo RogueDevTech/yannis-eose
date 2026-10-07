@@ -172,6 +172,35 @@ function sameValue(a: Record<string, unknown>, b: Record<string, unknown>): bool
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/**
+ * Free typing; the value is clamped to 1..max only on blur (or Enter), so
+ * editing 14 to 30 never passes through a clamped 1 or 130.
+ */
+function WindowInput({ label, max, value, onCommit }: { label: string; max: number; value: number; onCommit: (n: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const commit = () => {
+    const n = Math.round(Number(text));
+    const clamped = Number.isFinite(n) && text.trim() !== '' ? Math.min(max, Math.max(1, n)) : value;
+    setText(String(clamped));
+    if (clamped !== value) onCommit(clamped);
+  };
+  return (
+    <TextInput
+      label={label}
+      type="number"
+      inputMode="numeric"
+      min={1}
+      max={max}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
+      hint={`1 to ${max}`}
+    />
+  );
+}
+
 export function DuplicateRulesPage({ data }: { data: DuplicateRulesData }) {
   const fetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
   const [draft, setDraft] = useState<DuplicateRules>(data.rules);
@@ -235,10 +264,10 @@ export function DuplicateRulesPage({ data }: { data: DuplicateRulesData }) {
           : 'Using defaults. Nothing saved for this company yet.'}
       </p>
 
-      {draft.intakeBlock.mode === 'FLAG' && draft.cleanupCron.mode === 'DELETE' && (
+      {draft.intakeBlock.mode !== 'BLOCK' && draft.cleanupCron.mode === 'DELETE' && (
         <p className="mb-4 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-700 dark:bg-warning-900/20 dark:text-warning-300">
-          Repeat orders are created and flagged, but Duplicate cleanup is still set to delete. It will delete early-stage
-          flagged orders within 2 hours. Set Duplicate cleanup to Flag only to keep them.
+          Repeat orders now become orders, but Duplicate cleanup is still set to delete. It will delete the early-stage
+          ones within 2 hours. Set Duplicate cleanup to Flag only to keep them.
         </p>
       )}
 
@@ -278,17 +307,11 @@ export function DuplicateRulesPage({ data }: { data: DuplicateRulesData }) {
                           />
                         )}
                         {def.window && active && (
-                          <TextInput
+                          <WindowInput
                             label={`Window (${def.window.unit})`}
-                            type="number"
-                            inputMode="numeric"
-                            min={1}
                             max={def.window.max}
-                            value={String(value[def.window.field] ?? '')}
-                            onChange={(e) => {
-                              const n = Math.round(Number(e.target.value));
-                              if (Number.isFinite(n)) update(def.key, { [def.window!.field]: Math.min(def.window!.max, Math.max(1, n)) });
-                            }}
+                            value={Number(value[def.window.field] ?? 1)}
+                            onCommit={(n) => update(def.key, { [def.window!.field]: n })}
                           />
                         )}
                       </div>
@@ -311,7 +334,7 @@ export function DuplicateRulesPage({ data }: { data: DuplicateRulesData }) {
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
         title="Save duplicate rules?"
-        description="These changes apply to this company straight away, including the public order form."
+        description="These changes apply to this company within a minute, including the public order form."
         confirmLabel="Save rules"
         variant="warning"
         loading={saving}
