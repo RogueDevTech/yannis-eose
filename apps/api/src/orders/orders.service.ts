@@ -31,6 +31,12 @@ import { withActor, withActorAndBranch, type Tx } from '../common/db/with-actor'
 type DbOrTx = PostgresJsDatabase<typeof schema> | Tx;
 
 /** The winning (existing) order returned by the duplicate check. */
+/** Order-form offer/price check outcome (orders.offer_check, migration 0351). */
+type OfferCheckResult = {
+  code: 'PRICE_NOT_IN_OFFERS' | 'NO_ACTIVE_OFFERS' | 'PRODUCT_NOT_ON_FORM' | 'PRODUCT_MISSING' | 'CHECK_UNAVAILABLE';
+  detail: string;
+};
+
 type DedupWinner = {
   id: string;
   mediaBuyerId: string | null;
@@ -1743,10 +1749,34 @@ export class OrdersService {
     return closer?.primaryBranchId ?? sessionBranchId ?? fallbackBranchId;
   }
 
-  /** Edge tamper gate: order lines must match allowlisted tiers for this campaign (templates or legacy base price). */
-  private async assertEdgeFormLineItemsAllowlisted(orderInput: CreateOrderInput): Promise<void> {
+  /**
+   * Offer/price check for order-form lines: each line must match an active tier
+   * for this campaign (offer group, templates, or legacy base price).
+   *
+   * NEVER THROWS and never blocks an order (owner decision 2026-10-07: catch
+   * first, check after). It used to reject the submit, which sent fully filled
+   * orders to Carts. A mismatch now returns a reason; the order is created with
+   * orders.offer_check set and CS must clear it ("Price checked") before
+   * CONFIRMED. An error inside the check returns CHECK_UNAVAILABLE.
+   */
+  private async checkEdgeFormLineItems(orderInput: CreateOrderInput): Promise<OfferCheckResult | null> {
+    try {
+      return await this.runEdgeFormLineItemCheck(orderInput);
+    } catch (err) {
+      this.logger.warn(
+        { campaignId: orderInput.campaignId ?? null, err: err instanceof Error ? err.message : String(err) },
+        'offer check errored, order accepted and flagged CHECK_UNAVAILABLE',
+      );
+      return { code: 'CHECK_UNAVAILABLE', detail: 'The offer check could not run. Verify the price with the customer.' };
+    }
+  }
+
+  private async runEdgeFormLineItemCheck(orderInput: CreateOrderInput): Promise<OfferCheckResult | null> {
     const campaignId = orderInput.campaignId;
-    if (!campaignId) return;
+    if (!campaignId) return null;
+    // Human-readable submitted line, for the CS timeline note.
+    const describeLine = (item: CreateOrderInput['items'][number]) =>
+      `${item.offerLabel?.trim() ? `"${item.offerLabel.trim()}" ` : ''}x${item.quantity} at ${Number(item.unitPrice)}`;
 
     const [camp] = await this.db
       .select({
@@ -1795,10 +1825,7 @@ export class OrdersService {
         );
 
       if (rows.length === 0) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'This campaign offer has no active items.',
-        });
+        return { code: 'NO_ACTIVE_OFFERS', detail: 'This form has no active offers. Agree the price with the customer.' };
       }
 
       // For a non-base currency, load each item's per-currency price so the
@@ -1829,17 +1856,22 @@ export class OrdersService {
         }
 
         if (!ok) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Offer selection does not match this form.',
-          });
+          const active = rows
+            .filter((r) => r.productId === item.productId)
+            .slice(0, 6)
+            .map((r) => `"${r.label.trim()}" x${r.quantity ?? 1} at ${tierPrice(r)}`)
+            .join('; ');
+          return {
+            code: 'PRICE_NOT_IN_OFFERS',
+            detail: `Submitted ${describeLine(item)}. Active offers: ${active || 'none for this product'}.`,
+          };
         }
       }
-      return;
+      return null;
     }
 
     const campaignProductId = ((camp?.productIds ?? []) as string[])[0];
-    if (!campaignProductId) return;
+    if (!campaignProductId) return null;
 
     const selectedIds = (
       camp?.formConfig as { selectedOfferTemplateIds?: string[] } | null | undefined
@@ -1878,10 +1910,7 @@ export class OrdersService {
         .where(eq(schema.products.id, campaignProductId))
         .limit(1);
       if (!p) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Product not found for this campaign.',
-        });
+        return { code: 'PRODUCT_MISSING', detail: "This form's product no longer exists. Check the product and price." };
       }
       const embedded = p.offers as Array<{ label?: string; qty?: number; price?: string | number }> | null;
       if (Array.isArray(embedded) && embedded.length > 0) {
@@ -1912,10 +1941,7 @@ export class OrdersService {
 
     for (const item of orderInput.items) {
       if (item.productId !== campaignProductId) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Product does not match this campaign.',
-        });
+        return { code: 'PRODUCT_NOT_ON_FORM', detail: `Submitted a product that is not this form's product (${describeLine(item)}).` };
       }
 
       const unitNum = Number(item.unitPrice);
@@ -1935,12 +1961,17 @@ export class OrdersService {
       }
 
       if (!ok) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Offer selection does not match this form.',
-        });
+        const active = tiers
+          .slice(0, 6)
+          .map((t) => `"${t.name.trim()}" x${t.quantity ?? 1} at ${tplPrice(t)}`)
+          .join('; ');
+        return {
+          code: 'PRICE_NOT_IN_OFFERS',
+          detail: `Submitted ${describeLine(item)}. Active offers: ${active || 'none'}.`,
+        };
       }
     }
+    return null;
   }
 
   /**
@@ -2049,7 +2080,7 @@ export class OrdersService {
    * "select an offer" picker in the Adjust order items modal — picking a tier
    * sets quantity + unit price together so a bundled discount applies instead
    * of hand-editing the amount. Tier resolution mirrors the edge-form tamper
-   * gate (`assertEdgeFormLineItemsAllowlisted`): offer group → campaign-selected
+   * check (`checkEdgeFormLineItems`): offer group → campaign-selected
    * offer templates → embedded product offers → a single "Standard" base tier.
    * Returns an empty tier list for products with no offers (UI falls back to
    * manual "Custom" entry).
@@ -2437,9 +2468,11 @@ export class OrdersService {
       }
     }
 
-    if (orderSource === 'edge-form' && orderInput.campaignId) {
-      await this.assertEdgeFormLineItemsAllowlisted(orderInput);
-    }
+    // Offer/price check: never rejects (see checkEdgeFormLineItems). A mismatch
+    // flags the order "Check price" and CS clears it before CONFIRMED.
+    const offerCheck = orderSource === 'edge-form' && orderInput.campaignId
+      ? await this.checkEdgeFormLineItems(orderInput)
+      : null;
 
     // Idempotency check for edge-form orders — duplicate-order protection is
     // the API's job (the edge worker no longer keeps its own KV dedup). A
@@ -2804,6 +2837,8 @@ export class OrdersService {
           ...(intakeFlagWinner
             ? { isDuplicate: 'FLAGGED', duplicateOfId: intakeFlagWinner.source === 'orders' ? intakeFlagWinner.id : null }
             : {}),
+          // "Check price": the submit did not match an active offer (never rejected).
+          offerCheck: offerCheck?.code ?? null,
         })
         .returning();
       const created = rows[0];
@@ -2942,6 +2977,18 @@ export class OrdersService {
           : undefined,
       branchId: order.branchId ?? null,
     });
+
+    if (offerCheck) {
+      void this.writeTimelineEvent({
+        orderId: order.id,
+        eventType: 'CS_ORDER_COMMENT',
+        actorId: null,
+        actorName: 'System',
+        description: `Check price before confirming. ${offerCheck.detail}`,
+        metadata: { reason: 'OFFER_CHECK', offerCheck: offerCheck.code },
+        branchId: order.branchId ?? null,
+      });
+    }
 
     if (intakeFlagWinner) {
       const winnerRef = intakeFlagWinner.orderNumber != null
@@ -3983,7 +4030,7 @@ export class OrdersService {
     } else if (cart.productId) {
       // No CS override — synthesize from the cart. We MUST resolve the real tier price,
       // otherwise create() rejects it: orderSource='edge-form' runs
-      // `assertEdgeFormLineItemsAllowlisted`, which compares item.unitPrice against the
+      // `checkEdgeFormLineItems`, which compares item.unitPrice against the
       // campaign's allowlisted tiers; a placeholder 0 never matches and the recovery fails
       // with "Offer selection does not match this form."
       const quantity = cart.quantity ?? 1;
@@ -4331,7 +4378,7 @@ export class OrdersService {
 
   /**
    * Cart recovery: pull the tier price for (campaign, product, offerLabel, quantity).
-   * Mirrors the source-of-truth lookup in `assertEdgeFormLineItemsAllowlisted` so the
+   * Mirrors the source-of-truth lookup in `checkEdgeFormLineItems` so the
    * synthesized line items pass the same allowlist gate.
    *
    * Lookup order matches the gate: campaign offer_group → product offer_templates →
@@ -6034,6 +6081,8 @@ export class OrdersService {
       cartId: schema.orders.cartId,
       // Duplicate flag — shown as a badge on the orders list table.
       isDuplicate: schema.orders.isDuplicate,
+      // "Check price" flag (offer_check) — shown as a badge; blocks Confirm.
+      offerCheck: schema.orders.offerCheck,
       // Follow-up flag — shown as a badge when order was reopened via Follow Up page.
       isFollowUp: schema.orders.isFollowUp,
       // Frozen flag — order pulled into follow-up pipeline, no further mutations.
@@ -6510,6 +6559,16 @@ export class OrdersService {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: `Cannot transition from ${currentStatus} to ${newStatus}. Allowed: ${getAllowedNextStatuses(currentStatus).join(', ') || 'none'}`,
+      });
+    }
+
+    // "Check price" (orders.offer_check): the form submit did not match an active
+    // offer. The order was accepted; it cannot be confirmed until CS has agreed
+    // the price with the customer and cleared the flag (clearOfferCheck).
+    if (newStatus === 'CONFIRMED' && order.offerCheck) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Check the price first. This order did not match an active offer on the form. Agree the price with the customer, fix it if needed, then press "Price checked".',
       });
     }
 
@@ -11524,6 +11583,50 @@ export class OrdersService {
       });
     });
 
+    return { success: true as const };
+  }
+
+  /**
+   * Clear the "Check price" flag (orders.offer_check) after CS agreed the price
+   * with the customer. Same actor gate as a CS comment; audited via withActor
+   * and a timeline event naming who cleared it and the note they gave.
+   */
+  async clearOfferCheck(orderId: string, actor: SessionUser, body: { note: string }) {
+    const note = body.note.trim();
+    if (note.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Say what price was agreed.' });
+    }
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+    if (!order.offerCheck) return { success: true as const };
+
+    await this.assertActorMayUpdateOrder(actor, {
+      branchId: order.branchId ?? null,
+      assignedCsId: order.assignedCsId ?? null,
+      status: order.status,
+    });
+
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.orders)
+        .set({ offerCheck: null, updatedAt: new Date() })
+        .where(eq(schema.orders.id, orderId));
+      await tx.insert(schema.orderTimelineEvents).values({
+        orderId,
+        eventType: 'CS_ORDER_COMMENT',
+        actorId: actor.id,
+        actorName: actor.name ?? null,
+        description: `Price checked: ${note}`,
+        metadata: { reason: 'OFFER_CHECK_CLEARED', previous: order.offerCheck, note },
+        branchId: order.branchId ?? null,
+      });
+    });
     return { success: true as const };
   }
 

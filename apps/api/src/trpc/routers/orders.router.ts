@@ -2634,6 +2634,26 @@ export const ordersRouter = router({
       return res;
     }),
 
+  /**
+   * Clear the "Check price" flag once CS has agreed the price with the customer.
+   * The order cannot be confirmed while the flag is set.
+   */
+  clearOfferCheck: authedProcedure
+    .meta({ branchScopedMutation: true })
+    .input(
+      z.object({
+        orderId: z.string().uuid(),
+        note: z.string().min(1).max(500),
+        branchId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
+      const res = await getOrdersService().clearOfferCheck(input.orderId, ctx.user, { note: input.note });
+      await invalidateOrderDetailCache(input.orderId);
+      return res;
+    }),
+
   // ── Claim Mode ────────────────────────────────────────
 
   /**
