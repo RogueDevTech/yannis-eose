@@ -76,7 +76,8 @@ import {
   UNSUBMITTED_FORM_CAPTURE_SOURCE,
   FULL_FORM_CART_SQL,
   CONVERT_AFTER_ABANDONED_MINUTES,
-  CONVERT_LOOKBACK_HOURS,
+  CONVERT_WINDOW_END_MINUTES,
+  LATER_SUBMIT_WINDOW_HOURS,
 } from '../cart-orders/unsubmitted-form';
 import { InventoryService } from '../inventory/inventory.service';
 import {
@@ -2627,27 +2628,43 @@ export class OrdersService {
     // submitted" and CS keeps one order (owner decision 2026-10-07). Never
     // rejects; an idempotent return like the double-tap guard above. No
     // timeline note: the order must look like any other order to CS (owner).
-    if (orderSource === 'edge-form' && !opts?.captureSource && orderInput.sessionId && orderInput.campaignId) {
-      const [captured] = await this.db
+    // Only the SAME order counts: same form, same customer (browser session, or
+    // phone hash / last 9 digits), same product and quantity, within 24h, and the
+    // captured order not yet confirmed. Anything different is a real new order
+    // and is created normally (nothing a customer submits is dropped).
+    if (orderSource === 'edge-form' && !opts?.captureSource && orderInput.campaignId && orderInput.items.length > 0) {
+      const tail = (orderInput.customerPhone ?? '').replace(/\D/g, '').slice(-9);
+      const samePerson = [
+        ...(orderInput.sessionId ? [eq(schema.orders.sessionId, orderInput.sessionId)] : []),
+        ...(orderInput.customerPhoneHash ? [eq(schema.orders.customerPhoneHash, orderInput.customerPhoneHash)] : []),
+        ...(tail.length === 9 ? [sql`right(regexp_replace(coalesce(${schema.orders.customerPhone}, ''), '\\D', '', 'g'), 9) = ${tail}`] : []),
+      ];
+      const candidates = samePerson.length === 0 ? [] : await this.db
         .select({ id: schema.orders.id })
         .from(schema.orders)
         .where(
           and(
-            eq(schema.orders.sessionId, orderInput.sessionId),
+            or(...samePerson),
             eq(schema.orders.campaignId, orderInput.campaignId),
             eq(schema.orders.captureSource, UNSUBMITTED_FORM_CAPTURE_SOURCE),
             isNull(schema.orders.deletedAt),
-            notInArray(schema.orders.status, ['CANCELLED', 'DELETED']),
-            gte(schema.orders.createdAt, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)),
+            inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
+            gte(schema.orders.createdAt, new Date(Date.now() - LATER_SUBMIT_WINDOW_HOURS * 60 * 60 * 1000)),
           ),
         )
         .orderBy(desc(schema.orders.createdAt))
-        .limit(1);
-      if (captured) {
+        .limit(5);
+      const wanted = orderInput.items.map((it) => `${it.productId}:${it.quantity}`).sort().join('|');
+      for (const cand of candidates) {
+        const lines = await this.db
+          .select({ productId: schema.orderItems.productId, quantity: schema.orderItems.quantity })
+          .from(schema.orderItems)
+          .where(eq(schema.orderItems.orderId, cand.id));
+        if (lines.map((l) => `${l.productId}:${l.quantity}`).sort().join('|') !== wanted) continue;
         if (cartId) {
-          await this.cartService.convert(cartId, captured.id, actorId ?? undefined).catch(() => {});
+          await this.cartService.convert(cartId, cand.id, actorId ?? undefined).catch(() => {});
         }
-        return { id: captured.id, alreadySubmitted: true };
+        return { id: cand.id, alreadySubmitted: true };
       }
     }
 
@@ -4521,6 +4538,8 @@ export class OrdersService {
   // ── Unsubmitted properly filled forms → orders (owner decision 2026-10-07) ──
 
   private convertingUnsubmittedForms = false;
+  /** Carts the converter already tried and left for the pull (in-process, per window). */
+  private readonly unsubmittedFormsTried = new Map<string, number>();
 
   /**
    * Every 2 minutes: a cart whose customer filled every required field and chose
@@ -4536,18 +4555,27 @@ export class OrdersService {
     this.convertingUnsubmittedForms = true;
     let converted = 0;
     try {
+      // Window 25..55 min after ABANDONED: never overlaps the pull (60 min hold).
       const rows = (await this.db.execute(sql.raw(`
         SELECT ca.id FROM cart_abandonments ca
         WHERE ${FULL_FORM_CART_SQL}
           AND ca.converted_order_id IS NULL
           AND ca.skip_reason IS NULL
-          AND ca.id NOT IN (SELECT source_cart_id FROM cart_orders)
+          AND NOT EXISTS (SELECT 1 FROM cart_orders co WHERE co.source_cart_id = ca.id)
           AND ca.updated_at <= now() - INTERVAL '${CONVERT_AFTER_ABANDONED_MINUTES} minutes'
-          AND ca.updated_at > now() - INTERVAL '${CONVERT_LOOKBACK_HOURS} hours'
-        ORDER BY ca.updated_at
-        LIMIT 50
+          AND ca.updated_at > now() - INTERVAL '${CONVERT_WINDOW_END_MINUTES} minutes'
+        ORDER BY ca.updated_at DESC
+        LIMIT 200
       `))) as unknown as Array<{ id: string }>;
-      for (const row of rows) {
+      // Newest first, skipping carts already tried, so unconvertible carts can
+      // never crowd out new ones.
+      const now = Date.now();
+      for (const [id, at] of this.unsubmittedFormsTried) {
+        if (now - at > 2 * 60 * 60 * 1000) this.unsubmittedFormsTried.delete(id);
+      }
+      const todo = rows.filter((r) => !this.unsubmittedFormsTried.has(r.id)).slice(0, 50);
+      for (const row of todo) {
+        this.unsubmittedFormsTried.set(row.id, now);
         try {
           if (await this.convertUnsubmittedCart(row.id)) converted++;
         } catch (err) {
@@ -4580,9 +4608,13 @@ export class OrdersService {
       .from(schema.orders)
       .where(
         and(
+          // "Same phone" = hash OR last 9 raw digits (CLAUDE.md: 803… vs 0803…).
           or(
             eq(schema.orders.customerPhoneHash, cart.customerPhoneHash),
             ...(cart.sessionId ? [eq(schema.orders.sessionId, cart.sessionId)] : []),
+            ...((cart.customerPhone ?? '').replace(/\D/g, '').length >= 9
+              ? [sql`right(regexp_replace(coalesce(${schema.orders.customerPhone}, ''), '\\D', '', 'g'), 9) = ${(cart.customerPhone ?? '').replace(/\D/g, '').slice(-9)}`]
+              : []),
           ),
           gte(schema.orders.createdAt, since),
           isNull(schema.orders.deletedAt),

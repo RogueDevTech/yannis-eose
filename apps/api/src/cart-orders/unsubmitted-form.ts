@@ -24,8 +24,15 @@ export const CONVERT_AFTER_ABANDONED_MINUTES = 25;
  */
 export const PULL_HOLD_MINUTES = 60;
 
-/** Only carts abandoned this recently are converted (going forward, no backlog). */
-export const CONVERT_LOOKBACK_HOURS = 6;
+/**
+ * Converter window end (minutes after ABANDONED). Kept below PULL_HOLD_MINUTES
+ * so the converter and the cart pull never work on the same cart at the same
+ * time. Also makes it going forward only (no backlog).
+ */
+export const CONVERT_WINDOW_END_MINUTES = 55;
+
+/** Same-order window for a later submit from the same customer (see orders.create). */
+export const LATER_SUBMIT_WINDOW_HOURS = 24;
 
 /**
  * SQL predicate on a cart_abandonments row aliased `ca`: properly filled.
@@ -41,4 +48,8 @@ export const FULL_FORM_CART_SQL = `(
   AND btrim(coalesce(ca.offer_label, '')) <> ''
   AND btrim(coalesce(ca.delivery_address, ca.customer_address, '')) <> ''
   AND btrim(coalesce(ca.delivery_state, '')) <> ''
+  -- Not converted: Pay online (the customer may still be paying; Paystack
+  -- completion creates its own order) and non-naira carts (per-currency prices).
+  AND coalesce(ca.payment_method::text, 'PAY_ON_DELIVERY') <> 'PAY_ONLINE'
+  AND upper(coalesce(ca.currency_code, 'NGN')) = 'NGN'
 )`;

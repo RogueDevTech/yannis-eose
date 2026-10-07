@@ -4,7 +4,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 export interface FormFailuresData {
   totals: { browserBlocked: number; formBlocked: number; serverRejected: number; total: number };
   /** Customers (one per browser) who hit a failure, and what they did next. */
-  outcomes?: { customers: number; ordered: number; cartOrder: number; abandoned: number; untraceableFailures: number };
+  outcomes?: { customers: number; ordered: number; autoOrder?: number; cartOrder: number; abandoned: number; untraceableFailures: number };
   forms: Array<{
     campaignId: string;
     campaignName: string;
@@ -17,6 +17,7 @@ export interface FormFailuresData {
     orders: number;
     customers?: number;
     laterOrdered?: number;
+    autoOrder?: number;
     becameCartOrder?: number;
     abandoned?: number;
   }>;
@@ -64,7 +65,8 @@ export function FormFailuresView({ data }: { data: FormFailuresData }) {
           <OverviewStatStrip
             items={[
               { label: 'Customers who hit a failure', value: data.outcomes.customers },
-              { label: 'Later ordered', value: data.outcomes.ordered, title: 'An order from the same browser was created after the failure.' },
+              { label: 'Later ordered', value: data.outcomes.ordered, title: 'The customer submitted an order from the same browser after the failure.' },
+              { label: 'Order from filled form', value: data.outcomes.autoOrder ?? 0, title: 'They did not submit, but their fully filled form was created as an order.' },
               { label: 'Became cart order', value: data.outcomes.cartOrder, title: 'No order, but their cart was pulled into Cart Orders.' },
               { label: 'Abandoned', value: data.outcomes.abandoned, title: 'No order and no cart order (yet).' },
             ]}
@@ -98,6 +100,7 @@ export function FormFailuresView({ data }: { data: FormFailuresData }) {
           { key: 'total', header: 'Failed', align: 'right', render: (r) => <span className="font-semibold">{r.total}</span> },
           { key: 'orders', header: 'Orders', align: 'right', render: (r) => r.orders },
           { key: 'laterOrdered', header: 'Later ordered', align: 'right', render: (r) => r.laterOrdered ?? 0 },
+          { key: 'autoOrder', header: 'From filled form', align: 'right', hideOnMobile: true, render: (r) => r.autoOrder ?? 0 },
           { key: 'becameCart', header: 'Cart order', align: 'right', hideOnMobile: true, render: (r) => r.becameCartOrder ?? 0 },
           { key: 'abandoned', header: 'Abandoned', align: 'right', render: (r) => r.abandoned ?? 0 },
           { key: 'browser', header: 'Field refused', align: 'right', hideOnMobile: true, render: (r) => r.browserBlocked },

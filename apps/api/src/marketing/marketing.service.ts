@@ -8544,38 +8544,54 @@ export class MarketingService {
         .limit(15),
     ]);
 
-    // What happened AFTER a failure, per customer session (one browser visit):
-    //  ordered    = an order from the same session was created after the first failure
-    //  cartOrder  = no order, but the session's cart was pulled into Cart Orders
-    //  abandoned  = neither (yet)
-    // The form sends one sessionId with the failure beacon, the cart and the order,
-    // so they join on session_id. Failures without a sessionId (storage blocked)
-    // cannot be followed and are counted as untraceable.
-    const outcomeRows = (await this.db.execute(sql`
+    // What happened AFTER a failure, per customer (browser session_id, which the
+    // form sends with the failure beacon, the cart and the order):
+    //  ordered    = the customer's own order (submitted, not auto-created) after the first failure
+    //  autoOrder  = no submitted order, but their properly filled form was auto-created
+    //               as an order (orders.capture_source = 'UNSUBMITTED_FORM')
+    //  cartOrder  = neither, but their cart was pulled into Cart Orders after the failure
+    //  abandoned  = none of these (yet)
+    // Failures without a sessionId (storage blocked) cannot be followed: untraceable.
+    const outcomeSql = (groupByForm: boolean) => sql`
       WITH f AS (
-        SELECT ${fsa.sessionId} AS session_id, ${fsa.campaignId} AS campaign_id, min(${fsa.attemptedAt}) AS first_fail
+        SELECT ${fsa.sessionId} AS session_id,
+               ${groupByForm ? sql`${fsa.campaignId}` : sql`NULL::uuid`} AS campaign_id,
+               min(${fsa.attemptedAt}) AS first_fail
         FROM ${fsa}
         WHERE ${fsa.sessionId} IS NOT NULL ${where ? sql`AND ${where}` : sql``}
         GROUP BY 1, 2
       ), o AS (
         SELECT f.campaign_id,
-          EXISTS (SELECT 1 FROM orders ord WHERE ord.session_id = f.session_id AND ord.created_at >= f.first_fail) AS ordered,
+          EXISTS (SELECT 1 FROM orders ord WHERE ord.session_id = f.session_id AND ord.created_at >= f.first_fail
+                  AND ord.deleted_at IS NULL AND ord.capture_source IS NULL) AS ordered,
+          EXISTS (SELECT 1 FROM orders ord WHERE ord.session_id = f.session_id AND ord.created_at >= f.first_fail
+                  AND ord.deleted_at IS NULL AND ord.capture_source = 'UNSUBMITTED_FORM') AS auto_order,
           EXISTS (SELECT 1 FROM cart_orders co JOIN cart_abandonments ca ON ca.id = co.source_cart_id
-                  WHERE ca.session_id = f.session_id) AS cart_order
+                  WHERE ca.session_id = f.session_id AND co.created_at >= f.first_fail) AS cart_order
         FROM f
       )
       SELECT campaign_id,
         count(*)::int AS sessions,
         count(*) FILTER (WHERE ordered)::int AS ordered,
-        count(*) FILTER (WHERE NOT ordered AND cart_order)::int AS cart_order,
-        count(*) FILTER (WHERE NOT ordered AND NOT cart_order)::int AS abandoned
+        count(*) FILTER (WHERE NOT ordered AND auto_order)::int AS auto_order,
+        count(*) FILTER (WHERE NOT ordered AND NOT auto_order AND cart_order)::int AS cart_order,
+        count(*) FILTER (WHERE NOT ordered AND NOT auto_order AND NOT cart_order)::int AS abandoned
       FROM o GROUP BY campaign_id
-    `)) as unknown as Array<{ campaign_id: string; sessions: number; ordered: number; cart_order: number; abandoned: number }>;
-    const [untraceableRow] = await this.db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(fsa)
-      .where(and(isNull(fsa.sessionId), ...(where ? [where] : [])));
-    const outcomeByForm = new Map(outcomeRows.map((r) => [r.campaign_id, r]));
+    `;
+    type OutcomeRow = { campaign_id: string | null; sessions: number; ordered: number; auto_order: number; cart_order: number; abandoned: number };
+    // Independent reads: run together. Totals count each customer once even if
+    // they failed on several forms; the per-form rows count them per form.
+    const [outcomeRows, outcomeTotalRows, untraceableRows] = await Promise.all([
+      this.db.execute(outcomeSql(true)) as unknown as Promise<OutcomeRow[]>,
+      this.db.execute(outcomeSql(false)) as unknown as Promise<OutcomeRow[]>,
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(fsa)
+        .where(and(isNull(fsa.sessionId), ...(where ? [where] : []))),
+    ]);
+    const outcomeTotal = outcomeTotalRows[0];
+    const untraceableRow = untraceableRows[0];
+    const outcomeByForm = new Map(outcomeRows.map((r) => [r.campaign_id ?? '', r]));
 
     const campaignIds = perForm.map((r) => r.campaignId);
     const orderCounts = new Map<string, number>();
@@ -8601,10 +8617,11 @@ export class MarketingService {
       },
       // Customers (sessions) who hit at least one failure, and what they did next.
       outcomes: {
-        customers: outcomeRows.reduce((n, r) => n + r.sessions, 0),
-        ordered: outcomeRows.reduce((n, r) => n + r.ordered, 0),
-        cartOrder: outcomeRows.reduce((n, r) => n + r.cart_order, 0),
-        abandoned: outcomeRows.reduce((n, r) => n + r.abandoned, 0),
+        customers: outcomeTotal?.sessions ?? 0,
+        ordered: outcomeTotal?.ordered ?? 0,
+        autoOrder: outcomeTotal?.auto_order ?? 0,
+        cartOrder: outcomeTotal?.cart_order ?? 0,
+        abandoned: outcomeTotal?.abandoned ?? 0,
         untraceableFailures: untraceableRow?.count ?? 0,
       },
       forms: perForm.map((r) => {
@@ -8614,6 +8631,7 @@ export class MarketingService {
           orders: orderCounts.get(r.campaignId) ?? 0,
           customers: o?.sessions ?? 0,
           laterOrdered: o?.ordered ?? 0,
+          autoOrder: o?.auto_order ?? 0,
           becameCartOrder: o?.cart_order ?? 0,
           abandoned: o?.abandoned ?? 0,
         };
