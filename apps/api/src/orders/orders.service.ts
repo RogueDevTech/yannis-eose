@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import { randomUUID, createHash } from 'crypto';
@@ -23,7 +23,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, formatCustomerPhoneForDisplay, toInternationalPhone, type CallablePhone, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode, STRICT_PHONE_MODE_KEY, isStrictPhoneModeOn, isStrictPhoneModeRole } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, formatCustomerPhoneForDisplay, toInternationalPhone, type CallablePhone, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode, STRICT_PHONE_MODE_KEY, isStrictPhoneModeOn, isStrictPhoneModeRole, resolveDuplicateRules, type DuplicateRules } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch, type Tx } from '../common/db/with-actor';
 
@@ -65,6 +65,7 @@ import { EventsService } from '../events/events.service';
 import { emitOrderAutomationEvents } from '../automation/automation-hooks';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
+import { DuplicateRulesService } from '../settings/duplicate-rules.service';
 import { InventoryService } from '../inventory/inventory.service';
 import {
   isTransitionAllowed,
@@ -229,7 +230,22 @@ export class OrdersService {
     private readonly cache: CacheService,
     private readonly csOrderRouting: CsOrderRoutingService,
     private readonly generalLedger: GeneralLedgerService,
+    // Optional so hand-built test instances keep compiling; absent = today's defaults.
+    @Optional() private readonly duplicateRules?: DuplicateRulesService,
   ) {}
+
+  /**
+   * Per-company duplicate rules for a create path. NEVER throws: on any error
+   * (or no service) it returns today's defaults, so a settings problem can
+   * never be the reason an order is lost on the public intake path.
+   */
+  private async duplicateRulesFor(branchId: string | null | undefined): Promise<DuplicateRules> {
+    try {
+      return this.duplicateRules ? await this.duplicateRules.forBranch(branchId) : resolveDuplicateRules(null);
+    } catch {
+      return resolveDuplicateRules(null);
+    }
+  }
 
   /** Per-order detail cache key used by `getById`. Kept here so the router-side
    *  invalidator (`invalidateOrderDetailCache`) can target the same key without
@@ -2447,6 +2463,8 @@ export class OrdersService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let order!: any;
     let servicingBranchId: string | null = null;
+    // Set when the company's duplicate rules say "create and flag": the order is still created.
+    let intakeFlagWinner: DedupWinner | null = null;
     if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
       const hashHex = orderInput.customerPhoneHash.slice(0, 16);
       advisoryLockKey1 = parseInt(hashHex.slice(0, 8), 16) | 0;
@@ -2518,12 +2536,19 @@ export class OrdersService {
       }
     }
 
+    // Per-company duplicate rules (DUPLICATE_RULES): doubleSubmitGuard +
+    // intakeBlock. Defaults = the behaviour below as it always was.
+    const intakeRules = orderSource === 'edge-form' ? await this.duplicateRulesFor(branchId) : null;
+
     // Same-form rapid resubmit guard (double-tap / refresh within 2 minutes).
     // Same phone + same campaign + same products = idempotent return.
     // This is distinct from the 14-day universal dedup below: that one records
     // CFA rows and blocks creating a second order. This one returns early.
-    if (orderSource === 'edge-form' && orderInput.customerPhoneHash && orderInput.campaignId) {
-      const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
+    if (
+      orderSource === 'edge-form' && orderInput.customerPhoneHash && orderInput.campaignId &&
+      (intakeRules?.doubleSubmitGuard.enabled ?? true)
+    ) {
+      const twoMinAgo = new Date(Date.now() - (intakeRules?.doubleSubmitGuard.windowMinutes ?? 2) * 60 * 1000);
       const productIds = orderInput.items.map((i) => i.productId);
       const [recentSameForm] = await this.db
         .select({ id: schema.orders.id })
@@ -2564,7 +2589,9 @@ export class OrdersService {
     // Same phone + any overlapping product within 14 days = duplicate.
     // Duplicates are recorded in cross_funnel_attempts for MB visibility.
     // No order is created. Customer still sees success (pixel fires, redirect works).
-    if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
+    // Per-company intakeBlock: BLOCK (this), FLAG (order created + flagged), OFF.
+    const intakeMode = intakeRules?.intakeBlock.mode ?? 'BLOCK';
+    if (orderSource === 'edge-form' && orderInput.customerPhoneHash && intakeMode !== 'OFF') {
       const productIds = orderInput.items.map((i) => i.productId);
       const winner = await this.findExistingOrderForDedup(
         orderInput.customerPhoneHash,
@@ -2574,13 +2601,16 @@ export class OrdersService {
         // 5-min abandonment cron — otherwise the cron "steals" the submission
         // and the customer ends up in the cart pipeline instead of orders.
         // After the order is created we supersede any matching cart order below.
-        { skipCartOrders: true },
+        { skipCartOrders: true, windowDays: intakeRules?.intakeBlock.windowDays },
       );
       this.logger.log(
-        { phoneHash: orderInput.customerPhoneHash.slice(0, 12) + '…', productIds, winnerFound: !!winner, winnerId: winner?.id },
+        { phoneHash: orderInput.customerPhoneHash.slice(0, 12) + '…', productIds, winnerFound: !!winner, winnerId: winner?.id, intakeMode },
         'universal dedup check result',
       );
-      if (winner) {
+      if (winner && intakeMode === 'FLAG') {
+        // Create the order anyway; it is flagged below for CS to review.
+        intakeFlagWinner = winner;
+      } else if (winner) {
         // Always record the cross-funnel attempt — even without mediaBuyerId.
         // orderInput.mediaBuyerId is now campaign-derived (see the guarantee
         // above), so for any campaign submission it is set; winner's MB is a
@@ -2771,6 +2801,11 @@ export class OrdersService {
           sessionId: orderInput.sessionId ?? null,
           // Cart-recovered orders are follow-up from birth — never appear in main CS queue.
           ...(opts?.isFollowUp ? { isFollowUp: true } : {}),
+          // intakeBlock = FLAG: possible duplicate, created and flagged for CS.
+          // duplicate_of_id only links an `orders` winner (the Compare view reads orders).
+          ...(intakeFlagWinner
+            ? { isDuplicate: 'FLAGGED', duplicateOfId: intakeFlagWinner.source === 'orders' ? intakeFlagWinner.id : null }
+            : {}),
         })
         .returning();
       const created = rows[0];
@@ -2909,6 +2944,21 @@ export class OrdersService {
           : undefined,
       branchId: order.branchId ?? null,
     });
+
+    if (intakeFlagWinner) {
+      const winnerRef = intakeFlagWinner.orderNumber != null
+        ? formatOrderNumber(intakeFlagWinner.orderNumber, await this.resolveOrderPrefix(order).catch(() => null))
+        : intakeFlagWinner.id.slice(0, 8);
+      void this.writeTimelineEvent({
+        orderId: order.id,
+        eventType: 'ORDER_DUPLICATE_FLAGGED',
+        actorId: null,
+        actorName: 'System',
+        description: `Possible duplicate: same phone and product as ${winnerRef}. Created and flagged because duplicate rules are set to flag, not block.`,
+        metadata: { reason: 'INTAKE_FLAG', winnerId: intakeFlagWinner.id, winnerSource: intakeFlagWinner.source },
+        branchId: order.branchId ?? null,
+      });
+    }
 
     // Mark cart as CONVERTED — use cartId if available, otherwise fall back to
     // phone+product lookup so the live activity feed shows "Order placed" even
@@ -3084,6 +3134,7 @@ export class OrdersService {
     // Offline orders are manually created by a closer — serviced by the branch
     // the closer is working in (see resolveCloserServicingBranchId).
     const servicingBranchId = await this.resolveCloserServicingBranchId(actorId, sessionBranchId, branchId);
+    const manualBlock = (await this.duplicateRulesFor(branchId)).manualOrderBlock;
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       // Serialize concurrent creates for this phone (blocks; auto-released on
@@ -3093,7 +3144,10 @@ export class OrdersService {
 
       // Dedup runs INSIDE the locked transaction so a concurrent create that
       // committed while we waited on the lock is visible here.
-      const dup = await this.findExistingOrderForDedup(customerPhoneHash, productIds, { executor: tx });
+      // Per-company DUPLICATE_RULES.manualOrderBlock (BLOCK / OFF + window).
+      const dup = manualBlock.mode === 'BLOCK'
+        ? await this.findExistingOrderForDedup(customerPhoneHash, productIds, { executor: tx, windowDays: manualBlock.windowDays })
+        : null;
       if (dup) {
         // Unwind the tx (nothing has been inserted yet) and let the caller record
         // the cross-funnel attempt + surface the duplicate error outside the tx.
@@ -3726,13 +3780,17 @@ export class OrdersService {
     // the branch the closer is working in. CS routing rules should NOT override
     // this; routing is for incoming funnel orders, not closer-created orders.
     const servicingBranchId = await this.resolveCloserServicingBranchId(actorId, sessionBranchId, branchId);
+    const manualBlock = (await this.duplicateRulesFor(branchId)).manualOrderBlock;
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       // Serialize concurrent creates for this phone; held on the same connection
       // as the dedup SELECT + INSERT so check-then-insert is atomic.
       await this.acquirePhoneXactLock(tx, customerPhoneHash);
 
-      const dup = await this.findExistingOrderForDedup(customerPhoneHash, productIds, { executor: tx });
+      // Per-company DUPLICATE_RULES.manualOrderBlock (BLOCK / OFF + window).
+      const dup = manualBlock.mode === 'BLOCK'
+        ? await this.findExistingOrderForDedup(customerPhoneHash, productIds, { executor: tx, windowDays: manualBlock.windowDays })
+        : null;
       if (dup) {
         throw new DedupBlock(dup);
       }
@@ -3953,13 +4011,21 @@ export class OrdersService {
     // link the cart to the existing order so it leaves the abandonment queue.
     // NOTE: do NOT skipCartOrders here — unlike the edge-form path, recovery must
     // treat an existing cart order as a genuine duplicate, not something to beat.
-    const existing = await this.findExistingOrderForDedup(
-      phoneHash,
-      items.map((i) => i.productId),
-      // Recovery is a "which order did this cart become?" lookup, not a dedup
-      // rejection — a DELIVERED/REMITTED order must still be found and linked.
-      { includeCompleted: true },
-    );
+    // Per-company DUPLICATE_RULES.manualOrderBlock: OFF skips this lookup.
+    const recoveryBranchId = cart.campaignId
+      ? (await this.db.select({ branchId: schema.campaigns.branchId }).from(schema.campaigns)
+          .where(eq(schema.campaigns.id, cart.campaignId)).limit(1))[0]?.branchId ?? null
+      : null;
+    const manualBlock = (await this.duplicateRulesFor(recoveryBranchId)).manualOrderBlock;
+    const existing = manualBlock.mode === 'BLOCK'
+      ? await this.findExistingOrderForDedup(
+          phoneHash,
+          items.map((i) => i.productId),
+          // Recovery is a "which order did this cart become?" lookup, not a dedup
+          // rejection — a DELIVERED/REMITTED order must still be found and linked.
+          { includeCompleted: true, windowDays: manualBlock.windowDays },
+        )
+      : null;
     if (existing) {
       try {
         await this.cartService.convert(cartId, existing.id, actorId);
@@ -4112,15 +4178,18 @@ export class OrdersService {
     // phone+product would create a second live order. Link those carts to the
     // existing order and skip them instead of creating a duplicate.
     let skipped = 0;
+    // Per-company DUPLICATE_RULES.manualOrderBlock: OFF skips this lookup.
     const dedupChecks = await Promise.all(
-      prepared.map((p) =>
-        this.findExistingOrderForDedup(
+      prepared.map(async (p) => {
+        const manualBlock = (await this.duplicateRulesFor(p.branchId)).manualOrderBlock;
+        if (manualBlock.mode !== 'BLOCK') return null;
+        return this.findExistingOrderForDedup(
           p.phoneHash,
           p.items.map((i) => i.productId),
           // See above: recovery must still match completed orders.
-          { includeCompleted: true },
-        ).catch(() => null),
-      ),
+          { includeCompleted: true, windowDays: manualBlock.windowDays },
+        ).catch(() => null);
+      }),
     );
     const deduped: PreparedCart[] = [];
     for (let i = 0; i < prepared.length; i++) {
@@ -11892,7 +11961,7 @@ export class OrdersService {
   private async findExistingOrderForDedup(
     phoneHash: string,
     productIds: string[],
-    opts?: { skipCartOrders?: boolean; executor?: DbOrTx; includeCompleted?: boolean },
+    opts?: { skipCartOrders?: boolean; executor?: DbOrTx; includeCompleted?: boolean; windowDays?: number },
   ): Promise<DedupWinner | null> {
     if (!phoneHash || productIds.length === 0) return null;
 
@@ -11914,8 +11983,9 @@ export class OrdersService {
       opts?.includeCompleted ?? false,
     ) as unknown as (typeof schema.orders.$inferSelect)['status'][];
 
-    // 14-day window: same phone + overlapping product within 14 days = duplicate.
-    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    // 14-day window (DUPLICATE_RULES windowDays when the caller passes one):
+    // same phone + overlapping product inside the window = duplicate.
+    const fourteenDaysAgo = new Date(Date.now() - (opts?.windowDays ?? 14) * 24 * 60 * 60 * 1000);
 
     // Step 1: find candidates across orders, cart_orders, and follow_up_orders.
     type Candidate = {
