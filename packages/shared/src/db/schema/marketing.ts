@@ -402,3 +402,41 @@ export const campaignViews = pgTable(
     campaignViewedIdx: index('campaign_views_campaign_viewed_idx').on(table.campaignId, table.viewedAt),
   }),
 );
+
+/**
+ * Table: form_submit_attempts — public-form submits that did NOT go through
+ * (migration 0350). Written by the edge worker's fire-and-forget /track-submit
+ * beacon. Non-temporal telemetry like campaign_views: no history twin.
+ *
+ * outcome: BROWSER_BLOCKED (reason = field names the browser refused),
+ * FORM_BLOCKED (reason = error the form showed before sending),
+ * SERVER_REJECTED (reason = error shown after sending).
+ * Reasons never contain values the customer typed.
+ */
+export const formSubmitAttempts = pgTable(
+  'form_submit_attempts',
+  {
+    id: uuidv7Pk(),
+    campaignId: uuid('campaign_id')
+      .notNull()
+      .references(() => campaigns.id),
+    /** Copied from the campaign at write time. */
+    mediaBuyerId: uuid('media_buyer_id').references(() => users.id),
+    /** Copied from the campaign at write time. */
+    branchId: uuid('branch_id').references(() => branches.id),
+    sessionId: text('session_id'),
+    outcome: text('outcome').notNull(),
+    reason: text('reason'),
+    deploymentType: text('deployment_type'),
+    userAgent: text('user_agent'),
+    country: text('country'),
+    attemptedAt: timestamp('attempted_at', { withTimezone: true }).defaultNow().notNull(),
+    ...timestampColumns,
+  },
+  (table) => ({
+    campaignAttemptedIdx: index('form_submit_attempts_campaign_attempted_idx').on(table.campaignId, table.attemptedAt),
+    attemptedIdx: index('form_submit_attempts_attempted_idx').on(table.attemptedAt),
+    branchIdx: index('form_submit_attempts_branch_idx').on(table.branchId),
+    sessionIdx: index('form_submit_attempts_session_idx').on(table.sessionId),
+  }),
+);

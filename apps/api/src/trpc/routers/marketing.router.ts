@@ -2371,6 +2371,50 @@ export const marketingRouter = router({
       return { ok: true as const };
     }),
 
+  /**
+   * Form failures report: public-form submits that did not go through.
+   * Admin-level and full-team marketing viewers only (HoM); scoped by
+   * branch + company like Form Analytics.
+   */
+  submitFailures: authedProcedure
+    .input(z.object({ startDate: dateOrDateTimeOptional, endDate: dateOrDateTimeOptional }))
+    .query(async ({ input, ctx }) => {
+      if (!isAdminLevel(ctx.user) && !seesFullMarketingTeamSurfaces(ctx.user)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Missing marketing analytics access.' });
+      }
+      return getMarketingService().getSubmitFailures(input, ctx.currentBranchId, ctx.effectiveBranchIds);
+    }),
+
+  /**
+   * Submit-attempt beacon from the edge worker (/track-submit): a public-form
+   * submit that did not go through. Telemetry only, never fails the caller.
+   */
+  trackSubmitAttempt: publicProcedure
+    .input(
+      z.object({
+        campaignId: z.string().uuid(),
+        outcome: z.enum(['BROWSER_BLOCKED', 'FORM_BLOCKED', 'SERVER_REJECTED']),
+        reason: z.string().max(200).optional(),
+        sessionId: z.string().min(1).max(128).optional(),
+        deploymentType: z.string().max(32).optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      try {
+        const headers = ctx.req.headers;
+        const headerStr = (v: string | string[] | undefined): string | null =>
+          Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
+        await getMarketingService().recordSubmitAttempt({
+          ...input,
+          userAgent: headerStr(headers['user-agent']),
+          country: headerStr(headers['cf-ipcountry']),
+        });
+      } catch {
+        // Telemetry must never fail the caller.
+      }
+      return { ok: true as const };
+    }),
+
   // ── MB Fund Transfers ─────────────────────────────────────────────────
 
   createMbFundTransfer: authedProcedure

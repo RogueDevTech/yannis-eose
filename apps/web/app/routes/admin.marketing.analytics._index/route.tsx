@@ -5,6 +5,8 @@ import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { usePageRefreshOnEvent, usePollingFallback, useLivePoll } from '~/hooks/useSocket';
 import { MarketingAnalyticsPage } from '~/features/marketing/MarketingAnalyticsPage';
+import { isAdminLevel } from '~/lib/rbac';
+import { canonicalPermissionCode } from '@yannis/shared';
 import { MarketingAnalyticsLoadingShell } from '~/features/marketing/MarketingAnalyticsLoadingShell';
 import type { FormAnalytics } from '~/features/marketing/types';
 
@@ -27,7 +29,7 @@ const EMPTY_ANALYTICS: FormAnalytics = {
 export async function loader({ request }: LoaderFunctionArgs) {
   // MB sees own forms; HoM/admin see the branch; marketing team supervisors see
   // their team. Server-side (formAnalyticsPageBundle) re-enforces the exact scope.
-  await requirePermissionOrRoles(request, {
+  const user = await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'],
     permission: 'marketing.teamOverview',
     orMarketingTeamSupervisorOnBranch: true,
@@ -65,7 +67,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return { analytics: data ?? EMPTY_ANALYTICS };
   });
 
+  // Same rule as the API's submitFailures gate (admin-level, HoM, marketing.teamOverview).
+  const canSeeFailures =
+    isAdminLevel(user) ||
+    user.role === 'HEAD_OF_MARKETING' ||
+    (user.permissions ?? []).some((p: string) => canonicalPermissionCode(p) === canonicalPermissionCode('marketing.teamOverview'));
+
   const analyticsShell = {
+    canSeeFailures,
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
@@ -102,6 +111,7 @@ export default function MarketingAnalyticsRoute() {
         <MarketingAnalyticsPage
           {...payload}
           filters={analyticsShell.filters}
+          canSeeFailures={analyticsShell.canSeeFailures}
           liveEvents={[...ANALYTICS_LIVE_EVENTS]}
         />
       )}
