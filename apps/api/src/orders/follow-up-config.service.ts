@@ -534,6 +534,10 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       sql`${schema.orders.status} = ${rule.sourceStatus}`,
       sql`${ageExpr} <= ${minCutoff.toISOString()}::timestamptz`,
       eq(schema.orders.frozenForFollowUp, false),
+      // A "Check price" order (orders.offer_check) stays in the main CS queue
+      // until its price is checked: the follow-up copy has no such gate and
+      // would carry the unchecked price to CONFIRMED and graduation.
+      isNull(schema.orders.offerCheck),
       eq(schema.orders.isFollowUp, false),
       isNull(schema.orders.deletedAt),
     ];

@@ -2468,11 +2468,7 @@ export class OrdersService {
       }
     }
 
-    // Offer/price check: never rejects (see checkEdgeFormLineItems). A mismatch
-    // flags the order "Check price" and CS clears it before CONFIRMED.
-    const offerCheck = orderSource === 'edge-form' && orderInput.campaignId
-      ? await this.checkEdgeFormLineItems(orderInput)
-      : null;
+
 
     // Idempotency check for edge-form orders — duplicate-order protection is
     // the API's job (the edge worker no longer keeps its own KV dedup). A
@@ -2498,6 +2494,8 @@ export class OrdersService {
     let servicingBranchId: string | null = null;
     // Set when the company's duplicate rules say "create and flag": the order is still created.
     let intakeFlagWinner: DedupWinner | null = null;
+    // "Check price" result, set after the early-return guards below.
+    let offerCheck: OfferCheckResult | null = null;
     if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
       const hashHex = orderInput.customerPhoneHash.slice(0, 16);
       advisoryLockKey1 = parseInt(hashHex.slice(0, 8), 16) | 0;
@@ -2754,6 +2752,14 @@ export class OrdersService {
       }
     }
 
+    // Offer/price check: never rejects (see checkEdgeFormLineItems). Runs after
+    // the double-tap and duplicate guards so a replay that returns early does not
+    // pay for it. A mismatch flags the order "Check price"; CS clears it before
+    // CONFIRMED.
+    if (orderSource === 'edge-form' && orderInput.campaignId) {
+      offerCheck = await this.checkEdgeFormLineItems(orderInput);
+    }
+
     // Strip null bytes (\0) from all string fields — Postgres rejects 0x00 in
     // UTF-8 text columns. Edge-form submissions occasionally carry null bytes
     // from malformed form data or copy-paste artefacts, which causes
@@ -2981,7 +2987,7 @@ export class OrdersService {
     if (offerCheck) {
       void this.writeTimelineEvent({
         orderId: order.id,
-        eventType: 'CS_ORDER_COMMENT',
+        eventType: 'OFFER_CHECK_FLAGGED',
         actorId: null,
         actorName: 'System',
         description: `Check price before confirming. ${offerCheck.detail}`,
@@ -3089,7 +3095,9 @@ export class OrdersService {
     }
 
     let authorizationUrl: string | undefined;
-    if (paymentMethod === 'PAY_ONLINE' && orderInput.customerEmail && this.paystackService.isConfigured()) {
+    // A "Check price" order never starts an online payment at the unchecked
+    // submitted amount: the customer sees "order received" and CS agrees the price.
+    if (paymentMethod === 'PAY_ONLINE' && orderInput.customerEmail && this.paystackService.isConfigured() && !offerCheck) {
       const totalAmount = orderInput.totalAmount != null ? Number(orderInput.totalAmount) : 0;
       const amountInKobo = Math.round(totalAmount * 100); // NGN to kobo
       const callbackBase = process.env.PAYSTACK_CALLBACK_API_URL || process.env.API_URL || 'http://localhost:4444';
@@ -4028,11 +4036,10 @@ export class OrdersService {
     if (overrides.items && overrides.items.length > 0) {
       items = overrides.items;
     } else if (cart.productId) {
-      // No CS override — synthesize from the cart. We MUST resolve the real tier price,
-      // otherwise create() rejects it: orderSource='edge-form' runs
-      // `checkEdgeFormLineItems`, which compares item.unitPrice against the
-      // campaign's allowlisted tiers; a placeholder 0 never matches and the recovery fails
-      // with "Offer selection does not match this form."
+      // No CS override — synthesize from the cart. Resolve the real tier price: a
+      // placeholder 0 would not match the campaign's allowlisted tiers in
+      // `checkEdgeFormLineItems` (edge-form source), and the order would be
+      // created flagged "Check price" instead of clean.
       const quantity = cart.quantity ?? 1;
       const unitPrice = await this.resolveCartTierPrice({
         campaignId: cart.campaignId,
@@ -7526,6 +7533,8 @@ export class OrdersService {
           actorId: actor.id,
         });
       } catch { /* invoice sync is best-effort */ }
+      // Items edited to a valid offer clear "Check price" automatically.
+      if (order.offerCheck) await this.autoClearOfferCheckIfMatched(input.orderId, actor);
     }
 
     const { customerPhone: updatedPhone, ...updatedForResponse } = updated;
@@ -9005,6 +9014,7 @@ export class OrdersService {
         updatedAt: schema.orders.updatedAt,
         totalAmount: schema.orders.totalAmount,
         currencyCode: schema.orders.currencyCode,
+        offerCheck: schema.orders.offerCheck,
       })
       .from(schema.orders)
       .where(and(...conditions))
@@ -11587,9 +11597,38 @@ export class OrdersService {
   }
 
   /**
-   * Clear the "Check price" flag (orders.offer_check) after CS agreed the price
-   * with the customer. Same actor gate as a CS comment; audited via withActor
-   * and a timeline event naming who cleared it and the note they gave.
+   * Re-run the offer/price check against an order's CURRENT items (after CS
+   * edits). Null = every line now matches an active offer.
+   */
+  private async offerCheckForPersistedOrder(order: { id: string; campaignId: string | null; currencyCode: string | null }): Promise<OfferCheckResult | null> {
+    if (!order.campaignId) return null;
+    const items = await this.db
+      .select({
+        productId: schema.orderItems.productId,
+        quantity: schema.orderItems.quantity,
+        unitPrice: schema.orderItems.unitPrice,
+        offerLabel: schema.orderItems.offerLabel,
+      })
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, order.id));
+    return this.checkEdgeFormLineItems({
+      campaignId: order.campaignId,
+      currencyCode: order.currencyCode ?? undefined,
+      items: items.map((it) => ({
+        productId: it.productId,
+        quantity: it.quantity,
+        unitPrice: Number(it.unitPrice),
+        offerLabel: it.offerLabel ?? undefined,
+      })),
+    } as CreateOrderInput);
+  }
+
+  /**
+   * Clear the "Check price" flag (orders.offer_check). The current items are
+   * re-checked: if they now match an active offer anyone allowed to update the
+   * order may clear it; if they still do not, only Head of CS or admin-level may
+   * approve the off-offer price (a closer typing "ok" must not wave through a
+   * tampered price). Audited via withActor + an OFFER_CHECK_CLEARED event.
    */
   async clearOfferCheck(orderId: string, actor: SessionUser, body: { note: string }) {
     const note = body.note.trim();
@@ -11612,6 +11651,15 @@ export class OrdersService {
       status: order.status,
     });
 
+    const stillOff = await this.offerCheckForPersistedOrder(order);
+    const canApproveOffOffer = isAdminLevel(actor) || actor.role === 'HEAD_OF_CS';
+    if (stillOff && !canApproveOffOffer) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'The items still do not match an active offer. Edit the items to the agreed price, or ask Head of CS to approve this price.',
+      });
+    }
+
     await withActor(this.db, actor, async (tx) => {
       await tx
         .update(schema.orders)
@@ -11619,15 +11667,44 @@ export class OrdersService {
         .where(eq(schema.orders.id, orderId));
       await tx.insert(schema.orderTimelineEvents).values({
         orderId,
-        eventType: 'CS_ORDER_COMMENT',
+        eventType: 'OFFER_CHECK_CLEARED',
         actorId: actor.id,
         actorName: actor.name ?? null,
-        description: `Price checked: ${note}`,
-        metadata: { reason: 'OFFER_CHECK_CLEARED', previous: order.offerCheck, note },
+        description: stillOff
+          ? `Price approved outside the form's offers: ${note}`
+          : `Price checked: ${note}`,
+        metadata: { reason: 'OFFER_CHECK_CLEARED', previous: order.offerCheck, note, offOffer: !!stillOff },
         branchId: order.branchId ?? null,
       });
     });
     return { success: true as const };
+  }
+
+  /** After an item edit: clear "Check price" if the items now match an active offer. Never throws. */
+  private async autoClearOfferCheckIfMatched(orderId: string, actor: SessionUser): Promise<void> {
+    try {
+      const [order] = await this.db
+        .select({ id: schema.orders.id, campaignId: schema.orders.campaignId, currencyCode: schema.orders.currencyCode, offerCheck: schema.orders.offerCheck, branchId: schema.orders.branchId })
+        .from(schema.orders)
+        .where(eq(schema.orders.id, orderId))
+        .limit(1);
+      if (!order?.offerCheck) return;
+      if ((await this.offerCheckForPersistedOrder(order)) !== null) return;
+      await withActor(this.db, actor, async (tx) => {
+        await tx.update(schema.orders).set({ offerCheck: null, updatedAt: new Date() }).where(eq(schema.orders.id, orderId));
+        await tx.insert(schema.orderTimelineEvents).values({
+          orderId,
+          eventType: 'OFFER_CHECK_CLEARED',
+          actorId: actor.id,
+          actorName: actor.name ?? null,
+          description: 'Price checked: items now match an active offer.',
+          metadata: { reason: 'OFFER_CHECK_CLEARED', previous: order.offerCheck, auto: true },
+          branchId: order.branchId ?? null,
+        });
+      });
+    } catch (err) {
+      this.logger.warn(`autoClearOfferCheckIfMatched failed for ${orderId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**
@@ -12431,7 +12508,7 @@ export class OrdersService {
       'ORDER_CANCELLED', 'ADDRESS_UPDATED', 'QUANTITY_UPDATED', 'CALLBACK_SCHEDULED',
       'SUPERVISOR_WATCHING', 'PAYMENT_RECEIVED', 'ORDER_ARCHIVED',
       'LINE_PRICE_CHANGE_REQUESTED', 'LINE_PRICE_CHANGE_APPROVED', 'LINE_PRICE_CHANGE_REJECTED',
-      'CS_ORDER_COMMENT',
+      'CS_ORDER_COMMENT', 'OFFER_CHECK_FLAGGED', 'OFFER_CHECK_CLEARED',
     ]);
     const LOGISTICS_EVENTS = new Set([
       'ORDER_ALLOCATED', 'ORDER_DISPATCHED', 'ORDER_IN_TRANSIT', 'ORDER_DELIVERED',
