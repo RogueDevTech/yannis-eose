@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { isCustomerPhoneHiddenForRole, isStrictPhoneModeOn } from '@yannis/shared';
 
 /**
  * Call Customer phone reveal gate (`getCallablePhoneForViewer`).
@@ -30,17 +31,15 @@ function mayViewOrderForRead(
   return true;
 }
 
-const MARKETING_ROLES = new Set(['MEDIA_BUYER', 'HEAD_OF_MARKETING']);
-
 /** Mirrors the gate order in OrdersService.getCallablePhoneForViewer. */
 function revealPhone(
   actor: { role: string; id: string; permissions?: string[] },
   order: { mediaBuyerId: string | null; customerPhone: string | null } | null,
-  opts: { voipEnabled: boolean },
+  opts: { voipEnabled: boolean; strictPhoneMode?: Record<string, unknown> | null },
 ): { phone: string; isDialable: boolean } | null {
   if (opts.voipEnabled) return null;
-  if (MARKETING_ROLES.has(actor.role)) return null;
   if (!order) return null;
+  if (isCustomerPhoneHiddenForRole(actor.role, isStrictPhoneModeOn(opts.strictPhoneMode))) return null;
   if (!mayViewOrderForRead(actor, order)) return null;
   const raw = order.customerPhone?.trim();
   if (raw) return { phone: raw, isDialable: true };
@@ -82,10 +81,29 @@ describe('callable phone reveal gate', () => {
     expect(revealPhone(otherMb, order, { voipEnabled: false })).toBeNull();
   });
 
-  it('still denies marketing roles outright, even for their own order', () => {
+  it('strict phone mode (default) denies marketing roles, even for their own order', () => {
     const ownMb = { role: 'MEDIA_BUYER', id: 'mb-1', permissions: ['marketing.orders.view'] };
     expect(mayViewOrderForRead(ownMb, order)).toBe(true);
-    expect(revealPhone(ownMb, order, { voipEnabled: false })).toBeNull();
+    // Never configured = strict.
+    expect(revealPhone(ownMb, order, { voipEnabled: false, strictPhoneMode: null })).toBeNull();
+    expect(revealPhone(ownMb, order, { voipEnabled: false, strictPhoneMode: { enabled: true } })).toBeNull();
+  });
+
+  it('strict phone mode OFF reveals the phone to marketing roles who can read the order', () => {
+    const ownMb = { role: 'MEDIA_BUYER', id: 'mb-1', permissions: ['marketing.orders.view'] };
+    const hom = { role: 'HEAD_OF_MARKETING', id: 'hom-1', permissions: ['marketing.orders.view'] };
+    const off = { voipEnabled: false, strictPhoneMode: { enabled: false } };
+    expect(revealPhone(ownMb, order, off)).not.toBeNull();
+    expect(revealPhone(hom, order, off)).not.toBeNull();
+  });
+
+  it("strict phone mode OFF still denies a media buyer who is not the order's own", () => {
+    const otherMb = { role: 'MEDIA_BUYER', id: 'mb-2', permissions: ['marketing.orders.view'] };
+    expect(revealPhone(otherMb, order, { voipEnabled: false, strictPhoneMode: { enabled: false } })).toBeNull();
+  });
+
+  it('strict phone mode never affects non-marketing roles', () => {
+    expect(revealPhone(cs, order, { voipEnabled: false, strictPhoneMode: { enabled: true } })).not.toBeNull();
   });
 
   it('still denies when VOIP is enabled', () => {

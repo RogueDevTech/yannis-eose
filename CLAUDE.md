@@ -75,6 +75,17 @@ No state skipping. CANCELLED is legacy-only — use DELETED. CS never marks REMI
 - TPL Manager: transfers go to PENDING → Stock Manager/HoL approves → RECEIVED.
 - `approveTransfer` also goes straight to RECEIVED (deducts source + adds destination in one tx).
 
+## Cart Orders Classification (2026-10-05)
+- "Is this cart order really a real order?" has ONE definition: `cartRealOrderMatchesQuery` in `apps/api/src/cart-orders/cart-order-real-order-match.ts`. Pull guard, reconcile cron and export all use it. Never add a parallel phone_hash + exact-product check.
+- Match types: `CART_LINK` (orders.cart_id), `CART_CONVERTED` (source cart CONVERTED), `SAME_PRODUCT` (same phone + product, 14d), `SAME_SESSION` (same phone, any product, ±2h). "Same phone" = phone_hash OR last 9 raw digits (`803…` vs `0803…` hash differently).
+- Reconcile cron: UNPROCESSED/CS_ASSIGNED/CS_ENGAGED matches are soft-deleted; CONFIRMED+ are only flagged `is_duplicate='CART_EDGE_FORM_DUPE'`, never deleted. Every write has a timeline event naming the real order.
+- Pull guard: every skipped cart gets a `skip_reason`, or `runAutoSync` retries it every tick. One cart order per customer per session.
+- Never change `normalizePhoneForHash` to fix hash drift (breaks every NG hash). Never move this logic into the edge-form intake path (frozen).
+- Called-but-unconfirmed (CS_ENGAGED) cart orders stay as they are: no auto-close (user decision).
+
+## Export Columns
+- Every column key in `EXPORT_CONFIGS` (`apps/web/app/lib/export-config.ts`) must exist in `reportColumnsByKey` (`packages/shared/src/validators/reports.ts`), or the whole export fails with an invalid enum error. Enforced by `export-config.spec.ts`. When adding a column: validator enum + export-config + the `reports.service.ts` row and column list, all three.
+
 ## Critical Do NOTs
 - Never expose raw customer phones in any response/log
 - Never skip actor injection — `withActor()` always

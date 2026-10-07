@@ -6,6 +6,7 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { SettingsPage } from '~/features/settings/SettingsPage';
+import { STRICT_PHONE_MODE_KEY } from '@yannis/shared';
 
 export const meta: MetaFunction = () => [
   { title: 'Settings — Yannis EOSE' },
@@ -274,6 +275,20 @@ export async function action({ request }: ActionFunctionArgs) {
       return json(
         { error: extractApiErrorMessage(strictRes.data, 'Failed to update strict ad spend setting') },
         { status: safeStatus(strictRes.status) },
+      );
+    }
+
+    // 6. Strict Phone Mode
+    const strictPhoneEnabled = formData.get('strictPhoneEnabled')?.toString() !== 'false';
+    const strictPhoneRes = await apiRequest<unknown>('/trpc/settings.updateSystemSetting', {
+      method: 'POST',
+      cookie,
+      body: { key: STRICT_PHONE_MODE_KEY, value: { enabled: strictPhoneEnabled } },
+    });
+    if (!strictPhoneRes.ok) {
+      return json(
+        { error: extractApiErrorMessage(strictPhoneRes.data, 'Failed to update strict phone setting') },
+        { status: safeStatus(strictPhoneRes.status) },
       );
     }
 

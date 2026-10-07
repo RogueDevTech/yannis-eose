@@ -154,6 +154,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     productId: productIdParam,
     campaignId: campaignIdParam,
     branchScope: 'marketing' as const,
+    // Phone column: full number only where strict phone mode allows it.
+    phoneColumn: true,
     ...(apiStartDate && { startDate: apiStartDate }),
     ...(apiEndDate && { endDate: apiEndDate }),
     ...(testOrders && { testOrders: true }),
@@ -329,10 +331,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const total = trpcData?.pagination?.total ?? 0;
     const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
 
-    const orders: Order[] = (trpcData?.orders ?? []).map((o) => ({
-      ...o,
-      customerPhoneDisplay: '',
-    }));
+    const orders: Order[] = trpcData?.orders ?? [];
 
     return { orders, total, totalPages, listFailed: !res.ok };
   })();

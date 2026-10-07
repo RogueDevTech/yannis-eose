@@ -11,6 +11,7 @@ import { useToast } from './toast';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { EXPORT_DATE_PRESET_OPTIONS, type ExportConfig } from '~/lib/export-config';
 import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
+import { symbolForCurrencyCode } from '@yannis/shared';
 import type { ExportReportActionData } from '~/lib/export-report.server';
 
 export type ExportModalPicklists = {
@@ -34,6 +35,15 @@ type Props = {
 
 /** Order exports get the shared Product + Offer filter (line-item match). */
 const PRODUCT_OFFER_REPORT_KEYS = new Set<string>(['cs_orders', 'marketing_orders', 'cart_orders', 'follow_up_orders']);
+
+type OfferOption = { label: string; prices: Array<{ currencyCode: string; amount: number }> };
+
+/** "₦30,000 · TSh 50,000": one price per currency the offer is sold in. */
+function formatOfferPrices(prices: OfferOption['prices']): string {
+  return prices
+    .map((p) => `${symbolForCurrencyCode(p.currencyCode)}${p.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`)
+    .join(' · ');
+}
 
 function triggerCsvDownload(filename: string, csvContent: string) {
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
@@ -106,7 +116,7 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
   const [exportMediaBuyerId, setExportMediaBuyerId] = useState('');
   const [exportProductId, setExportProductId] = useState('');
   const [exportOfferLabel, setExportOfferLabel] = useState('');
-  const [offerLabels, setOfferLabels] = useState<string[]>([]);
+  const [offerLabels, setOfferLabels] = useState<OfferOption[]>([]);
   const [offerLabelsLoading, setOfferLabelsLoading] = useState(false);
   const [exportCampaignId, setExportCampaignId] = useState('');
   const [exportStatus, setExportStatus] = useState('');
@@ -300,7 +310,7 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
       signal: controller.signal,
     })
       .then((r) => r.json())
-      .then((res: { result?: { data?: string[] } }) => {
+      .then((res: { result?: { data?: OfferOption[] } }) => {
         if (!controller.signal.aborted) setOfferLabels(res?.result?.data ?? []);
       })
       .catch(() => {
@@ -313,7 +323,14 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
   }, [exportProductId, showProductOffer]);
 
   const offerOptions = useMemo(
-    () => [{ value: '', label: 'Any offer' }, ...offerLabels.map((l) => ({ value: l, label: l }))],
+    () => [
+      { value: '', label: 'Any offer' },
+      ...offerLabels.map((o) => ({
+        value: o.label,
+        label: o.label,
+        ...(o.prices.length > 0 ? { description: formatOfferPrices(o.prices) } : {}),
+      })),
+    ],
     [offerLabels],
   );
 

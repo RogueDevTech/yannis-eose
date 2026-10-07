@@ -23,7 +23,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, formatCustomerPhoneForDisplay, toInternationalPhone, type CallablePhone, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, formatCustomerPhoneForDisplay, toInternationalPhone, type CallablePhone, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode, STRICT_PHONE_MODE_KEY, isStrictPhoneModeOn, isStrictPhoneModeRole } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch, type Tx } from '../common/db/with-actor';
 
@@ -5252,17 +5252,74 @@ export class OrdersService {
    * when VOIP is off and the viewer is authorised; `null` otherwise. No side effects
    * — the CS_ENGAGED transition + MANUAL_CALL log happen via `initiateCall` on click.
    */
+  /**
+   * Of `branchIds`, the ones whose company has strict phone mode OFF. A branch
+   * with no company, or a company that never saved the setting, stays strict.
+   */
+  private async branchesWithStrictPhoneModeOff(branchIds: string[]): Promise<Set<string>> {
+    const open = new Set<string>();
+    const unique = [...new Set(branchIds)];
+    if (unique.length === 0) return open;
+    const rows = await this.db
+      .select({ id: schema.branches.id, groupId: schema.branches.groupId })
+      .from(schema.branches)
+      .where(inArray(schema.branches.id, unique));
+    const groupIds = [...new Set(rows.map((r) => r.groupId).filter((g): g is string => !!g))];
+    const strictByGroup = new Map<string, boolean>();
+    await Promise.all(
+      groupIds.map(async (groupId) => {
+        const setting = await this.settingsService.get(STRICT_PHONE_MODE_KEY, groupId);
+        strictByGroup.set(groupId, isStrictPhoneModeOn(setting));
+      }),
+    );
+    for (const r of rows) {
+      if (r.groupId && strictByGroup.get(r.groupId) === false) open.add(r.id);
+    }
+    return open;
+  }
+
+  /**
+   * List rows for a phone column: `customerPhoneDisplay` becomes the full number
+   * where the viewer may see it, and the raw `customerPhone` is always stripped.
+   * Same rule as `getCallablePhoneForViewer`: VOIP on hides it for everyone;
+   * strict phone mode (per order's company) hides it from marketing roles.
+   * Rows must come from a list already scoped to what the viewer may read.
+   */
+  async applyViewerPhoneDisplay<
+    T extends {
+      customerPhone?: string | null;
+      customerPhoneDisplay: string;
+      branchId: string | null;
+      servicingBranchId?: string | null;
+      currencyCode: string | null;
+    },
+  >(rows: T[], actor: SessionUser): Promise<Array<Omit<T, 'customerPhone'>>> {
+    const stripped = rows.map(({ customerPhone: _raw, ...rest }) => rest);
+    const voipSetting = await this.settingsService.get('VOIP_ENABLED');
+    if (voipSetting?.['enabled'] === true) return stripped;
+
+    let openBranches: Set<string> | null = null;
+    if (isStrictPhoneModeRole(actor.role)) {
+      openBranches = await this.branchesWithStrictPhoneModeOff(
+        rows.map((r) => r.branchId ?? r.servicingBranchId).filter((b): b is string => !!b),
+      );
+    }
+    return rows.map((row, i) => {
+      const rest = stripped[i]!;
+      const raw = row.customerPhone?.trim();
+      if (!raw) return rest;
+      const companyBranchId = row.branchId ?? row.servicingBranchId;
+      if (openBranches && !(companyBranchId && openBranches.has(companyBranchId))) return rest;
+      return { ...rest, customerPhoneDisplay: formatCustomerPhoneForDisplay(raw, row.currencyCode) };
+    });
+  }
+
   async getCallablePhoneForViewer(
     orderId: string,
     actor: SessionUser,
   ): Promise<CallablePhone | null> {
     const voipSetting = await this.settingsService.get('VOIP_ENABLED');
     if (voipSetting?.['enabled'] === true) return null;
-
-    // Phone is visible to all roles except marketing (MEDIA_BUYER, HEAD_OF_MARKETING)
-    // who shouldn't have direct customer contact info.
-    const MARKETING_ROLES = new Set(['MEDIA_BUYER', 'HEAD_OF_MARKETING']);
-    if (MARKETING_ROLES.has(actor.role)) return null;
 
     // The id may belong to a regular order, a cart order (cart_orders), or a
     // follow-up order (follow_up_orders) — all three flow through the same CS
@@ -5331,6 +5388,16 @@ export class OrdersService {
 
     if (!phoneRow) return null;
 
+    // Strict phone mode (per company, default ON): marketing roles never see the
+    // full number. Read from the ORDER's company, not the viewer's selection, so
+    // one company turning it off never exposes another company's customers.
+    if (isStrictPhoneModeRole(actor.role)) {
+      const companyBranchId = phoneRow.branchId ?? phoneRow.servicingBranchId;
+      if (!companyBranchId) return null;
+      const openBranches = await this.branchesWithStrictPhoneModeOff([companyBranchId]);
+      if (!openBranches.has(companyBranchId)) return null;
+    }
+
     // Visibility gate — reveal only for orders this actor may READ, using the
     // exact rule `orders.getById` applies (`assertActorMayViewOrderForRead`).
     // This is the same Pillar-2 IDOR protection as before: an actor who cannot
@@ -5351,7 +5418,7 @@ export class OrdersService {
     }
 
     // Phone is always visible once loaded — no status restriction.
-    // VOIP gate + marketing-role gate above are sufficient.
+    // VOIP gate + strict phone mode gate above are sufficient.
     const rawPhone = phoneRow.customerPhone?.trim();
     if (rawPhone) return toCallablePhone(rawPhone, phoneRow.currencyCode);
 

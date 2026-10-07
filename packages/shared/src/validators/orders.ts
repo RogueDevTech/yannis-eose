@@ -524,6 +524,11 @@ export const listOrdersSchema = z
     statuses: z.array(orderStatusSchema).min(1).optional(),
     /** Multi-currency filter: a specific currency code, or omitted = all currencies. */
     currencyCode: z.string().trim().toUpperCase().max(5).optional(),
+    /**
+     * Phone column: `customerPhoneDisplay` becomes the full number where the viewer
+     * may see it (VOIP off + strict phone mode). Raw `customerPhone` is never returned.
+     */
+    phoneColumn: z.boolean().optional(),
     assignedCsId: z.string().uuid().optional(),
     mediaBuyerId: z.union([z.string().uuid(), z.literal('__system__')]).optional(),
     /**

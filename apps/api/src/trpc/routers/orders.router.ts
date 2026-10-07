@@ -856,7 +856,16 @@ export const ordersRouter = router({
         }
       }
       const opts = Object.keys(baseOpts).length > 0 ? baseOpts : undefined;
-      const fetchList = () => getOrdersService().list(effectiveInput, branchId, opts);
+      type ListResult = Awaited<ReturnType<ReturnType<typeof getOrdersService>['list']>>;
+      const fetchList: () => Promise<ListResult> = effectiveInput.phoneColumn
+        ? async () => {
+            const res = await getOrdersService().list(effectiveInput, branchId, {
+              ...opts,
+              includeRawPhone: true,
+            });
+            return { ...res, orders: await getOrdersService().applyViewerPhoneDisplay(res.orders, ctx.user) };
+          }
+        : () => getOrdersService().list(effectiveInput, branchId, opts);
 
       // Cache all pages — the 15s TTL keeps the keyspace bounded and every
       // existing `invalidateOrdersAggregatesCache()` call (create / createOffline

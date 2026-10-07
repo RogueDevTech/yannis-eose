@@ -449,6 +449,18 @@ export function MarketingOrdersPage({
               </span>
             ),
       },
+      {
+        key: 'phone',
+        header: 'Phone',
+        render: showSkeletonRows
+          ? () => <TableCellTextPulse className="w-[7rem]" />
+          : (order) =>
+              order.customerPhoneDisplay ? (
+                <span className="whitespace-nowrap font-mono text-app-fg">{order.customerPhoneDisplay}</span>
+              ) : (
+                <span className="text-app-fg-muted">—</span>
+              ),
+      },
     ];
     if (showMediaBuyerColumn) {
       cols.push({
@@ -636,6 +648,9 @@ export function MarketingOrdersPage({
               {formatOrderTimestamp(order.createdAt)}
             </span>
           </div>
+          {order.customerPhoneDisplay && (
+            <p className="font-mono text-xs text-app-fg-muted">{order.customerPhoneDisplay}</p>
+          )}
           {order.lastCsComment && (
             <MobileCommentPreview comment={order.lastCsComment.comment} />
           )}
