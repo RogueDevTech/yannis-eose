@@ -1952,6 +1952,8 @@ export function OrderDetailPage({
         </div>
       )}
 
+      {order.offerCheck && <OfferCheckBanner order={order} canClear={canEditOrder} />}
+
       {canEditOrder && order.pendingOrderLinePriceRequestId && (
         <>
           <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
@@ -5054,4 +5056,63 @@ function renderCustomFieldValue(
   if (type === 'toggle') return value ? 'Yes' : 'No';
   if (Array.isArray(value)) return value.join(', ');
   return String(value);
+}
+
+/**
+ * "Check price" (orders.offer_check): the form submit matched no active offer.
+ * The order was accepted but cannot be confirmed until CS agrees the price with
+ * the customer and records it here (audited on the timeline).
+ */
+function OfferCheckBanner({ order, canClear }: { order: { id: string; branchId?: string | null }; canClear: boolean }) {
+  const fetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
+  useFetcherToast(fetcher.data);
+  useCloseOnFetcherSuccess(fetcher, () => setOpen(false));
+  const saving = fetcher.state !== 'idle';
+  return (
+    <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="text-sm text-warning-900 dark:text-warning-100">
+          <p className="font-semibold">Check price before confirming</p>
+          <p className="mt-0.5 text-warning-800 dark:text-warning-200/90">
+            The price on this order did not match an active offer on the form. Agree the price with the customer
+            (the timeline shows what was submitted), fix the items if needed, then mark it checked.
+          </p>
+        </div>
+        {canClear && (
+          <Button type="button" variant="primary" size="sm" className="shrink-0" onClick={() => setOpen(true)}>
+            Price checked
+          </Button>
+        )}
+      </div>
+      {open && (
+        <Modal open onClose={() => setOpen(false)} maxWidth="max-w-md" contentClassName="p-0">
+          <fetcher.Form method="post" className="p-6 space-y-4">
+            <input type="hidden" name="intent" value="clearOfferCheck" />
+            {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+            <h2 className="text-lg font-semibold text-app-fg">Price checked</h2>
+            <TextInput
+              label="Agreed price"
+              name="note"
+              required
+              maxLength={500}
+              placeholder="e.g. Customer confirmed 45,000 for 2 packs"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+            {fetcher.data?.error && <p className="text-sm text-danger-600">{fetcher.data.error}</p>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={saving}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving || note.trim().length === 0}>
+                Save
+              </Button>
+            </div>
+          </fetcher.Form>
+        </Modal>
+      )}
+    </div>
+  );
 }
