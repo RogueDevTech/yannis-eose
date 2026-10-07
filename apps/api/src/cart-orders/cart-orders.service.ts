@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, ne, notInArray, or, sql, asc } from 'drizzle-orm';
+import { and, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, ne, notInArray, or, sql, asc, exists } from 'drizzle-orm';
+import { offerLabelMatches } from '../common/db/offer-label-match';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay, formatOrderNumber, type OrderStatus } from '@yannis/shared';
 import type { ListCartOrdersInput, UpdateCartOrderInput, CreateCartOrderRoutingRuleInput, UpdateCartOrderRoutingRuleInput } from '@yannis/shared';
@@ -459,6 +460,23 @@ export class CartOrdersService {
       }
     }
     if (input.assignedCsId) conditions.push(eq(schema.cartOrders.assignedCsId, input.assignedCsId));
+    if (input.productId || input.offerLabel) {
+      // Product and offer must match on the SAME line item.
+      conditions.push(
+        exists(
+          this.db
+            .select({ one: sql`1` })
+            .from(schema.cartOrderItems)
+            .where(
+              and(
+                eq(schema.cartOrderItems.cartOrderId, schema.cartOrders.id),
+                input.productId ? eq(schema.cartOrderItems.productId, input.productId) : undefined,
+                input.offerLabel ? offerLabelMatches(schema.cartOrderItems.offerLabel, input.offerLabel) : undefined,
+              ),
+            ),
+        ),
+      );
+    }
     {
       const bCond = branchScopeCondition(schema.cartOrders.servicingBranchId, branchId ?? input.branchId, effectiveBranchIds);
       // CS closer self-query: show orders in their branch OR assigned to them

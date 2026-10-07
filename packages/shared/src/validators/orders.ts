@@ -540,6 +540,8 @@ export const listOrdersSchema = z
       .optional(),
     campaignId: z.string().uuid().optional(),
     productId: z.string().uuid().optional(),
+    /** Offer label on a line item (case/whitespace-insensitive). Narrows to productId's lines when both are set. */
+    offerLabel: z.string().trim().min(1).max(100).optional(),
     riderId: z.string().uuid().optional(),
     logisticsLocationId: z.string().uuid().optional(),
     servicingBranchId: z.string().uuid().optional(),
