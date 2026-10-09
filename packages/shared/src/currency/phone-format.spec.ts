@@ -42,7 +42,7 @@ describe('toInternationalPhone', () => {
 
   it('handles Kenya, Ghana and Nigeria', () => {
     expect(formatInternationalPhone('0712345678', 'KES')).toBe('+254 712 345 678');
-    expect(formatInternationalPhone('0241234567', 'GHS')).toBe('+233 241 234 567');
+    expect(formatInternationalPhone('0241234567', 'GHS')).toBe('+233 24 123 4567');
     expect(formatInternationalPhone('08031234567', 'NGN')).toBe('+234 803 123 4567');
   });
 
@@ -130,5 +130,45 @@ describe('dial fallback for numbers that do not fit the order country', () => {
   it('never turns a Tanzanian local number into +234', () => {
     expect(formatPhoneForClipboardPaste('0712345678', 'TZS')).toBe('+255712345678');
     expect(formatPhoneForClipboardPaste('0712345678', null)).toBe('0712345678');
+  });
+});
+
+describe('Ghana (GHS)', () => {
+  it('shows local numbers as +233 24 123 4567', () => {
+    expect(formatInternationalPhone('0241234567', 'GHS')).toBe('+233 24 123 4567');
+    expect(formatInternationalPhone('0598123456', 'GHS')).toBe('+233 59 812 3456');
+    expect(formatInternationalPhone('0201234567', 'GHS')).toBe('+233 20 123 4567');
+  });
+
+  it('never adds the code twice', () => {
+    expect(formatInternationalPhone('233241234567', 'GHS')).toBe('+233 24 123 4567');
+    expect(formatInternationalPhone('+233 24 123 4567', 'GHS')).toBe('+233 24 123 4567');
+    expect(formatInternationalPhone('00233241234567', 'GHS')).toBe('+233 24 123 4567');
+    expect(formatInternationalPhone('241234567', 'GHS')).toBe('+233 24 123 4567');
+  });
+
+  it('dials, copies and masks with the same digits', () => {
+    expect(toDialablePhone('0241234567', 'GHS')).toBe('+233241234567');
+    expect(formatPhoneForClipboardPaste('0241234567', 'GHS')).toBe('+233241234567');
+    expect(formatCustomerPhoneForDisplay('0241234567', 'GHS')).toBe('+233 24 123 4567');
+    expect(formatOrderCustomerPhoneDisplay('0241234567', null, 'GHS')).toBe('+233 24****567');
+  });
+
+  it('leaves shapes it cannot place as stored', () => {
+    // Code plus trunk 0, or too long: shown raw rather than guessed.
+    expect(formatInternationalPhone('2330241234567', 'GHS')).toBe('2330241234567');
+    expect(formatInternationalPhone('233412345678901', 'GHS')).toBe('233412345678901');
+  });
+
+  it('flags non-mobile ranges for a "Check number" hint', () => {
+    for (const p of ['024', '054', '055', '059', '020', '050', '026', '027', '056', '057', '053', '025']) {
+      expect(toInternationalPhone(`${p}1234567`, 'GHS')?.prefixMatchesCountry).toBe(true);
+    }
+    // 021 = old Accra landline code, not a mobile range.
+    expect(toInternationalPhone('0212345678', 'GHS')?.prefixMatchesCountry).toBe(false);
+  });
+
+  it('does not change the hash', () => {
+    expect(normalizePhoneForHash('0241234567')).toBe('233241234567');
   });
 });

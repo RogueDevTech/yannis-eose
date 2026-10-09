@@ -64,6 +64,38 @@ const SPEC_BY_CURRENCY: ReadonlyMap<string, CountryNumberSpec | null> = (() => {
   return out;
 })();
 
+/**
+ * Display-only overrides per dial code. NOT `COUNTRY_NUMBER_SPECS`: that table
+ * also drives the frozen edge form's client-side phone check, so narrowing a
+ * prefix there would block real customers. These only change how a stored
+ * number reads on screen and whether CS sees the "Check number" hint.
+ *
+ * - `groups`         national digit grouping, the way the country writes it.
+ * - `mobilePrefixes` real mobile ranges for the hint (spec prefixes are looser).
+ */
+const DISPLAY_OVERRIDES: Readonly<
+  Record<string, { groups?: ReadonlyArray<number>; mobilePrefixes?: ReadonlyArray<string> }>
+> = {
+  // Ghana: '+233 24 123 4567'. 021 (old Accra landline) is not a mobile range.
+  '233': {
+    groups: [2, 3, 4],
+    mobilePrefixes: ['20', '23', '24', '25', '26', '27', '28', '50', '53', '54', '55', '56', '57', '59'],
+  },
+};
+
+/** Split by fixed group sizes; any leftover digits form a last group. */
+function groupBySizes(national: string, sizes: ReadonlyArray<number>): string {
+  const groups: string[] = [];
+  let i = 0;
+  for (const size of sizes) {
+    if (i >= national.length) break;
+    groups.push(national.slice(i, i + size));
+    i += size;
+  }
+  if (i < national.length) groups.push(national.slice(i));
+  return groups.join(' ');
+}
+
 /** '976372552' → '976 372 552'; groups of 3 from the left, tail of 1 merges back. */
 function groupNational(national: string): string {
   const groups = national.match(/.{1,3}/g) ?? [national];
@@ -102,12 +134,15 @@ export function toInternationalPhone(
   }
   if (!national) return null;
 
+  const override = DISPLAY_OVERRIDES[spec.dial];
+  const grouped = override?.groups ? groupBySizes(national, override.groups) : groupNational(national);
+  const mobilePrefixes = override?.mobilePrefixes ?? spec.prefixes;
   return {
     e164: `+${spec.dial}${national}`,
-    display: `+${spec.dial} ${groupNational(national)}`,
+    display: `+${spec.dial} ${grouped}`,
     dialCode: spec.dial,
     national,
-    prefixMatchesCountry: spec.prefixes.some((p) => national!.startsWith(p)),
+    prefixMatchesCountry: mobilePrefixes.some((p) => national!.startsWith(p)),
   };
 }
 
