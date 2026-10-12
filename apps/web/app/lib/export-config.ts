@@ -402,6 +402,36 @@ export const EXPORT_CONFIGS: Record<ExportReportKey, ExportConfig> = {
     ],
     defaultColumns: ['reference', 'label', 'status', 'destination', 'supplier', 'totalExpected', 'totalReceived', 'created'],
   },
+  stock_out_summary: {
+    reportKey: 'stock_out_summary',
+    title: 'Export Stock Out Summary',
+    description: 'Units sold and written off per product.',
+    columns: [
+      { key: 'period', label: 'Period' },
+      { key: 'product', label: 'Product' },
+      { key: 'sold', label: 'Sold' },
+      { key: 'writtenOff', label: 'Written Off' },
+      { key: 'total', label: 'Total Out' },
+      { key: 'transactions', label: 'Transactions' },
+    ],
+    defaultColumns: ['period', 'product', 'sold', 'writtenOff', 'total', 'transactions'],
+  },
+  stock_out_transactions: {
+    reportKey: 'stock_out_transactions',
+    title: 'Export Stock Out Transactions',
+    description: 'Every stock-out line behind the summary.',
+    columns: [
+      { key: 'date', label: 'Date' },
+      { key: 'product', label: 'Product' },
+      { key: 'type', label: 'Type' },
+      { key: 'quantity', label: 'Quantity' },
+      { key: 'order', label: 'Order' },
+      { key: 'location', label: 'Location' },
+      { key: 'by', label: 'By' },
+      { key: 'reason', label: 'Reason' },
+    ],
+    defaultColumns: ['date', 'product', 'type', 'quantity', 'order', 'location'],
+  },
 };
 
 export const EXPORT_DATE_PRESET_OPTIONS: Array<{ value: ExportDatePreset; label: string }> = [

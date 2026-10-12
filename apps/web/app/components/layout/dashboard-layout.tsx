@@ -409,6 +409,13 @@ const navStructure: NavGroupDef[] = [
         permission: 'inventory.shipments.read',
       },
       {
+        label: 'Stock out',
+        href: '/admin/inventory/stock-out',
+        keywords: ['sold', 'issued', 'written off', 'units sold', 'product summary', 'stock report'],
+        icon: SidebarIcons.inventory,
+        permission: 'inventory.read',
+      },
+      {
         label: 'Our warehouse',
         href: '/admin/inventory/warehouses',
         keywords: ['locations', 'stores', 'depot'],

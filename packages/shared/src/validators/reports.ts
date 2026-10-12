@@ -20,6 +20,8 @@ export const exportReportKeySchema = z.enum([
   'expenses',
   'products',
   'shipments',
+  'stock_out_summary',
+  'stock_out_transactions',
 ]);
 export type ExportReportKey = z.infer<typeof exportReportKeySchema>;
 
@@ -258,6 +260,8 @@ export const reportColumnsByKey = {
     'expectedArrival',
     'created',
   ] as const,
+  stock_out_summary: ['period', 'product', 'sold', 'writtenOff', 'total', 'transactions'] as const,
+  stock_out_transactions: ['date', 'product', 'type', 'quantity', 'order', 'location', 'by', 'reason'] as const,
 } as const;
 
 const reportColumnsSchema = z.object({
@@ -280,7 +284,19 @@ const reportColumnsSchema = z.object({
   expenses: z.array(z.enum(reportColumnsByKey.expenses)).min(1),
   products: z.array(z.enum(reportColumnsByKey.products)).min(1),
   shipments: z.array(z.enum(reportColumnsByKey.shipments)).min(1),
+  stock_out_summary: z.array(z.enum(reportColumnsByKey.stock_out_summary)).min(1),
+  stock_out_transactions: z.array(z.enum(reportColumnsByKey.stock_out_transactions)).min(1),
 });
+
+/** Stock-out exports share the page's filters so the CSV matches the screen. */
+const stockOutExportFiltersSchema = z
+  .object({
+    startDate: z.string().date().optional(),
+    endDate: z.string().date().optional(),
+    periodAllTime: z.boolean().optional(),
+    productId: z.string().uuid().optional(),
+  })
+  .optional();
 
 export const exportReportSchema = z.discriminatedUnion('reportKey', [
   z.object({
@@ -552,6 +568,18 @@ export const exportReportSchema = z.discriminatedUnion('reportKey', [
         periodAllTime: z.boolean().optional(),
       })
       .optional(),
+  }),
+  z.object({
+    reportKey: z.literal('stock_out_summary'),
+    columns: reportColumnsSchema.shape.stock_out_summary,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: stockOutExportFiltersSchema,
+  }),
+  z.object({
+    reportKey: z.literal('stock_out_transactions'),
+    columns: reportColumnsSchema.shape.stock_out_transactions,
+    dateRange: exportDateRangeSchema.optional(),
+    filters: stockOutExportFiltersSchema,
   }),
 ]);
 

@@ -1136,3 +1136,47 @@ export function CategoriesLoadingShell() {
     </div>
   );
 }
+
+/** Stock out — mirrors StockOutPage header, stat strip and product table. */
+export function StockOutLoadingShell() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title="Stock out"
+        mobileInlineActions
+        description="Units sold and written off per product."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Stock out tools"
+            triggerAriaLabel="Stock out toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <span className="inline-block h-9 w-44 animate-pulse rounded-full bg-app-border/65 dark:bg-app-border/55" aria-hidden />
+                <span className="inline-block h-9 w-32 animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" aria-hidden />
+                <span className="inline-block h-9 w-40 animate-pulse rounded-lg bg-app-border/65 dark:bg-app-border/55" aria-hidden />
+              </>
+            }
+          />
+        }
+      />
+      {/* Mobile date row placeholder (MobileDateFilterRow) */}
+      <div className="h-10 w-full animate-pulse rounded-lg bg-app-hover md:hidden" aria-hidden />
+      <OverviewStatStrip
+        mobileGrid
+        tileClassName="min-w-[7rem]"
+        items={[
+          { label: 'Total out', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Sold', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Written off', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Products', value: <StatValuePulse className="min-w-[2rem]" /> },
+        ]}
+      />
+      <div className="card p-4 space-y-3">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
+          <div key={i} className="h-4 rounded bg-app-hover animate-pulse" aria-hidden />
+        ))}
+      </div>
+    </div>
+  );
+}

@@ -13,6 +13,8 @@ import type {
   StockAdjustmentInput,
   ListInventoryInput,
   ListMovementsInput,
+  StockOutSummaryInput,
+  StockOutTransactionsInput,
   CreateReconciliationInput,
   ResolveReconciliationInput,
 } from '@yannis/shared';
@@ -21,6 +23,18 @@ import type {
 type InventoryDbTx = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]
 >[0];
+
+/**
+ * Who may see which stock-out rows. Company via the product, branch + country
+ * via the location the units left from. TPL managers are pinned to their own
+ * warehouse by the router.
+ */
+export type StockOutScope = {
+  groupId: string | null;
+  effectiveBranchIds: string[] | null;
+  effectiveCurrencyCodes: string[] | null;
+  tplLocationId?: string | null;
+};
 
 /** Result of creating a single transfer line — drives the post-commit side effects. */
 type TransferLineResult = {
@@ -38,6 +52,7 @@ import { isAdminLevel } from '../common/authz';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { isMissingRelationError } from '../common/db/missing-relation';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
+import { nigeriaDayEnd, nigeriaDayStart } from '../common/utils/date-range';
 
 /** Virtual buffer: show 10% less stock to prevent overselling during bursts */
 const VIRTUAL_BUFFER_RATIO = 0.10;
@@ -2980,6 +2995,183 @@ export class InventoryService {
         limit: input.limit,
         total,
         totalPages: Math.ceil(total / input.limit),
+      },
+    };
+  }
+
+  /**
+   * FROM + WHERE shared by the stock-out summary and its transactions, so the
+   * per-product total always equals the sum of the listed transactions.
+   *
+   * Stock out = DELIVERY (sold) + WRITE_OFF, minus delivery reversals (the
+   * positive ADJUSTMENT stamped with DELIVERY_REVERSAL_REASON_PREFIX). Each row
+   * is one stock_movements row and every join is by primary key, so nothing is
+   * counted twice. The location is the one the units left from; legacy rows
+   * without one fall back to the order's logistics location.
+   */
+  private stockOutFromWhere(input: StockOutSummaryInput, scope: StockOutScope): SQL {
+    const reversalLike = `${InventoryService.DELIVERY_REVERSAL_REASON_PREFIX}%`;
+    const conditions: SQL[] = [
+      sql`(
+        sm.movement_type IN ('DELIVERY', 'WRITE_OFF')
+        OR (
+          sm.movement_type = 'ADJUSTMENT' AND sm.quantity > 0 AND sm.reason LIKE ${reversalLike}
+          -- A real reversal always references its order; a manual adjustment
+          -- whose free-text reason happens to start with the prefix does not.
+          AND o.id IS NOT NULL
+        )
+      )`,
+    ];
+    if (input.startDate) conditions.push(sql`sm.created_at >= ${nigeriaDayStart(input.startDate).toISOString()}::timestamptz`);
+    if (input.endDate) conditions.push(sql`sm.created_at <= ${nigeriaDayEnd(input.endDate).toISOString()}::timestamptz`);
+    if (input.productId) conditions.push(sql`sm.product_id = ${input.productId}`);
+    if (input.locationId) conditions.push(sql`loc.id = ${input.locationId}`);
+    if (scope.tplLocationId) conditions.push(sql`loc.id = ${scope.tplLocationId}`);
+    if (scope.groupId) conditions.push(sql`p.group_id = ${scope.groupId}`);
+    // Branch / country scopes need a known location: a row we cannot place
+    // belongs to no one (fail closed), never to everyone.
+    if (scope.effectiveBranchIds) {
+      if (scope.effectiveBranchIds.length === 0) {
+        conditions.push(sql`false`);
+      } else {
+        const inClause = sql.join(scope.effectiveBranchIds.map((id) => sql`${id}`), sql`, `);
+        conditions.push(sql`loc.id IS NOT NULL AND (loc.branch_id IS NULL OR loc.branch_id IN (${inClause}))`);
+      }
+    }
+    if (scope.effectiveCurrencyCodes && scope.effectiveCurrencyCodes.length > 0) {
+      const curClause = sql.join(scope.effectiveCurrencyCodes.map((c) => sql`${c.toUpperCase()}`), sql`, `);
+      conditions.push(sql`loc.provider_id IN (
+        SELECT lp.id FROM logistics_providers lp WHERE UPPER(lp.currency_code) IN (${curClause})
+      )`);
+    }
+    return sql`
+      FROM stock_movements sm
+      JOIN products p ON p.id = sm.product_id
+      LEFT JOIN orders o ON o.id = sm.reference_id
+      LEFT JOIN logistics_locations loc
+        ON loc.id = COALESCE(sm.from_location_id, sm.to_location_id, o.logistics_location_id)
+      LEFT JOIN users u ON u.id = sm.actor_id
+      LEFT JOIN branches ob ON ob.id = COALESCE(o.servicing_branch_id, o.branch_id)
+      LEFT JOIN branch_groups bg ON bg.id = ob.group_id
+      WHERE ${sql.join(conditions, sql` AND `)}
+    `;
+  }
+
+  /** Signed stock-out quantity of one row: sold / written off count up, reversals count down. */
+  private static readonly STOCK_OUT_QTY_SQL = sql`
+    CASE WHEN sm.movement_type = 'ADJUSTMENT' THEN -ABS(sm.quantity) ELSE ABS(sm.quantity) END
+  `;
+
+  /**
+   * Product-level stock out for a period: net sold, written off and total per
+   * product. Products with no stock out in the period are omitted.
+   */
+  async stockOutSummary(input: StockOutSummaryInput, scope: StockOutScope) {
+    const rows = await this.db.execute<{
+      productId: string;
+      productName: string;
+      soldQty: number;
+      reversedQty: number;
+      writtenOffQty: number;
+      totalQty: number;
+      transactionCount: number;
+    }>(sql`
+      SELECT
+        p.id   AS "productId",
+        p.name AS "productName",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'DELIVERY' THEN ABS(sm.quantity) ELSE 0 END), 0)::int
+          - COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' THEN ABS(sm.quantity) ELSE 0 END), 0)::int
+          AS "soldQty",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'ADJUSTMENT' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "reversedQty",
+        COALESCE(SUM(CASE WHEN sm.movement_type = 'WRITE_OFF' THEN ABS(sm.quantity) ELSE 0 END), 0)::int AS "writtenOffQty",
+        COALESCE(SUM(${InventoryService.STOCK_OUT_QTY_SQL}), 0)::int AS "totalQty",
+        COUNT(*)::int AS "transactionCount"
+      ${this.stockOutFromWhere(input, scope)}
+      GROUP BY p.id, p.name
+      ORDER BY "totalQty" DESC, p.name ASC
+    `);
+    const products = [...rows];
+    const totals = products.reduce(
+      (acc, r) => ({
+        soldQty: acc.soldQty + r.soldQty,
+        writtenOffQty: acc.writtenOffQty + r.writtenOffQty,
+        totalQty: acc.totalQty + r.totalQty,
+        transactionCount: acc.transactionCount + r.transactionCount,
+      }),
+      { soldQty: 0, writtenOffQty: 0, totalQty: 0, transactionCount: 0 },
+    );
+    return { products, totals };
+  }
+
+  /**
+   * The individual stock-out rows behind {@link stockOutSummary}, newest first.
+   * `quantity` is signed the same way as the summary (reversals negative), and
+   * `totalQty` is the sum over every page, so it reconciles with the product total.
+   * Exports page through every row and pass `withTotals: false` to skip the
+   * aggregate (totalQty / pagination.total are then 0).
+   */
+  async stockOutTransactions(
+    input: StockOutTransactionsInput,
+    scope: StockOutScope,
+    opts: { withTotals?: boolean } = {},
+  ) {
+    const fromWhere = this.stockOutFromWhere(input, scope);
+    const offset = (input.page - 1) * input.limit;
+    const [aggregateRows, transactions] = await Promise.all([
+      opts.withTotals === false
+        ? Promise.resolve([] as Array<{ total: number; totalQty: number }>)
+        : this.db.execute<{ total: number; totalQty: number }>(sql`
+            SELECT COUNT(*)::int AS total, COALESCE(SUM(${InventoryService.STOCK_OUT_QTY_SQL}), 0)::int AS "totalQty"
+            ${fromWhere}
+          `),
+      this.db.execute<{
+        id: string;
+        createdAt: Date;
+        kind: 'SOLD' | 'REVERSAL' | 'WRITE_OFF';
+        quantity: number;
+        productId: string;
+        productName: string;
+        orderId: string | null;
+        orderNumber: number | null;
+        orderBranchId: string | null;
+        orderPrefix: string | null;
+        locationName: string | null;
+        actorName: string | null;
+        reason: string | null;
+      }>(sql`
+        SELECT
+          sm.id,
+          sm.created_at AS "createdAt",
+          CASE sm.movement_type
+            WHEN 'DELIVERY' THEN 'SOLD'
+            WHEN 'WRITE_OFF' THEN 'WRITE_OFF'
+            ELSE 'REVERSAL'
+          END AS "kind",
+          (${InventoryService.STOCK_OUT_QTY_SQL})::int AS "quantity",
+          p.id   AS "productId",
+          p.name AS "productName",
+          o.id   AS "orderId",
+          o.order_number AS "orderNumber",
+          ob.id AS "orderBranchId",
+          bg.order_prefix AS "orderPrefix",
+          loc.name AS "locationName",
+          u.name AS "actorName",
+          sm.reason
+        ${fromWhere}
+        ORDER BY sm.created_at DESC, sm.id DESC
+        LIMIT ${input.limit}
+        OFFSET ${offset}
+      `),
+    ]);
+    const total = aggregateRows[0]?.total ?? 0;
+    return {
+      transactions: [...transactions],
+      totalQty: aggregateRows[0]?.totalQty ?? 0,
+      pagination: {
+        page: input.page,
+        limit: input.limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / input.limit)),
       },
     };
   }

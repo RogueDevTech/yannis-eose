@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { dateOrDateTimeOptional } from './date-params';
 
 // ============================================
 // Stock Intake — add a FIFO batch
@@ -166,6 +167,33 @@ export const listMovementsSchema = z.object({
 });
 
 export type ListMovementsInput = z.infer<typeof listMovementsSchema>;
+
+// ============================================
+// Stock Out — product-level sold / written-off summary
+// ============================================
+
+/**
+ * Stock out = DELIVERY (sold) minus delivery reversals, plus WRITE_OFF.
+ * Transfers and manual adjustments are NOT stock out: transfers keep the
+ * units inside the company, adjustments are count corrections.
+ * Dates are Nigeria-calendar days (nigeriaDayStart / nigeriaDayEnd); both
+ * omitted = all time.
+ */
+export const stockOutSummarySchema = z.object({
+  startDate: dateOrDateTimeOptional,
+  endDate: dateOrDateTimeOptional,
+  productId: z.string().uuid().optional(),
+  locationId: z.string().uuid().optional(),
+});
+
+export type StockOutSummaryInput = z.infer<typeof stockOutSummarySchema>;
+
+export const stockOutTransactionsSchema = stockOutSummarySchema.extend({
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(1000).default(50),
+});
+
+export type StockOutTransactionsInput = z.infer<typeof stockOutTransactionsSchema>;
 
 // ============================================
 // Stock Reconciliation — Ghost Stock Prevention

@@ -31,6 +31,13 @@ type Props = {
   picklists?: Partial<ExportModalPicklists>;
   /** Product + Offer filter for order exports. Only the Export page turns this on. */
   productOfferFilter?: boolean;
+  /** Start with "Include current page filters" ticked, so the export matches what is on screen. */
+  defaultIncludeCurrentFilters?: boolean;
+  /**
+   * Open on the page's own period instead of "All time": both null = all time,
+   * otherwise a custom range the user can still change.
+   */
+  initialDateRange?: { startDate: string | null; endDate: string | null };
 };
 
 /** Order exports get the shared Product + Offer filter (line-item match). */
@@ -102,7 +109,7 @@ async function toXlsxFromCsv(filename: string, csvContent: string) {
   );
 }
 
-export function ExportModal({ open, onClose, config, initialFilters = {}, picklists, productOfferFilter = false }: Props) {
+export function ExportModal({ open, onClose, config, initialFilters = {}, picklists, productOfferFilter = false, defaultIncludeCurrentFilters = false, initialDateRange }: Props) {
   const showProductOffer = productOfferFilter && PRODUCT_OFFER_REPORT_KEYS.has(config.reportKey);
   const fetcher = useFetcher<ExportReportActionData>();
   const exportSurface = useFetcherActionSurface(fetcher);
@@ -112,7 +119,7 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
   const [preset, setPreset] = useState<(typeof EXPORT_DATE_PRESET_OPTIONS)[number]['value']>('all_time');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [includeCurrentFilters, setIncludeCurrentFilters] = useState(false);
+  const [includeCurrentFilters, setIncludeCurrentFilters] = useState(defaultIncludeCurrentFilters);
   const [exportMediaBuyerId, setExportMediaBuyerId] = useState('');
   const [exportProductId, setExportProductId] = useState('');
   const [exportOfferLabel, setExportOfferLabel] = useState('');
@@ -139,10 +146,11 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
     if (!open) return;
     setFormat('csv');
     setSelectedColumns(config.defaultColumns);
-    setPreset('all_time');
-    setStartDate('');
-    setEndDate('');
-    setIncludeCurrentFilters(false);
+    const hasInitialRange = !!(initialDateRange?.startDate || initialDateRange?.endDate);
+    setPreset(hasInitialRange ? 'custom' : 'all_time');
+    setStartDate(hasInitialRange ? initialDateRange?.startDate ?? '' : '');
+    setEndDate(hasInitialRange ? initialDateRange?.endDate ?? '' : '');
+    setIncludeCurrentFilters(defaultIncludeCurrentFilters);
     setExportMediaBuyerId('');
     setExportProductId('');
     setExportOfferLabel('');
@@ -163,7 +171,7 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
     // doesn't re-trigger a download from a previous export.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     lastHandledFetcherData.current = fetcher.data ?? null;
-  }, [open, config.defaultColumns, config.reportKey]); // intentionally excludes fetcher.data
+  }, [open, config.defaultColumns, config.reportKey, defaultIncludeCurrentFilters, initialDateRange?.startDate, initialDateRange?.endDate]); // intentionally excludes fetcher.data
 
   const columnsJson = useMemo(() => JSON.stringify(selectedColumns), [selectedColumns]);
 

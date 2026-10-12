@@ -19,12 +19,13 @@ import {
   listLocationsSchema,
   listProvidersSchema,
   formatCustomerPhoneForDisplay,
+  formatOrderNumber,
 } from '@yannis/shared';
 import type { ExportReportInput, ExportDateRange, ListOrdersInput } from '@yannis/shared';
 import { OrdersService } from '../orders/orders.service';
 import { FollowUpConfigService } from '../orders/follow-up-config.service';
 import { MarketingService } from '../marketing/marketing.service';
-import { InventoryService } from '../inventory/inventory.service';
+import { InventoryService, type StockOutScope } from '../inventory/inventory.service';
 import { ShipmentsService } from '../inventory/shipments.service';
 import { FinanceService } from '../finance/finance.service';
 import { ExpenseSubmissionService } from '../finance/expense-submission.service';
@@ -34,6 +35,7 @@ import { CartOrdersService } from '../cart-orders/cart-orders.service';
 import { CartService } from '../cart/cart.service';
 import { HrService } from '../hr/hr.service';
 import { ProductsService } from '../products/products.service';
+import { nigeriaCalendarDate } from '../common/utils/date-range';
 
 type CsvRow = Record<string, string | number | boolean | null | undefined>;
 
@@ -181,7 +183,7 @@ export class ReportsService {
     private readonly productsService: ProductsService,
   ) {}
 
-  async exportCsv(input: ExportReportInput, user: SessionUser, currentBranchId: string | null, effectiveBranchIds?: string[] | null, activeGroupId?: string | null): Promise<{ filename: string; csvContent: string }> {
+  async exportCsv(input: ExportReportInput, user: SessionUser, currentBranchId: string | null, effectiveBranchIds?: string[] | null, activeGroupId?: string | null, effectiveCurrencyCodes?: string[] | null): Promise<{ filename: string; csvContent: string }> {
     const date = todayISODate();
     const eIds = effectiveBranchIds ?? null;
     const groupId = activeGroupId ?? null;
@@ -224,6 +226,10 @@ export class ReportsService {
         return this.exportProducts(input as Extract<ExportReportInput, { reportKey: 'products' }>, user, date, groupId);
       case 'shipments':
         return this.exportShipments(input as Extract<ExportReportInput, { reportKey: 'shipments' }>, user, date, groupId, eIds);
+      case 'stock_out_summary':
+        return this.exportStockOutSummary(input as Extract<ExportReportInput, { reportKey: 'stock_out_summary' }>, user, date, { groupId, effectiveBranchIds: eIds, effectiveCurrencyCodes: effectiveCurrencyCodes ?? null });
+      case 'stock_out_transactions':
+        return this.exportStockOutTransactions(input as Extract<ExportReportInput, { reportKey: 'stock_out_transactions' }>, user, date, { groupId, effectiveBranchIds: eIds, effectiveCurrencyCodes: effectiveCurrencyCodes ?? null });
       default:
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Unsupported report key' });
     }
@@ -1427,6 +1433,109 @@ export class ReportsService {
       { key: 'created', label: 'Created' },
     ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
     return { filename: `products-${date}.csv`, csvContent: toCsv(rows, columns) };
+  }
+
+  /* ── Stock out ────────────────────────────────────────────────── */
+
+  /** 3PL managers never reach these: the stock-out page is admin-side inventory. */
+  private ensureStockOutExport(user: SessionUser): void {
+    this.ensureExportPermission(user, 'inventory.read', 'inventory.export');
+    if (user.role === 'TPL_MANAGER') {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Not available for 3PL accounts.' });
+    }
+  }
+
+  private async exportStockOutSummary(
+    input: Extract<ExportReportInput, { reportKey: 'stock_out_summary' }>,
+    user: SessionUser,
+    date: string,
+    scope: StockOutScope,
+  ) {
+    this.ensureStockOutExport(user);
+    const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
+    const result = await this.inventoryService.stockOutSummary(
+      {
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+        ...(input.filters?.productId ? { productId: input.filters.productId } : {}),
+      },
+      scope,
+    );
+    const period = startDate || endDate ? `${startDate ?? 'start'} to ${endDate ?? 'today'}` : 'All time';
+    const rows = [
+      ...result.products.map((p) => ({
+        period,
+        product: p.productName,
+        sold: p.soldQty,
+        writtenOff: p.writtenOffQty,
+        total: p.totalQty,
+        transactions: p.transactionCount,
+      })),
+      {
+        period,
+        product: 'TOTAL',
+        sold: result.totals.soldQty,
+        writtenOff: result.totals.writtenOffQty,
+        total: result.totals.totalQty,
+        transactions: result.totals.transactionCount,
+      },
+    ];
+    const columns = [
+      { key: 'period', label: 'Period' },
+      { key: 'product', label: 'Product' },
+      { key: 'sold', label: 'Sold' },
+      { key: 'writtenOff', label: 'Written Off' },
+      { key: 'total', label: 'Total Out' },
+      { key: 'transactions', label: 'Transactions' },
+    ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
+    return { filename: `stock-out-summary-${date}.csv`, csvContent: toCsv(rows, columns) };
+  }
+
+  private async exportStockOutTransactions(
+    input: Extract<ExportReportInput, { reportKey: 'stock_out_transactions' }>,
+    user: SessionUser,
+    date: string,
+    scope: StockOutScope,
+  ) {
+    this.ensureStockOutExport(user);
+    const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
+    const base = {
+      ...(startDate ? { startDate } : {}),
+      ...(endDate ? { endDate } : {}),
+      ...(input.filters?.productId ? { productId: input.filters.productId } : {}),
+    };
+    const limit = 1000;
+    const all: Awaited<ReturnType<InventoryService['stockOutTransactions']>>['transactions'] = [];
+    for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
+      const result = await this.inventoryService.stockOutTransactions({ ...base, page, limit }, scope, { withTotals: false });
+      all.push(...result.transactions);
+      if (result.transactions.length < limit) break;
+      if (page === EXPORT_MAX_PAGES) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Export limited to ${EXPORT_MAX_PAGES * limit} rows. Narrow the date range.` });
+      }
+    }
+    const typeLabel = { SOLD: 'Sold', WRITE_OFF: 'Written off', REVERSAL: 'Delivery reversed' } as const;
+    const rows = all.map((t) => ({
+      date: nigeriaCalendarDate(new Date(t.createdAt)),
+      product: t.productName,
+      type: typeLabel[t.kind],
+      quantity: t.quantity,
+      order: t.orderId ? formatOrderNumber(t.orderNumber, t.orderPrefix) : '',
+      location: t.locationName ?? '',
+      by: t.actorName ?? 'System',
+      reason: t.reason ?? '',
+    }));
+    const columns = [
+      { key: 'date', label: 'Date' },
+      { key: 'product', label: 'Product' },
+      { key: 'type', label: 'Type' },
+      { key: 'quantity', label: 'Quantity' },
+      { key: 'order', label: 'Order' },
+      { key: 'location', label: 'Location' },
+      { key: 'by', label: 'By' },
+      { key: 'reason', label: 'Reason' },
+    ].filter((c) => input.columns.includes(c.key as (typeof input.columns)[number]));
+    return { filename: `stock-out-transactions-${date}.csv`, csvContent: toCsv(rows, columns) };
   }
 
   /* ── Shipments ────────────────────────────────────────────────── */
