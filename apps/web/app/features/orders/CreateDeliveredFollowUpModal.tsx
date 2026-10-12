@@ -54,16 +54,24 @@ export function CreateDeliveredFollowUpModal({
   const selectedOffer = offers.find((o) => o.label === selectedOfferLabel);
   const {
     showCurrency,
+    countryMissing,
+    countryOptions,
     currencyCode,
     setCurrencyCode,
+    resetCountry,
     currentCurrencyInfo,
     isBaseCurrency,
-    availableCurrencies,
     offerPriceInCurrency,
     pricedOffers,
     selectedOfferPrice,
     regionOptions,
-  } = useOrderCurrencyPricing(offers, selectedOfferLabel, () => setSelectedOfferLabel(''));
+  } = useOrderCurrencyPricing(
+    offers,
+    selectedOfferLabel,
+    () => setSelectedOfferLabel(''),
+    // A state from the previous country must not be saved on this one.
+    () => setDeliveryState(''),
+  );
   const [validationError, setValidationError] = useState('');
 
   useFetcherToast(fetcher.data, { successMessage: 'Delivered follow-up order created', skipErrorToast: open });
@@ -98,6 +106,7 @@ export function CreateDeliveredFollowUpModal({
     setProductId('');
     setSelectedOfferLabel('');
     setExtraFields([]);
+    resetCountry();
   }
 
   function onProductChange(id: string) {
@@ -111,6 +120,10 @@ export function CreateDeliveredFollowUpModal({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (countryMissing) {
+      setValidationError("Select the order's country before creating the order.");
+      return;
+    }
     if (!productId || !selectedOffer) return;
     if (selectedOfferPrice == null) {
       setValidationError(`This offer has no ${currencyCode} price. Ask marketing to add one.`);
@@ -132,7 +145,7 @@ export function CreateDeliveredFollowUpModal({
     formData.set('paymentMethod', paymentMethod);
     formData.set('items', JSON.stringify(validItems));
     formData.set('totalAmount', String(totalAmount.toFixed(2)));
-    if (showCurrency && currencyCode) formData.set('currencyCode', currencyCode);
+    if (currencyCode) formData.set('currencyCode', currencyCode);
     if (customerAddress.trim()) formData.set('customerAddress', customerAddress.trim());
     // Always sent (both are required): omitting a blank would surface as a
     // confusing "invalid input" rather than "delivery address is required".
@@ -201,6 +214,21 @@ export function CreateDeliveredFollowUpModal({
               />
             )}
 
+            {/* Country = order currency. Drives the phone dial code, delivery
+                states and offer prices. Required when the user works in several
+                countries and the top bar is on "All countries". */}
+            {showCurrency && (
+              <FormSelect
+                id="dfu-order-country"
+                label="Country *"
+                value={currencyCode}
+                onChange={(e) => setCurrencyCode(e.target.value)}
+                required
+                options={[{ value: '', label: 'Select country' }, ...countryOptions]}
+                hint={countryMissing ? undefined : `Amounts in ${currentCurrencyInfo?.symbol ?? ''} ${currencyCode}`.trim()}
+              />
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <TextInput
                 type="text"
@@ -242,8 +270,9 @@ export function CreateDeliveredFollowUpModal({
                 value={deliveryState}
                 onChange={(e) => setDeliveryState(e.target.value)}
                 required
+                disabled={countryMissing}
                 options={[
-                  { value: '', label: 'Select state' },
+                  { value: '', label: countryMissing ? 'Select country first' : 'Select state' },
                   ...regionOptions.map((s) => ({ value: s, label: s })),
                   ...(deliveryState && !regionOptions.includes(deliveryState)
                     ? [{ value: deliveryState, label: deliveryState }]
@@ -309,24 +338,17 @@ export function CreateDeliveredFollowUpModal({
                 wrapperClassName="w-full"
               />
 
-              {showCurrency && productId && offers.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-app-fg-muted mb-2">Currency</label>
-                  <FormSelect
-                    value={currencyCode}
-                    onChange={(e) => setCurrencyCode(e.target.value)}
-                    options={availableCurrencies.map((c) => ({ value: c.code, label: `${c.symbol} ${c.code}` }))}
-                  />
-                </div>
+              {productId && countryMissing && (
+                <p className="text-sm text-app-fg-muted">Select the country to see offer prices.</p>
               )}
 
-              {productId && offers.length > 0 && pricedOffers.length === 0 && (
+              {productId && !countryMissing && offers.length > 0 && pricedOffers.length === 0 && (
                 <p className="text-sm text-amber-600 dark:text-amber-400">
                   {selectedProduct?.name} has no {currencyCode} price yet. Ask marketing to add one.
                 </p>
               )}
 
-              {productId && offers.length > 0 && (
+              {productId && !countryMissing && offers.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-app-fg-muted mb-2">
                     Select offer *

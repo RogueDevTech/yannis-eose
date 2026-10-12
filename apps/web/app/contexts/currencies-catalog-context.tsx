@@ -26,6 +26,8 @@ export function CurrenciesCatalogProvider({ value, children }: { value: Currency
  * Keeps a country-scoped closer from creating orders in the base currency.
  */
 const PreferredCurrencyContext = createContext<string | null>(null);
+/** The user's assigned countries (currency codes); empty = not country-scoped. */
+const AssignedCurrencyCodesContext = createContext<string[]>([]);
 
 export function PreferredCurrencyProvider({
   currentCurrencyCode,
@@ -38,11 +40,22 @@ export function PreferredCurrencyProvider({
 }) {
   const assigned = [...new Set((currencyCodes ?? []).map((c) => c.toUpperCase()))];
   const value = currentCurrencyCode?.toUpperCase() || (assigned.length === 1 ? assigned[0]! : null);
-  return <PreferredCurrencyContext.Provider value={value}>{children}</PreferredCurrencyContext.Provider>;
+  const assignedKey = assigned.join(',');
+  const assignedValue = useMemo(() => (assignedKey ? assignedKey.split(',') : []), [assignedKey]);
+  return (
+    <PreferredCurrencyContext.Provider value={value}>
+      <AssignedCurrencyCodesContext.Provider value={assignedValue}>{children}</AssignedCurrencyCodesContext.Provider>
+    </PreferredCurrencyContext.Provider>
+  );
 }
 
 export function usePreferredCurrencyCode(): string | null {
   return useContext(PreferredCurrencyContext);
+}
+
+/** Currency codes of the countries the user is assigned to; empty when not country-scoped. */
+export function useAssignedCurrencyCodes(): string[] {
+  return useContext(AssignedCurrencyCodesContext);
 }
 
 export function useCurrenciesCatalog(): CurrencyCatalogEntry[] {

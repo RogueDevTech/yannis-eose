@@ -3187,6 +3187,35 @@ export class OrdersService {
    * Create an offline order (CS manual entry). Creator is set as assignee; no auto-dispatch.
    * Hashes customer phone server-side. Optionally checks for duplicate (same phone + product in 6h).
    */
+  /**
+   * The company's base (default) currency for a branch, used when a manually
+   * keyed order arrives with no currency. Company row first, then the global
+   * row (group_id NULL), then NGN.
+   */
+  private async baseCurrencyForBranch(branchId: string | null): Promise<string> {
+    let groupId: string | null = null;
+    if (branchId) {
+      const [branch] = await this.db
+        .select({ groupId: schema.branches.groupId })
+        .from(schema.branches)
+        .where(eq(schema.branches.id, branchId))
+        .limit(1);
+      groupId = branch?.groupId ?? null;
+    }
+    const rows = await this.db
+      .select({ code: schema.currencies.code, groupId: schema.currencies.groupId })
+      .from(schema.currencies)
+      .where(
+        and(
+          eq(schema.currencies.isDefault, true),
+          eq(schema.currencies.active, true),
+          groupId ? or(eq(schema.currencies.groupId, groupId), isNull(schema.currencies.groupId)) : isNull(schema.currencies.groupId),
+        ),
+      );
+    const pick = rows.find((r) => r.groupId === groupId) ?? rows[0];
+    return (pick?.code ?? 'NGN').toUpperCase();
+  }
+
   async createOffline(
     input: CreateOfflineOrderInput,
     actorId: string,
@@ -3290,7 +3319,7 @@ export class OrdersService {
           paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
           items: input.items,
           totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
-          currencyCode: input.currencyCode ? input.currencyCode.toUpperCase() : 'NGN',
+          currencyCode: input.currencyCode ? input.currencyCode.toUpperCase() : await this.baseCurrencyForBranch(branchId),
           status: 'CS_ASSIGNED',
           orderSource: 'offline',
           offlineOrderCategory: input.offlineOrderCategory ?? null,
@@ -3931,7 +3960,7 @@ export class OrdersService {
           paymentProvider: paymentMethod === 'PAY_ONLINE' ? 'PAYSTACK' : null,
           items: input.items,
           totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
-          currencyCode: input.currencyCode ? input.currencyCode.toUpperCase() : 'NGN',
+          currencyCode: input.currencyCode ? input.currencyCode.toUpperCase() : await this.baseCurrencyForBranch(branchId),
           status: 'CS_ASSIGNED',
           orderSource: 'delivered_follow_up',
           isDeliveredFollowUp: true,
