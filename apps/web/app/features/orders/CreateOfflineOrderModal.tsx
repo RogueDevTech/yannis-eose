@@ -36,6 +36,8 @@ export interface CartPrefill {
   productId?: string;
   offerLabel?: string;
   quantity?: number;
+  /** Cart country (currency). Prefills the order's country. */
+  currencyCode?: string;
 }
 
 interface CreateOfflineOrderModalProps {
@@ -88,16 +90,24 @@ export function CreateOfflineOrderModal({
   const selectedOffer = offers.find((o) => o.label === selectedOfferLabel);
   const {
     showCurrency,
+    countryMissing,
+    countryOptions,
     currencyCode,
     setCurrencyCode,
+    resetCountry,
     currentCurrencyInfo,
     isBaseCurrency,
-    availableCurrencies,
     offerPriceInCurrency,
     pricedOffers,
     selectedOfferPrice,
     regionOptions,
-  } = useOrderCurrencyPricing(offers, selectedOfferLabel, () => setSelectedOfferLabel(''));
+  } = useOrderCurrencyPricing(
+    offers,
+    selectedOfferLabel,
+    () => setSelectedOfferLabel(''),
+    // A state from the previous country must not be saved on this one.
+    () => setDeliveryState(''),
+  );
 
   useFetcherToast(fetcher.data, { successMessage: 'Offline order created', skipErrorToast: open });
 
@@ -108,6 +118,10 @@ export function CreateOfflineOrderModal({
 
   useEffect(() => {
     if (open && cartPrefill) {
+      // Country first: changing it clears the delivery state, set again below.
+      if (cartPrefill.currencyCode && countryOptions.some((c) => c.value === cartPrefill.currencyCode)) {
+        setCurrencyCode(cartPrefill.currencyCode);
+      }
       if (cartPrefill.customerName) setCustomerName(cartPrefill.customerName);
       if (cartPrefill.customerPhone) setCustomerPhone(cartPrefill.customerPhone);
       if (cartPrefill.customerAddress) setCustomerAddress(cartPrefill.customerAddress);
@@ -158,6 +172,7 @@ export function CreateOfflineOrderModal({
     setSelectedOfferLabel('');
     setOfflineOrderCategory('');
     setExtraFields([]);
+    resetCountry();
   }
 
   function onProductChange(id: string) {
@@ -175,6 +190,10 @@ export function CreateOfflineOrderModal({
     // Never return silently — the Product field is a SearchableSelect whose
     // `required` is only a visual asterisk (no native validation), so a bare
     // `return` here looks identical to a broken button.
+    if (countryMissing) {
+      setValidationError("Select the order's country before creating the order.");
+      return;
+    }
     if (!productId || !selectedOffer) {
       setValidationError('Select a product and an offer before creating the order.');
       return;
@@ -203,7 +222,7 @@ export function CreateOfflineOrderModal({
     formData.set('paymentMethod', paymentMethod);
     formData.set('items', JSON.stringify(validItems));
     formData.set('totalAmount', String(totalAmount.toFixed(2)));
-    if (showCurrency && currencyCode) formData.set('currencyCode', currencyCode);
+    if (currencyCode) formData.set('currencyCode', currencyCode);
     if (cartPrefill?.cartId) formData.set('cartId', cartPrefill.cartId);
     if (customerAddress.trim()) formData.set('customerAddress', customerAddress.trim());
     // Always sent (both required): omitting a blank would surface as a
@@ -275,6 +294,21 @@ export function CreateOfflineOrderModal({
               />
             )}
 
+            {/* Country = order currency. Drives the phone dial code, delivery
+                states and offer prices. Required when the user works in several
+                countries and the top bar is on "All countries". */}
+            {showCurrency && (
+              <FormSelect
+                id="offline-order-country"
+                label="Country *"
+                value={currencyCode}
+                onChange={(e) => setCurrencyCode(e.target.value)}
+                required
+                options={[{ value: '', label: 'Select country' }, ...countryOptions]}
+                hint={countryMissing ? undefined : `Amounts in ${currentCurrencyInfo?.symbol ?? ''} ${currencyCode}`.trim()}
+              />
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <TextInput
                 type="text"
@@ -317,8 +351,9 @@ export function CreateOfflineOrderModal({
                 value={deliveryState}
                 onChange={(e) => setDeliveryState(e.target.value)}
                 required
+                disabled={countryMissing}
                 options={[
-                  { value: '', label: 'Select state' },
+                  { value: '', label: countryMissing ? 'Select country first' : 'Select state' },
                   ...regionOptions.map((s) => ({ value: s, label: s })),
                   ...(deliveryState && !regionOptions.includes(deliveryState)
                     ? [{ value: deliveryState, label: deliveryState }]
@@ -393,25 +428,17 @@ export function CreateOfflineOrderModal({
                 wrapperClassName="w-full"
               />
 
-              {/* Offer cards — shown after product is selected */}
-              {showCurrency && productId && offers.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-app-fg-muted mb-2">Currency</label>
-                  <FormSelect
-                    value={currencyCode}
-                    onChange={(e) => setCurrencyCode(e.target.value)}
-                    options={availableCurrencies.map((c) => ({ value: c.code, label: `${c.symbol} ${c.code}` }))}
-                  />
-                </div>
+              {productId && countryMissing && (
+                <p className="text-sm text-app-fg-muted">Select the country to see offer prices.</p>
               )}
 
-              {productId && offers.length > 0 && pricedOffers.length === 0 && (
+              {productId && !countryMissing && offers.length > 0 && pricedOffers.length === 0 && (
                 <p className="text-sm text-amber-600 dark:text-amber-400">
                   {selectedProduct?.name} has no {currencyCode} price yet. Ask marketing to add one.
                 </p>
               )}
 
-              {productId && offers.length > 0 && (
+              {productId && !countryMissing && offers.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-app-fg-muted mb-2">
                     Select offer *

@@ -538,6 +538,7 @@ export function FollowUpPage({
                   productId: cart.productId ?? undefined,
                   offerLabel: cart.offerLabel ?? undefined,
                   quantity: cart.quantity ?? undefined,
+                  currencyCode: cart.currencyCode ?? undefined,
                 })}
               >
                 Convert
@@ -989,6 +990,7 @@ export function FollowUpPage({
                   productId: cart.productId ?? undefined,
                   offerLabel: cart.offerLabel ?? undefined,
                   quantity: cart.quantity ?? undefined,
+                  currencyCode: cart.currencyCode ?? undefined,
                 })}
               >
                 Convert to order
