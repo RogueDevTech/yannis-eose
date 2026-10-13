@@ -11,6 +11,8 @@ import {
   stockAdjustmentSchema,
   listInventorySchema,
   listMovementsSchema,
+  stockOutSummarySchema,
+  stockOutTransactionsSchema,
   createReconciliationSchema,
   resolveReconciliationSchema,
   createShipmentSchema,
@@ -195,6 +197,33 @@ export const inventoryRouter = router({
     .query(async ({ input, ctx }) => {
       denyTpl(ctx.user);
       return getInventoryService().getProviderMovements(input, ctx.activeGroupId);
+    }),
+
+  /**
+   * Product-level stock out (sold + written off, net of delivery reversals)
+   * for a period. Powers /admin/inventory/stock-out.
+   */
+  stockOutSummary: permissionProcedure('inventory.read')
+    .input(stockOutSummarySchema)
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().stockOutSummary(input, {
+        groupId: ctx.activeGroupId,
+        effectiveBranchIds: ctx.effectiveBranchIds,
+        effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
+        tplLocationId: tplLocationScope(ctx.user),
+      });
+    }),
+
+  /** The stock-out rows behind stockOutSummary; same filters, paginated. */
+  stockOutTransactions: permissionProcedure('inventory.read')
+    .input(stockOutTransactionsSchema)
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().stockOutTransactions(input, {
+        groupId: ctx.activeGroupId,
+        effectiveBranchIds: ctx.effectiveBranchIds,
+        effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
+        tplLocationId: tplLocationScope(ctx.user),
+      });
     }),
 
   /**
