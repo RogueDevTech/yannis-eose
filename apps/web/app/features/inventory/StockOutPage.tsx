@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
+import { Link } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -7,13 +8,9 @@ import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { EmptyState } from '~/components/ui/empty-state';
-import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
-import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
-import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
-import { formatOrderTimestamp } from '~/lib/format-date';
 
 export type StockOutProductRow = {
   productId: string;
@@ -39,58 +36,27 @@ export type StockOutPageData = {
   canExport: boolean;
 };
 
-type StockOutTransaction = {
-  id: string;
-  createdAt: string;
-  kind: 'SOLD' | 'REVERSAL' | 'WRITE_OFF';
-  quantity: number;
-  productId: string;
-  productName: string;
-  orderId: string | null;
-  orderNumber: number | null;
-  orderBranchId: string | null;
-  locationName: string | null;
-  actorName: string | null;
-  reason: string | null;
-};
+export const fmt = (n: number) => n.toLocaleString('en-NG');
 
-type TransactionsPage = {
-  transactions: StockOutTransaction[];
-  totalQty: number;
-  pagination: { page: number; limit: number; total: number; totalPages: number };
-};
-
-const KIND_LABEL: Record<StockOutTransaction['kind'], string> = {
-  SOLD: 'Sold',
-  WRITE_OFF: 'Written off',
-  REVERSAL: 'Delivery reversed',
-};
-
-const KIND_BADGE: Record<StockOutTransaction['kind'], string> = {
-  SOLD: 'badge-success',
-  WRITE_OFF: 'badge-danger',
-  REVERSAL: 'badge-warning',
-};
-
-const TRANSACTIONS_PAGE_SIZE = 50;
-
-const fmt = (n: number) => n.toLocaleString('en-NG');
-
-function periodLabel(startDate: string | null, endDate: string | null): string {
+export function periodLabel(startDate: string | null, endDate: string | null): string {
   if (!startDate && !endDate) return 'All time';
   if (startDate === endDate) return startDate ?? '';
   return `${startDate ?? 'Start'} to ${endDate ?? 'today'}`;
 }
 
-/** Same date filters the page uses; sent to the API and to exports. */
-function periodFilters(startDate: string | null, endDate: string | null): Record<string, string> {
-  return {
-    ...(startDate ? { startDate: startDate.slice(0, 10) } : {}),
-    ...(endDate ? { endDate: endDate.slice(0, 10) } : {}),
-  };
+/** Query string that keeps the chosen period when moving between the summary and a product. */
+export function stockOutPeriodSearch(startDate: string | null, endDate: string | null, periodAllTime: boolean): string {
+  const sp = new URLSearchParams();
+  if (periodAllTime) sp.set('period', 'all_time');
+  else {
+    if (startDate) sp.set('startDate', startDate);
+    if (endDate) sp.set('endDate', endDate);
+  }
+  const q = sp.toString();
+  return q ? `?${q}` : '';
 }
 
-function summaryColumns(onView: (row: StockOutProductRow) => void): CompactTableColumn<StockOutProductRow>[] {
+function summaryColumns(productHref: (row: StockOutProductRow) => string): CompactTableColumn<StockOutProductRow>[] {
   return [
     {
       key: 'product',
@@ -137,22 +103,19 @@ function summaryColumns(onView: (row: StockOutProductRow) => void): CompactTable
       align: 'right',
       tight: true,
       hideOnMobile: true,
-      render: (r) => <CompactTableActionButton onClick={() => onView(r)}>View</CompactTableActionButton>,
+      render: (r) => <CompactTableActionButton to={productHref(r)}>View</CompactTableActionButton>,
     },
   ];
 }
 
 export function StockOutPage({ summary, loadError, startDate, endDate, periodAllTime, canExport }: StockOutPageData) {
-  const [selected, setSelected] = useState<StockOutProductRow | null>(null);
   const [exportKey, setExportKey] = useState<'stock_out_summary' | 'stock_out_transactions' | null>(null);
-  const [exportProductId, setExportProductId] = useState<string | null>(null);
 
   const period = periodLabel(startDate, endDate);
+  const periodSearch = stockOutPeriodSearch(startDate, endDate, periodAllTime);
+  const productHref = (r: StockOutProductRow) => `/admin/inventory/stock-out/${r.productId}${periodSearch}`;
 
-  const openExport = (key: 'stock_out_summary' | 'stock_out_transactions', productId: string | null = null) => {
-    setExportProductId(productId);
-    setExportKey(key);
-  };
+  const openExport = (key: 'stock_out_summary' | 'stock_out_transactions') => setExportKey(key);
 
   const exportButtons = (onDone?: () => void, mobile = false) =>
     canExport ? (
@@ -228,13 +191,12 @@ export function StockOutPage({ summary, loadError, startDate, endDate, periodAll
         <CompactTable<StockOutProductRow>
           rows={summary.products}
           rowKey={(r) => r.productId}
-          columns={summaryColumns(setSelected)}
+          columns={summaryColumns(productHref)}
           emptyTitle="No stock out in this period"
           emptyDescription="Pick a wider date range."
           renderMobileCard={(r) => (
-            <button
-              type="button"
-              onClick={() => setSelected(r)}
+            <Link
+              to={productHref(r)}
               className="flex w-full flex-col gap-1 py-3 px-1 text-left"
             >
               <span className="flex items-center justify-between gap-2">
@@ -244,21 +206,10 @@ export function StockOutPage({ summary, loadError, startDate, endDate, periodAll
               <span className="text-xs text-app-fg-muted tabular-nums">
                 Sold {fmt(r.soldQty)} · Written off {fmt(r.writtenOffQty)} · {fmt(r.transactionCount)} txns
               </span>
-            </button>
+            </Link>
           )}
         />
       )}
-
-      <StockOutTransactionsModal
-        key={selected?.productId ?? 'none'}
-        product={selected}
-        startDate={startDate}
-        endDate={endDate}
-        period={period}
-        canExport={canExport}
-        onExport={(productId) => openExport('stock_out_transactions', productId)}
-        onClose={() => setSelected(null)}
-      />
 
       {exportKey && (
         <ExportModal
@@ -266,172 +217,8 @@ export function StockOutPage({ summary, loadError, startDate, endDate, periodAll
           onClose={() => setExportKey(null)}
           config={EXPORT_CONFIGS[exportKey]}
           initialDateRange={{ startDate, endDate }}
-          {...(exportProductId
-            ? { initialFilters: { productId: exportProductId }, defaultIncludeCurrentFilters: true }
-            : {})}
         />
       )}
     </div>
-  );
-}
-
-function StockOutTransactionsModal({
-  product,
-  startDate,
-  endDate,
-  period,
-  canExport,
-  onExport,
-  onClose,
-}: {
-  product: StockOutProductRow | null;
-  startDate: string | null;
-  endDate: string | null;
-  period: string;
-  canExport: boolean;
-  onExport: (productId: string) => void;
-  onClose: () => void;
-}) {
-  const [page, setPage] = useState(1);
-  const [data, setData] = useState<TransactionsPage | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const productId = product?.productId ?? null;
-
-  useEffect(() => {
-    if (!productId) return;
-    const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-    const input = encodeURIComponent(JSON.stringify({
-      ...periodFilters(startDate, endDate),
-      productId,
-      page,
-      limit: TRANSACTIONS_PAGE_SIZE,
-    }));
-    fetch(`${getBrowserApiBaseUrl()}/trpc/inventory.stockOutTransactions?input=${input}`, {
-      credentials: 'include',
-      signal: controller.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error('Could not load transactions.');
-        const body = (await res.json()) as { result?: { data?: TransactionsPage } };
-        if (!controller.signal.aborted) setData(body.result?.data ?? null);
-      })
-      .catch((e: unknown) => {
-        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'Could not load transactions.');
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [productId, startDate, endDate, page]);
-
-  const columns = useMemo<CompactTableColumn<StockOutTransaction>[]>(() => [
-    {
-      key: 'when',
-      header: 'Date',
-      nowrap: true,
-      cellClassName: 'text-app-fg-muted',
-      render: (t) => formatOrderTimestamp(t.createdAt),
-    },
-    {
-      key: 'type',
-      header: 'Type',
-      nowrap: true,
-      render: (t) => <span className={`badge ${KIND_BADGE[t.kind]}`}>{KIND_LABEL[t.kind]}</span>,
-    },
-    {
-      key: 'qty',
-      header: 'Qty',
-      align: 'right',
-      nowrap: true,
-      cellClassName: (t) => `tabular-nums font-semibold ${t.quantity < 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg'}`,
-      render: (t) => (t.quantity < 0 ? `−${fmt(Math.abs(t.quantity))}` : fmt(t.quantity)),
-    },
-    {
-      key: 'order',
-      header: 'Order',
-      nowrap: true,
-      render: (t) =>
-        t.orderId ? (
-          <OrderIdBadge
-            id={t.orderId}
-            orderNumber={t.orderNumber}
-            branchId={t.orderBranchId}
-            linkTo={`/admin/orders/${t.orderId}`}
-            hideCopy
-          />
-        ) : (
-          <span className="text-app-fg-muted">None</span>
-        ),
-    },
-    {
-      key: 'location',
-      header: 'Location',
-      hideOnMobile: true,
-      cellClassName: 'text-app-fg-muted',
-      render: (t) => t.locationName ?? 'Unknown',
-    },
-  ], []);
-
-  if (!product) return null;
-
-  const pagination = data?.pagination;
-  const reconciled = data ? data.totalQty === product.totalQty : null;
-
-  return (
-    <Modal open onClose={onClose} maxWidth="max-w-3xl" backdropBlur aria-labelledby="stock-out-transactions-title">
-      <div className="space-y-4 px-4 pt-5 md:px-6 md:pt-6 pb-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 id="stock-out-transactions-title" className="text-base font-semibold text-app-fg truncate">
-              {product.productName}
-            </h2>
-            <p className="text-xs text-app-fg-muted mt-0.5">{period}</p>
-          </div>
-          <span className="text-2xl font-semibold tabular-nums text-app-fg shrink-0">
-            {fmt(product.totalQty)}
-            <span className="text-sm font-normal text-app-fg-muted ml-1">out</span>
-          </span>
-        </div>
-
-        {error ? (
-          <EmptyState variant="card" title="Could not load transactions" description={error} />
-        ) : (
-          <CompactTable<StockOutTransaction>
-            rows={data?.transactions ?? []}
-            rowKey={(t) => t.id}
-            columns={columns}
-            loading={loading}
-            loadingVariant={data ? 'overlay' : 'skeleton'}
-            emptyTitle="No transactions"
-            pagination={
-              pagination && pagination.totalPages > 1
-                ? { page: pagination.page, totalPages: pagination.totalPages, onPageChange: setPage }
-                : undefined
-            }
-          />
-        )}
-
-        {data && (
-          <p className={`text-xs ${reconciled ? 'text-app-fg-muted' : 'text-danger-600 dark:text-danger-400'}`}>
-            {fmt(data.pagination.total)} transactions add up to {fmt(data.totalQty)} units
-            {reconciled ? ', matching the summary.' : `. The summary shows ${fmt(product.totalQty)}: refresh the page.`}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-2 pt-1">
-          {canExport && (
-            <Button type="button" variant="secondary" size="sm" onClick={() => onExport(product.productId)}>
-              Export
-            </Button>
-          )}
-          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      </div>
-    </Modal>
   );
 }
