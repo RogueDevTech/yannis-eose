@@ -460,6 +460,8 @@ export async function action({ request }: ActionFunctionArgs) {
         items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice, offerLabel: i.offerLabel })),
         totalAmount: parseFloat((form.get('totalAmount') as string) || '0') || undefined,
         offlineOrderCategory: (form.get('offlineOrderCategory') as string) || undefined,
+        // The country picked on the form. Dropping it saves the order in the base currency (NGN).
+        ...(form.get('currencyCode')?.toString()?.trim() ? { currencyCode: form.get('currencyCode')!.toString().trim().toUpperCase() } : {}),
         ...(form.get('customFields') ? { customFields: JSON.parse(form.get('customFields') as string) } : {}),
         ...(form.get('branchId')?.toString()?.trim() ? { branchId: form.get('branchId')!.toString().trim() } : {}),
       },
