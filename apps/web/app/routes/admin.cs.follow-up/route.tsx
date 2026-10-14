@@ -485,6 +485,9 @@ export async function action({ request }: ActionFunctionArgs) {
     if (customerEmail) body.customerEmail = customerEmail;
     const totalAmount = formData.get('totalAmount')?.toString()?.trim();
     if (totalAmount) body.totalAmount = Number(totalAmount);
+    // The country picked on the form. Dropping it saves the order in the base currency (NGN).
+    const currencyCode = formData.get('currencyCode')?.toString()?.trim();
+    if (currencyCode) body.currencyCode = currencyCode.toUpperCase();
     const offlineOrderCategory = formData.get('offlineOrderCategory')?.toString()?.trim();
     if (offlineOrderCategory) body.offlineOrderCategory = offlineOrderCategory;
     const customFieldsRaw = formData.get('customFields')?.toString();

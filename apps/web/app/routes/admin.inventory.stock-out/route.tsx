@@ -6,7 +6,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import { isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
-import { getLagosCalendarYmd } from '~/lib/order-delivery-today';
+import { parseStockOutPeriod } from '~/features/inventory/stock-out-period';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { StockOutPage, type StockOutPageData, type StockOutSummary } from '~/features/inventory/StockOutPage';
@@ -22,13 +22,7 @@ const EMPTY_SUMMARY: StockOutSummary = {
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'inventory.read');
 
-  const url = new URL(request.url);
-  const periodAllTime = url.searchParams.get('period') === 'all_time';
-  // Default: this month, on the Lagos calendar (the API reads dates as WAT days).
-  // Whole days only, so the summary, its transactions and the export share one window.
-  const today = getLagosCalendarYmd();
-  const startDate = periodAllTime ? null : (url.searchParams.get('startDate')?.trim() || `${today.slice(0, 8)}01`).slice(0, 10);
-  const endDate = periodAllTime ? null : (url.searchParams.get('endDate')?.trim() || today).slice(0, 10);
+  const { startDate, endDate, periodAllTime } = parseStockOutPeriod(new URL(request.url).searchParams);
 
   const pageData = (async (): Promise<StockOutPageData> => {
     const user = await getCurrentUser(request);
