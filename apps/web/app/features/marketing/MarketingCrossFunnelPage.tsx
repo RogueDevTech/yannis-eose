@@ -53,6 +53,11 @@ export interface CrossFunnelAttemptRow {
   originalOrderCreatedAt: string | null;
   originalOrderPhone: string | null;
   originalOrderCustomerName: string | null;
+  /** Order the duplicate cleanup removed or flagged. Null = blocked at entry, no order created. */
+  duplicateOrderId?: string | null;
+  duplicateOrderNumber?: number | null;
+  duplicateOrderStatus?: string | null;
+  duplicateOrderCreatedAt?: string | null;
 }
 
 export interface CrossFunnelStats {
@@ -696,6 +701,36 @@ function CompareRow({
   );
 }
 
+function orderRef(n: number | null | undefined): string {
+  return n != null ? `#${n}` : 'the original order';
+}
+
+/**
+ * What actually happened to the duplicate. A cleanup-cron row has a
+ * duplicateOrderId: the order WAS created and removed or flagged later. Without
+ * one, the submission was blocked at entry and no order exists. Never say
+ * "blocked" for a created order: that reads as "orders are rejected" (Oct 15).
+ */
+function duplicateOutcomeMessage(row: CrossFunnelAttemptRow): string {
+  const kind = getDuplicateKind(row);
+  const what =
+    kind === 'resubmission'
+      ? 'The same customer submitted the same form again.'
+      : kind === 'same-mb'
+        ? 'The same customer ordered the same product through another form of the same Media Buyer.'
+        : 'The same customer already ordered this product through a different Media Buyer\'s form.';
+  const original = orderRef(row.originalOrderNumber);
+  if (row.duplicateOrderId) {
+    const dup = orderRef(row.duplicateOrderNumber);
+    const created = row.duplicateOrderCreatedAt ? ` at ${formatTimestamp(row.duplicateOrderCreatedAt)}` : '';
+    const cleaned = formatTimestamp(row.attemptedAt);
+    return row.duplicateOrderStatus === 'DELETED'
+      ? `${what} This was created as order ${dup}${created}. Duplicate cleanup removed it at ${cleaned} because ${original} came first. The customer stays on ${original}.`
+      : `${what} This was created as order ${dup}${created}. Duplicate cleanup marked it at ${cleaned} as a copy of ${original} for CS to review.`;
+  }
+  return `${what} No new order was created because duplicate checking was set to block at the time. The customer stays on ${original}.`;
+}
+
 function DuplicateCompareOverlay({
   row,
   onClose,
@@ -723,7 +758,7 @@ function DuplicateCompareOverlay({
             {(() => {
               const kind = getDuplicateKind(row);
               switch (kind) {
-                case 'resubmission': return 'Repeat submission — same customer, same form';
+                case 'resubmission': return 'Repeat submission: same customer, same form';
                 case 'same-mb': return 'Same customer ordered through another form by the same Media Buyer';
                 case 'cross-funnel': return 'Same customer already ordered through a different Media Buyer';
               }
@@ -763,7 +798,20 @@ function DuplicateCompareOverlay({
             {row.originalOrderId && row.originalOrderNumber && (
               <CompareRow
                 label="Order"
-                left="—"
+                left={
+                  row.duplicateOrderId && row.duplicateOrderNumber ? (
+                    <OrderIdBadge
+                      id={row.duplicateOrderId}
+                      orderNumber={row.duplicateOrderNumber}
+                      length={8}
+                      ellipsis="…"
+                      linkTo={`/admin/orders/${row.duplicateOrderId}`}
+                      newTab
+                      textClassName="font-mono text-xs text-brand-600 dark:text-brand-400 hover:underline"
+                      className="inline-flex"
+                    />
+                  ) : 'No order created'
+                }
                 right={
                   <OrderIdBadge
                     id={row.originalOrderId}
@@ -781,9 +829,13 @@ function DuplicateCompareOverlay({
             <CompareRow
               label="Status"
               left={
-                <span className="inline-flex items-center rounded-full border border-warning-300 bg-warning-50 px-1.5 py-0.5 text-micro font-semibold uppercase text-warning-700 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-400">
-                  Duplicate
-                </span>
+                row.duplicateOrderStatus ? (
+                  <OrderStatusBadge status={row.duplicateOrderStatus} />
+                ) : (
+                  <span className="inline-flex items-center rounded-full border border-warning-300 bg-warning-50 px-1.5 py-0.5 text-micro font-semibold uppercase text-warning-700 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-400">
+                    Duplicate
+                  </span>
+                )
               }
               right={row.originalOrderStatus ? <OrderStatusBadge status={row.originalOrderStatus} /> : '—'}
             />
@@ -801,7 +853,7 @@ function DuplicateCompareOverlay({
             />
             <CompareRow
               label="Date"
-              left={formatTimestamp(row.attemptedAt)}
+              left={formatTimestamp(row.duplicateOrderCreatedAt ?? row.attemptedAt)}
               right={row.originalOrderCreatedAt ? formatTimestamp(row.originalOrderCreatedAt) : '—'}
               highlight
             />
@@ -821,17 +873,7 @@ function DuplicateCompareOverlay({
         <div className="px-5 py-4 space-y-3">
           <InlineNotification
             variant="info"
-            message={(() => {
-              const kind = getDuplicateKind(row);
-              switch (kind) {
-                case 'resubmission':
-                  return 'Same customer re-submitted the same form. This is a repeat submission — the customer likely clicked submit more than once or revisited the form.';
-                case 'same-mb':
-                  return 'Same customer ordered the same product through a different form by the same Media Buyer. Only one order per customer per product per week is allowed.';
-                case 'cross-funnel':
-                  return 'Same customer already ordered this product through a different Media Buyer\'s form. The original order takes priority — duplicate was blocked to prevent double-selling.';
-              }
-            })()}
+            message={duplicateOutcomeMessage(row)}
           />
 
           {row.originalOrderId && (

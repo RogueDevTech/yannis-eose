@@ -233,3 +233,16 @@ export function canMirror(
   // Branch supervisors are still resolved server-side from the live branch-team graph.
   return false;
 }
+
+/**
+ * Order detail "Journey" panel: every form view, cart, failed submit, order and
+ * duplicate cleanup for the same customer or browser. Shows other Media Buyers'
+ * forms, so only admins, the Marketing and CS heads, and org-wide marketing
+ * viewers get it. No phones are ever in the payload.
+ */
+export function canViewCustomerJourney(user: { role: string; permissions?: string[] | null } | null | undefined): boolean {
+  if (!user) return false;
+  if (isAdminLevel(user)) return true;
+  if (user.role === 'HEAD_OF_MARKETING' || user.role === 'HEAD_OF_CS') return true;
+  return (user.permissions ?? []).some((p) => canonicalPermissionCode(p) === 'marketing.scope.global');
+}

@@ -30,6 +30,8 @@ export const CONFIGURABLE_EMAIL_TYPES = [
   'order:callback_due',
   'delivery:assigned',
   'marketing:high_cpa',
+  'marketing:form_no_orders',
+  'marketing:form_on_other_page',
   'marketing:ad_spend_submitted',
   'funding:request',
   'funding:approved',
@@ -260,6 +262,20 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
     type: 'marketing:high_cpa',
     label: 'High CPA warning',
     description: 'SuperAdmin / Head of Marketing — Media Buyer CPA exceeds threshold',
+    mandatory: false,
+    category: 'marketing',
+  },
+  'marketing:form_no_orders': {
+    type: 'marketing:form_no_orders',
+    label: 'Form has visitors but no orders',
+    description: 'Media Buyer / Head of Marketing: a form had many visitors in the last 24 hours and no orders',
+    mandatory: false,
+    category: 'marketing',
+  },
+  'marketing:form_on_other_page': {
+    type: 'marketing:form_on_other_page',
+    label: "Form on another buyer's page",
+    description: "Media Buyer / Head of Marketing: a form is loading on a website that belongs to a different Media Buyer, so its orders go to the wrong buyer",
     mandatory: false,
     category: 'marketing',
   },
@@ -498,6 +514,8 @@ export const RELEVANT_NOTIFICATION_TYPES_BY_ROLE: Record<string, NotificationTyp
   // Marketing
   HEAD_OF_MARKETING: [
     'order:new',
+    'marketing:form_no_orders',
+    'marketing:form_on_other_page',
     'marketing:high_cpa',
     'marketing:ad_spend_submitted',
     'funding:request',
@@ -515,6 +533,8 @@ export const RELEVANT_NOTIFICATION_TYPES_BY_ROLE: Record<string, NotificationTyp
   MEDIA_BUYER: [
     'order:new_campaign',
     'order:duplicate_blocked',
+    'marketing:form_no_orders',
+    'marketing:form_on_other_page',
     'funding:approved',
     'funding:rejected',
     'funding:reversed',

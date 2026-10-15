@@ -20,6 +20,7 @@ import {
   isNotNull,
   sql,
   exists,
+  type AnyColumn,
   type SQL,
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -81,6 +82,47 @@ import {
 } from '../orders/orders.service';
 
 /** Default profitability config when `MARKETING_PROFITABILITY` system setting is unset. */
+/** Form Analytics visitor list: what a form visitor did next on that form. */
+export type FormVisitorOutcome = 'ORDERED' | 'FAILED' | 'STARTED' | 'LEFT';
+export const FORM_VISITOR_OUTCOMES = ['ORDERED', 'FAILED', 'STARTED', 'LEFT'] as const;
+const FORM_VISITORS_PAGE_SIZE = 50;
+
+export interface FormVisitorsPage {
+  rows: Array<{
+    firstAt: string;
+    lastAt: string;
+    views: number;
+    dwellMs: number | null;
+    country: string | null;
+    /** Website the form was shown on (0356); null for older views. */
+    hostDomain: string | null;
+    outcome: FormVisitorOutcome;
+    orderId: string | null;
+    orderNumber: number | null;
+    orderStatus: string | null;
+    orderedAt: string | null;
+    cartStatus: string | null;
+    cartAt: string | null;
+    failedSubmits: number;
+    lastFailure: string | null;
+  }>;
+  byOutcome: Record<FormVisitorOutcome, number>;
+  outcome: FormVisitorOutcome | null;
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+/**
+ * The form beacon's host hostname, cleaned. A malformed value is dropped (null),
+ * never an error: a view must still be recorded.
+ */
+export function normaliseHostDomain(raw: string | null | undefined): string | null {
+  const v = (raw ?? '').trim().toLowerCase().replace(/^www\./, '');
+  if (!v || v.length > 253) return null;
+  return /^[a-z0-9.-]+$/.test(v) && v.includes('.') ? v : null;
+}
+
 const DEFAULT_PROFITABILITY_TARGET_ROAS = 3;
 const DEFAULT_PROFITABILITY_GREEN_THRESHOLD = 2.5;
 export const MARKETING_PROFITABILITY_KEY = 'MARKETING_PROFITABILITY';
@@ -6732,6 +6774,8 @@ export class MarketingService {
 
     const campaignAlias = alias(schema.campaigns, 'cfa_campaign');
     const originalCampaignAlias = alias(schema.campaigns, 'cfa_orig_campaign');
+    // The order the duplicate cleanup removed or flagged (0355). NULL = blocked at entry.
+    const duplicateOrderAlias = alias(schema.orders, 'cfa_dup_order');
 
     const rows = await this.db
       .select({
@@ -6760,6 +6804,10 @@ export class MarketingService {
         originalOrderCreatedAt: schema.orders.createdAt,
         originalOrderPhone: schema.orders.customerPhone,
         originalOrderCustomerName: schema.orders.customerName,
+        duplicateOrderId: schema.crossFunnelAttempts.duplicateOrderId,
+        duplicateOrderNumber: duplicateOrderAlias.orderNumber,
+        duplicateOrderStatus: duplicateOrderAlias.status,
+        duplicateOrderCreatedAt: duplicateOrderAlias.createdAt,
       })
       .from(schema.crossFunnelAttempts)
       .leftJoin(productAlias, eq(schema.crossFunnelAttempts.productId, productAlias.id))
@@ -6767,6 +6815,7 @@ export class MarketingService {
       .leftJoin(ownerAlias, eq(schema.crossFunnelAttempts.mediaBuyerId, ownerAlias.id))
       .leftJoin(schema.orders, eq(schema.crossFunnelAttempts.originalOrderId, schema.orders.id))
       .leftJoin(campaignAlias, eq(schema.crossFunnelAttempts.campaignId, campaignAlias.id))
+      .leftJoin(duplicateOrderAlias, eq(schema.crossFunnelAttempts.duplicateOrderId, duplicateOrderAlias.id))
       // Resolve the winner campaign NAME from the source-agnostic denormalized
       // id first, falling back to the legacy orders join for pre-0305 rows.
       // Raw-SQL equality (not eq() with a raw left operand) so the ON clause
@@ -8665,6 +8714,7 @@ export class MarketingService {
     mediaBuyerId?: string | null;
     deploymentType?: string | null;
     referrer?: string | null;
+    hostDomain?: string | null;
     userAgent?: string | null;
     country?: string | null;
   }): Promise<void> {
@@ -8687,6 +8737,7 @@ export class MarketingService {
         dwellMs: null,
         deploymentType: input.deploymentType ?? null,
         referrer: input.referrer ?? null,
+        hostDomain: normaliseHostDomain(input.hostDomain),
         userAgent: input.userAgent ?? null,
         country: input.country ?? null,
       });
@@ -8751,7 +8802,11 @@ export class MarketingService {
     supervisorScope: OrdersAggregateSupervisorScope | undefined,
     effectiveBranchIds: string[] | null | undefined,
     /** When set, narrows EVERY query to a single campaign (per-form detail page). */
-    opts?: { campaignId?: string },
+    opts?: {
+      campaignId?: string;
+      /** Per-form detail only: one page of the visitor list. */
+      visitors?: { outcome?: FormVisitorOutcome; page?: number };
+    },
   ) {
     const periodStart = startDate ? nigeriaDayStart(startDate) : null;
     const periodEnd = endDate ? nigeriaDayEnd(endDate) : null;
@@ -8763,10 +8818,11 @@ export class MarketingService {
     // business day the rest of the analytics uses.
     const trendUnit: 'hour' | 'day' =
       startDate && endDate && startDate === endDate ? 'hour' : 'day';
-    const trendTrunc =
+    const trendBucket = (col: SQL | AnyColumn) =>
       trendUnit === 'hour'
-        ? sql`date_trunc('hour', ${schema.campaignViews.viewedAt} AT TIME ZONE 'Africa/Lagos')`
-        : sql`date_trunc('day', ${schema.campaignViews.viewedAt} AT TIME ZONE 'Africa/Lagos')`;
+        ? sql`date_trunc('hour', ${col} AT TIME ZONE 'Africa/Lagos')`
+        : sql`date_trunc('day', ${col} AT TIME ZONE 'Africa/Lagos')`;
+    const trendTrunc = trendBucket(schema.campaignViews.viewedAt);
 
     // ── Scope builders, one per table, mirroring getPerformanceMetrics ──
     // Views scope (media_buyer_id / branch_id live on campaign_views directly).
@@ -8972,6 +9028,39 @@ export class MarketingService {
         .groupBy(schema.orders.campaignId),
     ]);
 
+    // Per-form detail extras: carts + orders per trend bucket (same attributed
+    // definitions as the funnel, so the buckets add up to the funnel bars), and
+    // one page of the visitor list. Run only on the drill-in page.
+    const [cartTrendRows, orderTrendRows, visitors] = campaignId
+      ? await Promise.all([
+          this.db
+            .select({
+              day: sql<string>`to_char(${trendBucket(schema.cartAbandonments.createdAt)}, 'YYYY-MM-DD"T"HH24:MI:SS')`,
+              n: sql<number>`COUNT(DISTINCT ${schema.cartAbandonments.sessionId})`,
+            })
+            .from(schema.cartAbandonments)
+            .where(and(cartWhere, inArray(schema.cartAbandonments.sessionId, scopedViewSessionIds)))
+            .groupBy(trendBucket(schema.cartAbandonments.createdAt)),
+          this.db
+            .select({
+              day: sql<string>`to_char(${trendBucket(schema.orders.createdAt)}, 'YYYY-MM-DD"T"HH24:MI:SS')`,
+              n: count(),
+            })
+            .from(schema.orders)
+            .where(and(orderWhere, isNotNull(schema.orders.sessionId), inArray(schema.orders.sessionId, scopedViewSessionIds)))
+            .groupBy(trendBucket(schema.orders.createdAt)),
+          this.getFormVisitors(campaignId, viewWhere, opts?.visitors),
+        ])
+      : [[], [], null] as const;
+    const cartsByBucket = new Map(cartTrendRows.map((r) => [r.day, Number(r.n)]));
+    const ordersByBucket = new Map(orderTrendRows.map((r) => [r.day, Number(r.n)]));
+    // A bucket with carts/orders but no view (e.g. an order a minute past the last
+    // view's hour) still needs a point on the chart.
+    const extraBuckets = [...new Set([...cartsByBucket.keys(), ...ordersByBucket.keys()])]
+      .filter((day) => !trendRows.some((r) => r.day === day))
+      .map((day) => ({ day, viewsRaw: 0, viewsUnique: 0 }));
+    const trendAll = [...trendRows, ...extraBuckets].sort((x, y) => (x.day < y.day ? -1 : x.day > y.day ? 1 : 0));
+
     const rawLandings = Number(landingRow[0]?.rawLandings ?? 0);
     const uniqueLandings = Number(landingRow[0]?.uniqueLandings ?? 0);
     const avgDwellMs = landingRow[0]?.avgDwellMs != null ? Math.round(Number(landingRow[0].avgDwellMs)) : null;
@@ -9005,15 +9094,22 @@ export class MarketingService {
         avgDwellMs,
         conversionRate,
         attributionCoverage,
+        /** Orders in scope with no tracked form visit (no browser session, or a session that never logged a view). */
+        unlinkedOrders: Math.max(0, totalOrders - matchedOrders),
       },
       funnel: { formViews: uniqueLandings, startedCart, ordered, confirmed, delivered },
       /** 'hour' for a single-day range (chart labels as hours), else 'day'. */
       trendUnit,
-      timeSeries: trendRows.map((r) => ({
+      timeSeries: trendAll.map((r) => ({
         date: r.day,
         viewsRaw: Number(r.viewsRaw),
         viewsUnique: Number(r.viewsUnique),
+        ...(campaignId
+          ? { startedCart: cartsByBucket.get(r.day) ?? 0, ordered: ordersByBucket.get(r.day) ?? 0 }
+          : {}),
       })),
+      /** Per-form detail only (null on the overview). */
+      visitors,
       topForms: topFormRows.map((r) => ({
         campaignId: r.campaignId,
         label: r.name ?? 'Unknown form',
@@ -9044,6 +9140,107 @@ export class MarketingService {
           };
         });
       })(),
+    };
+  }
+
+  /**
+   * Visitor list for the per-form analytics page: one row per browser session
+   * that viewed the form in scope, with when they arrived, how long they stayed
+   * and what happened next on THIS form. Outcome precedence: ORDERED (a
+   * non-deleted order, same definition as the funnel) > FAILED (a recorded
+   * failed submit) > STARTED (a cart, i.e. started typing) > LEFT.
+   * No phones or typed values are returned.
+   */
+  private async getFormVisitors(
+    campaignId: string,
+    viewWhere: SQL | undefined,
+    input?: { outcome?: FormVisitorOutcome; page?: number },
+  ): Promise<FormVisitorsPage> {
+    const page = Math.max(1, Math.floor(input?.page ?? 1));
+    const outcomeFilter = input?.outcome ?? null;
+    const cte = sql`
+      WITH s AS (
+        SELECT session_id, min(viewed_at) AS first_at, max(viewed_at) AS last_at, count(*)::int AS views,
+               max(dwell_ms) AS dwell_ms, max(country) AS country, max(host_domain) AS host_domain
+        FROM campaign_views
+        WHERE ${viewWhere ?? sql`TRUE`}
+        GROUP BY session_id
+      ),
+      o AS (
+        SELECT DISTINCT ON (session_id) session_id, id, order_number, status::text AS status, created_at
+        FROM orders
+        WHERE campaign_id = ${campaignId}::uuid AND session_id IS NOT NULL AND status <> 'DELETED'
+        ORDER BY session_id, created_at
+      ),
+      ca AS (
+        SELECT DISTINCT ON (session_id) session_id, status::text AS status, created_at
+        FROM cart_abandonments
+        WHERE campaign_id = ${campaignId}::uuid AND session_id IS NOT NULL
+        ORDER BY session_id, created_at DESC
+      ),
+      f AS (
+        SELECT session_id, count(*)::int AS n,
+               (array_agg(coalesce(nullif(reason, ''), outcome) ORDER BY attempted_at DESC))[1] AS last_reason
+        FROM form_submit_attempts
+        WHERE campaign_id = ${campaignId}::uuid AND session_id IS NOT NULL
+        GROUP BY session_id
+      ),
+      y AS (
+        SELECT s.*, o.id AS order_id, o.order_number, o.status AS order_status, o.created_at AS ordered_at,
+               ca.status AS cart_status, ca.created_at AS cart_at,
+               coalesce(f.n, 0) AS failed, f.last_reason,
+               CASE WHEN o.id IS NOT NULL THEN 'ORDERED'
+                    WHEN f.n > 0 THEN 'FAILED'
+                    WHEN ca.session_id IS NOT NULL THEN 'STARTED'
+                    ELSE 'LEFT' END AS outcome
+        FROM s
+        LEFT JOIN o ON o.session_id = s.session_id
+        LEFT JOIN ca ON ca.session_id = s.session_id
+        LEFT JOIN f ON f.session_id = s.session_id
+      )`;
+    const [rows, counts] = await Promise.all([
+      this.db.execute<{
+        first_at: Date | string; last_at: Date | string; views: number; dwell_ms: number | null; country: string | null; host_domain: string | null;
+        order_id: string | null; order_number: number | null; order_status: string | null; ordered_at: Date | string | null;
+        cart_status: string | null; cart_at: Date | string | null; failed: number; last_reason: string | null;
+        outcome: FormVisitorOutcome;
+      }>(sql`${cte}
+        SELECT first_at, last_at, views, dwell_ms, country, host_domain, order_id, order_number, order_status, ordered_at,
+               cart_status, cart_at, failed, last_reason, outcome
+        FROM y
+        ${outcomeFilter ? sql`WHERE outcome = ${outcomeFilter}` : sql``}
+        ORDER BY first_at DESC
+        LIMIT ${FORM_VISITORS_PAGE_SIZE} OFFSET ${(page - 1) * FORM_VISITORS_PAGE_SIZE}`),
+      this.db.execute<{ outcome: FormVisitorOutcome; n: number }>(sql`${cte}
+        SELECT outcome, count(*)::int AS n FROM y GROUP BY outcome`),
+    ]);
+    const iso = (v: Date | string | null) => (v == null ? null : v instanceof Date ? v.toISOString() : new Date(v).toISOString());
+    const byOutcome: Record<FormVisitorOutcome, number> = { ORDERED: 0, FAILED: 0, STARTED: 0, LEFT: 0 };
+    for (const c of counts) byOutcome[c.outcome] = Number(c.n);
+    const total = outcomeFilter ? byOutcome[outcomeFilter] : Object.values(byOutcome).reduce((a, b) => a + b, 0);
+    return {
+      rows: [...rows].map((r) => ({
+        firstAt: iso(r.first_at)!,
+        lastAt: iso(r.last_at)!,
+        views: Number(r.views),
+        dwellMs: r.dwell_ms == null ? null : Number(r.dwell_ms),
+        country: r.country,
+        hostDomain: r.host_domain,
+        outcome: r.outcome,
+        orderId: r.order_id,
+        orderNumber: r.order_number == null ? null : Number(r.order_number),
+        orderStatus: r.order_status,
+        orderedAt: iso(r.ordered_at),
+        cartStatus: r.cart_status,
+        cartAt: iso(r.cart_at),
+        failedSubmits: Number(r.failed),
+        lastFailure: r.last_reason,
+      })),
+      byOutcome,
+      outcome: outcomeFilter,
+      page,
+      pageSize: FORM_VISITORS_PAGE_SIZE,
+      total,
     };
   }
 

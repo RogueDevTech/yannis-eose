@@ -467,3 +467,36 @@ export async function fetchDuplicateComparisonPhones(
     return null;
   }
 }
+
+export type CustomerJourneyEventKind = 'VIEW' | 'CART' | 'FAILED_SUBMIT' | 'ORDER' | 'CLEANUP';
+
+export interface CustomerJourneyEvent {
+  kind: CustomerJourneyEventKind;
+  at: string;
+  formName: string | null;
+  mediaBuyerName: string | null;
+  orderId: string | null;
+  orderNumber: number | null;
+  status: string | null;
+  detail: string | null;
+  sameBrowser: boolean;
+  isAnchor: boolean;
+}
+
+export interface CustomerJourney {
+  hasBrowserSession: boolean;
+  windowDays: number;
+  events: CustomerJourneyEvent[];
+  truncated: boolean;
+}
+
+/** Order detail Journey panel (`orders.customerJourney`). Throws with the server message on failure. */
+export async function fetchCustomerJourney(orderId: string): Promise<CustomerJourney> {
+  const base = getBrowserApiBaseUrl();
+  if (!base) throw new Error('API URL not configured');
+  const input = encodeURIComponent(JSON.stringify({ orderId }));
+  const res = await fetch(`${base}/trpc/orders.customerJourney?input=${input}`, { credentials: 'include' });
+  const json = (await res.json().catch(() => null)) as (TrpcEnvelope<CustomerJourney> & { error?: { message?: string } }) | null;
+  if (!res.ok || !json?.result?.data) throw new Error(json?.error?.message ?? 'Could not load the customer journey');
+  return json.result.data;
+}

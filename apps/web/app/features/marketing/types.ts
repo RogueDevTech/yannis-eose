@@ -624,6 +624,8 @@ export interface FormAnalytics {
     conversionRate: number;
     /** Orders matched to a form view ÷ total orders (0..1). */
     attributionCoverage: number;
+    /** Orders in scope with no tracked form visit. */
+    unlinkedOrders?: number;
   };
   funnel: {
     formViews: number;
@@ -635,7 +637,10 @@ export interface FormAnalytics {
   /** Time-series bucket unit: 'hour' for a single-day range, else 'day'. Drives
    *  how the trend chart formats each point's label (hour vs date). */
   trendUnit: 'hour' | 'day';
-  timeSeries: Array<{ date: string; viewsRaw: number; viewsUnique: number }>;
+  /** startedCart / ordered are set on the per-form detail page only. */
+  timeSeries: Array<{ date: string; viewsRaw: number; viewsUnique: number; startedCart?: number; ordered?: number }>;
+  /** Per-form detail page only: one page of the visitor list. */
+  visitors?: FormVisitorsPage | null;
   topForms: Array<{ campaignId: string; label: string; mediaBuyerName: string | null; count: number }>;
   /** Per-form rows for the clickable forms table. */
   forms: Array<{
@@ -719,4 +724,35 @@ export interface FundingDisputesLoaderData {
   total: number;
   filteredTotalAmount: string;
   statusCounts: Record<FundingDisputeStatus, number>;
+}
+
+/** What a form visitor did next on that form (Form Analytics visitor list). */
+export type FormVisitorOutcome = 'ORDERED' | 'FAILED' | 'STARTED' | 'LEFT';
+
+export interface FormVisitorRow {
+  firstAt: string;
+  lastAt: string;
+  views: number;
+  dwellMs: number | null;
+  country: string | null;
+  /** Website the form was shown on; null for views before host tracking. */
+  hostDomain?: string | null;
+  outcome: FormVisitorOutcome;
+  orderId: string | null;
+  orderNumber: number | null;
+  orderStatus: string | null;
+  orderedAt: string | null;
+  cartStatus: string | null;
+  cartAt: string | null;
+  failedSubmits: number;
+  lastFailure: string | null;
+}
+
+export interface FormVisitorsPage {
+  rows: FormVisitorRow[];
+  byOutcome: Record<FormVisitorOutcome, number>;
+  outcome: FormVisitorOutcome | null;
+  page: number;
+  pageSize: number;
+  total: number;
 }

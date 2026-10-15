@@ -302,6 +302,12 @@ export const crossFunnelAttempts = pgTable(
     originalOrderNumber: integer('original_order_number'),
     /** Denormalized winner lifecycle status at time of the blocked attempt. */
     originalOrderStatus: text('original_order_status'),
+    /**
+     * The order the duplicate cleanup cron removed or flagged (0355). NULL when
+     * the submission was blocked at entry, so no order exists. Not an FK: the
+     * order may later be hard-deleted.
+     */
+    duplicateOrderId: uuid('duplicate_order_id'),
     attemptedAt: timestamp('attempted_at', { withTimezone: true }).defaultNow().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -388,6 +394,12 @@ export const campaignViews = pgTable(
      */
     deploymentType: text('deployment_type'),
     referrer: text('referrer'),
+    /**
+     * Hostname of the website the form was shown on (0356). Embedded: the page
+     * itself; iframe: the parent page; hosted: the page that sent the visitor.
+     * Hostname only, never a path or query. NULL for views before 0356.
+     */
+    hostDomain: text('host_domain'),
     userAgent: text('user_agent'),
     /** From Cloudflare's cf-ipcountry header. */
     country: text('country'),

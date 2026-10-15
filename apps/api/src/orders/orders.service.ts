@@ -61,6 +61,7 @@ class DedupBlock extends Error {
 }
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import { isAdminLevel } from '../common/authz';
+import { loadCustomerJourney, type CustomerJourney } from './customer-journey';
 import { hasFinanceAccess, hasFinanceWriteAccess } from '../common/utils/strip-finance-fields';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { branchScopeCondition, closerBranchOrAssignedCondition } from '../common/db/branch-scope-condition';
@@ -4874,6 +4875,11 @@ export class OrdersService {
    * Deliberately bypasses the order-detail cache: this reads only the two branch
    * columns, and the guard must run before any payload is served.
    */
+  /** Customer journey for the order detail Journey panel (see customer-journey.ts). Caller checks company scope first. */
+  async getCustomerJourney(orderId: string, effectiveBranchIds: string[] | null | undefined): Promise<CustomerJourney> {
+    return loadCustomerJourney(this.db, orderId, effectiveBranchIds);
+  }
+
   /**
    * Batch form of {@link assertOrderInCompanyScope} for the bulk endpoints, which
    * accept client-supplied id arrays (up to 2000). One query for the whole batch

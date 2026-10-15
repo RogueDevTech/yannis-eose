@@ -93,6 +93,24 @@ export function MarketingAnalyticsLoadingShell({ filters, detail = false }: Mark
         </div>
       </div>
 
+      {/* Detail-only section: visitor list (filter pills + rows). */}
+      {detail && (
+        <div className="card overflow-hidden">
+          <Pulse className="h-4 w-20 mb-1" />
+          <Pulse className="h-3 w-60 mb-3" />
+          <div className="flex gap-2 mb-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Pulse key={i} className="h-7 w-20 rounded-full" />
+            ))}
+          </div>
+          <div className="space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Pulse key={i} className="h-10 w-full" />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Global-only section: all-forms table skeleton. */}
       {!detail && (
         <div className="space-y-2">
