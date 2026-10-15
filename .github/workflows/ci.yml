@@ -47,6 +47,52 @@ jobs:
           path: apps/api/dist/
           retention-days: 1
 
+  # ── History table drift (fresh DB from every migration) ───────
+  history-drift:
+    name: History table drift
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: yannis
+          POSTGRES_PASSWORD: yannis
+          POSTGRES_DB: yannis_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U yannis"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://yannis:yannis@localhost:5432/yannis_ci
+      TEST_DATABASE_URL: postgresql://yannis:yannis@localhost:5432/yannis_ci
+      PGSSLMODE: disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # 0237 needs a SUPER_ADMIN to exist; on a fresh DB the first run stops
+      # there, we seed a placeholder admin and resume (the runner skips applied files).
+      - name: Apply every migration
+        run: |
+          pnpm --filter @yannis/shared exec tsx src/migrations/cli.ts || {
+            psql "$DATABASE_URL" -c "INSERT INTO users (name, email, password_hash, role) VALUES ('CI Admin', 'ci@local', 'x', 'SUPER_ADMIN')"
+            pnpm --filter @yannis/shared exec tsx src/migrations/cli.ts
+          }
+
+      - name: Check history tables
+        run: pnpm --filter @yannis/api exec vitest run --config vitest.integration.config.ts src/database/history-drift.integration.spec.ts
+
   # ── Deploy to Staging (auto on push to main) ───────────────────
   # Environment declaration removed — the deploy is disabled and the
   # `environment: staging` gate was causing CI failures (approval required

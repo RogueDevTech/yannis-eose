@@ -22,7 +22,7 @@ Local dev: no Docker needed — Postgres + Redis via `.env` connection strings.
 - `uuid` columns for identifiers — never `text`.
 - Every write: `withActor(this.db, actor, async (tx) => {...})`. Never bare `pgClient.set_config`.
 - Numeric inserts: `sql\`${value}::numeric\``. Never `String()` or `.toFixed(2)`.
-- Altering a table → sync its `*_history` table in the same migration.
+- Altering a table → sync its `*_history` table in the same migration: same column, same position and type, and add it to any named `yannis_capture_history_insert_*` function for that table (orders keeps a named one on purpose). Enforced in CI by `apps/api/src/database/history-drift.integration.spec.ts`.
 - Migrations auto-run on boot. RBAC catalog auto-seeds + auto-restamps user snapshots on boot.
 
 ## Order Lifecycle
