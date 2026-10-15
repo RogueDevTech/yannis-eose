@@ -3,13 +3,14 @@ import { EventsModule } from '../events/events.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { MarketingService } from './marketing.service';
 import { AdSpendComplianceService } from './ad-spend-compliance.service';
+import { FormNoOrdersAlertService } from './form-no-orders-alert.service';
 import { BranchesModule } from '../branches/branches.module';
 import { SettingsModule } from '../settings/settings.module';
 import { LedgerModule } from '../finance/ledger.module';
 
 @Module({
   imports: [EventsModule, NotificationsModule, BranchesModule, SettingsModule, LedgerModule],
-  providers: [MarketingService, AdSpendComplianceService],
+  providers: [MarketingService, AdSpendComplianceService, FormNoOrdersAlertService],
   exports: [MarketingService],
 })
 export class MarketingModule {}

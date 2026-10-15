@@ -46,11 +46,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     endDate = undefined;
   }
 
+  // Visitor list filter + page (per-form detail only).
+  const visitorsParam = (url.searchParams.get('visitors') ?? '').toUpperCase();
+  const visitorOutcome = (['ORDERED', 'FAILED', 'STARTED', 'LEFT'] as const).find((o) => o === visitorsParam);
+  const visitorPage = Math.max(1, Number.parseInt(url.searchParams.get('vpage') ?? '1', 10) || 1);
+
   const bundleInput = encodeURIComponent(
     JSON.stringify({
       campaignId,
       ...(startDate && { startDate }),
       ...(endDate && { endDate }),
+      ...(visitorOutcome && { visitorOutcome }),
+      ...(visitorPage > 1 && { visitorPage }),
     }),
   );
   const analyticsData = apiRequest<unknown>(

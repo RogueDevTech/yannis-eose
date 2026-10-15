@@ -1230,9 +1230,22 @@ function getFormScript(
         }
         var __ystart = Date.now();
         window.__yannisSessionId = __yid || undefined;
+        // Which website the form is shown on (hostname only, never a path or
+        // query): embedded = this page; iframe = the parent page; hosted = the
+        // page that sent the visitor. Lets us see whose landing page a form is on.
+        var __yhost = null;
+        try {
+          ${
+            formMode === 'embedded'
+              ? '__yhost = location.hostname;'
+              : `if (location.ancestorOrigins && location.ancestorOrigins.length) __yhost = new URL(location.ancestorOrigins[0]).hostname;
+          else if (document.referrer) __yhost = new URL(document.referrer).hostname;`
+          }
+        } catch (e) { __yhost = null; }
+        window.__yannisPageHost = __yhost || undefined;
         if (__yid && navigator.sendBeacon) {
           navigator.sendBeacon(${JSON.stringify(endpointBase)} + '/track-view',
-            JSON.stringify({ sessionId: __yid, campaignId: ${campaignIdJson}, mediaBuyerId: ${mediaBuyerIdJson}, deploymentType: ${JSON.stringify(formMode)} }));
+            JSON.stringify({ sessionId: __yid, campaignId: ${campaignIdJson}, mediaBuyerId: ${mediaBuyerIdJson}, deploymentType: ${JSON.stringify(formMode)}, pageHost: __yhost || undefined }));
         }
         var __ysent = false;
         var __yleave = function() {
@@ -1728,11 +1741,14 @@ function getFormScript(
         var phoneEl = form.querySelector('#customerPhone') || form.querySelector('[name="customerPhone"]');
         if (!phoneEl) return;
         var name = nameEl ? (nameEl.value || '').trim() : '';
-        // Gate on a real Nigerian phone only — product/offer/name are progressive.
+        // Gate on a real phone for THIS form's country (the input's own pattern,
+        // the same rule the submit uses) — product/offer/name are progressive.
+        // Until 2026-10-15 this was the Nigerian rule, so Kenya / Ghana / Zambia /
+        // Tanzania forms almost never saved a cart (one phone rule everywhere).
         // Name is optional; defaults to "Unknown" on the API side.
         // Normalise a dropped leading zero first, so a cart is still captured for
         // the ~7% of customers who type 803xxxxxxx instead of 0803xxxxxxx.
-        if (!isValidNgPhone(normalisePhoneValue(phoneEl, phoneEl.value))) return;
+        if (!isValidPhoneForInput(phoneEl, normalisePhoneValue(phoneEl, phoneEl.value))) return;
         if (!isOnline) return;
         // Helper: read a field by name, return trimmed value or undefined if blank.
         function fv(name) {
@@ -2415,7 +2431,18 @@ function getFormScript(
             // Validated as a full URL on save; redirect only if it parses as http(s).
             var callbackUrl = (form.dataset.successCallback || '').trim();
             if (callbackUrl && /^https?:\\/\\//i.test(callbackUrl)) {
-              yannisGo(callbackUrl);
+              // Tag the thank-you URL with the order and the form that took it,
+              // so the Media Buyer can see which form an order landed on and
+              // match each pixel Purchase to one order (event id). Any URL
+              // problem falls back to the plain URL: never blocks the redirect.
+              var tagged = callbackUrl;
+              try {
+                var tu = new URL(callbackUrl);
+                if (result.data.orderId && result.data.orderId !== 'queued') tu.searchParams.set('yannis_order', String(result.data.orderId));
+                tu.searchParams.set('yannis_form', ${campaignIdJson});
+                tagged = tu.toString();
+              } catch (e) { tagged = callbackUrl; }
+              yannisGo(tagged);
               return;
             }
             if (showInlineSuccess(result.data.message || 'Order received successfully! We will contact you shortly.')) {
@@ -3105,10 +3132,40 @@ function renderEmbedScript(config: CampaignConfig, workerUrl: string): Response 
   container.innerHTML = ${JSON.stringify(getFormInnerHTML(config))};
   shadow.appendChild(container);
 
-  // Run form logic inside shadow DOM context
-  var formScript = document.createElement('script');
-  // We need to bind into shadow DOM — inline the logic
+  // Run the form logic against the shadow root. The form script looks its
+  // elements up with document.getElementById / querySelectorAll, which cannot
+  // see inside a shadow root, so before 2026-10-15 every embedded form threw on
+  // load ("Cannot read properties of null (reading 'addEventListener')"): no
+  // offer handling, prices left in NGN, no cart, no submit handler, and a press
+  // of Submit did a native GET to the host page. The proxy hands the script a
+  // document whose lookups search the shadow root first. Document-level click
+  // listeners ("close the dropdown on an outside click") are split: clicks
+  // inside the form go to the shadow root (real targets), clicks elsewhere on
+  // the page go to the real document. Everything else is the real document.
+  var __yrealDoc = window.document;
+  var __ydoc = new Proxy(__yrealDoc, {
+    get: function(t, p) {
+      if (p === 'getElementById') return function(id) { return shadow.getElementById(id) || t.getElementById(id); };
+      if (p === 'querySelector') return function(s) { return shadow.querySelector(s) || t.querySelector(s); };
+      if (p === 'querySelectorAll') return function(s) { return shadow.querySelectorAll(s); };
+      if (p === 'addEventListener') return function(type, fn, opts) {
+        if (type === 'click') {
+          shadow.addEventListener(type, fn, opts);
+          t.addEventListener(type, function(e) {
+            var path = e.composedPath ? e.composedPath() : [];
+            if (path.indexOf(target) === -1) fn.call(this, e);
+          }, opts);
+          return;
+        }
+        t.addEventListener(type, fn, opts);
+      };
+      var v = t[p];
+      return typeof v === 'function' ? v.bind(t) : v;
+    }
+  });
+  (function(document) {
   ${getFormScript(workerUrl, config.id, config.products, config.mediaBuyerId, 'embedded')}
+  })(__ydoc);
 })();`;
 
   return new Response(js, {
@@ -3474,6 +3531,8 @@ async function handleTrackView(request: Request, env: Env, _ctx: ExecutionContex
     if (typeof b['campaignId'] === 'string') payload['campaignId'] = b['campaignId'];
     if (typeof b['mediaBuyerId'] === 'string') payload['mediaBuyerId'] = b['mediaBuyerId'];
     if (typeof b['deploymentType'] === 'string') payload['deploymentType'] = b['deploymentType'];
+    // Host website hostname (0356). Hostname only; the API drops anything malformed.
+    if (typeof b['pageHost'] === 'string' && b['pageHost'].length <= 253) payload['pageHost'] = b['pageHost'];
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), getApiTimeoutMs(env.API_URL));

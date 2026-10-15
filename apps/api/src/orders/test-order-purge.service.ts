@@ -781,6 +781,9 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           branchId: e.branchId,
           originalOrderId: e.winnerId,
           originalMediaBuyerId: e.winnerMbId,
+          // The order this run removed or flagged, so the compare screen can say
+          // "created, then cleaned up" instead of "blocked" (0355).
+          duplicateOrderId: e.loserId,
         })),
       );
     if (cfaRows.length > 0) {

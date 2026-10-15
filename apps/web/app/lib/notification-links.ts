@@ -19,6 +19,8 @@ export function getNotificationLink(notif: NotificationForLink): string | null {
 export function getNotificationAction(notif: NotificationForLink): { link: string; label: string } | null {
   const data = notif.data as Record<string, string> | null | undefined;
   if (data) {
+    if ((notif.type === 'marketing:form_no_orders' || notif.type === 'marketing:form_on_other_page') && data.campaignId)
+      return { link: `/admin/marketing/analytics/${data.campaignId}`, label: 'View form analytics' };
     // Approval notifications with a requestId take priority over generic orderId links
     // so HoCS/HoL land on the Permission Requests page, not the order detail.
     // Exception: order-linked approval notifications (line price, deletion) link to the

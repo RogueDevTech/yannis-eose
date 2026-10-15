@@ -27,6 +27,9 @@ const OrderTimeline = lazy(() =>
 const InvoicePreviewModal = lazy(() =>
   import('~/components/ui/invoice-preview-modal').then((m) => ({ default: m.InvoicePreviewModal })),
 );
+const CustomerJourneyModal = lazy(() =>
+  import('~/features/orders/CustomerJourneyModal').then((m) => ({ default: m.CustomerJourneyModal })),
+);
 const DuplicateComparisonModal = lazy(() =>
   import('~/features/orders/DuplicateComparisonModal').then((m) => ({ default: m.DuplicateComparisonModal })),
 );
@@ -41,7 +44,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { shareOrderToLogistics, fetchOrderClipboardSummary } from '~/lib/trpc-browser';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
-import { hasFinanceAccess, isAdminLevel, isOrgWideDepartmentHead } from '~/lib/rbac';
+import { canViewCustomerJourney, hasFinanceAccess, isAdminLevel, isOrgWideDepartmentHead } from '~/lib/rbac';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { STATUS_LABELS, formatStatus } from '~/features/shared/order-status';
 import { ordersListPathForDetailFrom } from '~/lib/order-detail-return';
@@ -1141,6 +1144,9 @@ export function OrderDetailPage({
   const [shareError, setShareError] = useState<string | null>(null);
   const [invoicePreview, setInvoicePreview] = useState<OrderInvoice | null>(null);
   const [duplicateCompareOpen, setDuplicateCompareOpen] = useState(false);
+  const [journeyOpen, setJourneyOpen] = useState(false);
+  // Journey reads the orders table only; cart / follow-up pipeline orders have no journey.
+  const showJourney = !isCartOrder && !isFollowUpOrder && canViewCustomerJourney({ role: userRole, permissions });
   const [unfreezeModalOpen, setUnfreezeModalOpen] = useState(false);
   const [unfreezeReason, setUnfreezeReason] = useState('');
   const [optimisticallyUnfrozen, setOptimisticallyUnfrozen] = useState(false);
@@ -1811,6 +1817,18 @@ export function OrderDetailPage({
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <PageRefreshButton />
+          {showJourney && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setJourneyOpen(true)}
+              aria-label="Customer journey"
+              title="Customer journey: forms, carts and orders for this customer"
+            >
+              Journey
+            </Button>
+          )}
           {!canEditOrder && (
             <span className="inline-flex items-center rounded-full bg-app-hover px-2.5 py-1 text-xs font-medium text-app-fg-muted">
               View only
@@ -4824,6 +4842,12 @@ export function OrderDetailPage({
       <Suspense fallback={null}>
         <InvoicePreviewModal invoice={invoicePreview} onClose={() => setInvoicePreview(null)} />
       </Suspense>
+
+      {journeyOpen && (
+        <Suspense fallback={null}>
+          <CustomerJourneyModal orderId={order.id} onClose={() => setJourneyOpen(false)} />
+        </Suspense>
+      )}
 
       {duplicateCompareOpen && order.duplicateOfId && (
         <Suspense fallback={null}>

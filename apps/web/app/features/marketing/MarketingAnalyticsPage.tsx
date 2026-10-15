@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
-import { Link } from '@remix-run/react';
+import { Link, useSearchParams } from '@remix-run/react';
 import {
   ResponsiveContainer,
   BarChart,
@@ -14,6 +14,8 @@ import {
   LabelList,
   AreaChart,
   Area,
+  ComposedChart,
+  Line,
   Legend,
 } from 'recharts';
 import { PageHeader } from '~/components/ui/page-header';
@@ -31,7 +33,11 @@ import { ChartCard } from '~/components/ui/chart-card';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { useIsMobile } from '~/hooks/useIsMobile';
 import { STICKY_TABLE_HEADER_CELL_CLASS } from '~/components/ui/_sticky-table-header';
-import type { FormAnalytics } from './types';
+import { FilterPills } from '~/components/ui/filter-pills';
+import { Pagination } from '~/components/ui/pagination';
+import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { formatOrderTimestamp } from '~/lib/format-date';
+import type { FormAnalytics, FormVisitorOutcome, FormVisitorRow, FormVisitorsPage } from './types';
 
 const TOP_FORMS_LIMIT = 6;
 
@@ -44,6 +50,10 @@ const FUNNEL_COLORS = ['#6366f1', '#f59e0b', '#0284c7', '#4f46e5', '#0ea5e9', '#
 // (funnel end-state), so views never use it.
 const RAW_VIEWS_COLOR = '#6366f1'; // indigo — all views
 const UNIQUE_VIEWS_COLOR = '#f59e0b'; // amber — unique views
+// Per-form chart: started-form and order lines on a right-hand axis (they are
+// small next to views). Same hues as the funnel's Started cart / Ordered bars.
+const STARTED_CART_COLOR = FUNNEL_COLORS[2];
+const ORDERED_COLOR = '#059669';
 
 /**
  * X-axis tick for the funnel bar chart: colours each stage label to match its
@@ -541,6 +551,8 @@ function FormDetailBody({
   const trendData = timeSeries.map((d) => ({
     viewsRaw: d.viewsRaw,
     viewsUnique: d.viewsUnique,
+    startedCart: d.startedCart ?? 0,
+    ordered: d.ordered ?? 0,
     label: formatTrendLabel(d.date, analytics.trendUnit),
   }));
 
@@ -550,13 +562,14 @@ function FormDetailBody({
     { label: 'All form views', value: statStrip.rawLandings.toLocaleString() },
     { label: 'Avg time on form', value: formatDwell(statStrip.avgDwellMs) },
     { label: 'Conversion', value: formatPct(statStrip.conversionRate) },
+    { label: 'Orders without a visit', value: (statStrip.unlinkedOrders ?? 0).toLocaleString() },
   ];
 
   return (
     <div className="space-y-4">
       {/* Meta strip — what this form is + its headline numbers. */}
       <div className="card">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {meta.map((m) => (
             <div key={m.label}>
               <div className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">{m.label}</div>
@@ -605,13 +618,13 @@ function FormDetailBody({
 
         {/* Form views over time. */}
         <div className="card overflow-hidden px-2 py-4 sm:p-5">
-          <h3 className="text-sm font-semibold text-app-fg mb-1 px-2 sm:px-0">Form views over time</h3>
-          <p className="text-xs text-app-fg-muted mb-3 px-2 sm:px-0">All vs unique views over the period for this form.</p>
+          <h3 className="text-sm font-semibold text-app-fg mb-1 px-2 sm:px-0">Visits and orders over time</h3>
+          <p className="text-xs text-app-fg-muted mb-3 px-2 sm:px-0">Views (left axis), started forms and orders (right axis).</p>
           {/* Always render — an empty period shows a flat zero axis, not a card. */}
             <ClientOnly fallback={<div className="h-72 w-full animate-pulse rounded bg-app-hover" />}>
               <div style={{ height: 300 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={trendData} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
+                  <ComposedChart data={trendData} margin={{ top: 8, right: 0, left: 0, bottom: 4 }}>
                     <defs>
                       <linearGradient id={`${chartUid}-draw`} x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor={RAW_VIEWS_COLOR} stopOpacity={0.35} />
@@ -624,7 +637,8 @@ function FormDetailBody({
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" minTickGap={24} />
-                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={40} />
+                    <YAxis yAxisId="views" tick={{ fontSize: 11 }} allowDecimals={false} width={40} />
+                    <YAxis yAxisId="orders" orientation="right" tick={{ fontSize: 11 }} allowDecimals={false} width={32} />
                     <Tooltip
                       // Show "<series name>: <value>" so each row is labelled
                       // (indigo = all views, amber = unique views).
@@ -639,14 +653,145 @@ function FormDetailBody({
                       itemStyle={TOOLTIP_ITEM_STYLE}
                     />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Area type="monotone" dataKey="viewsRaw" name="All form views" stroke={RAW_VIEWS_COLOR} strokeWidth={2} fill={`url(#${chartUid}-draw)`} />
-                    <Area type="monotone" dataKey="viewsUnique" name="Unique form views" stroke={UNIQUE_VIEWS_COLOR} strokeWidth={2} fill={`url(#${chartUid}-dunique)`} />
-                  </AreaChart>
+                    <Area yAxisId="views" type="monotone" dataKey="viewsRaw" name="All form views" stroke={RAW_VIEWS_COLOR} strokeWidth={2} fill={`url(#${chartUid}-draw)`} />
+                    <Area yAxisId="views" type="monotone" dataKey="viewsUnique" name="Unique form views" stroke={UNIQUE_VIEWS_COLOR} strokeWidth={2} fill={`url(#${chartUid}-dunique)`} />
+                    <Line yAxisId="orders" type="monotone" dataKey="startedCart" name="Started form" stroke={STARTED_CART_COLOR} strokeWidth={2} dot={false} />
+                    <Line yAxisId="orders" type="monotone" dataKey="ordered" name="Ordered" stroke={ORDERED_COLOR} strokeWidth={2.5} dot={{ r: 2 }} />
+                  </ComposedChart>
                 </ResponsiveContainer>
               </div>
             </ClientOnly>
         </div>
       </div>
+
+      {analytics.visitors && <FormVisitorsCard visitors={analytics.visitors} />}
+    </div>
+  );
+}
+
+const VISITOR_OUTCOME_LABEL: Record<FormVisitorOutcome, string> = {
+  ORDERED: 'Ordered',
+  FAILED: 'Submit failed',
+  STARTED: 'Started, left',
+  LEFT: 'Left',
+};
+
+const VISITOR_OUTCOME_DOT: Record<FormVisitorOutcome, string> = {
+  ORDERED: 'bg-success-500',
+  FAILED: 'bg-danger-500',
+  STARTED: 'bg-amber-500',
+  LEFT: 'bg-app-fg-muted/50',
+};
+
+function visitorDetail(v: FormVisitorRow): string | null {
+  switch (v.outcome) {
+    case 'ORDERED':
+      return v.orderedAt ? `Ordered ${formatOrderTimestamp(v.orderedAt)}` : null;
+    case 'FAILED':
+      return v.lastFailure
+        ? `${v.failedSubmits > 1 ? `${v.failedSubmits} failed submits. Last: ` : ''}${v.lastFailure}`
+        : null;
+    case 'STARTED':
+      // A converted cart with no live order on this form: the order was removed
+      // (e.g. duplicate cleanup) or placed through another form.
+      return v.cartStatus === 'CONVERTED'
+        ? 'Submitted, but the order was removed or went to another form'
+        : 'Started typing, never submitted';
+    case 'LEFT':
+      return null;
+  }
+}
+
+function FormVisitorRowBody({ v }: { v: FormVisitorRow }) {
+  const detail = visitorDetail(v);
+  return (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium text-app-fg tabular-nums">{formatOrderTimestamp(v.firstAt)}</span>
+        <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-app-fg">
+          <span aria-hidden className={`h-2 w-2 rounded-full ${VISITOR_OUTCOME_DOT[v.outcome]}`} />
+          {VISITOR_OUTCOME_LABEL[v.outcome]}
+        </span>
+      </div>
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-app-fg-muted">
+        <span>On form {formatDwell(v.dwellMs)}</span>
+        {v.views > 1 && <span>· {v.views} visits</span>}
+        {v.country && <span>· {v.country}</span>}
+        {v.hostDomain && <span className="break-all">· on {v.hostDomain}</span>}
+        {v.orderNumber != null && <span className="font-mono text-brand-600 dark:text-brand-400">· #{v.orderNumber}</span>}
+        {v.orderStatus && <OrderStatusBadge status={v.orderStatus} />}
+      </div>
+      {detail && (
+        <p className={`mt-0.5 text-xs break-words ${v.outcome === 'FAILED' ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}`}>
+          {detail}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * Visitor list for one form: when each visitor arrived, how long they stayed
+ * and what happened next. A visitor who ordered links to the order (its
+ * Journey view shows the full path). Filter + page live in the URL
+ * (`visitors`, `vpage`) so the live refresh keeps the view.
+ */
+function FormVisitorsCard({ visitors }: { visitors: FormVisitorsPage }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const all = Object.values(visitors.byOutcome).reduce((a, b) => a + b, 0);
+  const options = [
+    { value: '', label: 'All', count: all },
+    ...(['ORDERED', 'STARTED', 'FAILED', 'LEFT'] as const).map((o) => ({
+      value: o,
+      label: VISITOR_OUTCOME_LABEL[o],
+      count: visitors.byOutcome[o],
+      dotColor: VISITOR_OUTCOME_DOT[o],
+    })),
+  ];
+  const totalPages = Math.max(1, Math.ceil(visitors.total / visitors.pageSize));
+
+  return (
+    <div className="card overflow-hidden px-2 py-4 sm:p-5">
+      <h3 className="text-sm font-semibold text-app-fg mb-1 px-2 sm:px-0">Visitors</h3>
+      <p className="text-xs text-app-fg-muted mb-3 px-2 sm:px-0">When each visitor arrived and what they did next.</p>
+      <div className="-mx-2 px-2 sm:mx-0 sm:px-0 overflow-x-auto">
+        <FilterPills
+          size="sm"
+          options={options}
+          value={visitors.outcome ?? ''}
+          onChange={(value) => {
+            const next = new URLSearchParams(searchParams);
+            if (value) next.set('visitors', value.toLowerCase());
+            else next.delete('visitors');
+            next.delete('vpage');
+            setSearchParams(next, { preventScrollReset: true, replace: true });
+          }}
+        />
+      </div>
+      {visitors.rows.length === 0 ? (
+        <p className="py-8 text-center text-sm text-app-fg-muted">No visitors in this period.</p>
+      ) : (
+        <ul className="mt-3 divide-y divide-app-border/60">
+          {visitors.rows.map((v, i) => (
+            <li key={`${v.firstAt}-${i}`}>
+              {v.orderId ? (
+                <Link
+                  to={`/admin/orders/${v.orderId}`}
+                  prefetch="intent"
+                  className="block px-2 py-2.5 sm:px-1 hover:bg-app-hover rounded"
+                >
+                  <FormVisitorRowBody v={v} />
+                </Link>
+              ) : (
+                <div className="px-2 py-2.5 sm:px-1">
+                  <FormVisitorRowBody v={v} />
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <Pagination page={visitors.page} totalPages={totalPages} pageParam="vpage" className="mt-3" />
     </div>
   );
 }

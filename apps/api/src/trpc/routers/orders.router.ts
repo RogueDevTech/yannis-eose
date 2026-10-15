@@ -60,7 +60,7 @@ import { CsOrderRoutingService } from '../../orders/cs-order-routing.service';
 import { TestOrderPurgeService } from '../../orders/test-order-purge.service';
 import { FollowUpConfigService } from '../../orders/follow-up-config.service';
 import type { VoipService } from '../../voip/voip.service';
-import { isAdminLevel } from '../../common/authz';
+import { canViewCustomerJourney, isAdminLevel } from '../../common/authz';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
 import { CacheService } from '../../common/cache/cache.service';
 
@@ -682,6 +682,21 @@ export const ordersRouter = router({
           : Promise.resolve(false),
       ]);
       return { ...order, viewerCanEditOrderLinePrices, viewerIsCsTeamSupervisor };
+    }),
+
+  /**
+   * Customer journey for the order detail Journey panel: form views, carts,
+   * failed submits, orders and duplicate cleanups for the same customer or
+   * browser, scoped to the caller's company. No phones in the payload.
+   */
+  customerJourney: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      if (!canViewCustomerJourney(ctx.user)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized' });
+      }
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
+      return getOrdersService().getCustomerJourney(input.orderId, ctx.effectiveBranchIds);
     }),
 
   /**

@@ -49,7 +49,7 @@ import {
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, publicProcedure, authedProcedure, permissionProcedure, edgeProcedure } from '../trpc';
-import { MarketingService } from '../../marketing/marketing.service';
+import { FORM_VISITOR_OUTCOMES, MarketingService } from '../../marketing/marketing.service';
 import { getBranchTeamsService, listBranchesForUser } from './branches.router';
 import {
   applySupervisorScope,
@@ -787,6 +787,9 @@ export const marketingRouter = router({
         personalOnly: z.boolean().optional(),
         /** When set, returns per-form detail scoped to a single campaign (drill-in page). */
         campaignId: z.string().uuid().optional(),
+        /** Per-form detail: visitor list filter + page. */
+        visitorOutcome: z.enum(FORM_VISITOR_OUTCOMES).optional(),
+        visitorPage: z.number().int().min(1).max(10000).optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -834,7 +837,9 @@ export const marketingRouter = router({
           ctx.currentBranchId,
           supervisorScope,
           ctx.effectiveBranchIds,
-          input.campaignId ? { campaignId: input.campaignId } : undefined,
+          input.campaignId
+            ? { campaignId: input.campaignId, visitors: { outcome: input.visitorOutcome, page: input.visitorPage } }
+            : undefined,
         ),
         getMarketingService().crossFunnelStats(
           ctx.user,
@@ -2344,6 +2349,8 @@ export const marketingRouter = router({
         mediaBuyerId: z.string().uuid().optional(),
         deploymentType: z.string().max(32).optional(),
         dwellMs: z.number().int().nonnegative().max(86_400_000).optional(),
+        /** Host website hostname (0356). Loose on purpose: a bad value is dropped server-side, never a rejected view. */
+        pageHost: z.string().max(300).optional().catch(undefined),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -2362,6 +2369,7 @@ export const marketingRouter = router({
             mediaBuyerId: input.mediaBuyerId ?? null,
             deploymentType: input.deploymentType ?? null,
             referrer: headerStr(headers['referer']),
+            hostDomain: input.pageHost ?? null,
             userAgent: headerStr(headers['user-agent']),
             country: headerStr(headers['cf-ipcountry']),
           });
