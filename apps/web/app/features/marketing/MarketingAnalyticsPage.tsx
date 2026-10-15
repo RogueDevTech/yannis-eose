@@ -36,6 +36,7 @@ import { STICKY_TABLE_HEADER_CELL_CLASS } from '~/components/ui/_sticky-table-he
 import { FilterPills } from '~/components/ui/filter-pills';
 import { Pagination } from '~/components/ui/pagination';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { formatOrderTimestamp } from '~/lib/format-date';
 import type { FormAnalytics, FormVisitorOutcome, FormVisitorRow, FormVisitorsPage } from './types';
 
@@ -718,6 +719,9 @@ function FormVisitorRowBody({ v }: { v: FormVisitorRow }) {
         {v.views > 1 && <span>· {v.views} visits</span>}
         {v.country && <span>· {v.country}</span>}
         {v.hostDomain && <span className="break-all">· on {v.hostDomain}</span>}
+        <span className="inline-flex items-center gap-1">
+          · Session <OrderIdBadge id={v.sessionId} textClassName="font-mono text-xs" />
+        </span>
         {v.orderNumber != null && <span className="font-mono text-brand-600 dark:text-brand-400">· #{v.orderNumber}</span>}
         {v.orderStatus && <OrderStatusBadge status={v.orderStatus} />}
       </div>
@@ -773,7 +777,7 @@ function FormVisitorsCard({ visitors }: { visitors: FormVisitorsPage }) {
       ) : (
         <ul className="mt-3 divide-y divide-app-border/60">
           {visitors.rows.map((v, i) => (
-            <li key={`${v.firstAt}-${i}`}>
+            <li key={v.sessionId || `${v.firstAt}-${i}`}>
               {v.orderId ? (
                 <Link
                   to={`/admin/orders/${v.orderId}`}

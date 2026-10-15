@@ -89,6 +89,7 @@ const FORM_VISITORS_PAGE_SIZE = 50;
 
 export interface FormVisitorsPage {
   rows: Array<{
+    sessionId: string;
     firstAt: string;
     lastAt: string;
     views: number;
@@ -9049,7 +9050,7 @@ export class MarketingService {
             .from(schema.orders)
             .where(and(orderWhere, isNotNull(schema.orders.sessionId), inArray(schema.orders.sessionId, scopedViewSessionIds)))
             .groupBy(trendBucket(schema.orders.createdAt)),
-          this.getFormVisitors(campaignId, viewWhere, opts?.visitors),
+          this.getFormVisitors(campaignId, viewWhere, opts?.visitors, { start: periodStart, end: periodEnd }),
         ])
       : [[], [], null] as const;
     const cartsByBucket = new Map(cartTrendRows.map((r) => [r.day, Number(r.n)]));
@@ -9155,7 +9156,11 @@ export class MarketingService {
     campaignId: string,
     viewWhere: SQL | undefined,
     input?: { outcome?: FormVisitorOutcome; page?: number },
+    period?: { start?: Date | null; end?: Date | null },
   ): Promise<FormVisitorsPage> {
+    // Same period as the funnel, so "Ordered" here matches the funnel's Ordered.
+    const inPeriod = (col: SQL) =>
+      sql`${period?.start ? sql`AND ${col} >= ${period.start.toISOString()}::timestamptz` : sql``} ${period?.end ? sql`AND ${col} <= ${period.end.toISOString()}::timestamptz` : sql``}`;
     const page = Math.max(1, Math.floor(input?.page ?? 1));
     const outcomeFilter = input?.outcome ?? null;
     const cte = sql`
@@ -9169,20 +9174,20 @@ export class MarketingService {
       o AS (
         SELECT DISTINCT ON (session_id) session_id, id, order_number, status::text AS status, created_at
         FROM orders
-        WHERE campaign_id = ${campaignId}::uuid AND session_id IS NOT NULL AND status <> 'DELETED'
+        WHERE campaign_id = ${campaignId}::uuid AND session_id IS NOT NULL AND status <> 'DELETED' ${inPeriod(sql`created_at`)}
         ORDER BY session_id, created_at
       ),
       ca AS (
         SELECT DISTINCT ON (session_id) session_id, status::text AS status, created_at
         FROM cart_abandonments
-        WHERE campaign_id = ${campaignId}::uuid AND session_id IS NOT NULL
+        WHERE campaign_id = ${campaignId}::uuid AND session_id IS NOT NULL ${inPeriod(sql`created_at`)}
         ORDER BY session_id, created_at DESC
       ),
       f AS (
         SELECT session_id, count(*)::int AS n,
                (array_agg(coalesce(nullif(reason, ''), outcome) ORDER BY attempted_at DESC))[1] AS last_reason
         FROM form_submit_attempts
-        WHERE campaign_id = ${campaignId}::uuid AND session_id IS NOT NULL
+        WHERE campaign_id = ${campaignId}::uuid AND session_id IS NOT NULL ${inPeriod(sql`attempted_at`)}
         GROUP BY session_id
       ),
       y AS (
@@ -9200,12 +9205,12 @@ export class MarketingService {
       )`;
     const [rows, counts] = await Promise.all([
       this.db.execute<{
-        first_at: Date | string; last_at: Date | string; views: number; dwell_ms: number | null; country: string | null; host_domain: string | null;
+        session_id: string; first_at: Date | string; last_at: Date | string; views: number; dwell_ms: number | null; country: string | null; host_domain: string | null;
         order_id: string | null; order_number: number | null; order_status: string | null; ordered_at: Date | string | null;
         cart_status: string | null; cart_at: Date | string | null; failed: number; last_reason: string | null;
         outcome: FormVisitorOutcome;
       }>(sql`${cte}
-        SELECT first_at, last_at, views, dwell_ms, country, host_domain, order_id, order_number, order_status, ordered_at,
+        SELECT session_id, first_at, last_at, views, dwell_ms, country, host_domain, order_id, order_number, order_status, ordered_at,
                cart_status, cart_at, failed, last_reason, outcome
         FROM y
         ${outcomeFilter ? sql`WHERE outcome = ${outcomeFilter}` : sql``}
@@ -9220,6 +9225,7 @@ export class MarketingService {
     const total = outcomeFilter ? byOutcome[outcomeFilter] : Object.values(byOutcome).reduce((a, b) => a + b, 0);
     return {
       rows: [...rows].map((r) => ({
+        sessionId: r.session_id,
         firstAt: iso(r.first_at)!,
         lastAt: iso(r.last_at)!,
         views: Number(r.views),

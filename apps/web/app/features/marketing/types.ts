@@ -730,6 +730,8 @@ export interface FundingDisputesLoaderData {
 export type FormVisitorOutcome = 'ORDERED' | 'FAILED' | 'STARTED' | 'LEFT';
 
 export interface FormVisitorRow {
+  /** Browser session id (same id on carts, orders and failed submits). */
+  sessionId: string;
   firstAt: string;
   lastAt: string;
   views: number;
