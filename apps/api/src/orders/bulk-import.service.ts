@@ -1975,6 +1975,19 @@ export class BulkImportService {
       unitPrice = config.defaultUnitPrice ?? 0;
     }
 
+    // Import bypasses the orders.create Zod validators, so enforce the same
+    // floors here. A negative quantity or money cell (CRM refund/adjustment
+    // rows) used to import as a live order worth -₦50,000. Fail the row loudly
+    // instead; the DB guard (migration 0354) rejects it too.
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      throw new Error(`Invalid quantity "${quantity}": must be a whole number of at least 1`);
+    }
+    if (unitPrice < 0 || (totalAmount != null && totalAmount < 0)) {
+      throw new Error(
+        `Negative amount (price ${unitPrice}, total ${totalAmount ?? 'none'}): refund or adjustment rows cannot be imported as orders`,
+      );
+    }
+
     // Date cells arrive in several shapes — an Excel SERIAL number (46141), an
     // ISO string, or a typed "25/05/2026". normalizeImportDate resolves all of
     // them to ISO and rejects anything absurd, so a serial can never reach
