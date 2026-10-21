@@ -506,7 +506,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
 
   /**
    * Universal 14-day dedup flagging (CEO directive 2026-05-26):
-   * Same phone + any overlapping product within 14 days = duplicate.
+   * Same phone (hash or last 9 digits) + any overlapping product within 14 days = duplicate.
    * Winner: highest lifecycle status, ties → oldest created_at.
    * Early-stage losers (UNPROCESSED / CS_ASSIGNED / CS_ENGAGED): soft-deleted + FLAGGED.
    * Late-stage losers (CONFIRMED+): FLAGGED only — stock may be allocated.
@@ -515,7 +515,8 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
    *
    * Per-company switch: DUPLICATE_RULES.cleanupCron (mode + window), resolved by
    * the loser's branch company. OFF skips the company; FLAG never deletes and
-   * leaves already-flagged / dismissed / merged orders alone.
+   * leaves already-flagged orders alone. DISMISSED / MERGED orders (CS decided)
+   * are never touched in any mode.
    */
   async purgeUniversalDuplicates(
     allDates = false,
@@ -588,8 +589,22 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       LEFT JOIN status_rank sr_loser ON sr_loser.status = loser.status
       LEFT JOIN status_rank sr_winner ON sr_winner.status = winner.status
       WHERE loser.customer_phone_hash IS NOT NULL
-        AND loser.customer_phone_hash = winner.customer_phone_hash
+        -- Same phone = phone_hash OR last 9 digits: '0803…' and '803…' hash differently.
+        AND (
+          loser.customer_phone_hash = winner.customer_phone_hash
+          OR (
+            length(right(regexp_replace(coalesce(loser.customer_phone, ''), '\\D', '', 'g'), 9)) = 9
+            AND right(regexp_replace(coalesce(loser.customer_phone, ''), '\\D', '', 'g'), 9)
+              = right(regexp_replace(coalesce(winner.customer_phone, ''), '\\D', '', 'g'), 9)
+          )
+        )
+        -- Sargable bound so the digits match above only runs on orders near the loser.
+        AND winner.created_at BETWEEN loser.created_at - make_interval(days => COALESCE(cfg.window_days, ${fallbackWindow}))
+                                  AND loser.created_at + make_interval(days => COALESCE(cfg.window_days, ${fallbackWindow}))
         AND loser.id != winner.id
+        -- CS already decided: "not a duplicate" (DISMISSED) or merged. Never re-flag or delete.
+        AND loser.is_duplicate IS DISTINCT FROM 'DISMISSED'
+        AND loser.is_duplicate IS DISTINCT FROM 'MERGED'
         AND loser.status NOT IN ('CANCELLED', 'DELETED')
         AND loser.deleted_at IS NULL
         AND winner.status NOT IN ('CANCELLED', 'DELETED')
