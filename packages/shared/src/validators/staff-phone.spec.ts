@@ -21,6 +21,8 @@ describe('staffPhoneSchema', () => {
     ['+254712345678', 'Kenya, international'],
     ['0971234567', 'Zambia, local'],
     ['+260971234567', 'Zambia, international'],
+    ['0768390720', 'Zambia MTN 07x, local'],
+    ['+260768390720', 'Zambia MTN 07x, international'],
     ['0621234567', 'Tanzania, local'],
     ['+255621234567', 'Tanzania, international'],
   ])('accepts %s (%s)', (value) => {

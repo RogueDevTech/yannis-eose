@@ -24,6 +24,12 @@ describe('toInternationalPhone', () => {
     expect(formatInternationalPhone('0976372552', 'ZMW')).toBe('+260 976 372 552');
   });
 
+  it('accepts a Zambian 07x mobile (MTN 076) without the "Check number" flag', () => {
+    const r = toInternationalPhone('0768390720', 'ZMW');
+    expect(r?.display).toBe('+260 768 390 720');
+    expect(r?.prefixMatchesCountry).toBe(true);
+  });
+
   it('converts but flags a Zambian-prefix number on a Tanzania order', () => {
     const r = toInternationalPhone('0976372552', 'TZS');
     expect(r?.display).toBe('+255 976 372 552');
