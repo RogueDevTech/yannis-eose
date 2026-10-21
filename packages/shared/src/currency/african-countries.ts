@@ -210,7 +210,8 @@ export const COUNTRY_NUMBER_SPECS: Readonly<Record<string, CountryNumberSpec>> =
   Nigeria: { dial: '234', len: 10, prefixes: ['7', '8', '9'] },
   Ghana: { dial: '233', len: 9, prefixes: ['2', '5'] },
   Tanzania: { dial: '255', len: 9, prefixes: ['6', '7'] },
-  Zambia: { dial: '260', len: 9, prefixes: ['9'] },
+  // Zambia: 9x (Zamtel 95, MTN 96, Airtel 97) and 7x (Zamtel 75, MTN 76, Airtel 77).
+  Zambia: { dial: '260', len: 9, prefixes: ['9', '7'] },
   Kenya: { dial: '254', len: 9, prefixes: ['7', '1'] },
   // ── Remaining African markets, from national numbering plans ────────────────
   Algeria: { dial: '213', len: 9, prefixes: ['5', '6', '7'] },
