@@ -15,6 +15,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
 import { formatNaira } from '~/lib/format-amount';
 import { LensedMoney } from '~/components/ui/lensed-money';
+import { dashboardLink } from '~/lib/dashboard-link';
 import { ConvertedRevenue } from '~/components/ui/converted-revenue';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
@@ -406,6 +407,18 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
 
 // ── Sales Dashboard ─────────────────────────────────────────
 
+/** Statuses `marketing.metrics` counts as confirmed, minus DELIVERED/REMITTED. */
+const OFFLINE_CONFIRMED_NOT_DELIVERED = [
+  'CONFIRMED',
+  'AGENT_ASSIGNED',
+  'DISPATCHED',
+  'IN_TRANSIT',
+  'PARTIALLY_DELIVERED',
+  'RETURNED',
+  'RESTOCKED',
+  'WRITTEN_OFF',
+] as const;
+
 function CSDashboard({
   data,
   role,
@@ -431,6 +444,30 @@ function CSDashboard({
   const csAssigned = (counts['CS_ASSIGNED'] ?? 0) - (offSc['CS_ASSIGNED'] ?? 0);
   const engaged = (counts['CS_ENGAGED'] ?? 0) - (offSc['CS_ENGAGED'] ?? 0);
   const pendingQueue = unprocessed + csAssigned;
+  const [searchParams] = useSearchParams();
+  const teamId = searchParams.get('teamId') || undefined;
+  const link = (base: string, extra?: Record<string, string>) => dashboardLink(base, { ...dateFilters, teamId }, extra);
+
+  // `marketing.metrics` runs CS (servicing) rules for HoCS and closers: its
+  // totals include offline, which has its own strip, so take offline out here.
+  // Same derivation for both views so their Funnel strips can never disagree.
+  const funnelFromMetrics = (metrics: DashboardData['metrics']) => {
+    const offTotal = Object.entries(offSc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
+    const offDelivered = (offSc['DELIVERED'] ?? 0) + (offSc['REMITTED'] ?? 0);
+    // Every status `metrics.confirmedOrders` counts, minus the delivered pair
+    // (taken out below), so offline is removed from Confirmed in full.
+    const offConfirmed = OFFLINE_CONFIRMED_NOT_DELIVERED.reduce((sum, st) => sum + (offSc[st] ?? 0), 0);
+    const total = Math.max(0, metrics.totalOrders - offTotal);
+    const delivered = Math.max(0, metrics.deliveredOrders - offDelivered);
+    const confirmed = Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders - offConfirmed);
+    return {
+      total,
+      delivered,
+      confirmed,
+      cr: total > 0 ? ((confirmed + delivered) / total) * 100 : 0,
+      dr: total > 0 ? (delivered / total) * 100 : 0,
+    };
+  };
 
   // Sales Closers get the lean MB-style dashboard: stats strip + Performance Summary | Quick Actions.
   // No Order Pipeline (they don't manage flow), no Recent Orders feed (they have a dedicated
@@ -446,32 +483,28 @@ function CSDashboard({
         <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={offSc} offlineCount={offlineCount} />
 
         <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={7} />}>
-          {(metrics) => (
+          {(metrics) => {
+            const f = funnelFromMetrics(metrics);
+            return (
             <div>
             <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Funnel Orders</h2>
             <OverviewStatStrip
               mobileGrid
               tileClassName="min-w-[6rem]"
               items={[
-                { label: 'Total', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
-                { label: 'Assigned', value: pendingQueue.toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
-                { label: 'Unconfirmed', value: engaged.toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
-                { label: 'Confirmed', value: Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders).toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
-                { label: 'Delivered', value: metrics.deliveredOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
-                {
-                  label: 'CR',
-                  value: `${metrics.confirmationRate.toFixed(1)}%`,
-                  valueClassName: confirmationRateColorClass(metrics.confirmationRate),
-                },
-                {
-                  label: 'DR',
-                  value: `${metrics.deliveryRate.toFixed(1)}%`,
-                  valueClassName: deliveryRateColorClass(metrics.deliveryRate),
-                },
+                { label: 'Total', value: f.total.toString(), valueClassName: 'text-app-fg', to: link('/admin/sales/orders') },
+                // CS_ASSIGNED only, exactly what the link lists.
+                { label: 'Assigned', value: Math.max(0, csAssigned).toString(), valueClassName: 'text-info-600 dark:text-info-400', to: link('/admin/sales/orders', { status: 'CS_ASSIGNED' }) },
+                { label: 'Unconfirmed', value: Math.max(0, engaged).toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: link('/admin/sales/orders', { status: 'CS_ENGAGED' }) },
+                { label: 'Confirmed', value: f.confirmed.toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: link('/admin/sales/orders', { status: 'CONFIRMED' }) },
+                { label: 'Delivered', value: f.delivered.toString(), valueClassName: 'text-success-600 dark:text-success-400', to: link('/admin/sales/orders', { status: 'DELIVERED' }) },
+                { label: 'CR', value: `${f.cr.toFixed(1)}%`, valueClassName: confirmationRateColorClass(f.cr) },
+                { label: 'DR', value: `${f.dr.toFixed(1)}%`, valueClassName: deliveryRateColorClass(f.dr) },
               ]}
             />
             </div>
-          )}
+            );
+          }}
         </DashboardMetricsSection>
 
         {/* ── Offline Orders ── */}
@@ -495,11 +528,11 @@ function CSDashboard({
                 mobileGrid
                 tileClassName="min-w-[6rem]"
                 items={[
-                  { label: 'Total', value: offTotal, valueClassName: 'text-app-fg', to: '/admin/sales/offline-orders' },
-                  { label: 'Assigned', value: offAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/offline-orders?status=CS_ASSIGNED' },
-                  { label: 'Unconfirmed', value: offEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/offline-orders?status=CS_ENGAGED' },
-                  { label: 'Confirmed', value: offConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/offline-orders?status=CONFIRMED' },
-                  { label: 'Delivered', value: offDelivered, valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/offline-orders?status=DELIVERED' },
+                  { label: 'Total', value: offTotal, valueClassName: 'text-app-fg', to: link('/admin/sales/offline-orders') },
+                  { label: 'Assigned', value: offAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: link('/admin/sales/offline-orders', { status: 'CS_ASSIGNED' }) },
+                  { label: 'Unconfirmed', value: offEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: link('/admin/sales/offline-orders', { status: 'CS_ENGAGED' }) },
+                  { label: 'Confirmed', value: offConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: link('/admin/sales/offline-orders', { status: 'CONFIRMED' }) },
+                  { label: 'Delivered', value: offDelivered, valueClassName: 'text-success-600 dark:text-success-400', to: link('/admin/sales/offline-orders', { status: 'DELIVERED' }) },
                   { label: 'CR', value: `${offCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(offCR) },
                   { label: 'DR', value: `${offDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(offDR) },
                 ]}
@@ -513,22 +546,26 @@ function CSDashboard({
         <DeliveredFollowUpDashboardStrip filters={dateFilters} />
 
         <DashboardMetricsSection fallback={<DualCardSkeleton />}>
-          {(metrics) => (
+          {(metrics) => {
+            // Same funnel numbers as the Funnel Orders strip above.
+            const f = funnelFromMetrics(metrics);
+            return (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="card">
                 <h2 className="text-lg font-semibold text-app-fg mb-4">Performance Summary</h2>
                 <div className="space-y-3">
-                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Total Orders</span><span className="text-sm font-medium text-app-fg">{metrics.totalOrders}</span></div>
-                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{Math.max(0, metrics.confirmedOrders - metrics.deliveredOrders)}</span></div>
-                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
-                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{metrics.confirmationRate.toFixed(1)}%</span></div>
-                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivery Rate</span><span className="text-sm font-medium text-app-fg">{metrics.deliveryRate.toFixed(1)}%</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Total Orders</span><span className="text-sm font-medium text-app-fg">{f.total}</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{f.confirmed}</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{f.delivered}</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{f.cr.toFixed(1)}%</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivery Rate</span><span className="text-sm font-medium text-app-fg">{f.dr.toFixed(1)}%</span></div>
                 </div>
               </div>
 
               <QuickActionsCard role={role} unprocessed={pendingQueue} />
             </div>
-          )}
+            );
+          }}
         </DashboardMetricsSection>
       </>
     );
@@ -541,12 +578,7 @@ function CSDashboard({
 
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
         {(metrics) => {
-          const offTotal = Object.entries(offSc).filter(([k]) => k !== 'DELETED').reduce((s, [, n]) => s + (n || 0), 0);
-          const offDelivered = (offSc['DELIVERED'] ?? 0) + (offSc['REMITTED'] ?? 0);
-          const offConfirmed = (offSc['CONFIRMED'] ?? 0) + (offSc['AGENT_ASSIGNED'] ?? 0) + (offSc['DISPATCHED'] ?? 0) + (offSc['IN_TRANSIT'] ?? 0);
-          const funnelTotal = metrics.totalOrders - offTotal;
-          const funnelDelivered = metrics.deliveredOrders - offDelivered;
-          const funnelConfirmed = metrics.confirmedOrders - metrics.deliveredOrders - offConfirmed;
+          const f = funnelFromMetrics(metrics);
           return (
           <div>
           <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">Funnel Orders</h2>
@@ -554,22 +586,14 @@ function CSDashboard({
             mobileGrid
             tileClassName="min-w-[6rem]"
             items={[
-              { label: 'Total', value: Math.max(0, funnelTotal).toString(), valueClassName: 'text-app-fg', to: '/admin/sales/orders' },
-              { label: 'Unassigned', value: Math.max(0, unprocessed).toString(), valueClassName: 'text-warning-600 dark:text-warning-400', to: '/admin/sales/orders?status=UNPROCESSED' },
-              { label: 'Assigned', value: Math.max(0, csAssigned).toString(), valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/orders?status=CS_ASSIGNED' },
-              { label: 'Unconfirmed', value: Math.max(0, engaged).toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/orders?status=CS_ENGAGED' },
-              { label: 'Confirmed', value: Math.max(0, funnelConfirmed).toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/orders?status=CONFIRMED' },
-              { label: 'Delivered', value: Math.max(0, funnelDelivered).toString(), valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/orders?status=DELIVERED' },
-              {
-                label: 'CR',
-                value: (() => { const cr = funnelTotal > 0 ? ((Math.max(0, funnelConfirmed) + Math.max(0, funnelDelivered)) / funnelTotal) * 100 : 0; return `${cr.toFixed(1)}%`; })(),
-                valueClassName: (() => { const cr = funnelTotal > 0 ? ((Math.max(0, funnelConfirmed) + Math.max(0, funnelDelivered)) / funnelTotal) * 100 : 0; return confirmationRateColorClass(cr); })(),
-              },
-              {
-                label: 'DR',
-                value: (() => { const dr = funnelTotal > 0 ? (Math.max(0, funnelDelivered) / funnelTotal) * 100 : 0; return `${dr.toFixed(1)}%`; })(),
-                valueClassName: (() => { const dr = funnelTotal > 0 ? (Math.max(0, funnelDelivered) / funnelTotal) * 100 : 0; return deliveryRateColorClass(dr); })(),
-              },
+              { label: 'Total', value: f.total.toString(), valueClassName: 'text-app-fg', to: link('/admin/sales/orders') },
+              { label: 'Unassigned', value: Math.max(0, unprocessed).toString(), valueClassName: 'text-warning-600 dark:text-warning-400', to: link('/admin/sales/orders', { status: 'UNPROCESSED' }) },
+              { label: 'Assigned', value: Math.max(0, csAssigned).toString(), valueClassName: 'text-info-600 dark:text-info-400', to: link('/admin/sales/orders', { status: 'CS_ASSIGNED' }) },
+              { label: 'Unconfirmed', value: Math.max(0, engaged).toString(), valueClassName: 'text-cyan-600 dark:text-cyan-400', to: link('/admin/sales/orders', { status: 'CS_ENGAGED' }) },
+              { label: 'Confirmed', value: f.confirmed.toString(), valueClassName: 'text-brand-600 dark:text-brand-400', to: link('/admin/sales/orders', { status: 'CONFIRMED' }) },
+              { label: 'Delivered', value: f.delivered.toString(), valueClassName: 'text-success-600 dark:text-success-400', to: link('/admin/sales/orders', { status: 'DELIVERED' }) },
+              { label: 'CR', value: `${f.cr.toFixed(1)}%`, valueClassName: confirmationRateColorClass(f.cr) },
+              { label: 'DR', value: `${f.dr.toFixed(1)}%`, valueClassName: deliveryRateColorClass(f.dr) },
             ]}
           />
           </div>
@@ -606,12 +630,12 @@ function CSDashboard({
               mobileGrid
               tileClassName="min-w-[6rem]"
               items={[
-                { label: 'Total', value: offTotal, valueClassName: 'text-app-fg', to: '/admin/sales/offline-orders' },
-                { label: 'Unassigned', value: offUnassigned, valueClassName: offUnassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg', to: '/admin/sales/offline-orders?status=UNPROCESSED' },
-                { label: 'Assigned', value: offAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: '/admin/sales/offline-orders?status=CS_ASSIGNED' },
-                { label: 'Unconfirmed', value: offEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: '/admin/sales/offline-orders?status=CS_ENGAGED' },
-                { label: 'Confirmed', value: offConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: '/admin/sales/offline-orders?status=CONFIRMED' },
-                { label: 'Delivered', value: offDelivered, valueClassName: 'text-success-600 dark:text-success-400', to: '/admin/sales/offline-orders?status=DELIVERED' },
+                { label: 'Total', value: offTotal, valueClassName: 'text-app-fg', to: link('/admin/sales/offline-orders') },
+                { label: 'Unassigned', value: offUnassigned, valueClassName: offUnassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg', to: link('/admin/sales/offline-orders', { status: 'UNPROCESSED' }) },
+                { label: 'Assigned', value: offAssigned, valueClassName: 'text-info-600 dark:text-info-400', to: link('/admin/sales/offline-orders', { status: 'CS_ASSIGNED' }) },
+                { label: 'Unconfirmed', value: offEngaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', to: link('/admin/sales/offline-orders', { status: 'CS_ENGAGED' }) },
+                { label: 'Confirmed', value: offConfirmed, valueClassName: 'text-brand-600 dark:text-brand-400', to: link('/admin/sales/offline-orders', { status: 'CONFIRMED' }) },
+                { label: 'Delivered', value: offDelivered, valueClassName: 'text-success-600 dark:text-success-400', to: link('/admin/sales/offline-orders', { status: 'DELIVERED' }) },
                 { label: 'CR', value: `${offCR.toFixed(1)}%`, valueClassName: confirmationRateColorClass(offCR) },
                 { label: 'DR', value: `${offDR.toFixed(1)}%`, valueClassName: deliveryRateColorClass(offDR) },
               ]}

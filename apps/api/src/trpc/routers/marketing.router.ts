@@ -738,6 +738,10 @@ export const marketingRouter = router({
         // Confirmed than the list shows (see project_closer_self_query_branch_parity).
         // `assignedCsId = me` is already an exact ownership scope, so dropping
         // the branch AND here yields the same row set as the list.
+        // Servicing (CS) rules, same as Head of CS: all sources except the
+        // graduated copies, and no cart_orders added on top. The marketing
+        // default added every delivered cart order in the company, because its
+        // cart query filters by media buyer, never by closer.
         return getMarketingService().getPerformanceMetrics(
           narrowed.mediaBuyerId,
           input.startDate && input.endDate ? 'this_month' : 'all_time',
@@ -747,6 +751,7 @@ export const marketingRouter = router({
           narrowed.assignedCsId,
           narrowed.supervisorScope,
           ctx.effectiveBranchIds,
+          'servicing',
         );
       }
 

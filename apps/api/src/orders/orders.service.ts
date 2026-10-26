@@ -25,6 +25,7 @@ import {
 } from '@yannis/shared';
 import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, formatCustomerPhoneForDisplay, toInternationalPhone, type CallablePhone, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode, STRICT_PHONE_MODE_KEY, isStrictPhoneModeOn, isStrictPhoneModeRole, resolveDuplicateRules, type DuplicateRules } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
+import { importStatusForAssignee } from './import-status';
 import { withActor, withActorAndBranch, type Tx } from '../common/db/with-actor';
 
 /** A drizzle handle that is either the connection pool or an open transaction. */
@@ -3458,6 +3459,7 @@ export class OrdersService {
     actorId: string,
   ): Promise<{ id: string }> {
     const customerPhoneHash = this.hashPhone(input.customerPhone);
+    const targetStatus = importStatusForAssignee(input.targetStatus, input.assignedCsId);
 
     // Parse createdAt override — fall back to now if not provided or invalid
     let createdAtDate: Date | undefined;
@@ -3468,7 +3470,7 @@ export class OrdersService {
     // Build timestamp overrides based on how far along the target status is
     const statusTimestamps: Record<string, Date | undefined> = {};
     if (createdAtDate) {
-      const ts = input.targetStatus;
+      const ts = targetStatus;
       // CONFIRMED and beyond get confirmedAt
       if (['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'RETURNED', 'REMITTED'].includes(ts)) {
         statusTimestamps.confirmedAt = createdAtDate;
@@ -3501,7 +3503,7 @@ export class OrdersService {
           paymentMethod: 'PAY_ON_DELIVERY',
           items: input.items,
           totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
-          status: input.targetStatus,
+          status: targetStatus,
           orderSource: 'import',
           customFields: input.customFields ?? null,
           ...(createdAtDate ? { createdAt: createdAtDate } : {}),
@@ -3539,7 +3541,7 @@ export class OrdersService {
       eventType: 'ORDER_RECEIVED',
       actorId,
       actorName,
-      description: `Imported from external CRM (status: ${input.targetStatus})`,
+      description: `Imported from external CRM (status: ${targetStatus})`,
       branchId: input.branchId,
     });
 
@@ -3563,6 +3565,7 @@ export class OrdersService {
     actorId: string,
   ): Promise<{ id: string; created: boolean }> {
     const customerPhoneHash = this.hashPhone(input.customerPhone);
+    const targetStatus = importStatusForAssignee(input.targetStatus, input.assignedCsId);
 
     let createdAtDate: Date | undefined;
     if (input.createdAtOverride) {
@@ -3571,7 +3574,7 @@ export class OrdersService {
 
     const statusTimestamps: Record<string, Date | undefined> = {};
     if (createdAtDate) {
-      const ts = input.targetStatus;
+      const ts = targetStatus;
       if (['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'RETURNED', 'REMITTED'].includes(ts)) {
         statusTimestamps.confirmedAt = createdAtDate;
       }
@@ -3635,7 +3638,7 @@ export class OrdersService {
         paymentMethod: 'PAY_ON_DELIVERY',
         items: input.items,
         totalAmount: input.totalAmount != null ? sql`${input.totalAmount}::numeric` : null,
-        status: input.targetStatus,
+        status: targetStatus,
         orderSource: 'import',
         importExternalId: input.importExternalId,
         importIdentityKey: input.importIdentityKey ?? null,
