@@ -22,8 +22,10 @@ export interface DashboardData {
     /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
     deliveredThisMonth?: number;
     deliveredRevenue: number;
-    /** Per-currency delivered revenue map for the currency lens. Absent → NGN-only. */
+    /** Per-currency delivered revenue, raw. `deliveredRevenue` is these in ₦ via FX. */
     deliveredRevenueByCurrency?: Record<string, number>;
+    /** Raw amounts per currency with no FX rate, left out of `deliveredRevenue` and ROAS. */
+    unconvertedRevenueByCurrency?: Record<string, number>;
     confirmedOrders: number;
     confirmationRate: number;
     cpa: number;

@@ -20,6 +20,7 @@ import { FilterPills } from '~/components/ui/filter-pills';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { formatNaira } from '~/lib/format-amount';
 import { LensedMoney } from '~/components/ui/lensed-money';
+import { ConvertedRevenue } from '~/components/ui/converted-revenue';
 import { STATUS_HEX, STATUS_LABELS, STATUS_OPTIONS, STATUS_TEXT_CLASS } from '~/features/shared/order-status';
 import type { CEODashboardData, CEODashboardFilters, ChartDataPayload } from './types';
 
@@ -266,6 +267,7 @@ export function CEODashboardPage({
     pendingSpend: marketing?.pendingSpend ?? 0,
     deliveredRevenue: marketing?.deliveredRevenue ?? 0,
     deliveredRevenueByCurrency: marketing?.deliveredRevenueByCurrency,
+    unconvertedRevenueByCurrency: marketing?.unconvertedRevenueByCurrency,
     cpa: marketing?.cpa ?? 0,
     roas: marketing?.roas ?? 0,
     deliveryRate: marketing?.deliveryRate ?? 0,
@@ -512,7 +514,11 @@ export function CEODashboardPage({
             <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
               <p className="text-mini font-medium text-app-fg-muted">Delivered revenue</p>
               <p className="text-base font-bold text-app-fg tabular-nums">
-                <LensedMoney amounts={marketingSafe.deliveredRevenueByCurrency ?? { NGN: marketingSafe.deliveredRevenue }} />
+                <ConvertedRevenue
+                  amount={marketingSafe.deliveredRevenue}
+                  byCurrency={marketingSafe.deliveredRevenueByCurrency}
+                  unconverted={marketingSafe.unconvertedRevenueByCurrency}
+                />
               </p>
             </div>
             <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">

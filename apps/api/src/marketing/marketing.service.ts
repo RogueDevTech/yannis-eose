@@ -61,6 +61,7 @@ import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
+import { buildFxRateLookup, convertRevenueToBase, type FxRateLookup, type RevenueSlice } from './revenue-fx';
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 import { BranchTeamsService } from '../branches/branch-teams.service';
@@ -5684,6 +5685,10 @@ export class MarketingService {
      *  CS/Sales roles should pass `'servicing'` so orders scope by `servicing_branch_id`. */
     orderBranchScope?: 'marketing' | 'servicing',
   ) {
+    // Started now so it overlaps the campaign / branch lookups below.
+    const rateOfPromise = this.loadFxRateLookup();
+    // Early returns below never await it; keep a failure from going unhandled.
+    rateOfPromise.catch(() => undefined);
     let periodStart: Date | null = null;
     let periodEnd: Date | null = null;
     if (startDate && endDate) {
@@ -5727,6 +5732,7 @@ export class MarketingService {
         deliveredRevenue: 0,
         deliveredRevenueBreakdown: { funnel: 0, cart: 0 },
         deliveredRevenueByCurrency: {},
+        unconvertedRevenueByCurrency: {},
         confirmedOrders: 0,
         confirmationRate: 0,
         cpa: 0,
@@ -5970,14 +5976,11 @@ export class MarketingService {
           if (periodStart) cartConds.push(gte(schema.cartOrders.createdAt, periodStart));
           if (periodEnd) cartConds.push(lte(schema.cartOrders.createdAt, periodEnd));
           return this.db
-            .select({
-              deliveredCount: count(),
-              deliveredRevenue: sql<number>`coalesce(sum(${schema.cartOrders.totalAmount}), 0)`.mapWith(Number),
-            })
+            .select({ deliveredCount: count() })
             .from(schema.cartOrders)
             .where(and(...cartConds));
         })()
-      : Promise.resolve([{ deliveredCount: 0, deliveredRevenue: 0 }] as { deliveredCount: number; deliveredRevenue: number }[]);
+      : Promise.resolve([{ deliveredCount: 0 }] as { deliveredCount: number }[]);
 
     // Cart contribution to "Total Delivered This Month" — same scope but by
     // delivered_at (carry-over-inclusive). Display-only.
@@ -6010,13 +6013,13 @@ export class MarketingService {
       otherExpenseRows,
       totalOrdersRows,
       deliveredOrdersRows,
-      deliveredRevenueRows,
       confirmedOrdersRows,
       cartDeliveredRows,
       deliveredThisMonthRows,
       cartDeliveredThisMonthRows,
       funnelRevenueByCurrencyRows,
       cartRevenueByCurrencyRows,
+      rateOf,
     ] = await Promise.all([
       this.db
         .select({ total: sum(schema.adSpendLogs.spendAmount) })
@@ -6032,25 +6035,23 @@ export class MarketingService {
         .where(otherExpenseWhere),
       this.db.select({ count: count() }).from(schema.orders).where(orderWhere),
       this.db.select({ count: count() }).from(schema.orders).where(deliveredWhere),
-      this.db
-        .select({ total: sum(schema.orders.totalAmount) })
-        .from(schema.orders)
-        .where(deliveredWhere),
       this.db.select({ count: count() }).from(schema.orders).where(confirmedWhere),
       cartQuery,
       this.db.select({ count: count() }).from(schema.orders).where(deliveredThisMonthWhere),
       cartDeliveredThisMonthQuery,
-      // Delivered revenue grouped by frozen currency (funnel side). Same scope
-      // as the funnel deliveredRevenue SUM above — reuses `deliveredWhere` so it
-      // can never drift. Powers the currency-lens (per-currency / merged views).
+      // Delivered revenue grouped by company × frozen currency (funnel side),
+      // the only funnel revenue source. Reuses `deliveredWhere` so it matches
+      // the delivered count. Company is in the key because FX rates are per company.
       this.db
         .select({
+          groupId: schema.branches.groupId,
           currencyCode: schema.orders.currencyCode,
           total: sql<number>`coalesce(sum(${schema.orders.totalAmount}), 0)`.mapWith(Number),
         })
         .from(schema.orders)
+        .leftJoin(schema.branches, eq(schema.branches.id, schema.orders.branchId))
         .where(deliveredWhere)
-        .groupBy(schema.orders.currencyCode),
+        .groupBy(schema.branches.groupId, schema.orders.currencyCode),
       // Cart side, grouped by currency. Mirrors the cart delivered scope.
       !isServicingScope
         ? (() => {
@@ -6068,14 +6069,17 @@ export class MarketingService {
             if (periodEnd) cartConds.push(lte(schema.cartOrders.createdAt, periodEnd));
             return this.db
               .select({
+                groupId: schema.branches.groupId,
                 currencyCode: schema.cartOrders.currencyCode,
                 total: sql<number>`coalesce(sum(${schema.cartOrders.totalAmount}), 0)`.mapWith(Number),
               })
               .from(schema.cartOrders)
+              .leftJoin(schema.branches, eq(schema.branches.id, schema.cartOrders.branchId))
               .where(and(...cartConds))
-              .groupBy(schema.cartOrders.currencyCode);
+              .groupBy(schema.branches.groupId, schema.cartOrders.currencyCode);
           })()
-        : Promise.resolve([] as { currencyCode: string | null; total: number }[]),
+        : Promise.resolve([] as RevenueSlice[]),
+      rateOfPromise,
     ]);
 
     const approvedSpend = Number(totalSpendRows[0]?.total ?? 0);
@@ -6083,16 +6087,25 @@ export class MarketingService {
     const otherExpenses = Number(otherExpenseRows[0]?.total ?? 0);
     const totalSpend = approvedSpend + pendingSpend;
     const cartDelivered = cartDeliveredRows[0]?.deliveredCount ?? 0;
-    const cartRevenue = cartDeliveredRows[0]?.deliveredRevenue ?? 0;
-    const funnelRevenue = Number(deliveredRevenueRows[0]?.total ?? 0);
+    // Revenue in ₦: each company × currency slice converted at its FX rate.
+    // Currencies with no rate stay out (returned raw in `unconvertedRevenueByCurrency`).
+    const metricsContext = `metrics ${mediaBuyerId ?? 'all media buyers'}`;
+    const funnelFx = this.convertRevenueLogged(funnelRevenueByCurrencyRows, rateOf, `${metricsContext}, funnel`);
+    const cartFx = this.convertRevenueLogged(cartRevenueByCurrencyRows, rateOf, `${metricsContext}, cart`);
+    const funnelRevenue = funnelFx.base;
+    const cartRevenue = cartFx.base;
+    const unconvertedRevenueByCurrency: Record<string, number> = { ...funnelFx.unconverted };
+    for (const [code, amount] of Object.entries(cartFx.unconverted)) {
+      unconvertedRevenueByCurrency[code] = (unconvertedRevenueByCurrency[code] ?? 0) + amount;
+    }
     // Pure funnel cohort (orders table only) — Funnel CPA's denominator,
     // before cart-graduated deliveries are added into `totalOrders` below.
     const funnelOrders = totalOrdersRows[0]?.count ?? 0;
     const totalOrders = funnelOrders + cartDelivered;
     const deliveredOrders = (deliveredOrdersRows[0]?.count ?? 0) + cartDelivered;
     const deliveredRevenue = funnelRevenue + cartRevenue;
-    // Per-currency delivered revenue (funnel + cart), keyed by ISO code. Powers
-    // the currency lens. Sums to `deliveredRevenue` across all currencies.
+    // Per-currency delivered revenue (funnel + cart), raw amounts keyed by ISO
+    // code. `deliveredRevenue` above is the same money converted to ₦.
     const deliveredRevenueByCurrency: Record<string, number> = {};
     for (const r of [...funnelRevenueByCurrencyRows, ...cartRevenueByCurrencyRows]) {
       const code = (r.currencyCode ?? 'NGN').toUpperCase();
@@ -6121,9 +6134,11 @@ export class MarketingService {
         funnel: funnelRevenue,
         cart: cartRevenue,
       },
-      /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }). Sums
-       *  to `deliveredRevenue`. Drives the currency lens on aggregate surfaces. */
+      /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }), raw
+       *  amounts. `deliveredRevenue` is these converted to ₦ via FX. */
       deliveredRevenueByCurrency,
+      /** Raw amounts per currency with no FX rate, left out of `deliveredRevenue` and ROAS. */
+      unconvertedRevenueByCurrency,
       confirmedOrders,
       confirmationRate,
       // CPA uses approved spend only — pending spend is unverified and would
@@ -6164,6 +6179,43 @@ export class MarketingService {
     'REMITTED',
   ] as const;
 
+  /**
+   * FX lookup for converting delivered revenue to ₦ (see `revenue-fx.ts`).
+   * `currencies` is a few rows per company, so one unscoped read covers every
+   * company an order can belong to. Concurrent callers (a page bundle runs the
+   * leaderboard and metrics in parallel) share the one in-flight read; nothing
+   * is kept once it settles, so a rate change is picked up on the next call.
+   */
+  private fxRateLookupInFlight: Promise<FxRateLookup> | null = null;
+  private loadFxRateLookup(): Promise<FxRateLookup> {
+    if (!this.fxRateLookupInFlight) {
+      this.fxRateLookupInFlight = this.db
+        .select({
+          groupId: schema.currencies.groupId,
+          code: schema.currencies.code,
+          isDefault: schema.currencies.isDefault,
+          fxRateToBase: schema.currencies.fxRateToBase,
+        })
+        .from(schema.currencies)
+        .then(buildFxRateLookup)
+        .finally(() => {
+          this.fxRateLookupInFlight = null;
+        });
+    }
+    return this.fxRateLookupInFlight;
+  }
+
+  /** Convert revenue slices to ₦, logging any slice whose SUM was not a number. */
+  private convertRevenueLogged(slices: RevenueSlice[], rateOf: FxRateLookup, context: string) {
+    const result = convertRevenueToBase(slices, rateOf);
+    for (const bad of result.invalid) {
+      this.logger.warn(
+        `Delivered revenue SUM is not a number (${context}, company ${bad.groupId ?? 'none'}, ${bad.currencyCode ?? 'NGN'}): an order has an invalid total_amount; that group is left out of revenue and ROAS.`,
+      );
+    }
+    return result;
+  }
+
   /** Derive ratio metrics (CPA, true ROAS, delivery/confirmation rate) from raw counts. */
   private deriveBuyerMetrics(raw: {
     totalSpend: number;
@@ -6179,9 +6231,12 @@ export class MarketingService {
      * (single-source surfaces where the two are the same number).
      */
     funnelOrders?: number;
-    /** Delivered revenue split by frozen ISO currency code. Sums to
-     *  `deliveredRevenue`. Empty on single-currency companies. */
+    /** Delivered revenue split by frozen ISO currency code, raw amounts in each
+     *  currency. `deliveredRevenue` is these converted to ₦ via FX. */
     deliveredRevenueByCurrency?: Record<string, number>;
+    /** Raw amounts per currency with no FX rate, left out of `deliveredRevenue`
+     *  and ROAS (never counted 1:1). */
+    unconvertedRevenueByCurrency?: Record<string, number>;
   }) {
     const { totalSpend, totalOrders, deliveredOrders, deliveredRevenue, confirmedOrders } = raw;
     const funnelOrders = raw.funnelOrders ?? totalOrders;
@@ -6193,10 +6248,12 @@ export class MarketingService {
       // Total Delivered This Month (carry-over-inclusive, by delivered_at).
       // Pass-through display value — NEVER used in any rate below.
       deliveredThisMonth: raw.deliveredThisMonth ?? 0,
+      // ₦-equivalent across every currency (FX-converted), so it can sit
+      // beside ₦ ad spend in ROAS.
       deliveredRevenue,
-      // Per-currency delivered revenue (funnel + cart), keyed by ISO code.
-      // Powers the marketing currency lens. Sums to `deliveredRevenue`.
+      // Per-currency delivered revenue (funnel + cart), raw, keyed by ISO code.
       deliveredRevenueByCurrency: raw.deliveredRevenueByCurrency ?? {},
+      unconvertedRevenueByCurrency: raw.unconvertedRevenueByCurrency ?? {},
       confirmedOrders,
       confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0,
       cpa: totalOrders > 0 ? totalSpend / totalOrders : 0,
@@ -6241,6 +6298,10 @@ export class MarketingService {
     restrictToBuyerIds = false,
   ): Promise<Map<string, ReturnType<MarketingService['deriveBuyerMetrics']>>> {
     if (buyerIds.length === 0) return new Map();
+    // Started now so it overlaps the campaign lookup below.
+    const rateOfPromise = this.loadFxRateLookup();
+    // Early returns below never await it; keep a failure from going unhandled.
+    rateOfPromise.catch(() => undefined);
 
     let periodStart: Date | null = null;
     let periodEnd: Date | null = null;
@@ -6372,7 +6433,7 @@ export class MarketingService {
       branchScopeCondition(schema.orders.branchId, branchId, effectiveBranchIds) ?? undefined,
     );
 
-    const [spendRows, orderRows, cartRows, orderCurrencyRows, cartCurrencyRows] = await Promise.all([
+    const [spendRows, orderRows, cartRows, orderCurrencyRows, cartCurrencyRows, rateOf] = await Promise.all([
       this.db
         .select({
           mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
@@ -6390,51 +6451,50 @@ export class MarketingService {
           ),
           deliveredOrders: sql<number>`count(*) FILTER (WHERE ${deliveredFilter})`.mapWith(Number),
           deliveredThisMonth: sql<number>`count(*) FILTER (WHERE ${deliveredThisMonthFilter})`.mapWith(Number),
-          deliveredRevenue:
-            sql<number>`coalesce(sum(${schema.orders.totalAmount}) FILTER (WHERE ${deliveredFilter}), 0)`.mapWith(
-              Number,
-            ),
         })
         .from(schema.orders)
         .where(funnelOrdersWhere)
         .groupBy(schema.orders.mediaBuyerId),
       // Per-MB cart graduated delivered — attributed to original MB.
-      // deliveredCount/Revenue = cohort (by created_at); deliveredThisMonth =
+      // deliveredCount = cohort (by created_at); deliveredThisMonth =
       // carry-over-inclusive (by delivered_at). Both from one grouped query.
       this.db
         .select({
           mediaBuyerId: schema.cartOrders.mediaBuyerId,
           deliveredCount: sql<number>`count(*) FILTER (WHERE ${cartCreatedFilter})`.mapWith(Number),
-          deliveredRevenue: sql<number>`coalesce(sum(${schema.cartOrders.totalAmount}) FILTER (WHERE ${cartCreatedFilter}), 0)`.mapWith(Number),
           deliveredThisMonth: sql<number>`count(*) FILTER (WHERE ${cartDeliveredFilter})`.mapWith(Number),
         })
         .from(schema.cartOrders)
         .where(and(...cartConditions))
         .groupBy(schema.cartOrders.mediaBuyerId),
-      // Per-(MB × currency) funnel delivered revenue. Same WHERE as the funnel
-      // scalar query, same `deliveredFilter` on the SUM — so the per-currency
-      // map sums exactly to the funnel `deliveredRevenue` scalar above.
+      // Per-(MB × company × currency) funnel delivered revenue: the only
+      // revenue source. Grouped by company too because FX rates are
+      // per company. Same WHERE as the count query + `deliveredFilter`.
       this.db
         .select({
           mediaBuyerId: schema.orders.mediaBuyerId,
+          groupId: schema.branches.groupId,
           currencyCode: schema.orders.currencyCode,
           total: sql<number>`coalesce(sum(${schema.orders.totalAmount}) FILTER (WHERE ${deliveredFilter}), 0)`.mapWith(Number),
         })
         .from(schema.orders)
+        .leftJoin(schema.branches, eq(schema.branches.id, schema.orders.branchId))
         .where(funnelOrdersWhere)
-        .groupBy(schema.orders.mediaBuyerId, schema.orders.currencyCode),
-      // Per-(MB × currency) cart graduated delivered revenue. Same conditions +
-      // same `cartCreatedFilter` (cohort by created_at) as the cart scalar
-      // deliveredRevenue above — sums exactly to the cart `deliveredRevenue`.
+        .groupBy(schema.orders.mediaBuyerId, schema.branches.groupId, schema.orders.currencyCode),
+      // Per-(MB × company × currency) cart graduated delivered revenue. Same
+      // conditions + `cartCreatedFilter` (cohort by created_at) as the count.
       this.db
         .select({
           mediaBuyerId: schema.cartOrders.mediaBuyerId,
+          groupId: schema.branches.groupId,
           currencyCode: schema.cartOrders.currencyCode,
           total: sql<number>`coalesce(sum(${schema.cartOrders.totalAmount}) FILTER (WHERE ${cartCreatedFilter}), 0)`.mapWith(Number),
         })
         .from(schema.cartOrders)
+        .leftJoin(schema.branches, eq(schema.branches.id, schema.cartOrders.branchId))
         .where(and(...cartConditions))
-        .groupBy(schema.cartOrders.mediaBuyerId, schema.cartOrders.currencyCode),
+        .groupBy(schema.cartOrders.mediaBuyerId, schema.branches.groupId, schema.cartOrders.currencyCode),
+      rateOfPromise,
     ]);
 
     const spendByBuyer = new Map<string, number>(
@@ -6452,16 +6512,19 @@ export class MarketingService {
         .filter((row): row is typeof row & { mediaBuyerId: string } => row.mediaBuyerId != null)
         .map((row) => [row.mediaBuyerId, row]),
     );
-    // Per-buyer delivered revenue split by frozen ISO currency (funnel + cart).
-    // Merges both grouped queries; each keyed { code -> total }. Sums per buyer
-    // exactly to that buyer's `deliveredRevenue` scalar (same filters/scope).
+    // Per-buyer delivered revenue (funnel + cart): the raw per-currency split
+    // plus the company × currency slices that get FX-converted to ₦.
     const revenueByCurrencyByBuyer = new Map<string, Record<string, number>>();
+    const revenueSlicesByBuyer = new Map<string, RevenueSlice[]>();
     for (const row of [...orderCurrencyRows, ...cartCurrencyRows]) {
       if (row.mediaBuyerId == null) continue;
       const code = (row.currencyCode ?? 'NGN').toUpperCase();
       const bucket = revenueByCurrencyByBuyer.get(row.mediaBuyerId) ?? {};
       bucket[code] = (bucket[code] ?? 0) + Number(row.total ?? 0);
       revenueByCurrencyByBuyer.set(row.mediaBuyerId, bucket);
+      const slices = revenueSlicesByBuyer.get(row.mediaBuyerId) ?? [];
+      slices.push(row);
+      revenueSlicesByBuyer.set(row.mediaBuyerId, slices);
     }
 
     const result = new Map<string, ReturnType<MarketingService['deriveBuyerMetrics']>>();
@@ -6475,7 +6538,7 @@ export class MarketingService {
       const orderRow = orderByBuyer.get(buyerId);
       const cartRow = cartByBuyer.get(buyerId);
       const cartDelivered = cartRow?.deliveredCount ?? 0;
-      const cartRevenue = cartRow?.deliveredRevenue ?? 0;
+      const revenue = this.convertRevenueLogged(revenueSlicesByBuyer.get(buyerId) ?? [], rateOf, `media buyer ${buyerId}`);
       result.set(
         buyerId,
         this.deriveBuyerMetrics({
@@ -6485,8 +6548,9 @@ export class MarketingService {
           // cart-graduated deliveries folded in on the line above.
           funnelOrders: Number(orderRow?.totalOrders ?? 0),
           deliveredOrders: Number(orderRow?.deliveredOrders ?? 0) + cartDelivered,
-          deliveredRevenue: Number(orderRow?.deliveredRevenue ?? 0) + cartRevenue,
+          deliveredRevenue: revenue.base,
           deliveredRevenueByCurrency: revenueByCurrencyByBuyer.get(buyerId) ?? {},
+          unconvertedRevenueByCurrency: revenue.unconverted,
           confirmedOrders: Number(orderRow?.confirmedOrders ?? 0) + cartDelivered,
           // Carry-over-inclusive delivered (by delivered_at), orders + cart.
           deliveredThisMonth:

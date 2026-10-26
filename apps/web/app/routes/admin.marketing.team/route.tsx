@@ -225,6 +225,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     deliveredThisMonth?: number;
     deliveredRevenue: number;
     deliveredRevenueByCurrency?: Record<string, number>;
+    unconvertedRevenueByCurrency?: Record<string, number>;
     confirmationRate: number;
     deliveryRate: number;
     cpa: number;
@@ -247,6 +248,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         deliveredOrders: e.deliveredOrders,
         deliveredRevenue: e.deliveredRevenue,
         deliveredRevenueByCurrency: e.deliveredRevenueByCurrency,
+        unconvertedRevenueByCurrency: e.unconvertedRevenueByCurrency,
         deliveredThisMonth: e.deliveredThisMonth,
         confirmationRate: e.confirmationRate,
         deliveryRate: e.deliveryRate,
@@ -272,6 +274,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           deliveredOrders: metrics.deliveredOrders,
           deliveredRevenue: metrics.deliveredRevenue,
           deliveredRevenueByCurrency: metrics.deliveredRevenueByCurrency,
+          unconvertedRevenueByCurrency: metrics.unconvertedRevenueByCurrency,
           deliveredThisMonth: metrics.deliveredThisMonth,
           confirmationRate: metrics.confirmationRate,
           deliveryRate: metrics.deliveryRate,
@@ -302,6 +305,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       deliveredOrders: e.deliveredOrders,
       deliveredRevenue: e.deliveredRevenue,
       deliveredRevenueByCurrency: e.deliveredRevenueByCurrency,
+      unconvertedRevenueByCurrency: e.unconvertedRevenueByCurrency,
       deliveredThisMonth: e.deliveredThisMonth,
       confirmationRate: e.confirmationRate,
       deliveryRate: e.deliveryRate,

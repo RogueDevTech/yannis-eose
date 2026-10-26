@@ -13,7 +13,7 @@ import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { LensedMoney } from '~/components/ui/lensed-money';
+import { ConvertedRevenue } from '~/components/ui/converted-revenue';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SortMenu } from '~/components/ui/sort-menu';
@@ -840,7 +840,11 @@ export function MarketingTeamPage({
         render: (m) =>
           m.deliveredRevenue != null ? (
             <span className="text-app-fg-muted">
-              <LensedMoney amounts={m.deliveredRevenueByCurrency ?? { NGN: m.deliveredRevenue }} />
+              <ConvertedRevenue
+                amount={m.deliveredRevenue}
+                byCurrency={m.deliveredRevenueByCurrency}
+                unconverted={m.unconvertedRevenueByCurrency}
+              />
             </span>
           ) : (
             '\u2014'

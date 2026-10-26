@@ -15,6 +15,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
 import { formatNaira } from '~/lib/format-amount';
 import { LensedMoney } from '~/components/ui/lensed-money';
+import { ConvertedRevenue } from '~/components/ui/converted-revenue';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
 import { isAdminLevel, hasFinanceAccess } from '~/lib/rbac';
@@ -830,7 +831,7 @@ function MarketingPerformanceSummary({ metrics, naira, cartOrdersCounts, marketi
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{deliveredOrders}</span></div>
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{Math.max(0, confirmedOrders - deliveredOrders)}</span></div>
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{cr.toFixed(1)}%</span></div>
-        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered Revenue</span><LensedMoney className="text-sm font-medium text-app-fg" amounts={metrics.deliveredRevenueByCurrency ?? { NGN: metrics.deliveredRevenue }} /></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered Revenue</span><ConvertedRevenue className="text-sm font-medium text-app-fg" amount={metrics.deliveredRevenue} byCurrency={metrics.deliveredRevenueByCurrency} unconverted={metrics.unconvertedRevenueByCurrency} /></div>
       </div>
     </div>
   );
