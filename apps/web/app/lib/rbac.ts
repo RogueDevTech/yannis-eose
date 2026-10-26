@@ -246,3 +246,10 @@ export function canViewCustomerJourney(user: { role: string; permissions?: strin
   if (user.role === 'HEAD_OF_MARKETING' || user.role === 'HEAD_OF_CS') return true;
   return (user.permissions ?? []).some((p) => canonicalPermissionCode(p) === 'marketing.scope.global');
 }
+
+/** May edit currencies / FX rates (Settings > Currencies). Gates "Set FX rate" links. */
+export function canManageCurrencies(user: { role: string; permissions?: string[] | null } | null | undefined): boolean {
+  if (!user) return false;
+  if (isAdminLevel(user)) return true;
+  return (user.permissions ?? []).some((p) => canonicalPermissionCode(p) === 'settings.currencies.manage');
+}

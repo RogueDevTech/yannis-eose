@@ -44,11 +44,13 @@ export interface FundingBalanceRow {
   confirmedOrders?: number;
   /** Orders delivered + remitted */
   deliveredOrders?: number;
-  /** Delivered revenue (funnel + cart), when merged from leaderboard — Media Buyers only. */
+  /** Delivered revenue (funnel + cart) in ₦, every currency FX-converted. From leaderboard, Media Buyers only. */
   deliveredRevenue?: number;
-  /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }). Sums to
-   *  `deliveredRevenue`. Absent/empty on single-currency companies. */
+  /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }), raw
+   *  amounts. `deliveredRevenue` is these converted to ₦ via FX. */
   deliveredRevenueByCurrency?: Record<string, number>;
+  /** Raw amounts per currency with no FX rate, left out of `deliveredRevenue` and ROAS. */
+  unconvertedRevenueByCurrency?: Record<string, number>;
   /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
   deliveredThisMonth?: number;
   /** AD_SPEND-only total (drives CPA/ROAS), when merged from leaderboard */
@@ -227,9 +229,11 @@ export interface Metrics {
   /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
   deliveredThisMonth?: number;
   deliveredRevenue: number;
-  /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }). Sums to
-   *  `deliveredRevenue`. Absent/empty on single-currency companies. */
+  /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }), raw
+   *  amounts. `deliveredRevenue` is these converted to ₦ via FX. */
   deliveredRevenueByCurrency?: Record<string, number>;
+  /** Raw amounts per currency with no FX rate, left out of `deliveredRevenue` and ROAS. */
+  unconvertedRevenueByCurrency?: Record<string, number>;
   confirmedOrders: number;
   confirmationRate: number;
   cpa: number;
@@ -251,9 +255,11 @@ export interface LeaderboardEntry {
   /** Carry-over delivered: delivered this period but generated in a prior month. Display-only. */
   deliveredThisMonth?: number;
   deliveredRevenue: number;
-  /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }). Sums to
-   *  `deliveredRevenue`. Absent/empty on single-currency companies. */
+  /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }), raw
+   *  amounts. `deliveredRevenue` is these converted to ₦ via FX. */
   deliveredRevenueByCurrency?: Record<string, number>;
+  /** Raw amounts per currency with no FX rate, left out of `deliveredRevenue` and ROAS. */
+  unconvertedRevenueByCurrency?: Record<string, number>;
   confirmedOrders: number;
   confirmationRate: number;
   cpa: number;

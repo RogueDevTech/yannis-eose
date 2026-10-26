@@ -13,6 +13,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { formatNaira } from '~/lib/format-amount';
 import { LensedMoney } from '~/components/ui/lensed-money';
+import { ConvertedRevenue } from '~/components/ui/converted-revenue';
 import type { CEODashboardData } from '~/features/ceo/types';
 import { FunnelInfoIcon, FunnelBreakdownModal } from './funnel-breakdown';
 
@@ -201,6 +202,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     pendingSpend: data?.marketing?.pendingSpend ?? 0,
     deliveredRevenue: data?.marketing?.deliveredRevenue ?? 0,
     deliveredRevenueByCurrency: data?.marketing?.deliveredRevenueByCurrency,
+    unconvertedRevenueByCurrency: data?.marketing?.unconvertedRevenueByCurrency,
     funnelRevenue: marketingBreakdown?.funnel ?? data?.marketing?.deliveredRevenue ?? 0,
     cartRevenue: marketingBreakdown?.cart ?? 0,
     totalOrders: data?.marketing?.totalOrders ?? 0,
@@ -288,8 +290,10 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               </span>
             ),
             value: (
-              <LensedMoney
-                amounts={marketingSafe.deliveredRevenueByCurrency ?? { NGN: marketingSafe.deliveredRevenue }}
+              <ConvertedRevenue
+                amount={marketingSafe.deliveredRevenue}
+                byCurrency={marketingSafe.deliveredRevenueByCurrency}
+                unconverted={marketingSafe.unconvertedRevenueByCurrency}
               />
             ),
             valueClassName: 'text-success-600 dark:text-success-400',

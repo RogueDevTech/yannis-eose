@@ -51,8 +51,10 @@ export interface CEODashboardData {
     approvedSpend?: number;
     pendingSpend?: number;
     deliveredRevenue?: number;
-    /** Per-currency delivered revenue map for the currency lens. Absent → NGN-only. */
+    /** Per-currency delivered revenue, raw. `deliveredRevenue` is these in ₦ via FX. */
     deliveredRevenueByCurrency?: Record<string, number>;
+    /** Raw amounts per currency with no FX rate, left out of `deliveredRevenue` and ROAS. */
+    unconvertedRevenueByCurrency?: Record<string, number>;
     /** Pieces of deliveredRevenue for hero breakdown (funnel orders + cart graduated). */
     deliveredRevenueBreakdown?: { funnel: number; cart: number };
     totalOrders: number;
