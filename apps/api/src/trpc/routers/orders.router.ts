@@ -1929,6 +1929,8 @@ export const ordersRouter = router({
       const [team, workloads, leaderboard, inactiveAgents, supplementary, funnelStatusCounts, offlineStatusCounts, totalOrdersStatusCounts, deliveredFollowUpStatusCounts, followUpCounts, cartCounts] = await Promise.all([
         getUsersService().listCSTeam(branchId, eIds),
         getOrdersService().getCSCloserWorkloads(branchId, eIds, undefined, cats, ctx.effectiveCurrencyCodes),
+        // Per-closer totals use the CS dashboard TOTAL ORDERS definition
+        // (follow-up + cart from their own tables), on this page's branch.
         getOrdersService().getCSCloserLeaderboard(
           input.period,
           input.startDate,
@@ -1937,6 +1939,7 @@ export const ordersRouter = router({
           eIds,
           cats,
           ctx.effectiveCurrencyCodes,
+          { includePipelineTables: true },
         ),
         getOrdersService().getInactiveAgents(input.inactiveThresholdMinutes, branchId, eIds, ctx.effectiveCurrencyCodes),
         getOrdersService().getSupplementaryCounts(
