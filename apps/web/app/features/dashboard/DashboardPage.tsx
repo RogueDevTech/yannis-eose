@@ -480,7 +480,7 @@ function CSDashboard({
     return (
       <>
         {/* TOTAL ORDERS first — grand total across all pipelines */}
-        <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={offSc} offlineCount={offlineCount} />
+        <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={offSc} offlineCount={offlineCount} link={link} />
 
         <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={7} />}>
           {(metrics) => {
@@ -574,7 +574,7 @@ function CSDashboard({
   // Head of CS: KPI strip + team controls + quick links (no full pipeline strip).
   return (
     <>
-      <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={offSc} offlineCount={offlineCount} />
+      <TotalOrdersStrip orderCounts={counts} offlineStatusCounts={offSc} offlineCount={offlineCount} link={link} />
 
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={10} />}>
         {(metrics) => {
@@ -1735,16 +1735,28 @@ function TotalOrdersInfoIcon({ onClick }: { onClick: () => void }) {
   );
 }
 
+/** TOTAL ORDERS tiles that open a per-pipeline breakdown. One status each, so every
+ *  pipeline's list filters to exactly the orders the tile counted. */
+const TOTAL_STRIP_STATUS_TILES = {
+  UNPROCESSED: 'Unassigned',
+  CS_ASSIGNED: 'Assigned',
+  CS_ENGAGED: 'Unconfirmed',
+} as const;
+type TotalStripStatus = keyof typeof TOTAL_STRIP_STATUS_TILES;
+
 function TotalOrdersStrip({
   orderCounts,
   offlineStatusCounts,
   offlineCount,
+  link,
 }: {
   orderCounts: Record<string, number>;
   offlineStatusCounts: Record<string, number>;
   offlineCount: number;
+  /** Builds a list URL carrying the dashboard's dates and team (see `dashboardLink`). */
+  link: (base: string, extra?: Record<string, string>) => string;
 }) {
-  const [breakdownModal, setBreakdownModal] = useState<'total' | 'delivered' | null>(null);
+  const [breakdownModal, setBreakdownModal] = useState<'total' | 'delivered' | TotalStripStatus | null>(null);
   const { bundle } = useDashboardSecondary();
   const fuSc = bundle?.followUpCounts ?? {};
   const cartSc = bundle?.cartOrdersCounts ?? {};
@@ -1810,9 +1822,11 @@ function TotalOrdersStrip({
             value: total,
             valueClassName: 'text-app-fg',
           },
-          { label: 'Unassigned', value: unassigned, valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg' },
-          { label: 'Assigned', value: assigned, valueClassName: 'text-info-600 dark:text-info-400' },
-          { label: 'Unconfirmed', value: engaged, valueClassName: 'text-cyan-600 dark:text-cyan-400' },
+          // These three span every pipeline (funnel, offline, follow-up, cart,
+          // delivered follow-up), so tapping one shows where its orders are.
+          { label: 'Unassigned', value: unassigned, valueClassName: unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg', onClick: () => setBreakdownModal('UNPROCESSED') },
+          { label: 'Assigned', value: assigned, valueClassName: 'text-info-600 dark:text-info-400', onClick: () => setBreakdownModal('CS_ASSIGNED') },
+          { label: 'Unconfirmed', value: engaged, valueClassName: 'text-cyan-600 dark:text-cyan-400', onClick: () => setBreakdownModal('CS_ENGAGED') },
           { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
           {
             label: <span className="flex items-center">Delivered<TotalOrdersInfoIcon onClick={() => setBreakdownModal('delivered')} /></span>,
@@ -1863,6 +1877,42 @@ function TotalOrdersStrip({
           ))}
         </div>
       </Modal>
+      {(() => {
+        const status = breakdownModal && breakdownModal in TOTAL_STRIP_STATUS_TILES ? (breakdownModal as TotalStripStatus) : null;
+        if (!status) return null;
+        const rows = [
+          { label: 'Funnel Orders', value: funnelSc[status] ?? 0, to: link('/admin/sales/orders', { status }) },
+          { label: 'Offline Orders', value: offSc[status] ?? 0, to: link('/admin/sales/offline-orders', { status }) },
+          { label: 'Follow-Up Orders', value: fuSc[status] ?? 0, to: link('/admin/cs/follow-up', { view: 'orders', status }) },
+          { label: 'Cart Orders', value: cartSc[status] ?? 0, to: link('/admin/sales/cart-orders', { status }) },
+          { label: 'Delivered Follow-Up', value: dfuSc[status] ?? 0, to: link('/admin/sales/delivered-follow-up', { status }) },
+        ];
+        return (
+          <Modal open onClose={() => setBreakdownModal(null)} maxWidth="max-w-sm" contentClassName="p-5">
+            <h2 className="text-base font-semibold text-app-fg mb-1">{TOTAL_STRIP_STATUS_TILES[status]}: Breakdown</h2>
+            <p className="text-sm text-app-fg-muted mb-4">Tap a pipeline to see its orders.</p>
+            <div className="space-y-0.5">
+              {rows.map((r) =>
+                r.value > 0 ? (
+                  <Link key={r.label} to={r.to} prefetch="intent" className="flex items-center justify-between gap-4 py-1.5 text-sm text-brand-600 dark:text-brand-400 hover:underline">
+                    <span>{r.label}</span>
+                    <span className="tabular-nums">{r.value.toLocaleString()}</span>
+                  </Link>
+                ) : (
+                  <div key={r.label} className="flex items-center justify-between gap-4 py-1.5 text-sm text-app-fg-muted">
+                    <span>{r.label}</span>
+                    <span className="tabular-nums">0</span>
+                  </div>
+                ),
+              )}
+              <div className="flex items-center justify-between gap-4 font-semibold border-t border-app-border pt-2.5 mt-1 text-sm text-app-fg">
+                <span>Total</span>
+                <span className="tabular-nums">{rows.reduce((s, r) => s + r.value, 0).toLocaleString()}</span>
+              </div>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }

@@ -228,6 +228,15 @@ function parsePlausibleOrderDate(value: string): Date | undefined {
   return parsed;
 }
 
+/**
+ * A cart order's graduated copy in `orders`: stamped `online`, or a legacy
+ * un-stamped graduation (no source, linked cart, delivered). The cart itself is
+ * counted from `cart_orders`; anything that counts both must exclude these.
+ * Shared by the CS status counts and the Team Analysis leaderboard.
+ */
+const isCartGraduatedCopy = () =>
+  sql`(${schema.orders.orderSource} = 'online' OR (${schema.orders.orderSource} IS NULL AND ${schema.orders.cartId} IS NOT NULL AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`;
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -8901,7 +8910,7 @@ export class OrdersService {
         // Exclude cart-graduated orders — CS funnel; cart orders have their own strip.
         // Primary: order_source='online' (stamped since cart graduation was added).
         // Fallback: catch any legacy un-stamped graduations via cartId + DELIVERED.
-        conditions.push(sql`NOT (${schema.orders.orderSource} = 'online' OR (${schema.orders.orderSource} IS NULL AND ${schema.orders.cartId} IS NOT NULL AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`);
+        conditions.push(sql`NOT ${isCartGraduatedCopy()}`);
       }
     } else if (isFollowUp === true) {
       conditions.push(eq(schema.orders.isFollowUp, true));
@@ -10161,7 +10170,15 @@ export class OrdersService {
     /** Filter leaderboard to specific order categories. Empty/undefined = all. */
     categories?: string[] | null,
     effectiveCurrencyCodes?: string[] | null,
+    /**
+     * Count follow-up and cart orders from their own tables (every status),
+     * instead of only their graduated copies in `orders`. Same definition as
+     * the CS dashboard TOTAL ORDERS strip, so Team Analysis matches it. Off by
+     * default: performance-mode dispatch ranks closers with this leaderboard.
+     */
+    opts?: { includePipelineTables?: boolean },
   ) {
+    const includePipelineTables = opts?.includePipelineTables === true;
     const useCustomRange = startDate && endDate;
     const periodStart = useCustomRange
       ? nigeriaDayStart(startDate)
@@ -10207,13 +10224,18 @@ export class OrdersService {
 
     // Predicate templates — Postgres `FILTER (WHERE …)` evaluates per row inside
     // a single grouped aggregate, so we never materialize per-agent subqueries.
-    const confirmedOrBeyond = sql`${schema.orders.status} IN ('CONFIRMED','AGENT_ASSIGNED','DISPATCHED','IN_TRANSIT','DELIVERED','PARTIALLY_DELIVERED','REMITTED','RETURNED','RESTOCKED','WRITTEN_OFF')`;
+    // One status list for every source (orders, follow_up_orders, cart_orders).
+    const CONFIRMED_OR_BEYOND = ['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'PARTIALLY_DELIVERED', 'REMITTED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF'];
+    const DELIVERED_OR_REMITTED = ['DELIVERED', 'REMITTED'];
+    type StatusColumn = typeof schema.orders.status | typeof schema.followUpOrders.status | typeof schema.cartOrders.status;
+    const statusIn = (col: StatusColumn, list: string[]) => sql`${col}::text IN (${sql.join(list.map((v) => sql`${v}`), sql`, `)})`;
+    const confirmedOrBeyond = statusIn(schema.orders.status, CONFIRMED_OR_BEYOND);
     // DELETED is an editorial action (test/fake/mistake orders), never a business
     // outcome — it must NOT appear in any rate's numerator or denominator. We still
     // surface legacy CANCELLED rejections (pre-2026-05-23 directive) as a real outcome.
     const legacyCancelled = sql`${schema.orders.status} = 'CANCELLED'`;
     const notDeleted = sql`${schema.orders.status} <> 'DELETED'`;
-    const deliveredOrRemitted = sql`${schema.orders.status} IN ('DELIVERED','REMITTED')`;
+    const deliveredOrRemitted = statusIn(schema.orders.status, DELIVERED_OR_REMITTED);
     const callCompleted = sql`${schema.callLogs.callStatus} = 'COMPLETED'`;
 
     // Date range conditions reused inside each grouped query's WHERE clause.
@@ -10250,6 +10272,18 @@ export class OrdersService {
         categoryConditions.push(sql`(${sql.join(clauses, sql` OR `)})`);
       }
     }
+    // Order counts only (calls keep `categoryConditions`): with pipeline tables,
+    // the graduated follow-up / cart copies in `orders` are swapped for their
+    // source tables (every status), exactly as the dashboard's excludeGraduated
+    // + excludeCartGraduated do, so nothing is counted twice.
+    const orderCountConditions = includePipelineTables
+      ? [
+          ...categoryConditions,
+          sql`${schema.orders.isFollowUp} = false AND ${schema.orders.orderSource} IS DISTINCT FROM 'graduated_follow_up' AND NOT ${isCartGraduatedCopy()}`,
+        ]
+      : categoryConditions;
+    const includeFollowUpTable = includePipelineTables && (!categories?.length || categories.includes('follow_up'));
+    const includeCartTable = includePipelineTables && (!categories?.length || categories.includes('cart'));
 
     // Include all orders (normal + follow-up) in agent metrics so that
     // delivered follow-up orders count toward CS delivery performance and
@@ -10261,7 +10295,7 @@ export class OrdersService {
       ...(bCond ? [bCond] : []),
       ...(cCond ? [cCond] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
-      ...categoryConditions,
+      ...orderCountConditions,
     );
     const deliveredWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
@@ -10269,10 +10303,38 @@ export class OrdersService {
       ...(bCond ? [bCond] : []),
       ...(cCond ? [cCond] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
-      ...categoryConditions,
+      ...orderCountConditions,
     );
 
-    const [orderRows, deliveredRows, callRows] = await Promise.all([
+    // Follow-up / cart table rows per closer: same branch, country and period
+    // scope as `orders`. Engaged excludes DELETED/CANCELLED like the dashboard.
+    const pipelineTableCounts = (table: typeof schema.followUpOrders | typeof schema.cartOrders) => {
+      const tb = branchScopeCondition(table.servicingBranchId, branchId, effectiveBranchIds);
+      const tc = countryScopeCondition(table.currencyCode, effectiveCurrencyCodes);
+      return this.db
+        .select({
+          agentId: table.assignedCsId,
+          engaged: sql<number>`COUNT(*) FILTER (WHERE NOT ${statusIn(table.status, ['DELETED', 'CANCELLED'])})::int`,
+          confirmed: sql<number>`COUNT(*) FILTER (WHERE ${statusIn(table.status, CONFIRMED_OR_BEYOND)})::int`,
+          delivered: sql<number>`COUNT(*) FILTER (WHERE ${statusIn(table.status, DELIVERED_OR_REMITTED)})::int`,
+        })
+        .from(table)
+        .where(
+          and(
+            inArray(table.assignedCsId, agentIds),
+            isNull(table.deletedAt),
+            ...(tb ? [tb] : []),
+            ...(tc ? [tc] : []),
+            ...(periodStart ? [gte(table.createdAt, periodStart)] : []),
+            ...(periodEnd ? [lte(table.createdAt, periodEnd)] : []),
+          ),
+        )
+        .groupBy(table.assignedCsId);
+    };
+    type PipelineRow = { agentId: string | null; engaged: number; confirmed: number; delivered: number };
+    const noRows = Promise.resolve([] as PipelineRow[]);
+
+    const [orderRows, deliveredRows, callRows, followUpRows, cartRows] = await Promise.all([
       this.db
         .select({
           agentId: schema.orders.assignedCsId,
@@ -10330,6 +10392,8 @@ export class OrdersService {
               ),
             )
             .groupBy(schema.callLogs.agentId),
+      includeFollowUpTable ? pipelineTableCounts(schema.followUpOrders) : noRows,
+      includeCartTable ? pipelineTableCounts(schema.cartOrders) : noRows,
     ]);
 
     type OrderAgg = { engaged: number; confirmed: number; cancelled: number };
@@ -10346,6 +10410,14 @@ export class OrdersService {
     for (const r of deliveredRows) {
       if (!r.agentId) continue;
       deliveredByAgent.set(r.agentId, Number(r.delivered) || 0);
+    }
+    for (const r of [...followUpRows, ...cartRows]) {
+      if (!r.agentId) continue;
+      const ord = orderByAgent.get(r.agentId) ?? { engaged: 0, confirmed: 0, cancelled: 0 };
+      ord.engaged += Number(r.engaged) || 0;
+      ord.confirmed += Number(r.confirmed) || 0;
+      orderByAgent.set(r.agentId, ord);
+      deliveredByAgent.set(r.agentId, (deliveredByAgent.get(r.agentId) ?? 0) + (Number(r.delivered) || 0));
     }
     type CallAgg = { callsMade: number; avgDurationSeconds: number };
     const callsByAgent = new Map<string, CallAgg>();
