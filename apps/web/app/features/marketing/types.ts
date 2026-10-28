@@ -277,6 +277,7 @@ export interface MarketingOverviewRecentOrder {
   status: string;
   createdAt: string;
   totalAmount: string | null;
+  currencyCode?: string;
   customerName: string;
   mediaBuyerName?: string | null;
 }

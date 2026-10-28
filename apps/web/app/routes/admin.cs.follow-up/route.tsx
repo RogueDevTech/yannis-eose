@@ -142,6 +142,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         customerPhoneDisplay: '',
         status: o.status as string,
         totalAmount: (o.totalAmount as string) ?? null,
+        currencyCode: (o.currencyCode as string) ?? undefined,
         createdAt: o.createdAt as string,
         preferredDeliveryDate: (o.preferredDeliveryDate as string) ?? null,
         callbackScheduledAt: (o.callbackScheduledAt as string) ?? null,
