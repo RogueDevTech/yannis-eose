@@ -57,6 +57,7 @@ import { FilterDismiss } from '~/components/ui/filter-dismiss';
 import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
 import { fetchOrdersMatchingIds, fetchOrderClipboardSummary, ORDERS_DEEP_SELECT_MAX } from '~/lib/trpc-browser';
+import { copyTextWhenReady } from '~/lib/clipboard';
 import { useToast } from '~/components/ui/toast';
 import { CsCommentIcon, MobileCommentPreview } from '~/components/ui/cs-comment-icon';
 import { BulkProgressModal, BULK_PROGRESS_IDLE, type BulkProgressState } from '~/components/ui/bulk-progress-modal';
@@ -1421,8 +1422,8 @@ function OrdersListPageImpl({
                   variant="neutral"
                   onClick={async () => {
                     try {
-                      const { text } = await fetchOrderClipboardSummary(order.id);
-                      await navigator.clipboard.writeText(text);
+                      // Start the fetch and the copy in the same tick as the click (Safari).
+                      await copyTextWhenReady(fetchOrderClipboardSummary(order.id).then((r) => r.text));
                       toast.success('Copied', 'Order summary copied to clipboard.');
                     } catch (e) {
                       toast.error('Copy failed', e instanceof Error ? e.message : 'Could not copy order summary.');
