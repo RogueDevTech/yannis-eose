@@ -1,4 +1,4 @@
-import { uuid, pgTable, text, numeric, jsonb, timestamp, integer, date, boolean } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, numeric, jsonb, timestamp, integer, date, boolean, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { branchGroups } from './branch-groups';
 import {
   payoutStatusEnum,
@@ -324,6 +324,12 @@ export const payrollStaffAllowances = pgTable('payroll_staff_allowances', {
   periodMonth: date('period_month'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   ...temporalColumns,
+  /**
+   * Recurring allowances (0357): NULL on a recurring row = the TEMPLATE (never
+   * linked to a payout; period_month = first month). Set = that template's
+   * per-month row, created and linked by the month's batch.
+   */
+  sourceAllowanceId: uuid('source_allowance_id').references((): AnyPgColumn => payrollStaffAllowances.id),
 });
 
 // Table 20: payroll_refunds — post-tax cash owed back to a staff member.

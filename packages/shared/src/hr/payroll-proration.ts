@@ -12,7 +12,18 @@
  * active day.
  */
 
-/** Parse a `YYYY-MM-DD` or Date into a UTC-midnight day index (days since epoch). */
+// Payroll periods are Nigeria calendar months. `nigeriaMonthWindow` passes
+// WAT-midnight instants (Oct 1 00:00 WAT === Sep 30 23:00 UTC), so a Date must
+// be read on the Lagos calendar, never with getUTC*: that turned every month
+// into "32 days" (Sep 30..Oct 31) and under-paid every prorated joiner.
+const LAGOS_DAY_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Africa/Lagos',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/** Parse a `YYYY-MM-DD` or Date (read as a Lagos calendar day) into a day index (days since epoch). */
 function toDayIndex(value: Date | string | null | undefined): number | null {
   if (value == null) return null;
   let y: number;
@@ -25,9 +36,12 @@ function toDayIndex(value: Date | string | null | undefined): number | null {
     m = Number(match[2]) - 1;
     d = Number(match[3]);
   } else {
-    y = value.getUTCFullYear();
-    m = value.getUTCMonth();
-    d = value.getUTCDate();
+    if (Number.isNaN(value.getTime())) return null;
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(LAGOS_DAY_FORMATTER.format(value));
+    if (!match) return null;
+    y = Number(match[1]);
+    m = Number(match[2]) - 1;
+    d = Number(match[3]);
   }
   return Math.floor(Date.UTC(y, m, d) / 86_400_000);
 }

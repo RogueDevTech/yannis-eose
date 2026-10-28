@@ -1482,7 +1482,24 @@ export class HrService {
     actorId: string,
     effectiveBranchIds?: string[] | null,
   ) {
-    await this.loadCorrectableStaffAllowance(input.allowanceId, effectiveBranchIds);
+    const existing = await this.loadCorrectableStaffAllowance(input.allowanceId, effectiveBranchIds);
+    // A month's row of a recurring allowance (0357) belongs to that month: only
+    // its amount/label can change. The template drives future months; once it
+    // has paid a month it can't turn one-time (it would pay once more), only void.
+    const isMonthRow = existing.sourceAllowanceId != null;
+    if (!isMonthRow && existing.recurring && !input.recurring) {
+      const [child] = await this.db
+        .select({ id: schema.payrollStaffAllowances.id })
+        .from(schema.payrollStaffAllowances)
+        .where(eq(schema.payrollStaffAllowances.sourceAllowanceId, existing.id))
+        .limit(1);
+      if (child) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'This recurring allowance has already been paid. Void it to stop future months.',
+        });
+      }
+    }
     return withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
         .update(schema.payrollStaffAllowances)
@@ -1490,8 +1507,12 @@ export class HrService {
           amount: sql`${input.amount}::numeric`,
           name: input.name,
           notes: input.notes ?? null,
-          recurring: input.recurring,
-          ...(input.periodMonth ? { periodMonth: input.periodMonth } : {}),
+          ...(isMonthRow
+            ? {}
+            : {
+                recurring: input.recurring,
+                ...(input.periodMonth ? { periodMonth: input.periodMonth } : {}),
+              }),
         })
         .where(eq(schema.payrollStaffAllowances.id, input.allowanceId))
         .returning();

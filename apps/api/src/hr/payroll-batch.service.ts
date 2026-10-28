@@ -72,11 +72,18 @@ function pendingRefundForMonth(periodMonth: string) {
 }
 
 /**
- * A per-staff allowance is sweepable into a batch for `periodMonth` when it is
+ * A per-staff allowance row is sweepable into a batch for `periodMonth` when it is
  * APPROVED (not VOIDED), not yet linked to a payout, and either un-earmarked or
  * earmarked for exactly this month. Mirrors pendingRefundForMonth.
+ *
+ * Recurring templates (recurring, no source) never match: they pay through a
+ * per-month child row instead (see recurringAllowanceDueForMonth). A child only
+ * pays while its template is still APPROVED, so voiding a template also drops
+ * the month already in an open batch on its next regenerate. Raw SQL names the
+ * outer table explicitly so the self-referencing subquery is correct inside both
+ * SELECT and UPDATE.
  */
-function pendingStaffAllowanceForMonth(periodMonth: string) {
+export function pendingStaffAllowanceForMonth(periodMonth: string) {
   return and(
     eq(schema.payrollStaffAllowances.status, 'APPROVED'),
     isNull(schema.payrollStaffAllowances.payoutId),
@@ -84,7 +91,41 @@ function pendingStaffAllowanceForMonth(periodMonth: string) {
       isNull(schema.payrollStaffAllowances.periodMonth),
       eq(schema.payrollStaffAllowances.periodMonth, periodMonth),
     ),
+    sql`(CASE WHEN "payroll_staff_allowances"."source_allowance_id" IS NULL
+      THEN "payroll_staff_allowances"."recurring" = false
+      ELSE EXISTS (
+        SELECT 1 FROM payroll_staff_allowances tpl
+        WHERE tpl.id = "payroll_staff_allowances"."source_allowance_id" AND tpl.status = 'APPROVED'
+      ) END)`,
   );
+}
+
+/**
+ * A recurring allowance TEMPLATE is due for `periodMonth` when it is APPROVED,
+ * starts on or before that month, and has no row for that month yet. Generation
+ * inserts that month's child row linked to the payout (0357).
+ */
+export function recurringAllowanceDueForMonth(periodMonth: string) {
+  return and(
+    eq(schema.payrollStaffAllowances.status, 'APPROVED'),
+    eq(schema.payrollStaffAllowances.recurring, true),
+    isNull(schema.payrollStaffAllowances.sourceAllowanceId),
+    isNull(schema.payrollStaffAllowances.payoutId),
+    or(
+      isNull(schema.payrollStaffAllowances.periodMonth),
+      lte(schema.payrollStaffAllowances.periodMonth, periodMonth),
+    ),
+    sql`NOT EXISTS (
+      SELECT 1 FROM payroll_staff_allowances child
+      WHERE child.source_allowance_id = "payroll_staff_allowances"."id"
+        AND child.period_month = ${periodMonth}::date
+    )`,
+  );
+}
+
+/** Every allowance amount a batch for `periodMonth` pays: floating rows + due recurring templates. */
+export function staffAllowanceForMonth(periodMonth: string) {
+  return or(pendingStaffAllowanceForMonth(periodMonth), recurringAllowanceDueForMonth(periodMonth));
 }
 
 /**
@@ -1095,6 +1136,47 @@ export class PayrollBatchService {
         .values(insertValues)
         .returning({ id: schema.payoutRecords.id, staffId: schema.payoutRecords.staffId });
 
+      // This month's row for every due recurring allowance, linked to the new
+      // payout. Read BEFORE inserting: the due check is "no row for this month".
+      const dueRecurring = await tx
+        .select({
+          id: schema.payrollStaffAllowances.id,
+          staffId: schema.payrollStaffAllowances.staffId,
+          amount: schema.payrollStaffAllowances.amount,
+          name: schema.payrollStaffAllowances.name,
+          notes: schema.payrollStaffAllowances.notes,
+          approvedBy: schema.payrollStaffAllowances.approvedBy,
+        })
+        .from(schema.payrollStaffAllowances)
+        .where(
+          and(
+            inArray(schema.payrollStaffAllowances.staffId, payableStaff.map((m) => m.id)),
+            recurringAllowanceDueForMonth(periodMonth),
+          ),
+        );
+      const payoutIdByStaff = new Map(
+        insertedRows.filter((r) => r.staffId).map((r) => [r.staffId as string, r.id]),
+      );
+      const recurringRows = dueRecurring.flatMap((t) => {
+        const payoutId = payoutIdByStaff.get(t.staffId);
+        if (!payoutId) return [];
+        return [{
+          staffId: t.staffId,
+          amount: sql`${t.amount}::numeric`,
+          name: t.name,
+          notes: t.notes,
+          recurring: true,
+          status: 'APPROVED' as const,
+          approvedBy: t.approvedBy,
+          payoutId,
+          periodMonth,
+          sourceAllowanceId: t.id,
+        }];
+      });
+      if (recurringRows.length > 0) {
+        await tx.insert(schema.payrollStaffAllowances).values(recurringRows);
+      }
+
       // Link each member's pending, month-eligible adjustments to their new payout.
       for (const row of insertedRows) {
         if (!row.staffId) continue;
@@ -1533,7 +1615,7 @@ export class PayrollBatchService {
         .where(
           and(
             inArray(schema.payrollStaffAllowances.staffId, staffIds),
-            pendingStaffAllowanceForMonth(periodMonth),
+            staffAllowanceForMonth(periodMonth),
           ),
         )
         .groupBy(schema.payrollStaffAllowances.staffId, schema.payrollStaffAllowances.recurring),
@@ -2300,7 +2382,7 @@ export class PayrollBatchService {
       .where(
         and(
           eq(schema.payrollStaffAllowances.staffId, member.id),
-          pendingStaffAllowanceForMonth(periodMonth),
+          staffAllowanceForMonth(periodMonth),
         ),
       )
       .groupBy(schema.payrollStaffAllowances.recurring);

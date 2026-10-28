@@ -7,6 +7,20 @@ const AUG_START = '2026-08-01';
 const AUG_END = '2026-08-31'; // 31 days
 
 describe('computeProration', () => {
+  it('reads WAT-midnight Date bounds (nigeriaMonthWindow) as the Nigeria month', () => {
+    // Oct 1 00:00 WAT is Sep 30 23:00 UTC. Must still be a 31-day October.
+    const periodStart = new Date('2026-10-01T00:00:00+01:00');
+    const periodEnd = new Date('2026-10-31T23:59:59.999+01:00');
+    const full = computeProration({ periodStart, periodEnd });
+    expect(full.periodDays).toBe(31);
+    expect(full.isProrated).toBe(false);
+
+    const r = computeProration({ periodStart, periodEnd, dateOfJoining: '2026-10-16' });
+    expect(r.activeDays).toBe(16);
+    expect(r.periodDays).toBe(31);
+    expect(r.fraction).toBeCloseTo(16 / 31, 6);
+  });
+
   it('returns full fraction when no join/exit dates', () => {
     const r = computeProration({ periodStart: AUG_START, periodEnd: AUG_END });
     expect(r.fraction).toBe(1);

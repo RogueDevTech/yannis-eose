@@ -68,6 +68,8 @@ export interface StaffAllowance {
   createdAt: string;
   periodMonth?: string | null;
   batchStatus?: string | null;
+  /** Set on a recurring allowance's per-month row; null on the template / one-time rows. */
+  sourceAllowanceId?: string | null;
 }
 
 export interface HRUser {

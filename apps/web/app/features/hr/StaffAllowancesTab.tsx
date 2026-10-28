@@ -111,12 +111,16 @@ export function StaffAllowancesTab({ users, canWrite }: StaffAllowancesTabProps)
     {
       key: 'recurring',
       header: 'Type',
-      render: (a) => (a.recurring ? 'Recurring' : 'One-time'),
+      render: (a) => (!a.recurring ? 'One-time' : a.sourceAllowanceId ? 'Recurring payment' : 'Recurring monthly'),
     },
     {
       key: 'period',
       header: 'Month',
-      render: (a) => allowancePeriodLabel(a.periodMonth) ?? 'Next batch',
+      render: (a) => {
+        const label = allowancePeriodLabel(a.periodMonth);
+        if (a.recurring && !a.sourceAllowanceId) return label ? `From ${label}` : 'Every month';
+        return label ?? 'Next batch';
+      },
     },
     { key: 'status', header: 'Status', render: (a) => <StatusBadge status={a.status} /> },
     {
@@ -228,7 +232,7 @@ export function StaffAllowancesTab({ users, canWrite }: StaffAllowancesTabProps)
                 defaultChecked={editTarget?.recurring ?? false}
                 className="rounded border-app-border"
               />
-              Recurring monthly (prorate for part-month staff)
+              Recurring monthly (pays every month from the month below until voided)
             </label>
             <TextInput
               name="notes"
