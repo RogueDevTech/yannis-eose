@@ -506,7 +506,8 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
 
   /**
    * Universal 14-day dedup flagging (CEO directive 2026-05-26):
-   * Same phone (hash or last 9 digits) + any overlapping product within 14 days = duplicate.
+   * Same phone (hash or last 9 digits) + same country (currency) + any overlapping
+   * product within 14 days = duplicate.
    * Winner: highest lifecycle status, ties → oldest created_at.
    * Early-stage losers (UNPROCESSED / CS_ASSIGNED / CS_ENGAGED): soft-deleted + FLAGGED.
    * Late-stage losers (CONFIRMED+): FLAGGED only — stock may be allocated.
@@ -598,6 +599,10 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
               = right(regexp_replace(coalesce(winner.customer_phone, ''), '\\D', '', 'g'), 9)
           )
         )
+        -- Same country: a Kenyan and a Tanzanian 07… number can share the last 9
+        -- digits (and the phone hash, which reads every 10-digit 0… as Ghana) but
+        -- are different customers.
+        AND winner.currency_code = loser.currency_code
         -- Sargable bound so the digits match above only runs on orders near the loser.
         AND winner.created_at BETWEEN loser.created_at - make_interval(days => COALESCE(cfg.window_days, ${fallbackWindow}))
                                   AND loser.created_at + make_interval(days => COALESCE(cfg.window_days, ${fallbackWindow}))
