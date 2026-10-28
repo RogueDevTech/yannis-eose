@@ -25,6 +25,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { DuplicateRulesService } from '../settings/duplicate-rules.service';
 import { FULL_FORM_CART_SQL, PULL_HOLD_MINUTES } from './unsubmitted-form';
+import { CART_LINE_PRICE_SQL } from './cart-line-price';
 import { parseOrderNumberSearch } from '../common/utils/parse-order-number';
 // Raw SQL pull/backfill calls PostgreSQL uuidv7().
 // PG 18 has it natively; older DBs get a polyfill via migration 0275.
@@ -192,29 +193,7 @@ export class CartOrdersService {
         -- Reading only products.offers booked every offer_group_items-priced
         -- product at 0. This repair path runs on every API boot, so leaving it
         -- unfixed would re-create the free orders Step B now avoids.
-        COALESCE(
-          (SELECT ogi.price FROM offer_group_items ogi
-            JOIN offer_groups og ON og.id = ogi.offer_group_id
-            WHERE ogi.product_id = ca.product_id
-              AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'
-              AND ogi.label = ca.offer_label
-            LIMIT 1),
-          (SELECT ot.price FROM offer_templates ot
-            WHERE ot.product_id = ca.product_id
-              AND ot.status = 'ACTIVE' AND ot.name = ca.offer_label
-            LIMIT 1),
-          (SELECT (o->>'price')::numeric
-           FROM jsonb_array_elements(COALESCE(p.offers, '[]'::jsonb)) AS o
-           WHERE o->>'label' = ca.offer_label
-           LIMIT 1),
-          (SELECT min(ogi.price) FROM offer_group_items ogi
-            JOIN offer_groups og ON og.id = ogi.offer_group_id
-            WHERE ogi.product_id = ca.product_id
-              AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'),
-          (SELECT min(ot.price) FROM offer_templates ot
-            WHERE ot.product_id = ca.product_id AND ot.status = 'ACTIVE'),
-          NULLIF(p.base_sale_price, 0)
-        ),
+        ${CART_LINE_PRICE_SQL},
         ca.offer_label
       FROM cart_orders co
       JOIN cart_abandonments ca ON ca.id = co.source_cart_id
@@ -225,29 +204,7 @@ export class CartOrdersService {
         AND ca.product_id IS NOT NULL
         -- unit_price is NOT NULL: skip unpriced carts instead of aborting the
         -- batch or booking them free. They are retried once the catalog is priced.
-        AND COALESCE(
-          (SELECT ogi.price FROM offer_group_items ogi
-            JOIN offer_groups og ON og.id = ogi.offer_group_id
-            WHERE ogi.product_id = ca.product_id
-              AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'
-              AND ogi.label = ca.offer_label
-            LIMIT 1),
-          (SELECT ot.price FROM offer_templates ot
-            WHERE ot.product_id = ca.product_id
-              AND ot.status = 'ACTIVE' AND ot.name = ca.offer_label
-            LIMIT 1),
-          (SELECT (o->>'price')::numeric
-           FROM jsonb_array_elements(COALESCE(p.offers, '[]'::jsonb)) AS o
-           WHERE o->>'label' = ca.offer_label
-           LIMIT 1),
-          (SELECT min(ogi.price) FROM offer_group_items ogi
-            JOIN offer_groups og ON og.id = ogi.offer_group_id
-            WHERE ogi.product_id = ca.product_id
-              AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'),
-          (SELECT min(ot.price) FROM offer_templates ot
-            WHERE ot.product_id = ca.product_id AND ot.status = 'ACTIVE'),
-          NULLIF(p.base_sale_price, 0)
-        ) IS NOT NULL
+        AND ${CART_LINE_PRICE_SQL} IS NOT NULL
     `);
     const inserted = result.count ?? 0;
     if (inserted > 0) {
@@ -2735,6 +2692,7 @@ export class CartOrdersService {
     //   2. offer_templates    (legacy tiers)
     //   3. products.offers    (jsonb column; older still)
     //   4. products.base_sale_price
+    // Non-NGN carts read only their own currency prices (see cart-line-price.ts).
     // Within 1-3 we match the cart's `offer_label` first, then fall back to the
     // cheapest ACTIVE tier for the product so a cart abandoned BEFORE the customer
     // picked a tier still prices at a real number.
@@ -2764,38 +2722,7 @@ export class CartOrdersService {
           co.id,
           ca.product_id,
           COALESCE(ca.quantity, 1),
-          COALESCE(
-            -- 1. offer_group_items, exact label match
-            (SELECT ogi.price FROM offer_group_items ogi
-              JOIN offer_groups og ON og.id = ogi.offer_group_id
-              WHERE ogi.product_id = ca.product_id
-                AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'
-                AND ogi.label = ca.offer_label
-              LIMIT 1),
-            -- 2. offer_templates, exact label match (legacy name column)
-            (SELECT ot.price FROM offer_templates ot
-              WHERE ot.product_id = ca.product_id
-                AND ot.status = 'ACTIVE'
-                AND ot.name = ca.offer_label
-              LIMIT 1),
-            -- 3. products.offers jsonb, exact label match
-            (SELECT (o->>'price')::numeric
-              FROM jsonb_array_elements(COALESCE(p.offers, '[]'::jsonb)) AS o
-              WHERE o->>'label' = ca.offer_label
-              LIMIT 1),
-            -- 4. No label match (cart abandoned before a tier was picked, or the
-            --    label was renamed): cheapest ACTIVE tier, same precedence order.
-            (SELECT min(ogi.price) FROM offer_group_items ogi
-              JOIN offer_groups og ON og.id = ogi.offer_group_id
-              WHERE ogi.product_id = ca.product_id
-                AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'),
-            (SELECT min(ot.price) FROM offer_templates ot
-              WHERE ot.product_id = ca.product_id AND ot.status = 'ACTIVE'),
-            -- 5. Base sale price, but only when it is a REAL price. NULLIF keeps a
-            --    0.00 base (the default for template-priced products) from being
-            --    mistaken for "free".
-            NULLIF(p.base_sale_price, 0)
-          ),
+          ${CART_LINE_PRICE_SQL},
           ca.offer_label
         FROM cart_orders co
         JOIN cart_abandonments ca ON ca.id = co.source_cart_id
@@ -2807,30 +2734,7 @@ export class CartOrdersService {
           -- Skip carts with no resolvable price rather than booking them free.
           -- Mirrors the COALESCE chain above; NULL here means every source came
           -- up empty, so the cart waits for the catalog to be priced.
-          AND COALESCE(
-            (SELECT ogi.price FROM offer_group_items ogi
-              JOIN offer_groups og ON og.id = ogi.offer_group_id
-              WHERE ogi.product_id = ca.product_id
-                AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'
-                AND ogi.label = ca.offer_label
-              LIMIT 1),
-            (SELECT ot.price FROM offer_templates ot
-              WHERE ot.product_id = ca.product_id
-                AND ot.status = 'ACTIVE'
-                AND ot.name = ca.offer_label
-              LIMIT 1),
-            (SELECT (o->>'price')::numeric
-              FROM jsonb_array_elements(COALESCE(p.offers, '[]'::jsonb)) AS o
-              WHERE o->>'label' = ca.offer_label
-              LIMIT 1),
-            (SELECT min(ogi.price) FROM offer_group_items ogi
-              JOIN offer_groups og ON og.id = ogi.offer_group_id
-              WHERE ogi.product_id = ca.product_id
-                AND ogi.status = 'ACTIVE' AND og.status = 'ACTIVE'),
-            (SELECT min(ot.price) FROM offer_templates ot
-              WHERE ot.product_id = ca.product_id AND ot.status = 'ACTIVE'),
-            NULLIF(p.base_sale_price, 0)
-          ) IS NOT NULL
+          AND ${CART_LINE_PRICE_SQL} IS NOT NULL
         RETURNING id
       `);
       this.logger.log(`[pull] Step B: created ${items.length} line items`);
