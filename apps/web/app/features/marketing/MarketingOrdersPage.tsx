@@ -423,6 +423,7 @@ export function MarketingOrdersPage({
       {
         key: 'id',
         header: 'Order ID',
+        nowrap: true,
         hideable: false,
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[7rem]" />
@@ -440,10 +441,11 @@ export function MarketingOrdersPage({
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[9rem] max-w-[min(14rem,100%)]" />
           : (order) => (
-              <span className="font-medium text-app-fg" title={order.customerName ?? undefined}>
-                {clipName(order.customerName)}
+              // One line: the name ellipses, tags stay visible beside it.
+              <span className="flex min-w-0 max-w-[14rem] items-center gap-1.5" title={order.customerName ?? undefined}>
+                <span className="min-w-0 truncate font-medium text-app-fg">{clipName(order.customerName)}</span>
                 {/\btest\b/i.test(order.customerName?.trim() ?? '') && (
-                  <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
+                  <span className="inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
                 <OrderSourceTag orderSource={order.orderSource} />
               </span>
@@ -472,7 +474,8 @@ export function MarketingOrdersPage({
               order.mediaBuyerId ? (
                 <Link
                   to={`/hr/users/${order.mediaBuyerId}`}
-                  className="text-app-fg font-semibold hover:underline"
+                  title={order.mediaBuyerName ?? undefined}
+                  className="block max-w-[12rem] truncate text-app-fg font-semibold hover:underline"
                 >
                   {order.mediaBuyerName ?? 'View user'}
                 </Link>
