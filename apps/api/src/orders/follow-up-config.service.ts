@@ -1287,6 +1287,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
           campaignName: o.campaignId ? (campaignMap.get(o.campaignId) ?? null) : null,
           servicingBranchId: o.servicingBranchId,
           totalAmount: o.totalAmount,
+          currencyCode: o.currencyCode,
           createdAt: o.createdAt,
           confirmedAt: o.confirmedAt,
           deliveredAt: o.deliveredAt,

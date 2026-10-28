@@ -74,6 +74,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           status: string;
           createdAt: string;
           totalAmount: string | null;
+          currencyCode?: string;
           customerName: string;
           mediaBuyerName?: string | null;
         }>;
@@ -108,6 +109,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         status: o.status,
         createdAt: o.createdAt,
         totalAmount: o.totalAmount ?? null,
+        currencyCode: o.currencyCode,
         customerName: o.customerName,
         mediaBuyerName: o.mediaBuyerName ?? null,
       }),

@@ -21,6 +21,7 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { STATUS_DOT_CLASS, STATUS_LABELS } from '~/features/shared/order-status';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { fetchOrderClipboardSummary } from '~/lib/trpc-browser';
+import { copyTextWhenReady } from '~/lib/clipboard';
 import type { OrderDetail, HistoryEntry } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
 
@@ -551,12 +552,8 @@ export function LogisticsOrderDetailPage({
 
   const handleCopyOrderSummary = useCallback(async () => {
     try {
-      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
-        toast.error('Copy failed', 'Clipboard is not available in this browser.');
-        return;
-      }
-      const { text } = await fetchOrderClipboardSummary(order.id);
-      await navigator.clipboard.writeText(text);
+      // Start the fetch and the copy in the same tick as the click (Safari).
+      await copyTextWhenReady(fetchOrderClipboardSummary(order.id).then((r) => r.text));
       toast.success('Copied', 'Order summary ready to paste into WhatsApp or your 3PL group.');
     } catch (e) {
       toast.error(

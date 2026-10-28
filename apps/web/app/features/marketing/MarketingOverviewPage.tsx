@@ -17,6 +17,7 @@ import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/o
 import { ConvertedRevenue } from '~/components/ui/converted-revenue';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
+import { MoneyAmount } from '~/components/ui/money-amount';
 import { STATUS_COLORS, formatStatus } from '~/features/shared/order-status';
 import type { LeaderboardEntry, Metrics, FundingBalanceRow, MarketingOverviewRecentOrder } from './types';
 import type { LiveActivityItem } from '~/features/cs/types';
@@ -779,7 +780,7 @@ export function MarketingOverviewPage({
                               )}
                             </p>
                             <span className="text-mini font-bold text-app-fg shrink-0 tabular-nums">
-                              {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
+                              <MoneyAmount amount={order.totalAmount ? Number(order.totalAmount) : null} currencyCode={order.currencyCode} />
                             </span>
                           </div>
 

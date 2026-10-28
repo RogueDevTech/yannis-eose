@@ -21,6 +21,7 @@ import {
 } from '~/components/ui/compact-table';
 import { TableRowActionsSheet } from '~/components/ui/table-row-actions-sheet';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { STATUS_LABELS, formatStatus } from '~/features/shared/order-status';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Modal } from '~/components/ui/modal';
@@ -718,14 +719,26 @@ function duplicateOutcomeMessage(row: CrossFunnelAttemptRow): string {
       ? 'The same customer submitted the same form again.'
       : kind === 'same-mb'
         ? 'The same customer ordered the same product through another form of the same Media Buyer.'
-        : 'The same customer already ordered this product through a different Media Buyer\'s form.';
+        : 'The same customer also ordered this product through a different Media Buyer\'s form.';
   const original = orderRef(row.originalOrderNumber);
   if (row.duplicateOrderId) {
     const dup = orderRef(row.duplicateOrderNumber);
     const created = row.duplicateOrderCreatedAt ? ` at ${formatTimestamp(row.duplicateOrderCreatedAt)}` : '';
     const cleaned = formatTimestamp(row.attemptedAt);
+    // Cleanup keeps the order furthest along (e.g. Delivered), then the oldest.
+    // When the kept order is the newer one, "came first" would be false.
+    const keptIsNewer =
+      row.duplicateOrderCreatedAt != null &&
+      row.originalOrderCreatedAt != null &&
+      new Date(row.originalOrderCreatedAt).getTime() > new Date(row.duplicateOrderCreatedAt).getTime();
+    const keptStatus = row.originalOrderStatus
+      ? (STATUS_LABELS[row.originalOrderStatus] ?? formatStatus(row.originalOrderStatus))
+      : null;
+    const reason = keptIsNewer
+      ? `${original} is further along${keptStatus ? ` (${keptStatus})` : ''}, even though it was placed later`
+      : `${original} came first`;
     return row.duplicateOrderStatus === 'DELETED'
-      ? `${what} This was created as order ${dup}${created}. Duplicate cleanup removed it at ${cleaned} because ${original} came first. The customer stays on ${original}.`
+      ? `${what} This was created as order ${dup}${created}. Duplicate cleanup removed it at ${cleaned} because ${reason}. The customer stays on ${original}.`
       : `${what} This was created as order ${dup}${created}. Duplicate cleanup marked it at ${cleaned} as a copy of ${original} for CS to review.`;
   }
   return `${what} No new order was created because duplicate checking was set to block at the time. The customer stays on ${original}.`;
@@ -760,7 +773,7 @@ function DuplicateCompareOverlay({
               switch (kind) {
                 case 'resubmission': return 'Repeat submission: same customer, same form';
                 case 'same-mb': return 'Same customer ordered through another form by the same Media Buyer';
-                case 'cross-funnel': return 'Same customer already ordered through a different Media Buyer';
+                case 'cross-funnel': return 'Same customer also ordered through a different Media Buyer';
               }
             })()}
           </p>

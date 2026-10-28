@@ -43,6 +43,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { shareOrderToLogistics, fetchOrderClipboardSummary } from '~/lib/trpc-browser';
+import { copyTextWhenReady } from '~/lib/clipboard';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { canViewCustomerJourney, hasFinanceAccess, isAdminLevel, isOrgWideDepartmentHead } from '~/lib/rbac';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
@@ -1378,12 +1379,8 @@ export function OrderDetailPage({
 
   const handleCopyOrderSummary = useCallback(async () => {
     try {
-      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
-        toast.error('Copy failed', 'Clipboard is not available in this browser.');
-        return;
-      }
-      const { text } = await fetchOrderClipboardSummary(order.id);
-      await navigator.clipboard.writeText(text);
+      // Start the fetch and the copy in the same tick as the click (Safari).
+      await copyTextWhenReady(fetchOrderClipboardSummary(order.id).then((r) => r.text));
       toast.success('Copied', 'Order summary ready to paste into WhatsApp or your logistics company group.');
     } catch (e) {
       toast.error(
