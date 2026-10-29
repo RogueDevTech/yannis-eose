@@ -30,7 +30,7 @@ import { isBranchTeamsSchemaMissingError } from '../common/db/branch-teams-schem
 import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
 import { computeEarningsFromPlanRules } from './commission-rules-math';
 import { PayrollComputeService } from './payroll-compute.service';
-import { PayrollMetricsService } from './payroll-metrics.service';
+import { PayrollMetricsService, PPD_METRIC_ROLES } from './payroll-metrics.service';
 import { nigeriaMonthWindow } from '../common/utils/date-range';
 import type { PayrollMetrics } from '@yannis/shared';
 
@@ -1084,12 +1084,19 @@ export class PayrollBatchService {
     // identical to the per-member computePayoutForMember (same formula/PAYE math).
     const payableStaff = staff.filter((m) => m.onboardingPayrollStatus !== 'PENDING_APPROVAL');
     if (payableStaff.length > 0) {
+      // Generation (and recalculate) saves the month-end FX rates for a finished
+      // month, attributed to the actor withActor set on this transaction.
+      const actorRows = await tx.execute(sql`SELECT current_setting('yannis.current_user_id', true) AS actor_id`);
+      const actorRow = (Array.isArray(actorRows) ? actorRows : (actorRows as { rows?: unknown[] }).rows ?? [])[0] as
+        | { actor_id?: string | null }
+        | undefined;
       const computedByStaff = await this.computeStaffPayoutsBatched(
         tx,
         payableStaff,
         periodStart,
         periodEnd,
         periodMonth,
+        { lockFxActorId: actorRow?.actor_id || null },
       );
 
       const insertValues = payableStaff.map((member) => {
@@ -1420,6 +1427,11 @@ export class PayrollBatchService {
     periodStart: Date,
     periodEnd: Date,
     periodMonth: string,
+    /**
+     * Generation only: save the month-end FX rates for this month (when it has
+     * ended) before converting Payroll PPD ROAS revenue. Preview never saves.
+     */
+    opts?: { lockFxActorId?: string | null },
   ): Promise<Map<string, Omit<PayoutRow, 'staffId'> | null>> {
     const out = new Map<string, Omit<PayoutRow, 'staffId'> | null>();
     if (staff.length === 0) return out;
@@ -1687,6 +1699,33 @@ export class PayrollBatchService {
       periodEnd,
     );
 
+    // --- 6c) Payroll PPD ROAS + OC Bonus inputs for media buyers, batched. -----
+    // Same method and scope the single-member path uses (getStaffMetrics).
+    const ppdStaff = staff
+      .filter((s) => PPD_METRIC_ROLES.includes(s.role))
+      .map((s) => ({
+        id: s.id,
+        source:
+          (s.payRoleId ? payRoleCache.get(s.payRoleId)?.deliveredMetricSource : null) === 'RECOVERY_COMBINED'
+            ? ('RECOVERY_COMBINED' as const)
+            : ('FUNNEL' as const),
+      }));
+    const ppdById = await this.payrollMetrics.computePpdMetricsBatched(
+      tx,
+      ppdStaff,
+      periodStart,
+      periodEnd,
+      revenueServicingBranchIds.length ? revenueServicingBranchIds : null,
+      // Only a batch that pays media buyers saves the month's rates, so an
+      // unrelated batch (e.g. CS) generated early cannot fix them first.
+      {
+        lockFx:
+          opts?.lockFxActorId && ppdStaff.length > 0 && periodEnd.getTime() < Date.now()
+            ? { actorId: opts.lockFxActorId }
+            : null,
+      },
+    );
+
     // --- 7) Compute each member's line IN MEMORY, folding in adjustments. ------
     for (const member of staff) {
       const branchInfo = memberBranchByUser.get(member.id);
@@ -1716,6 +1755,7 @@ export class PayrollBatchService {
         returnedCount: base.returnedCount,
         qualifyingRevenue: base.qualifyingRevenue,
         missingData,
+        ...ppdById.get(member.id),
       };
 
       const [plan, payRole, taxConfig] = await Promise.all([

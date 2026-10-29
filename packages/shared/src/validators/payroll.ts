@@ -81,8 +81,47 @@ export const payrollEmployerPayeSubsidySchema = z.object({
   subsidyPercent: z.number().min(0).max(100),
 });
 
+/**
+ * How a media buyer's Pay Per Delivered order (PPD) is worked out.
+ *   PERFORMANCE_METRICS (default) — the PER_ORDER bonus tiers (DR% / CPA).
+ *   ROAS — `roasPpdTiers` on Payroll PPD ROAS; PER_ORDER bonus tiers are
+ *          skipped so PPD is never paid twice. FLAT bonus tiers still apply.
+ */
+export const payrollPpdMethodSchema = z.enum(['PERFORMANCE_METRICS', 'ROAS']);
+export type PayrollPpdMethod = z.infer<typeof payrollPpdMethodSchema>;
+
+/** One ROAS band: Payroll PPD ROAS ≥ minRoas pays ratePerOrder per delivered order. */
+export const payrollRoasPpdTierSchema = z.object({
+  minRoas: z.number().min(0),
+  ratePerOrder: z.number().min(0),
+});
+
+/**
+ * Which orders count toward the OC Bonus brackets. HR has not yet defined
+ * "qualifying orders", so the pay role states it explicitly.
+ *   ORDERS_CREATED — orders the media buyer generated in the month (not deleted).
+ *   DELIVERED_ORDERS — the same delivered orders Payroll PPD ROAS counts.
+ */
+export const payrollOcBonusBasisSchema = z.enum(['ORDERS_CREATED', 'DELIVERED_ORDERS']);
+
+/** OC Bonus: the highest bracket whose minOrders is reached pays its flat amount. */
+export const payrollOcBonusSchema = z.object({
+  basis: payrollOcBonusBasisSchema,
+  tiers: z
+    .array(
+      z.object({
+        minOrders: z.number().int().min(0),
+        amount: z.number().min(0),
+      }),
+    )
+    .max(10),
+});
+
 export const payrollFormulaSchema = z.object({
   schemaVersion: z.literal('payroll_v1').optional(),
+  ppdMethod: payrollPpdMethodSchema.optional(),
+  roasPpdTiers: z.array(payrollRoasPpdTierSchema).max(10).optional(),
+  ocBonus: payrollOcBonusSchema.optional(),
   flatBaseSalary: z.number().min(0).optional(),
   baseSalaryTiers: z.array(payrollBaseSalaryTierSchema).max(20).optional(),
   bonusTiers: z.array(payrollBonusTierSchema).max(30).optional(),
@@ -119,6 +158,23 @@ export const payrollMetricsSchema = z.object({
   // non-CS staff and where not computed.
   qualifyingRevenue: z.number().min(0).optional(),
   targetMet: z.boolean().optional(),
+  // Payroll PPD ROAS inputs (media buyers only; absent for everyone else).
+  // Delivered orders the person is the MEDIA BUYER on (not the CS closer), by
+  // delivered_at in the period, within the pay role's order source. Revenue is
+  // those orders' totals in ₦ (international orders converted at the period's
+  // saved month-end rate). Spend is approved AD_SPEND by spend_date.
+  ppdDeliveredCount: z.number().int().min(0).optional(),
+  ppdRevenue: z.number().min(0).optional(),
+  ppdAdSpend: z.number().min(0).optional(),
+  /** null when there is no approved ad spend (ROAS cannot be worked out). */
+  ppdRoas: z.number().min(0).nullable().optional(),
+  /** Rate used per currency (1 unit = rate ₦), and whether it is the saved month-end rate. */
+  ppdFxRates: z.record(z.string(), z.number()).optional(),
+  ppdFxLocked: z.boolean().optional(),
+  /** Revenue left out because its currency had no rate, per currency (local amount). */
+  ppdUnconvertedRevenue: z.record(z.string(), z.number()).optional(),
+  /** Orders the person is the media buyer on, created in the period (not deleted). OC Bonus basis. */
+  ocOrdersCreated: z.number().int().min(0).optional(),
   deliveredByProduct: z.record(z.string(), z.number().int().min(0)).optional(),
   drByProduct: z.record(z.string(), z.number().min(0).max(100)).optional(),
   missingData: z.boolean().optional(),

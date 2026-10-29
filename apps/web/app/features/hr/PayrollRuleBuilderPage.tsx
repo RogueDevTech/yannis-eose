@@ -111,6 +111,8 @@ export function PayrollRuleBuilderPage({ payRole, plan, canWrite, duplicateSourc
           sampleReturnedCount: String(samples.returnedCount),
           sampleQualifyingRevenue: String(samples.qualifyingRevenue),
           sampleTargetMet: samples.targetMet ? 'true' : 'false',
+          sampleRoas: String(samples.roas),
+          sampleOcOrders: String(samples.ocOrders),
         },
         { method: 'post' },
       );

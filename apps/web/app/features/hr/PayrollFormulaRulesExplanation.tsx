@@ -75,6 +75,9 @@ export function PayrollFormulaRulesExplanation({
   const floor = formula.minimumFloor;
   const scaling = formula.scalingRule;
   const subsidy = formula.employerPayeSubsidy;
+  const roasPpd = formula.ppdMethod === 'ROAS';
+  const roasBands = [...(formula.roasPpdTiers ?? [])].sort((a, b) => b.minRoas - a.minRoas);
+  const ocBrackets = [...(formula.ocBonus?.tiers ?? [])].sort((a, b) => a.minOrders - b.minOrders);
 
   return (
     <div className="space-y-4">
@@ -112,6 +115,7 @@ export function PayrollFormulaRulesExplanation({
         ) : (
           <ul className="space-y-2">
             {bonusTiers.map((tier, idx) => {
+              const skipped = roasPpd && tier.kind === 'PER_ORDER';
               const amountLabel =
                 tier.kind === 'PER_ORDER'
                   ? `${formatNaira(tier.amount)} per delivered order`
@@ -124,6 +128,7 @@ export function PayrollFormulaRulesExplanation({
                   <span className="text-xs font-semibold text-app-fg-muted mr-2">#{idx + 1}</span>
                   Add <span className="font-medium tabular-nums">{amountLabel}</span>{' '}
                   {tierPhrase(tier)}.
+                  {skipped ? <span className="text-xs text-app-fg-muted"> Not paid: ROAS-based PPD.</span> : null}
                 </li>
               );
             })}
@@ -131,10 +136,55 @@ export function PayrollFormulaRulesExplanation({
         )}
         {bonusTiers.length > 0 ? (
           <p className="text-xs text-app-fg-muted">
-            Every matching bonus tier is added on top of base salary (they stack).
+            Tiers are checked from the highest threshold down. Only the first match pays.
           </p>
         ) : null}
       </div>
+
+      <div className="card p-4 space-y-3">
+        <h3 className="text-sm font-semibold text-app-fg">Pay per delivered order (PPD)</h3>
+        {roasPpd ? (
+          <>
+            <p className="text-sm text-app-fg">
+              ROAS-based. Payroll PPD ROAS = revenue of delivered orders where the person is the media buyer (by
+              delivery date, converted at the saved month-end rate) / approved ad spend for the month.
+            </p>
+            <ul className="space-y-2">
+              {roasBands.map((b, idx) => (
+                <li
+                  key={`roas-${idx}`}
+                  className="rounded-lg border border-app-border bg-app-hover/30 px-3 py-2 text-sm text-app-fg"
+                >
+                  ROAS at least {b.minRoas}:{' '}
+                  <span className="font-medium tabular-nums">{formatNaira(b.ratePerOrder)}</span> per delivered order
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-app-fg-muted">The highest band reached pays. No ad spend means no PPD.</p>
+          </>
+        ) : (
+          <p className="text-sm text-app-fg">Performance metrics: the per-order bonus tiers above.</p>
+        )}
+      </div>
+
+      {ocBrackets.length > 0 ? (
+        <div className="card p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-app-fg">OC Bonus</h3>
+          <ul className="space-y-2">
+            {ocBrackets.map((t, idx) => (
+              <li
+                key={`oc-${idx}`}
+                className="rounded-lg border border-app-border bg-app-hover/30 px-3 py-2 text-sm text-app-fg"
+              >
+                {t.minOrders.toLocaleString('en-NG')}+{' '}
+                {formula.ocBonus?.basis === 'DELIVERED_ORDERS' ? 'delivered orders' : 'orders generated'}:{' '}
+                <span className="font-medium tabular-nums">{formatNaira(t.amount)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-app-fg-muted">Paid under either PPD method. The highest bracket reached pays.</p>
+        </div>
+      ) : null}
 
       {(allowances.length > 0 || penalty > 0 || floor || scaling || subsidy) && (
         <div className="card p-4 space-y-3">

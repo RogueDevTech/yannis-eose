@@ -4,6 +4,8 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type { PayrollMetrics } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
+import { nigeriaCalendarDate } from '../common/utils/date-range';
+import { buildFxRateLookup, convertRevenueToBase, type FxRateLookup, type RevenueSlice } from '../marketing/revenue-fx';
 
 type TxLike = PostgresJsDatabase<typeof schema>;
 
@@ -52,6 +54,26 @@ export interface PayBatchedMetric {
   returnedCount: number;
   /** CS-closer qualifying revenue (₦). 0 unless a servicing-branch revenue scope is supplied. */
   qualifyingRevenue: number;
+}
+
+/** Payroll PPD ROAS + OC Bonus inputs for one media buyer (see computePpdMetricsBatched). */
+export interface PpdMetric {
+  ppdDeliveredCount: number;
+  ppdRevenue: number;
+  ppdAdSpend: number;
+  ppdRoas: number | null;
+  ppdFxRates: Record<string, number>;
+  ppdFxLocked: boolean;
+  ppdUnconvertedRevenue: Record<string, number>;
+  ocOrdersCreated: number;
+}
+
+/** Roles that get Payroll PPD ROAS / OC Bonus inputs. */
+export const PPD_METRIC_ROLES: readonly string[] = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'];
+
+/** "YYYY-MM" of a period start in Nigeria time (period bounds are WAT midnights). */
+function nigeriaMonth(d: Date): string {
+  return nigeriaCalendarDate(d).slice(0, 7);
 }
 
 /** Minimal order shape for the pure OR-attribution aggregation reference. */
@@ -164,6 +186,22 @@ export class PayrollMetricsService {
   constructor(@Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>) {}
 
   async getStaffMetrics(input: StaffMetricsInput, tx: TxLike = this.db): Promise<PayrollMetrics> {
+    const [metrics, ppd] = await Promise.all([
+      this.getStaffOrderMetrics(input, tx),
+      PPD_METRIC_ROLES.includes(input.staffRole)
+        ? this.computePpdMetricsBatched(
+            tx,
+            [{ id: input.staffId, source: input.deliveredMetricSource ?? 'FUNNEL' }],
+            input.periodStart,
+            input.periodEnd,
+            input.servicingBranchIds,
+          ).then((m) => m.get(input.staffId))
+        : Promise.resolve(undefined),
+    ]);
+    return ppd ? { ...metrics, ...ppd } : metrics;
+  }
+
+  private async getStaffOrderMetrics(input: StaffMetricsInput, tx: TxLike): Promise<PayrollMetrics> {
     if (input.deliveredMetricSource === 'RECOVERY_COMBINED') {
       return this.getRecoveryCombinedStaffMetrics(input, tx);
     }
@@ -852,6 +890,207 @@ export class PayrollMetricsService {
       const totalOrders = totalOrdersByStaff.get(id) ?? 0;
       const spend = spendById.get(id) ?? 0;
       out.set(id, totalOrders > 0 && spend > 0 ? spend / totalOrders : null);
+    }
+    return out;
+  }
+
+  /**
+   * Month-end FX for payroll: the period's saved rates (payroll_fx_rates), else
+   * today's currencies.fx_rate_to_base. With `lock`, every rate not yet saved for
+   * the month is saved first, so the month converts at that rate from then on.
+   * Only lock a month that has ended (a mid-month rate is not a month-end rate).
+   */
+  async loadPayrollFxLookup(
+    tx: TxLike,
+    periodMonth: string,
+    lock?: { actorId: string } | null,
+  ): Promise<{ rateOf: FxRateLookup; isLocked: (groupId: string | null, code: string) => boolean }> {
+    const currencyRows = await tx
+      .select({
+        groupId: schema.currencies.groupId,
+        code: schema.currencies.code,
+        isDefault: schema.currencies.isDefault,
+        fxRateToBase: schema.currencies.fxRateToBase,
+      })
+      .from(schema.currencies);
+    const current = buildFxRateLookup(currencyRows);
+
+    if (lock) {
+      const toSave = currencyRows
+        .filter((r) => r.groupId && !r.isDefault && r.code.toUpperCase() !== 'NGN')
+        .map((r) => ({ groupId: r.groupId as string, code: r.code.toUpperCase(), rate: current(r.groupId, r.code) }))
+        .filter((r): r is { groupId: string; code: string; rate: number } => r.rate != null);
+      if (toSave.length) {
+        await tx
+          .insert(schema.payrollFxRates)
+          .values(
+            toSave.map((r) => ({
+              groupId: r.groupId,
+              periodMonth,
+              currencyCode: r.code,
+              rate: sql`${r.rate}::numeric`,
+              lockedBy: lock.actorId,
+            })),
+          )
+          .onConflictDoNothing();
+      }
+    }
+
+    const saved = await tx
+      .select({
+        groupId: schema.payrollFxRates.groupId,
+        code: schema.payrollFxRates.currencyCode,
+        rate: schema.payrollFxRates.rate,
+      })
+      .from(schema.payrollFxRates)
+      .where(eq(schema.payrollFxRates.periodMonth, periodMonth));
+    const savedByKey = new Map(saved.map((r) => [`${r.groupId}:${r.code.toUpperCase()}`, Number(r.rate)]));
+
+    return {
+      rateOf: (groupId, code) => {
+        const upper = code.toUpperCase();
+        if (upper === 'NGN') return current(groupId, upper);
+        return savedByKey.get(`${groupId ?? ''}:${upper}`) ?? current(groupId, upper);
+      },
+      isLocked: (groupId, code) =>
+        code.toUpperCase() === 'NGN' || savedByKey.has(`${groupId ?? ''}:${code.toUpperCase()}`),
+    };
+  }
+
+  /**
+   * Payroll PPD ROAS + OC Bonus inputs for media buyers, batched. One definition
+   * for every payroll path (Earnings Outlook, preview, generation).
+   *
+   * Attribution is the MEDIA BUYER only (orders.media_buyer_id), never the CS
+   * closer. Delivered orders count by delivered_at in the period and follow the
+   * pay role's order source:
+   *   FUNNEL            — every orders-table row (one row per real order, so a
+   *                       delivered cart or follow-up is its graduated copy).
+   *   RECOVERY_COMBINED — orders with is_delivered_follow_up + cart_orders, the
+   *                       same split as getRecoveryCombinedStaffMetrics.
+   * Revenue is those same orders' totals, converted to ₦ per company × currency.
+   * Spend is approved AD_SPEND by spend_date (₦), as CPA uses.
+   */
+  async computePpdMetricsBatched(
+    tx: TxLike,
+    staff: Array<{ id: string; source: DeliveredMetricSource }>,
+    periodStart: Date,
+    periodEnd: Date,
+    scopeBranchIds: string[] | null | undefined,
+    opts?: { lockFx?: { actorId: string } | null },
+  ): Promise<Map<string, PpdMetric>> {
+    const out = new Map<string, PpdMetric>();
+    const ids = [...new Set(staff.map((s) => s.id).filter(Boolean))];
+    if (ids.length === 0) return out;
+    const recoveryIds = new Set(staff.filter((s) => s.source === 'RECOVERY_COMBINED').map((s) => s.id));
+    const funnelIds = ids.filter((id) => !recoveryIds.has(id));
+
+    const startIso = periodStart.toISOString();
+    const endIso = periodEnd.toISOString();
+    const idSql = (list: string[]) => sql.join(list.map((id) => sql`${id}::uuid`), sql`, `);
+    const scope = scopeBranchIds?.length ? idSql(scopeBranchIds) : null;
+    const orderScope = scope ? sql`AND (o.branch_id IN (${scope}) OR o.servicing_branch_id IN (${scope}))` : sql``;
+    const rowsOf = (res: unknown) =>
+      (Array.isArray(res) ? res : ((res as { rows?: unknown[] })?.rows ?? [])) as Array<Record<string, unknown>>;
+
+    const deliveredSlices = (table: 'orders' | 'cart_orders', list: string[], extra = sql``) => {
+      if (list.length === 0) return Promise.resolve([] as Array<Record<string, unknown>>);
+      const from = table === 'orders' ? sql`orders o` : sql`cart_orders o`;
+      const cartScope = scope ? sql`AND o.servicing_branch_id IN (${scope})` : sql``;
+      return tx
+        .execute(sql`
+          SELECT o.media_buyer_id AS staff_id, b.group_id, upper(COALESCE(o.currency_code, 'NGN')) AS code,
+                 count(*) AS n, COALESCE(sum(o.total_amount), 0) AS total
+          FROM ${from}
+          LEFT JOIN branches b ON b.id = o.branch_id
+          WHERE o.media_buyer_id IN (${idSql(list)})
+            AND o.status IN ('DELIVERED', 'REMITTED')
+            AND o.delivered_at >= ${startIso}::timestamptz
+            AND o.delivered_at <= ${endIso}::timestamptz
+            ${table === 'orders' ? orderScope : cartScope}
+            ${extra}
+          GROUP BY 1, 2, 3
+        `)
+        .then(rowsOf);
+    };
+
+    const periodMonth = `${nigeriaMonth(periodStart)}-01`;
+    const [funnelRows, recoveryOrderRows, recoveryCartRows, createdRows, spendRows, fx] = await Promise.all([
+      deliveredSlices('orders', funnelIds),
+      deliveredSlices('orders', [...recoveryIds], sql`AND o.is_delivered_follow_up = true`),
+      deliveredSlices('cart_orders', [...recoveryIds]),
+      tx
+        .execute(sql`
+          SELECT o.media_buyer_id AS staff_id, count(*) AS n
+          FROM orders o
+          WHERE o.media_buyer_id IN (${idSql(ids)})
+            AND o.status <> 'DELETED'
+            AND o.created_at >= ${startIso}::timestamptz
+            AND o.created_at <= ${endIso}::timestamptz
+            ${orderScope}
+          GROUP BY 1
+        `)
+        .then(rowsOf),
+      tx
+        .select({ mediaBuyerId: schema.adSpendLogs.mediaBuyerId, total: sum(schema.adSpendLogs.spendAmount) })
+        .from(schema.adSpendLogs)
+        .where(
+          and(
+            inArray(schema.adSpendLogs.mediaBuyerId, ids),
+            eq(schema.adSpendLogs.status, 'APPROVED'),
+            eq(schema.adSpendLogs.category, 'AD_SPEND'),
+            gte(schema.adSpendLogs.spendDate, periodStart),
+            lte(schema.adSpendLogs.spendDate, periodEnd),
+          ),
+        )
+        .groupBy(schema.adSpendLogs.mediaBuyerId),
+      this.loadPayrollFxLookup(tx, periodMonth, opts?.lockFx ?? null),
+    ]);
+
+    for (const id of ids) {
+      out.set(id, {
+        ppdDeliveredCount: 0,
+        ppdRevenue: 0,
+        ppdAdSpend: 0,
+        ppdRoas: null,
+        ppdFxRates: {},
+        ppdFxLocked: true,
+        ppdUnconvertedRevenue: {},
+        ocOrdersCreated: 0,
+      });
+    }
+
+    const slicesByStaff = new Map<string, RevenueSlice[]>();
+    for (const r of [...funnelRows, ...recoveryOrderRows, ...recoveryCartRows]) {
+      const m = out.get(String(r['staff_id']));
+      if (!m) continue;
+      m.ppdDeliveredCount += Number(r['n'] ?? 0);
+      const groupId = (r['group_id'] as string | null) ?? null;
+      const code = String(r['code'] ?? 'NGN');
+      const list = slicesByStaff.get(String(r['staff_id'])) ?? [];
+      list.push({ groupId, currencyCode: code, total: Number(r['total'] ?? 0) });
+      slicesByStaff.set(String(r['staff_id']), list);
+      if (code !== 'NGN') {
+        const rate = fx.rateOf(groupId, code);
+        if (rate != null) m.ppdFxRates[code] = rate;
+        if (!fx.isLocked(groupId, code)) m.ppdFxLocked = false;
+      }
+    }
+    for (const [staffId, slices] of slicesByStaff) {
+      const m = out.get(staffId)!;
+      const converted = convertRevenueToBase(slices, fx.rateOf);
+      m.ppdRevenue = converted.base;
+      m.ppdUnconvertedRevenue = converted.unconverted;
+    }
+    for (const r of createdRows) {
+      const m = out.get(String(r['staff_id']));
+      if (m) m.ocOrdersCreated = Number(r['n'] ?? 0);
+    }
+    for (const r of spendRows) {
+      const m = out.get(r.mediaBuyerId as string);
+      if (!m) continue;
+      m.ppdAdSpend = Number(r.total ?? 0);
+      m.ppdRoas = m.ppdAdSpend > 0 ? m.ppdRevenue / m.ppdAdSpend : null;
     }
     return out;
   }

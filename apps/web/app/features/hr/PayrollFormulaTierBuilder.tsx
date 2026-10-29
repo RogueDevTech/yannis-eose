@@ -69,6 +69,22 @@ const OPERATOR_OPTIONS = [
 type BaseTier = NonNullable<PayrollFormula['baseSalaryTiers']>[number];
 type BonusTier = NonNullable<PayrollFormula['bonusTiers']>[number];
 type TierCondition = NonNullable<BonusTier['extraConditions']>[number];
+type RoasBand = NonNullable<PayrollFormula['roasPpdTiers']>[number];
+type OcBracket = NonNullable<PayrollFormula['ocBonus']>['tiers'][number];
+type PpdMethod = NonNullable<PayrollFormula['ppdMethod']>;
+type OcBasis = NonNullable<PayrollFormula['ocBonus']>['basis'];
+
+const PPD_METHOD_OPTIONS = [
+  { value: 'PERFORMANCE_METRICS', label: 'Performance metrics (per-order bonus tiers)' },
+  { value: 'ROAS', label: 'ROAS (Payroll PPD ROAS bands)' },
+];
+
+const OC_BASIS_OPTIONS = [
+  { value: 'ORDERS_CREATED', label: 'Orders generated in the month' },
+  { value: 'DELIVERED_ORDERS', label: 'Delivered orders in the month' },
+];
+
+const BAND_GRID = 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1.5rem] gap-x-2 gap-y-1.5 items-center';
 
 function emptyCondition(): TierCondition {
   return { metric: 'CPA', operator: 'LT', threshold: 0 };
@@ -204,6 +220,10 @@ export interface FormulaPreviewSamples {
   returnedCount: number;
   qualifyingRevenue: number;
   targetMet: boolean;
+  /** Sample Payroll PPD ROAS (ROAS-based PPD). */
+  roas: number;
+  /** Sample orders generated (OC Bonus on orders generated). */
+  ocOrders: number;
 }
 
 interface PayrollFormulaTierBuilderProps {
@@ -234,6 +254,12 @@ function parseFormula(raw: Record<string, unknown>): PayrollFormula {
     baseSalaryTiers: Array.isArray(raw.baseSalaryTiers) ? (raw.baseSalaryTiers as BaseTier[]) : [],
     bonusTiers: Array.isArray(raw.bonusTiers) ? (raw.bonusTiers as BonusTier[]) : [],
     penaltyPerReturn: asNumber(raw.penaltyPerReturn),
+    ppdMethod: raw.ppdMethod === 'ROAS' ? 'ROAS' : undefined,
+    roasPpdTiers: Array.isArray(raw.roasPpdTiers) ? (raw.roasPpdTiers as RoasBand[]) : [],
+    ocBonus:
+      raw.ocBonus && typeof raw.ocBonus === 'object'
+        ? (raw.ocBonus as NonNullable<PayrollFormula['ocBonus']>)
+        : undefined,
   };
 }
 
@@ -253,6 +279,12 @@ export function PayrollFormulaTierBuilder({
   const [baseTiers, setBaseTiers] = useState<BaseTier[]>(parsed.baseSalaryTiers ?? []);
   const [bonusTiers, setBonusTiers] = useState<BonusTier[]>(parsed.bonusTiers ?? []);
   const [penaltyPerReturn, setPenaltyPerReturn] = useState(String(parsed.penaltyPerReturn ?? ''));
+  const [ppdMethod, setPpdMethod] = useState<PpdMethod>(parsed.ppdMethod ?? 'PERFORMANCE_METRICS');
+  const [roasBands, setRoasBands] = useState<RoasBand[]>(parsed.roasPpdTiers ?? []);
+  const [ocBasis, setOcBasis] = useState<OcBasis>(parsed.ocBonus?.basis ?? 'ORDERS_CREATED');
+  const [ocBrackets, setOcBrackets] = useState<OcBracket[]>(parsed.ocBonus?.tiers ?? []);
+  const [sampleRoas, setSampleRoas] = useState('2.5');
+  const [sampleOcOrders, setSampleOcOrders] = useState('1500');
   const [sampleDr, setSampleDr] = useState('55');
   const [sampleTeamDr, setSampleTeamDr] = useState('52');
   const [sampleCpa, setSampleCpa] = useState('10000');
@@ -267,8 +299,15 @@ export function PayrollFormulaTierBuilder({
     if (baseTiers.length) out.baseSalaryTiers = baseTiers;
     if (bonusTiers.length) out.bonusTiers = bonusTiers;
     if (penaltyPerReturn) out.penaltyPerReturn = Number(penaltyPerReturn);
+    // Only ROAS is written; an absent ppdMethod is Performance Metrics, so
+    // existing pay roles keep their saved formula as it was.
+    if (ppdMethod === 'ROAS') out.ppdMethod = 'ROAS';
+    if (roasBands.length) out.roasPpdTiers = roasBands;
+    if (ocBrackets.length) out.ocBonus = { basis: ocBasis, tiers: ocBrackets };
     return out;
-  }, [flatBaseSalary, baseTiers, bonusTiers, penaltyPerReturn]);
+  }, [flatBaseSalary, baseTiers, bonusTiers, penaltyPerReturn, ppdMethod, roasBands, ocBasis, ocBrackets]);
+
+  const roasPpd = ppdMethod === 'ROAS';
 
   const samples = useMemo<FormulaPreviewSamples>(
     () => ({
@@ -279,8 +318,20 @@ export function PayrollFormulaTierBuilder({
       returnedCount: toNumberLoose(sampleReturned),
       qualifyingRevenue: toNumberLoose(sampleQualifyingRevenue),
       targetMet: sampleTargetMet,
+      roas: toNumberLoose(sampleRoas),
+      ocOrders: toNumberLoose(sampleOcOrders),
     }),
-    [sampleDr, sampleTeamDr, sampleCpa, sampleDelivered, sampleReturned, sampleQualifyingRevenue, sampleTargetMet],
+    [
+      sampleDr,
+      sampleTeamDr,
+      sampleCpa,
+      sampleDelivered,
+      sampleReturned,
+      sampleQualifyingRevenue,
+      sampleTargetMet,
+      sampleRoas,
+      sampleOcOrders,
+    ],
   );
 
   /** Which sample inputs to show: driven only by metrics/kinds currently on the form. */
@@ -291,9 +342,12 @@ export function PayrollFormulaTierBuilder({
       t.metric,
       ...(t.extraConditions ?? []).map((c) => c.metric),
     ];
+    // Under ROAS-based PPD the per-order tiers do not pay, so their metrics
+    // need no sample input.
+    const payingBonusTiers = roasPpd ? bonusTiers.filter((t) => t.kind !== 'PER_ORDER') : bonusTiers;
     const usedMetrics = new Set([
       ...baseTiers.flatMap(tierMetrics),
-      ...bonusTiers.flatMap(tierMetrics),
+      ...payingBonusTiers.flatMap(tierMetrics),
     ]);
     return {
       individualDr: usedMetrics.has('INDIVIDUAL_DR'),
@@ -302,17 +356,25 @@ export function PayrollFormulaTierBuilder({
       targetMet: usedMetrics.has('TARGET_MET'),
       // Delivered-order count input is relevant both for PER_ORDER bonus math
       // and for any tier gated on the DELIVERED_COUNT metric.
-      delivered: bonusTiers.some((t) => t.kind === 'PER_ORDER') || usedMetrics.has('DELIVERED_COUNT'),
+      delivered:
+        payingBonusTiers.some((t) => t.kind === 'PER_ORDER') ||
+        usedMetrics.has('DELIVERED_COUNT') ||
+        roasPpd ||
+        (ocBrackets.length > 0 && ocBasis === 'DELIVERED_ORDERS'),
+      roas: roasPpd,
+      ocOrders: ocBrackets.length > 0 && ocBasis === 'ORDERS_CREATED',
       // Qualifying revenue (delivered + remitted) input — shown when a base or
       // bonus tier is gated on the QUALIFYING_REVENUE metric (revenue tiers).
       qualifyingRevenue: usedMetrics.has('QUALIFYING_REVENUE'),
       returned: Number(penaltyPerReturn) > 0,
     };
-  }, [baseTiers, bonusTiers, penaltyPerReturn]);
+  }, [baseTiers, bonusTiers, penaltyPerReturn, roasPpd, ocBrackets, ocBasis]);
 
   const showSamplePreview =
     baseTiers.length > 0 ||
     bonusTiers.length > 0 ||
+    (roasPpd && roasBands.length > 0) ||
+    ocBrackets.length > 0 ||
     Number(flatBaseSalary) > 0 ||
     Number(penaltyPerReturn) > 0;
 
@@ -492,6 +554,11 @@ export function PayrollFormulaTierBuilder({
         onAdd={() => setBonusTiers((rows) => [...rows, emptyBonusTier()])}
         hasRows={bonusTiers.length > 0}
       >
+        {roasPpd && bonusTiers.some((t) => t.kind === 'PER_ORDER') ? (
+          <p className="text-xs text-app-fg-muted">
+            ROAS-based PPD is selected: per-order tiers are kept but do not pay. Flat tiers still pay.
+          </p>
+        ) : null}
         {bonusTiers.length > 0 ? (
           <div className="overflow-x-auto space-y-2">
             <TierGridHeader
@@ -596,6 +663,72 @@ export function PayrollFormulaTierBuilder({
         ) : null}
       </TierSection>
 
+      <div className="card !p-3 space-y-2">
+        <h3 className="text-sm font-semibold text-app-fg flex items-center">
+          Pay per delivered order (PPD) method
+          <InfoButton
+            label="PPD method"
+            text={
+              'Performance metrics: PPD comes from the per-order bonus tiers above (DR %, CPA).\n\nROAS: PPD comes from the ROAS bands below. Payroll PPD ROAS = revenue of the delivered orders the person is media buyer on (by delivery date, international orders converted at the saved month-end rate) / approved ad spend for the month. The highest band reached pays its rate for every one of those delivered orders. Per-order tiers do not pay under ROAS; flat tiers still do.'
+            }
+          />
+        </h3>
+        <FormSelect
+          aria-label="PPD method"
+          value={ppdMethod}
+          disabled={!canWrite}
+          onChange={(e) => setPpdMethod(e.target.value as PpdMethod)}
+          options={PPD_METHOD_OPTIONS}
+        />
+        {roasPpd ? (
+          <BandRows
+            columns={['ROAS at least', 'NGN per delivered order']}
+            rows={roasBands.map((b) => [b.minRoas, b.ratePerOrder] as const)}
+            canWrite={canWrite}
+            emptyLabel="No ROAS bands yet. Add one band per ROAS level."
+            addLabel="Add ROAS band"
+            onAdd={() => setRoasBands((rows) => [...rows, { minRoas: 0, ratePerOrder: 0 }])}
+            onChange={(i, a, b) =>
+              setRoasBands((rows) => rows.map((r, idx) => (idx === i ? { minRoas: a, ratePerOrder: b } : r)))
+            }
+            onRemove={(i) => setRoasBands((rows) => rows.filter((_, idx) => idx !== i))}
+          />
+        ) : null}
+      </div>
+
+      <div className="card !p-3 space-y-2">
+        <h3 className="text-sm font-semibold text-app-fg flex items-center">
+          OC Bonus
+          <InfoButton
+            label="OC Bonus"
+            text={
+              'A flat bonus on the number of orders in the month, paid whichever PPD method is selected. The highest bracket reached pays its amount. Only orders the person is media buyer on count.'
+            }
+          />
+        </h3>
+        <FormSelect
+          aria-label="OC Bonus counts"
+          value={ocBasis}
+          disabled={!canWrite}
+          onChange={(e) => setOcBasis(e.target.value as OcBasis)}
+          options={OC_BASIS_OPTIONS}
+        />
+        <BandRows
+          columns={['Orders at least', 'Bonus (NGN)']}
+          rows={ocBrackets.map((t) => [t.minOrders, t.amount] as const)}
+          canWrite={canWrite}
+          emptyLabel="No OC Bonus brackets: no OC Bonus is paid."
+          addLabel="Add bracket"
+          onAdd={() => setOcBrackets((rows) => [...rows, { minOrders: 0, amount: 0 }])}
+          onChange={(i, a, b) =>
+            setOcBrackets((rows) =>
+              rows.map((r, idx) => (idx === i ? { minOrders: Math.max(0, Math.floor(a)), amount: b } : r)),
+            )
+          }
+          onRemove={(i) => setOcBrackets((rows) => rows.filter((_, idx) => idx !== i))}
+        />
+      </div>
+
       {!showSamplePreview ? null : (
         <div className="card !p-3 space-y-2">
           <h3 className="text-sm font-semibold text-app-fg">Sample preview</h3>
@@ -654,6 +787,25 @@ export function PayrollFormulaTierBuilder({
                 />
               </div>
             )}
+            {sampleFields.roas && (
+              <TextInput
+                label="Sample Payroll PPD ROAS"
+                type="number"
+                min={0}
+                step="0.01"
+                value={sampleRoas}
+                onChange={(e) => setSampleRoas(e.target.value)}
+              />
+            )}
+            {sampleFields.ocOrders && (
+              <TextInput
+                label="Sample orders generated"
+                type="number"
+                min={0}
+                value={sampleOcOrders}
+                onChange={(e) => setSampleOcOrders(e.target.value)}
+              />
+            )}
             {sampleFields.returned && (
               <TextInput
                 label="Sample returned orders"
@@ -679,6 +831,8 @@ export function PayrollFormulaTierBuilder({
               !sampleFields.cpa &&
               !sampleFields.delivered &&
               !sampleFields.qualifyingRevenue &&
+              !sampleFields.roas &&
+              !sampleFields.ocOrders &&
               !sampleFields.returned &&
               !sampleFields.targetMet && (
                 <p className="text-sm text-app-fg-muted col-span-2">
@@ -697,7 +851,7 @@ export function PayrollFormulaTierBuilder({
             Refresh preview
           </Button>
           {/* Insufficient data: a PER_ORDER tier needs a delivered-order count. */}
-          {bonusTiers.some((t) => t.kind === 'PER_ORDER') && samples.deliveredCount <= 0 ? (
+          {(roasPpd || bonusTiers.some((t) => t.kind === 'PER_ORDER')) && samples.deliveredCount <= 0 ? (
             <p className="text-sm text-warning-700 dark:text-warning-400">
               Insufficient data to calculate bonus: a per-order tier is configured but Sample Delivered Orders is 0.
             </p>
@@ -803,6 +957,82 @@ function LabelWithInfo({ htmlFor, label, info }: { htmlFor: string; label: strin
       {label}
       <InfoButton label={label} text={info} />
     </label>
+  );
+}
+
+/** Two-number rows (threshold + amount) for ROAS bands and OC Bonus brackets. */
+function BandRows({
+  columns,
+  rows,
+  canWrite,
+  emptyLabel,
+  addLabel,
+  onAdd,
+  onChange,
+  onRemove,
+}: {
+  columns: [string, string];
+  rows: ReadonlyArray<readonly [number, number]>;
+  canWrite: boolean;
+  emptyLabel: string;
+  addLabel: string;
+  onAdd: () => void;
+  onChange: (index: number, first: number, second: number) => void;
+  onRemove: (index: number) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      {rows.length > 0 ? (
+        <div className={`${BAND_GRID} pb-1 border-b border-app-border`}>
+          {columns.map((label) => (
+            <span key={label} className="text-micro font-semibold uppercase tracking-wide text-app-fg-muted">
+              {label}
+            </span>
+          ))}
+          <span aria-hidden />
+        </div>
+      ) : (
+        <p className="text-xs text-app-fg-muted">{emptyLabel}</p>
+      )}
+      {rows.map(([first, second], i) => (
+        <div key={i} className={BAND_GRID}>
+          <TextInput
+            type="number"
+            min={0}
+            step="0.01"
+            aria-label={columns[0]}
+            value={String(first)}
+            disabled={!canWrite}
+            onChange={(e) => onChange(i, Number(e.target.value) || 0, second)}
+          />
+          <AmountInput
+            prefix="NGN"
+            className="input w-full"
+            aria-label={columns[1]}
+            value={String(second)}
+            disabled={!canWrite}
+            onChange={(v) => onChange(i, first, toNumberLoose(v))}
+          />
+          {canWrite ? (
+            <button
+              type="button"
+              onClick={() => onRemove(i)}
+              className="text-danger-600 hover:text-danger-500 text-base leading-none justify-self-end"
+              aria-label="Remove row"
+            >
+              &times;
+            </button>
+          ) : (
+            <span aria-hidden />
+          )}
+        </div>
+      ))}
+      {canWrite ? (
+        <Button type="button" variant="secondary" size="sm" onClick={onAdd}>
+          {addLabel}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
