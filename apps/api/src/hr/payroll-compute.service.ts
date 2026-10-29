@@ -5,6 +5,7 @@ import {
   db as schema,
   computePaye,
   computePayrollFormula,
+  ppdNeedsAttention,
   computeProration,
   defaultPayeBandConfig,
   resolveFormulaFromRules,
@@ -265,7 +266,7 @@ export class PayrollComputeService {
     );
 
     const netPay = grossBeforeAdj - paye.employeePaye - paye.statutoryTotal;
-    const lineStatus = metrics.missingData ? 'NEEDS_ATTENTION' : 'OK';
+    const lineStatus = metrics.missingData || ppdNeedsAttention(formula, metrics) ? 'NEEDS_ATTENTION' : 'OK';
 
     // Drop guard checks the GATED base — a fully-gated staff with no bonus/penalty
     // is correctly dropped, same as an inactive (prorated-to-zero) member.
@@ -585,7 +586,7 @@ export class PayrollComputeService {
     );
 
     const netPay = grossBeforeAdj - paye.employeePaye - paye.statutoryTotal;
-    const lineStatus = metrics.missingData ? 'NEEDS_ATTENTION' : 'OK';
+    const lineStatus = metrics.missingData || ppdNeedsAttention(formula, metrics) ? 'NEEDS_ATTENTION' : 'OK';
 
     if (netPay <= 0 && formulaResult.penalties <= 0 && gatedBase <= 0) return null;
 

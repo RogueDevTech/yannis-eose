@@ -390,3 +390,21 @@ export const staffTaxDocuments = pgTable('staff_tax_documents', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   ...temporalColumns,
 });
+
+// Table 23: payroll_fx_rates — month-end FX snapshot for payroll (Payroll PPD ROAS).
+// One row per company × payroll month × currency: 1 unit of `currency_code` =
+// `rate` ₦. Written once when a finished month's payroll is generated (copied
+// from currencies.fx_rate_to_base at that moment) and never changed, so
+// recalculating a past month always converts revenue at the same rate.
+// Append-only; no history twin.
+export const payrollFxRates = pgTable('payroll_fx_rates', {
+  id: uuidv7Pk(),
+  groupId: uuid('group_id')
+    .notNull()
+    .references(() => branchGroups.id),
+  periodMonth: date('period_month').notNull(),
+  currencyCode: text('currency_code').notNull(),
+  rate: numeric('rate', { precision: 18, scale: 6 }).notNull(),
+  lockedBy: uuid('locked_by').references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});

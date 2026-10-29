@@ -203,6 +203,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
           returnedCount: returned,
           qualifyingRevenue,
           targetMet: sampleTargetMet,
+          // Payroll PPD ROAS + OC Bonus samples. The delivered sample doubles as
+          // the PPD delivered count.
+          ppdRoas: Math.max(0, numField('sampleRoas', 0)),
+          ppdDeliveredCount: delivered,
+          ocOrdersCreated: Math.max(0, Math.floor(numField('sampleOcOrders', 0))),
         },
       }),
     );

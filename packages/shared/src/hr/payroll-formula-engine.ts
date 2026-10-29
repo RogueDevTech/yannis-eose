@@ -175,6 +175,54 @@ function resolveBonusFromTiers(
   return { bonus: flatBonus, lines };
 }
 
+/** ROAS shown on payslips: cut (not rounded) to 2 dp, so 2.499 reads 2.49 like the band it fell in. */
+export function displayRoas(roas: number): string {
+  return (Math.floor(roas * 100) / 100).toFixed(2);
+}
+
+/**
+ * ROAS-based PPD: the highest band whose minRoas the Payroll PPD ROAS reaches
+ * pays its rate per delivered order. Bands compare the unrounded ROAS.
+ * A zero-amount line explains why nothing was paid (no spend / below bands).
+ */
+function resolveRoasPpd(formula: PayrollFormula, metrics: PayrollMetrics): { bonus: number; lines: BonusBreakdownLine[] } {
+  const bands = formula.roasPpdTiers ?? [];
+  if ((formula.ppdMethod ?? 'PERFORMANCE_METRICS') !== 'ROAS' || bands.length === 0) return { bonus: 0, lines: [] };
+  const roas = metrics.ppdRoas;
+  const count = metrics.ppdDeliveredCount ?? 0;
+  if (roas == null) {
+    return { bonus: 0, lines: [{ label: 'PPD (ROAS): no approved ad spend, so no ROAS', amount: 0 }] };
+  }
+  const band = [...bands].sort((a, b) => b.minRoas - a.minRoas).find((b) => roas >= b.minRoas);
+  if (!band) {
+    return { bonus: 0, lines: [{ label: `PPD (ROAS ${displayRoas(roas)}): below the lowest band`, amount: 0 }] };
+  }
+  const amount = count * band.ratePerOrder;
+  return {
+    bonus: amount,
+    lines: [
+      {
+        label: `PPD (ROAS ${displayRoas(roas)} ≥ ${band.minRoas}) @ ₦${band.ratePerOrder}/order × ${count}`,
+        amount,
+      },
+    ],
+  };
+}
+
+/** OC Bonus: the highest bracket whose minOrders is reached pays its flat amount. Independent of the PPD method. */
+function resolveOcBonus(formula: PayrollFormula, metrics: PayrollMetrics): { bonus: number; lines: BonusBreakdownLine[] } {
+  const oc = formula.ocBonus;
+  if (!oc?.tiers.length) return { bonus: 0, lines: [] };
+  const orders = oc.basis === 'DELIVERED_ORDERS' ? metrics.ppdDeliveredCount ?? 0 : metrics.ocOrdersCreated ?? 0;
+  const bracket = [...oc.tiers].sort((a, b) => b.minOrders - a.minOrders).find((t) => orders >= t.minOrders);
+  if (!bracket) return { bonus: 0, lines: [] };
+  const what = oc.basis === 'DELIVERED_ORDERS' ? 'delivered orders' : 'orders';
+  return {
+    bonus: bracket.amount,
+    lines: [{ label: `OC Bonus (${orders} ${what} ≥ ${bracket.minOrders})`, amount: bracket.amount }],
+  };
+}
+
 function sumAllowances(allowances: PayrollFormulaAllowance[] | undefined): {
   total: number;
   lines: Array<{ name: string; amount: number; taxable: boolean }>;
@@ -264,8 +312,28 @@ export function validatePayrollFormula(formula: PayrollFormula): FormulaValidati
     }
   }
 
+  const roasPpd = (formula.ppdMethod ?? 'PERFORMANCE_METRICS') === 'ROAS';
+  const roasBands = formula.roasPpdTiers ?? [];
+  if (roasPpd) {
+    if (roasBands.length === 0) errors.push('ROAS-based PPD needs at least one ROAS band.');
+    const seen = new Set<number>();
+    for (const b of roasBands) {
+      if (seen.has(b.minRoas)) errors.push(`Two ROAS bands start at ${b.minRoas}.`);
+      seen.add(b.minRoas);
+    }
+    if ((formula.bonusTiers ?? []).some((t) => t.kind === 'PER_ORDER')) {
+      warnings.push('ROAS-based PPD is selected: the per-order bonus tiers are kept but do not pay.');
+    }
+  }
+  const ocBrackets = formula.ocBonus?.tiers ?? [];
+  const seenOc = new Set<number>();
+  for (const t of ocBrackets) {
+    if (seenOc.has(t.minOrders)) errors.push(`Two OC Bonus brackets start at ${t.minOrders} orders.`);
+    seenOc.add(t.minOrders);
+  }
+
   // A per-order bonus tier requires a delivered-order count to multiply against.
-  const hasPerOrderBonus = (formula.bonusTiers ?? []).some((t) => t.kind === 'PER_ORDER');
+  const hasPerOrderBonus = !roasPpd && (formula.bonusTiers ?? []).some((t) => t.kind === 'PER_ORDER');
   if (hasPerOrderBonus) {
     warnings.push('Per-order bonus configured: staff without a delivered-order count will earn ₦0 bonus.');
   }
@@ -287,10 +355,17 @@ export function computePayrollFormula(
   const baseSalary = resolveBaseSalary(formula, metrics);
   const deliveredCount = metrics.deliveredCount;
 
+  // Under ROAS-based PPD the PER_ORDER tiers (the Performance Metrics PPD) are
+  // skipped so PPD is never paid twice; FLAT tiers are not PPD and still apply.
+  const roasPpd = (formula.ppdMethod ?? 'PERFORMANCE_METRICS') === 'ROAS';
+  const bonusTiers = roasPpd ? formula.bonusTiers?.filter((t) => t.kind !== 'PER_ORDER') : formula.bonusTiers;
+
   const bonusBreakdown: BonusBreakdownLine[] = [];
-  const bb = resolveBonusFromTiers(formula.bonusTiers, metrics, formula, deliveredCount, 'Bonus');
-  const performanceBonus = bb.bonus;
-  bonusBreakdown.push(...bb.lines);
+  const bb = resolveBonusFromTiers(bonusTiers, metrics, formula, deliveredCount, 'Bonus');
+  const ppd = resolveRoasPpd(formula, metrics);
+  const oc = resolveOcBonus(formula, metrics);
+  const performanceBonus = bb.bonus + ppd.bonus + oc.bonus;
+  bonusBreakdown.push(...bb.lines, ...ppd.lines, ...oc.lines);
 
   const penalties = (formula.penaltyPerReturn ?? 0) * (metrics.returnedCount ?? 0);
   const { total: allowancesTotal, lines: allowanceLines } = sumAllowances(formula.allowances);
@@ -377,4 +452,13 @@ export function isPayrollFormulaRules(rules: unknown): rules is PayrollFormula {
 export function resolveFormulaFromRules(rules: CommissionRules | PayrollFormula): PayrollFormula {
   if (isPayrollFormulaRules(rules)) return rules;
   return legacyCommissionRulesToFormula(rules as CommissionRules);
+}
+
+/**
+ * A ROAS-based PPD line needs HR's eye when some delivered revenue could not be
+ * converted to ₦ (its currency has no rate): ROAS, and so PPD, is understated.
+ */
+export function ppdNeedsAttention(formula: PayrollFormula, metrics: PayrollMetrics): boolean {
+  if ((formula.ppdMethod ?? 'PERFORMANCE_METRICS') !== 'ROAS') return false;
+  return Object.keys(metrics.ppdUnconvertedRevenue ?? {}).length > 0;
 }
