@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, eq, gte, inArray, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, formatOrderNumber } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID } from '@yannis/shared';
@@ -46,6 +46,158 @@ const MAX_PER_RUN = 200;
 const TEST_NAME_MATCH = sql`btrim(${schema.orders.customerName}) ~* '(^|[^[:alpha:]])test([^[:alpha:]]|$)'`;
 const TEST_NAME_MATCH_CART = sql`btrim(${schema.cartOrders.customerName}) ~* '(^|[^[:alpha:]])test([^[:alpha:]]|$)'`;
 const TEST_NAME_MATCH_FU = sql`btrim(${schema.followUpOrders.customerName}) ~* '(^|[^[:alpha:]])test([^[:alpha:]]|$)'`;
+
+/**
+ * Extra days the duplicate cleanup looks back beyond a company's window, so a
+ * missed or failed run (deploy, restart) is caught up by the next one.
+ */
+const DUPLICATE_LOOKBACK_MARGIN_DAYS = 2;
+
+type CleanupCronRule = { mode: 'DELETE' | 'FLAG' | 'OFF'; windowDays: number };
+
+export type DuplicateLoserRow = {
+  loser_id: string;
+  loser_customer_name: string;
+  loser_customer_phone: string | null;
+  loser_customer_phone_hash: string;
+  loser_mb_id: string | null;
+  loser_campaign_id: string | null;
+  loser_branch_id: string | null;
+  loser_status: string;
+  winner_id: string;
+  winner_mb_id: string | null;
+  winner_order_number: number | null;
+  product_id: string;
+  rule_mode: 'DELETE' | 'FLAG';
+};
+
+/**
+ * The duplicate cleanup's matching query: one row per loser with its winner.
+ *
+ * A loser is checked for its company's whole window (plus a small margin), not
+ * just the last 48 hours: a pair often only becomes a duplicate later, when the
+ * newer order moves past the older one (customer re-ordered and got delivered
+ * while the first copy sat in CS_ENGAGED). The 48h lookback left those copies
+ * in CS queues for good (131 found by hand on 2026-10-29).
+ *
+ * Phone digits are worked out once per order and matched with two equality
+ * joins (hash, last 9 digits) instead of a regex inside an OR join, so the
+ * wider scan stays cheap.
+ */
+export function duplicateLosersQuery(opts: {
+  companyRules: Array<{ groupId: string } & CleanupCronRule>;
+  fallback: CleanupCronRule;
+  /** Every order instead of the window lookback. Heavy: never on a schedule. */
+  allDates?: boolean;
+}): SQL {
+  const { companyRules, fallback } = opts;
+  // One row per company that has its own setting; everyone else uses the fallback.
+  const cfgRows = companyRules.length > 0
+    ? sql.join(
+        companyRules.map((r) => sql`(${r.groupId}::uuid, ${r.mode}::text, ${r.windowDays}::int)`),
+        sql`, `,
+      )
+    : sql`(NULL::uuid, NULL::text, NULL::int)`;
+  const maxWindow = Math.max(fallback.windowDays, ...companyRules.map((r) => r.windowDays));
+  // Losers reach back window + margin; their winners up to one more window.
+  const horizon = opts.allDates
+    ? sql`TRUE`
+    : sql`o.created_at >= NOW() - make_interval(days => ${2 * maxWindow + DUPLICATE_LOOKBACK_MARGIN_DAYS}::int)`;
+  const loserLookback = opts.allDates
+    ? sql`TRUE`
+    : sql`l.created_at >= NOW() - make_interval(days => l.window_days + ${DUPLICATE_LOOKBACK_MARGIN_DAYS}::int)`;
+
+  return sql`
+    WITH cfg(group_id, mode, window_days) AS (VALUES ${cfgRows}),
+    base AS MATERIALIZED (
+      SELECT o.id, o.order_number, o.status, o.is_duplicate, o.customer_name,
+             o.customer_phone, o.customer_phone_hash, o.media_buyer_id, o.campaign_id,
+             o.branch_id, o.currency_code, o.created_at, o.delivered_at,
+             COALESCE(cfg.mode, ${fallback.mode}::text) AS rule_mode,
+             COALESCE(cfg.window_days, ${fallback.windowDays}::int) AS window_days,
+             nullif(right(regexp_replace(coalesce(o.customer_phone, ''), '\\D', '', 'g'), 9), '') AS tail,
+             CASE o.status::text
+               WHEN 'REMITTED' THEN 10 WHEN 'DELIVERED' THEN 9 WHEN 'PARTIALLY_DELIVERED' THEN 8
+               WHEN 'IN_TRANSIT' THEN 7 WHEN 'DISPATCHED' THEN 6 WHEN 'AGENT_ASSIGNED' THEN 5
+               WHEN 'CONFIRMED' THEN 4 WHEN 'CS_ENGAGED' THEN 3 WHEN 'CS_ASSIGNED' THEN 2
+               WHEN 'UNPROCESSED' THEN 1 ELSE 0 END AS rank
+      FROM orders o
+      LEFT JOIN branches b ON b.id = o.branch_id
+      LEFT JOIN cfg ON cfg.group_id = b.group_id
+      WHERE o.deleted_at IS NULL
+        AND o.status NOT IN ('CANCELLED', 'DELETED')
+        AND ${horizon}
+    ),
+    -- Same phone = phone_hash OR last 9 digits: '0803…' and '803…' hash differently.
+    -- Same country: a Kenyan and a Tanzanian 07… number can share the last 9
+    -- digits (and the phone hash, which reads every 10-digit 0… as Ghana) but
+    -- are different customers.
+    same_customer AS (
+      SELECT l.id AS loser_id, w.id AS winner_id
+      FROM base l
+      JOIN base w ON w.customer_phone_hash = l.customer_phone_hash
+                 AND w.currency_code = l.currency_code AND w.id <> l.id
+      WHERE l.customer_phone_hash IS NOT NULL AND l.rule_mode <> 'OFF' AND ${loserLookback}
+      UNION
+      SELECT l.id, w.id
+      FROM base l
+      JOIN base w ON w.tail = l.tail
+                 AND w.currency_code = l.currency_code AND w.id <> l.id
+      WHERE l.customer_phone_hash IS NOT NULL AND l.rule_mode <> 'OFF' AND ${loserLookback}
+        AND length(l.tail) = 9
+    )
+    SELECT DISTINCT ON (l.id)
+      l.id                  AS loser_id,
+      l.customer_name       AS loser_customer_name,
+      l.customer_phone      AS loser_customer_phone,
+      l.customer_phone_hash AS loser_customer_phone_hash,
+      l.media_buyer_id      AS loser_mb_id,
+      l.campaign_id         AS loser_campaign_id,
+      l.branch_id           AS loser_branch_id,
+      l.status              AS loser_status,
+      w.id                  AS winner_id,
+      w.media_buyer_id      AS winner_mb_id,
+      w.order_number        AS winner_order_number,
+      shared.product_id     AS product_id,
+      l.rule_mode           AS rule_mode
+    FROM same_customer sc
+    JOIN base l ON l.id = sc.loser_id
+    JOIN base w ON w.id = sc.winner_id
+    -- Both orders carry the same product.
+    JOIN LATERAL (
+      SELECT a.product_id FROM order_items a
+      JOIN order_items c ON c.product_id = a.product_id AND c.order_id = w.id
+      WHERE a.order_id = l.id
+      LIMIT 1
+    ) shared ON TRUE
+    WHERE ABS(EXTRACT(EPOCH FROM (l.created_at - w.created_at))) <= l.window_days * 86400
+      -- CS already decided: "not a duplicate" (DISMISSED) or merged. Never re-flag or delete.
+      AND l.is_duplicate IS DISTINCT FROM 'DISMISSED'
+      AND l.is_duplicate IS DISTINCT FROM 'MERGED'
+      -- Flag-only companies: an order already flagged, dismissed or merged is settled.
+      AND NOT (l.rule_mode = 'FLAG' AND l.is_duplicate IS NOT NULL)
+      -- A flag-only copy (past CS_ENGAGED) that is already flagged needs nothing
+      -- new (without this it is re-flagged, with a new timeline entry, every run).
+      AND NOT (l.is_duplicate = 'FLAGGED' AND l.status::text NOT IN ('UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'))
+      -- A completed order is a finished transaction, not an open duplicate.
+      -- If the winner was already delivered before the loser was even created,
+      -- the loser is a legitimate repeat purchase (customer re-ordering the same
+      -- product weeks later) and must NOT be auto-deleted. Only collapse when the
+      -- winner was still open at the time the loser came in.
+      AND NOT (
+        w.status IN ('DELIVERED', 'REMITTED')
+        AND w.delivered_at IS NOT NULL
+        AND w.delivered_at < l.created_at
+      )
+      AND (
+        w.rank > l.rank
+        OR (w.rank = l.rank AND w.created_at < l.created_at)
+        OR (w.rank = l.rank AND w.created_at = l.created_at AND w.id < l.id)
+      )
+    ORDER BY l.id, w.rank DESC, w.created_at ASC
+    LIMIT ${MAX_PER_RUN}
+  `;
+}
 
 /**
  * TestOrderPurgeService — scheduled auto-deletion of test orders.
@@ -131,8 +283,8 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     await drain('test-cart-orders', this.purgeTestCartOrders);
     await drain('test-follow-up-orders', this.purgeTestFollowUpOrders);
     // Universal dedup sweep skipped on boot — migration 0159 handles the
-    // historical cleanup, and the 2-hour cron with a 48h window catches
-    // ongoing slips. The full-table self-join is too heavy to run on every
+    // historical cleanup, and the 2-hour cron (each company's window plus a
+    // margin) catches ongoing slips. The full-table self-join is too heavy to run on every
     // API restart without blocking the connection pool.
 
     try {
@@ -518,125 +670,22 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
    * the loser's branch company. OFF skips the company; FLAG never deletes and
    * leaves already-flagged orders alone. DISMISSED / MERGED orders (CS decided)
    * are never touched in any mode.
+   *
+   * Each run checks orders from the company's window plus a 2-day margin, see
+   * `duplicateLosersQuery`.
    */
   async purgeUniversalDuplicates(
     allDates = false,
   ): Promise<{ deleted: number; skipped: number }> {
-    const dateFilter = allDates
-      ? sql`TRUE`
-      : sql`loser.created_at >= NOW() - INTERVAL '48 hours'`;
-
     const { byGroup, fallback } = await this.duplicateRules.allCompanies();
-    const companyRules = [...byGroup.entries()];
-    if (fallback.cleanupCron.mode === 'OFF' && companyRules.every(([, r]) => r.cleanupCron.mode === 'OFF')) {
+    const companyRules = [...byGroup.entries()].map(([groupId, r]) => ({ groupId, ...r.cleanupCron }));
+    if (fallback.cleanupCron.mode === 'OFF' && companyRules.every((r) => r.mode === 'OFF')) {
       return { deleted: 0, skipped: 0 };
     }
-    // One row per company that has its own setting; everyone else uses the fallback.
-    const cfgRows = companyRules.length > 0
-      ? sql.join(
-          companyRules.map(([groupId, r]) => sql`(${groupId}::uuid, ${r.cleanupCron.mode}::text, ${r.cleanupCron.windowDays}::int)`),
-          sql`, `,
-        )
-      : sql`(NULL::uuid, NULL::text, NULL::int)`;
-    const fallbackMode = fallback.cleanupCron.mode;
-    const fallbackWindow = fallback.cleanupCron.windowDays;
 
-    // Find losers: orders that have a better match (higher lifecycle rank or
-    // older at same rank) on same phone + overlapping product within 14 days.
-    const losers = await this.db.execute<{
-      loser_id: string;
-      loser_customer_name: string;
-      loser_customer_phone: string | null;
-      loser_customer_phone_hash: string;
-      loser_mb_id: string | null;
-      loser_campaign_id: string | null;
-      loser_branch_id: string | null;
-      loser_status: string;
-      winner_id: string;
-      winner_mb_id: string | null;
-      winner_order_number: number | null;
-      product_id: string;
-      rule_mode: 'DELETE' | 'FLAG';
-    }>(sql`
-      WITH cfg(group_id, mode, window_days) AS (VALUES ${cfgRows}),
-      status_rank AS (
-        SELECT unnest(ARRAY[
-          'REMITTED', 'DELIVERED', 'PARTIALLY_DELIVERED', 'IN_TRANSIT',
-          'DISPATCHED', 'AGENT_ASSIGNED', 'CONFIRMED', 'CS_ENGAGED',
-          'CS_ASSIGNED', 'UNPROCESSED'
-        ]::order_status[]) AS status,
-        unnest(ARRAY[10, 9, 8, 7, 6, 5, 4, 3, 2, 1]) AS rank
-      )
-      SELECT DISTINCT ON (loser.id)
-        loser.id              AS loser_id,
-        loser.customer_name   AS loser_customer_name,
-        loser.customer_phone  AS loser_customer_phone,
-        loser.customer_phone_hash AS loser_customer_phone_hash,
-        loser.media_buyer_id  AS loser_mb_id,
-        loser.campaign_id     AS loser_campaign_id,
-        loser.branch_id       AS loser_branch_id,
-        loser.status          AS loser_status,
-        winner.id             AS winner_id,
-        winner.media_buyer_id AS winner_mb_id,
-        winner.order_number   AS winner_order_number,
-        oi_loser.product_id   AS product_id,
-        COALESCE(cfg.mode, ${fallbackMode}) AS rule_mode
-      FROM orders loser
-      LEFT JOIN branches loser_branch ON loser_branch.id = loser.branch_id
-      LEFT JOIN cfg ON cfg.group_id = loser_branch.group_id
-      JOIN order_items oi_loser ON oi_loser.order_id = loser.id
-      JOIN order_items oi_winner ON oi_winner.product_id = oi_loser.product_id
-      JOIN orders winner ON winner.id = oi_winner.order_id
-      LEFT JOIN status_rank sr_loser ON sr_loser.status = loser.status
-      LEFT JOIN status_rank sr_winner ON sr_winner.status = winner.status
-      WHERE loser.customer_phone_hash IS NOT NULL
-        -- Same phone = phone_hash OR last 9 digits: '0803…' and '803…' hash differently.
-        AND (
-          loser.customer_phone_hash = winner.customer_phone_hash
-          OR (
-            length(right(regexp_replace(coalesce(loser.customer_phone, ''), '\\D', '', 'g'), 9)) = 9
-            AND right(regexp_replace(coalesce(loser.customer_phone, ''), '\\D', '', 'g'), 9)
-              = right(regexp_replace(coalesce(winner.customer_phone, ''), '\\D', '', 'g'), 9)
-          )
-        )
-        -- Same country: a Kenyan and a Tanzanian 07… number can share the last 9
-        -- digits (and the phone hash, which reads every 10-digit 0… as Ghana) but
-        -- are different customers.
-        AND winner.currency_code = loser.currency_code
-        -- Sargable bound so the digits match above only runs on orders near the loser.
-        AND winner.created_at BETWEEN loser.created_at - make_interval(days => COALESCE(cfg.window_days, ${fallbackWindow}))
-                                  AND loser.created_at + make_interval(days => COALESCE(cfg.window_days, ${fallbackWindow}))
-        AND loser.id != winner.id
-        -- CS already decided: "not a duplicate" (DISMISSED) or merged. Never re-flag or delete.
-        AND loser.is_duplicate IS DISTINCT FROM 'DISMISSED'
-        AND loser.is_duplicate IS DISTINCT FROM 'MERGED'
-        AND loser.status NOT IN ('CANCELLED', 'DELETED')
-        AND loser.deleted_at IS NULL
-        AND winner.status NOT IN ('CANCELLED', 'DELETED')
-        AND winner.deleted_at IS NULL
-        AND COALESCE(cfg.mode, ${fallbackMode}) <> 'OFF'
-        AND ABS(EXTRACT(EPOCH FROM (loser.created_at - winner.created_at))) <= COALESCE(cfg.window_days, ${fallbackWindow}) * 86400
-        -- Flag-only companies: an order already flagged, dismissed or merged is settled.
-        AND NOT (COALESCE(cfg.mode, ${fallbackMode}) = 'FLAG' AND loser.is_duplicate IS NOT NULL)
-        -- A completed order is a finished transaction, not an open duplicate.
-        -- If the winner was already delivered before the loser was even created,
-        -- the loser is a legitimate repeat purchase (customer re-ordering the same
-        -- product weeks later) and must NOT be auto-deleted. Only collapse when the
-        -- winner was still open at the time the loser came in.
-        AND NOT (
-          winner.status IN ('DELIVERED', 'REMITTED')
-          AND winner.delivered_at IS NOT NULL
-          AND winner.delivered_at < loser.created_at
-        )
-        AND (
-          COALESCE(sr_winner.rank, 0) > COALESCE(sr_loser.rank, 0)
-          OR (COALESCE(sr_winner.rank, 0) = COALESCE(sr_loser.rank, 0) AND winner.created_at < loser.created_at)
-          OR (COALESCE(sr_winner.rank, 0) = COALESCE(sr_loser.rank, 0) AND winner.created_at = loser.created_at AND winner.id < loser.id)
-        )
-        AND ${dateFilter}
-      ORDER BY loser.id, COALESCE(sr_winner.rank, 0) DESC, winner.created_at ASC
-      LIMIT ${MAX_PER_RUN}
-    `);
+    const losers = await this.db.execute<DuplicateLoserRow>(
+      duplicateLosersQuery({ companyRules, fallback: fallback.cleanupCron, allDates }),
+    );
 
     if (losers.length === 0) {
       return { deleted: 0, skipped: 0 };
