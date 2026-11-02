@@ -10,7 +10,12 @@ import { randomUUID } from 'crypto';
 import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb } from '../test/setup-integration';
 import { createTestBranch, createTestProduct } from '../test/factories/order.factory';
-import { duplicateLosersQuery, type DuplicateLoserRow } from './test-order-purge.service';
+import {
+  duplicateLosersQuery,
+  followUpCopyDuplicatesQuery,
+  type DuplicateLoserRow,
+  type FollowUpCopyDuplicateRow,
+} from './test-order-purge.service';
 
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
 
@@ -50,6 +55,8 @@ describe.skipIf(SKIP_IF_NO_DB)('duplicate cleanup lookback', () => {
       currency?: string;
       deliveredAt?: Date;
       isDuplicate?: (typeof schema.orders.$inferInsert)['isDuplicate'];
+      paymentStatus?: string;
+      frozen?: boolean;
     },
   ) {
     const [row] = await db
@@ -65,6 +72,8 @@ describe.skipIf(SKIP_IF_NO_DB)('duplicate cleanup lookback', () => {
         createdAt: o.createdAt,
         deliveredAt: o.deliveredAt ?? null,
         isDuplicate: o.isDuplicate ?? null,
+        paymentStatus: o.paymentStatus ?? null,
+        frozenForFollowUp: o.frozen ?? false,
       })
       .returning({ id: schema.orders.id });
     await db.insert(schema.orderItems).values({
@@ -80,6 +89,11 @@ describe.skipIf(SKIP_IF_NO_DB)('duplicate cleanup lookback', () => {
   async function losers(rules: Parameters<typeof duplicateLosersQuery>[0]) {
     const rows = await db.execute<DuplicateLoserRow>(duplicateLosersQuery(rules));
     return new Map(rows.map((r) => [r.loser_id, r.winner_id]));
+  }
+
+  async function deletable(rules: Parameters<typeof duplicateLosersQuery>[0]) {
+    const rows = await db.execute<DuplicateLoserRow>(duplicateLosersQuery(rules));
+    return new Map(rows.map((r) => [r.loser_id, r.loser_deletable]));
   }
 
   it('catches an older stuck copy once a newer order is delivered (missed by the 48h lookback)', async () => {
@@ -114,16 +128,16 @@ describe.skipIf(SKIP_IF_NO_DB)('duplicate cleanup lookback', () => {
     expect(found.has(otherCountry)).toBe(false);
   });
 
-  it('leaves settled orders alone: flagged CONFIRMED+, dismissed, and repeat purchases', async () => {
+  it('leaves settled orders alone: flagged AGENT_ASSIGNED+, dismissed, and repeat purchases', async () => {
     const ctx = await setup();
     await order(ctx, { createdAt: daysAgo(10), status: 'REMITTED', deliveredAt: daysAgo(8) });
-    const flaggedConfirmed = await order(ctx, { createdAt: daysAgo(9), status: 'CONFIRMED', isDuplicate: 'FLAGGED' });
+    const flaggedAssigned = await order(ctx, { createdAt: daysAgo(9), status: 'AGENT_ASSIGNED', isDuplicate: 'FLAGGED' });
     const dismissed = await order(ctx, { createdAt: daysAgo(9), status: 'CS_ENGAGED', isDuplicate: 'DISMISSED' });
     // Ordered after the first one was already delivered: a real repeat purchase.
     const repeat = await order(ctx, { createdAt: daysAgo(3), status: 'CS_ENGAGED', hash: 'hash-r', phone: '08035550000' });
     await order(ctx, { createdAt: daysAgo(6), status: 'DELIVERED', deliveredAt: daysAgo(5), hash: 'hash-r', phone: '08035550000' });
     const found = await losers(ctx.rules);
-    expect(found.has(flaggedConfirmed)).toBe(false);
+    expect(found.has(flaggedAssigned)).toBe(false);
     expect(found.has(dismissed)).toBe(false);
     expect(found.has(repeat)).toBe(false);
   });
@@ -135,5 +149,77 @@ describe.skipIf(SKIP_IF_NO_DB)('duplicate cleanup lookback', () => {
     expect((await losers(ctx.rules)).has(flaggedEarly)).toBe(true);
     const off = { ...ctx.rules, companyRules: ctx.rules.companyRules.map((r) => ({ ...r, mode: 'OFF' as const })) };
     expect((await losers(off)).has(flaggedEarly)).toBe(false);
+  });
+
+  it('deletes CONFIRMED copies (even already flagged) unless paid online; FLAG mode leaves flagged ones', async () => {
+    const ctx = await setup();
+    const kept = await order(ctx, { createdAt: daysAgo(6), status: 'REMITTED', deliveredAt: daysAgo(1) });
+    const flaggedConfirmed = await order(ctx, { createdAt: daysAgo(5), status: 'CONFIRMED', isDuplicate: 'FLAGGED' });
+    const paid = await order(ctx, { createdAt: daysAgo(4), status: 'CONFIRMED', paymentStatus: 'PAID' });
+    const assigned = await order(ctx, { createdAt: daysAgo(4), status: 'AGENT_ASSIGNED' });
+    const found = await deletable(ctx.rules);
+    expect(found.get(flaggedConfirmed)).toBe(true);
+    expect((await losers(ctx.rules)).get(flaggedConfirmed)).toBe(kept);
+    // Found (so it gets flagged) but never deleted.
+    expect(found.get(paid)).toBe(false);
+    expect(found.get(assigned)).toBe(false);
+    const flagMode = { ...ctx.rules, companyRules: ctx.rules.companyRules.map((r) => ({ ...r, mode: 'FLAG' as const })) };
+    expect((await losers(flagMode)).has(flaggedConfirmed)).toBe(false);
+  });
+
+  async function followUp(
+    ctx: { branchId: string; productId: string },
+    f: { createdAt: Date; status: string; sourceOrderId?: string; phone?: string; hash?: string },
+  ) {
+    const [row] = await db
+      .insert(schema.followUpOrders)
+      .values({
+        customerName: 'Dup Lookback Customer',
+        customerPhone: f.phone ?? '08031234567',
+        customerPhoneHash: f.hash ?? 'hash-dup-lookback',
+        status: f.status,
+        branchId: ctx.branchId,
+        sourceOrderId: f.sourceOrderId ?? null,
+        createdAt: f.createdAt,
+      })
+      .returning({ id: schema.followUpOrders.id });
+    await db.insert(schema.followUpOrderItems).values({
+      followUpOrderId: row!.id,
+      productId: ctx.productId,
+      quantity: 1,
+      unitPrice: '10000',
+    });
+    return row!.id;
+  }
+
+  async function fuMatches(rules: Parameters<typeof followUpCopyDuplicatesQuery>[0]) {
+    const rows = await db.execute<FollowUpCopyDuplicateRow>(followUpCopyDuplicatesQuery(rules));
+    return new Map(rows.map((r) => [r.follow_up_id, r]));
+  }
+
+  it('matches an open follow-up copy once the customer orders again, never its own source', async () => {
+    const ctx = await setup();
+    const source = await order(ctx, { createdAt: daysAgo(12), status: 'CS_ENGAGED', frozen: true });
+    const copy = await followUp(ctx, { createdAt: daysAgo(10), status: 'UNPROCESSED', sourceOrderId: source });
+    const reorder = await order(ctx, { createdAt: daysAgo(1), status: 'CS_ASSIGNED', isDuplicate: 'FLAGGED' });
+    // Different customer: never matched.
+    const other = await followUp(ctx, { createdAt: daysAgo(2), status: 'CS_ENGAGED', hash: 'hash-x', phone: '08030000001' });
+    const found = await fuMatches(ctx.rules);
+    expect(found.get(copy)?.order_id).toBe(reorder);
+    expect(found.get(copy)?.order_flagged_unlinked).toBe(true);
+    expect(found.has(other)).toBe(false);
+  });
+
+  it('skips follow-up copies when the only order was delivered before the copy, or is too far apart', async () => {
+    const ctx = await setup();
+    await order(ctx, { createdAt: daysAgo(13), status: 'REMITTED', deliveredAt: daysAgo(12) });
+    const afterDelivery = await followUp(ctx, { createdAt: daysAgo(10), status: 'UNPROCESSED' });
+    const far = await followUp(ctx, { createdAt: daysAgo(20), status: 'UNPROCESSED', hash: 'hash-f', phone: '08030000002' });
+    await order(ctx, { createdAt: daysAgo(1), status: 'CS_ENGAGED', hash: 'hash-f', phone: '08030000002' });
+    const found = await fuMatches(ctx.rules);
+    expect(found.has(afterDelivery)).toBe(false);
+    expect(found.has(far)).toBe(false);
+    const off = { ...ctx.rules, companyRules: ctx.rules.companyRules.map((r) => ({ ...r, mode: 'OFF' as const })) };
+    expect((await fuMatches(off)).size).toBe(0);
   });
 });
