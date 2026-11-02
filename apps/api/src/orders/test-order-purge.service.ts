@@ -48,6 +48,25 @@ const TEST_NAME_MATCH_CART = sql`btrim(${schema.cartOrders.customerName}) ~* '(^
 const TEST_NAME_MATCH_FU = sql`btrim(${schema.followUpOrders.customerName}) ~* '(^|[^[:alpha:]])test([^[:alpha:]]|$)'`;
 
 /**
+ * A CONFIRMED duplicate the cleanup may delete (owner request 2026-11-02:
+ * "delete them, not just mark them"). CONFIRMED moves no stock (the RESERVATION
+ * movement is a log line; inventory is held from AGENT_ASSIGNED), so deleting it
+ * is stock-neutral like a retrack to CS_ENGAGED. Its DRAFT invoice is cancelled
+ * with it. Kept flag-only: paid online, an invoice past DRAFT, a graduated
+ * cart/follow-up copy (status syncs to its source), or frozen for follow-up.
+ * Evaluated against `orders o`.
+ */
+const DELETABLE_CONFIRMED = sql`o.status::text = 'CONFIRMED'
+  AND o.payment_status IS DISTINCT FROM 'PAID'
+  AND o.source_cart_order_id IS NULL
+  AND o.source_follow_up_order_id IS NULL
+  AND NOT o.frozen_for_follow_up
+  AND NOT EXISTS (
+    SELECT 1 FROM invoices i
+    WHERE i.order_id = o.id AND i.status::text NOT IN ('DRAFT', 'CANCELLED')
+  )`;
+
+/**
  * Extra days the duplicate cleanup looks back beyond a company's window, so a
  * missed or failed run (deploy, restart) is caught up by the next one.
  */
@@ -69,6 +88,8 @@ export type DuplicateLoserRow = {
   winner_order_number: number | null;
   product_id: string;
   rule_mode: 'DELETE' | 'FLAG';
+  /** Early stage, or a CONFIRMED copy with nothing to unwind (see DELETABLE_CONFIRMED). */
+  loser_deletable: boolean;
 };
 
 /**
@@ -113,6 +134,7 @@ export function duplicateLosersQuery(opts: {
       SELECT o.id, o.order_number, o.status, o.is_duplicate, o.customer_name,
              o.customer_phone, o.customer_phone_hash, o.media_buyer_id, o.campaign_id,
              o.branch_id, o.currency_code, o.created_at, o.delivered_at,
+             (o.status::text IN ('UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED') OR (${DELETABLE_CONFIRMED})) AS deletable,
              COALESCE(cfg.mode, ${fallback.mode}::text) AS rule_mode,
              COALESCE(cfg.window_days, ${fallback.windowDays}::int) AS window_days,
              nullif(right(regexp_replace(coalesce(o.customer_phone, ''), '\\D', '', 'g'), 9), '') AS tail,
@@ -159,7 +181,8 @@ export function duplicateLosersQuery(opts: {
       w.media_buyer_id      AS winner_mb_id,
       w.order_number        AS winner_order_number,
       shared.product_id     AS product_id,
-      l.rule_mode           AS rule_mode
+      l.rule_mode           AS rule_mode,
+      l.deletable           AS loser_deletable
     FROM same_customer sc
     JOIN base l ON l.id = sc.loser_id
     JOIN base w ON w.id = sc.winner_id
@@ -176,9 +199,14 @@ export function duplicateLosersQuery(opts: {
       AND l.is_duplicate IS DISTINCT FROM 'MERGED'
       -- Flag-only companies: an order already flagged, dismissed or merged is settled.
       AND NOT (l.rule_mode = 'FLAG' AND l.is_duplicate IS NOT NULL)
-      -- A flag-only copy (past CS_ENGAGED) that is already flagged needs nothing
-      -- new (without this it is re-flagged, with a new timeline entry, every run).
-      AND NOT (l.is_duplicate = 'FLAGGED' AND l.status::text NOT IN ('UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'))
+      -- A flag-only copy that is already flagged needs nothing new (without this
+      -- it is re-flagged, with a new timeline entry, every run). In DELETE mode a
+      -- deletable copy (early, or CONFIRMED with nothing to unwind) stays in so
+      -- copies flagged before 2026-11-02 get deleted too.
+      -- IS NOT DISTINCT FROM, not =: is_duplicate is NULL on an unflagged copy,
+      -- and NOT (NULL AND x) drops the row (aed03e7c skipped every unflagged
+      -- CONFIRMED+ copy this way).
+      AND NOT (l.is_duplicate IS NOT DISTINCT FROM 'FLAGGED' AND NOT (l.rule_mode = 'DELETE' AND l.deletable))
       -- A completed order is a finished transaction, not an open duplicate.
       -- If the winner was already delivered before the loser was even created,
       -- the loser is a legitimate repeat purchase (customer re-ordering the same
@@ -195,6 +223,111 @@ export function duplicateLosersQuery(opts: {
         OR (w.rank = l.rank AND w.created_at = l.created_at AND w.id < l.id)
       )
     ORDER BY l.id, w.rank DESC, w.created_at ASC
+    LIMIT ${MAX_PER_RUN}
+  `;
+}
+
+export type FollowUpCopyDuplicateRow = {
+  follow_up_id: string;
+  follow_up_status: string;
+  follow_up_branch_id: string | null;
+  order_id: string;
+  order_number: number;
+  order_prefix: string | null;
+  order_flagged_unlinked: boolean;
+  rule_mode: 'DELETE' | 'FLAG';
+};
+
+/**
+ * Open follow-up copies whose customer ordered the same product again on their
+ * own (owner decision 2026-11-02). The follow-up copy lives in follow_up_orders,
+ * which the orders-table cleanup never compares, so both teams called the same
+ * customer and the new order carried an intake "duplicate" badge with nothing
+ * to compare against.
+ *
+ * Match: same company + same currency + same phone (hash or last 9 digits) +
+ * same product, the order created within the company's window of the copy, the
+ * order live and not the copy's own source or graduated order, and not a repeat
+ * purchase delivered before the copy existed. UNPROCESSED / CS_ASSIGNED /
+ * CS_ENGAGED copies are deleted (DELETE mode); CONFIRMED copies are flagged.
+ * One row per follow-up copy, newest matching order wins.
+ */
+export function followUpCopyDuplicatesQuery(opts: {
+  companyRules: Array<{ groupId: string } & CleanupCronRule>;
+  fallback: CleanupCronRule;
+}): SQL {
+  const { companyRules, fallback } = opts;
+  const cfgRows = companyRules.length > 0
+    ? sql.join(
+        companyRules.map((r) => sql`(${r.groupId}::uuid, ${r.mode}::text, ${r.windowDays}::int)`),
+        sql`, `,
+      )
+    : sql`(NULL::uuid, NULL::text, NULL::int)`;
+  return sql`
+    WITH cfg(group_id, mode, window_days) AS (VALUES ${cfgRows}),
+    fu AS MATERIALIZED (
+      SELECT f.id, f.status, f.is_duplicate, f.source_order_id, f.customer_phone_hash,
+             f.currency_code, f.created_at, f.branch_id, b.group_id,
+             COALESCE(cfg.mode, ${fallback.mode}::text) AS rule_mode,
+             COALESCE(cfg.window_days, ${fallback.windowDays}::int) AS window_days,
+             nullif(right(regexp_replace(coalesce(f.customer_phone, ''), '\\D', '', 'g'), 9), '') AS tail
+      FROM follow_up_orders f
+      JOIN branches b ON b.id = COALESCE(f.branch_id, f.servicing_branch_id)
+      LEFT JOIN cfg ON cfg.group_id = b.group_id
+      WHERE f.deleted_at IS NULL
+        AND f.status IN ('UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED')
+        AND f.is_duplicate IS DISTINCT FROM 'DISMISSED'
+        AND f.is_duplicate IS DISTINCT FROM 'MERGED'
+    ),
+    live AS MATERIALIZED (
+      SELECT o.id, o.order_number, o.customer_phone_hash, o.currency_code, o.created_at,
+             o.delivered_at, o.status, o.is_duplicate, o.duplicate_of_id, o.source_follow_up_order_id,
+             b.group_id,
+             nullif(right(regexp_replace(coalesce(o.customer_phone, ''), '\\D', '', 'g'), 9), '') AS tail
+      FROM orders o
+      JOIN branches b ON b.id = o.branch_id
+      WHERE o.deleted_at IS NULL
+        AND o.status NOT IN ('CANCELLED', 'DELETED')
+        AND NOT o.frozen_for_follow_up
+        AND o.created_at >= NOW() - make_interval(days => ${2 * Math.max(fallback.windowDays, ...companyRules.map((r) => r.windowDays)) + DUPLICATE_LOOKBACK_MARGIN_DAYS}::int)
+    ),
+    same_customer AS (
+      SELECT f.id AS fu_id, o.id AS order_id
+      FROM fu f JOIN live o ON o.customer_phone_hash = f.customer_phone_hash
+                          AND o.group_id = f.group_id AND o.currency_code = f.currency_code
+      WHERE f.rule_mode <> 'OFF'
+      UNION
+      SELECT f.id, o.id
+      FROM fu f JOIN live o ON o.tail = f.tail
+                          AND o.group_id = f.group_id AND o.currency_code = f.currency_code
+      WHERE f.rule_mode <> 'OFF' AND length(f.tail) = 9
+    )
+    SELECT DISTINCT ON (f.id)
+      f.id                AS follow_up_id,
+      f.status            AS follow_up_status,
+      f.branch_id         AS follow_up_branch_id,
+      o.id                AS order_id,
+      o.order_number      AS order_number,
+      g.order_prefix      AS order_prefix,
+      (o.is_duplicate = 'FLAGGED' AND o.duplicate_of_id IS NULL) AS order_flagged_unlinked,
+      f.rule_mode         AS rule_mode
+    FROM same_customer sc
+    JOIN fu f ON f.id = sc.fu_id
+    JOIN live o ON o.id = sc.order_id
+    JOIN branch_groups g ON g.id = o.group_id
+    WHERE o.id IS DISTINCT FROM f.source_order_id
+      AND o.source_follow_up_order_id IS DISTINCT FROM f.id
+      AND ABS(EXTRACT(EPOCH FROM (o.created_at - f.created_at))) <= f.window_days * 86400
+      -- Delivered before the follow-up copy existed: an earlier sale, not this one.
+      AND NOT (o.status IN ('DELIVERED', 'REMITTED') AND o.delivered_at IS NOT NULL AND o.delivered_at < f.created_at)
+      -- FLAG mode, or a CONFIRMED copy: once flagged it is settled.
+      AND NOT (f.is_duplicate = 'FLAGGED' AND (f.rule_mode = 'FLAG' OR f.status = 'CONFIRMED'))
+      AND EXISTS (
+        SELECT 1 FROM follow_up_order_items fi
+        JOIN order_items oi ON oi.product_id = fi.product_id AND oi.order_id = o.id
+        WHERE fi.follow_up_order_id = f.id
+      )
+    ORDER BY f.id, o.created_at DESC
     LIMIT ${MAX_PER_RUN}
   `;
 }
@@ -358,6 +491,11 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       await this.purgeUniversalDuplicates();
     } catch (err) {
       this.logger.error(`Universal duplicate purge run failed: ${(err as Error)?.message ?? err}`);
+    }
+    try {
+      await this.purgeFollowUpCopiesReordered();
+    } catch (err) {
+      this.logger.error(`Follow-up copy duplicate purge run failed: ${(err as Error)?.message ?? err}`);
     }
     try {
       await this.followUpService.retryFailedGraduations();
@@ -706,6 +844,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       winnerOrderNumber: number | null;
       productIds: string[];
       ruleMode: 'DELETE' | 'FLAG';
+      deletable: boolean;
     }>();
     for (const row of losers) {
       const existing = loserMap.get(row.loser_id);
@@ -728,6 +867,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
           winnerOrderNumber: row.winner_order_number,
           productIds: [row.product_id],
           ruleMode: row.rule_mode,
+          deletable: row.loser_deletable === true,
         });
       }
     }
@@ -740,11 +880,11 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       .join('; ');
 
     const now = new Date();
-    // Early-stage statuses where no stock has moved — safe to soft-delete.
-    const SAFE_TO_DELETE_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'];
-    // Delete only in DELETE-mode companies; FLAG-mode companies flag every stage.
-    const willDelete = (e: { status: string; ruleMode: 'DELETE' | 'FLAG' }) =>
-      e.ruleMode === 'DELETE' && SAFE_TO_DELETE_STATUSES.includes(e.status);
+    // Delete only in DELETE-mode companies, and only copies with no stock held:
+    // early stage, or CONFIRMED with nothing to unwind (`loser_deletable`, see
+    // DELETABLE_CONFIRMED). FLAG-mode companies flag every stage.
+    const willDelete = (e: { ruleMode: 'DELETE' | 'FLAG'; deletable: boolean }) =>
+      e.ruleMode === 'DELETE' && e.deletable;
     const softDeleteIds = loserEntries.filter(willDelete).map((e) => e.loserId);
     const flagOnlyIds = loserEntries.filter((e) => !willDelete(e)).map((e) => e.loserId);
 
@@ -781,8 +921,49 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         }
       }
 
-      // 1b. Flag-only for CONFIRMED+ orders — stock may be allocated, can't
-      //     safely delete without inventory reversal. CS/HoCS handles manually.
+      // 1a-bis. A deleted CONFIRMED copy had a DRAFT invoice; cancel it so it
+      //     never reaches remittance. Invoices past DRAFT block the delete.
+      if (softDeleteIds.length > 0) {
+        await tx
+          .update(schema.invoices)
+          .set({ status: 'CANCELLED' })
+          .where(and(inArray(schema.invoices.orderId, softDeleteIds), eq(schema.invoices.status, 'DRAFT')));
+      }
+
+      // 1a-ter. The kept order often carries the intake "duplicate" badge
+      //     pointing at the copy just deleted. Nothing live is left to compare,
+      //     so clear it (a real remaining duplicate is re-flagged next run).
+      let clearedWinners: Array<{ id: string; branchId: string | null }> = [];
+      if (softDeleteIds.length > 0) {
+        clearedWinners = await tx
+          .update(schema.orders)
+          .set({ isDuplicate: null, duplicateOfId: null, updatedAt: now })
+          .where(
+            and(
+              eq(schema.orders.isDuplicate, 'FLAGGED'),
+              inArray(schema.orders.duplicateOfId, softDeleteIds),
+              isNull(schema.orders.deletedAt),
+              notInArray(schema.orders.id, softDeleteIds),
+            ),
+          )
+          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+        if (clearedWinners.length > 0) {
+          await tx.insert(schema.orderTimelineEvents).values(
+            clearedWinners.map((w) => ({
+              orderId: w.id,
+              eventType: 'ORDER_DUPLICATE_FLAGGED' as const,
+              actorId: null,
+              actorName: 'System' as const,
+              description: 'Duplicate badge cleared: the other copy of this order was deleted, so this is the order to keep.',
+              metadata: { reason: 'DUPLICATE_RULE_KEPT_ORDER' },
+              branchId: w.branchId ?? null,
+            })),
+          );
+        }
+      }
+
+      // 1b. Flag-only for copies holding stock (AGENT_ASSIGNED+) or with money /
+      //     a source to unwind. CS/HoCS handles them by hand.
       if (flagOnlyIds.length > 0) {
         const byWinner = new Map<string, string[]>();
         for (const e of loserEntries) {
@@ -864,10 +1045,104 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
     this.logger.log(
-      `Duplicate cleanup: ${softDeleteIds.length} soft-deleted (early-stage), ${flagOnlyIds.length} flagged-only (CONFIRMED+). Targets: ${preview}` +
+      `Duplicate cleanup: ${softDeleteIds.length} soft-deleted, ${flagOnlyIds.length} flagged-only (stock held or paid). Targets: ${preview}` +
         (loserIds.length > 20 ? ` … +${loserIds.length - 20} more` : ''),
     );
     return { deleted: softDeleteIds.length, skipped: flagOnlyIds.length };
   }
-}
 
+  /**
+   * Remove open follow-up copies the customer has already re-ordered (see
+   * `followUpCopyDuplicatesQuery`). Early copies are deleted, CONFIRMED copies
+   * flagged; FLAG-mode companies only flag. The new order's intake badge, when
+   * it pointed at no order (the intake matched this follow-up copy), is cleared.
+   */
+  async purgeFollowUpCopiesReordered(): Promise<{ deleted: number; flagged: number }> {
+    const { byGroup, fallback } = await this.duplicateRules.allCompanies();
+    const companyRules = [...byGroup.entries()].map(([groupId, r]) => ({ groupId, ...r.cleanupCron }));
+    if (fallback.cleanupCron.mode === 'OFF' && companyRules.every((r) => r.mode === 'OFF')) {
+      return { deleted: 0, flagged: 0 };
+    }
+
+    const rows = await this.db.execute<FollowUpCopyDuplicateRow>(
+      followUpCopyDuplicatesQuery({ companyRules, fallback: fallback.cleanupCron }),
+    );
+    if (rows.length === 0) return { deleted: 0, flagged: 0 };
+
+    const EARLY = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'];
+    const willDelete = (r: FollowUpCopyDuplicateRow) => r.rule_mode === 'DELETE' && EARLY.includes(r.follow_up_status);
+    const toDelete = rows.filter(willDelete);
+    const toFlag = rows.filter((r) => !willDelete(r));
+    const badgeOrderIds = [...new Set(toDelete.filter((r) => r.order_flagged_unlinked).map((r) => r.order_id))];
+    const now = new Date();
+
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      if (toDelete.length > 0) {
+        await tx
+          .update(schema.followUpOrders)
+          .set({ status: 'DELETED', deletedAt: now, isDuplicate: 'FLAGGED', updatedAt: now })
+          .where(
+            and(
+              inArray(schema.followUpOrders.id, toDelete.map((r) => r.follow_up_id)),
+              inArray(schema.followUpOrders.status, EARLY),
+              isNull(schema.followUpOrders.deletedAt),
+            ),
+          );
+      }
+      if (toFlag.length > 0) {
+        await tx
+          .update(schema.followUpOrders)
+          .set({ isDuplicate: 'FLAGGED', updatedAt: now })
+          .where(and(inArray(schema.followUpOrders.id, toFlag.map((r) => r.follow_up_id)), isNull(schema.followUpOrders.deletedAt)));
+      }
+      await tx.insert(schema.followUpOrderTimelineEvents).values(
+        rows.map((r) => {
+          const label = formatOrderNumber(r.order_number, r.order_prefix);
+          return {
+            followUpOrderId: r.follow_up_id,
+            eventType: willDelete(r) ? 'ORDER_DELETED' : 'ORDER_DUPLICATE_FLAGGED',
+            actorId: null,
+            actorName: 'System' as const,
+            description: willDelete(r)
+              ? `Deleted: the customer ordered the same product again on their own (${label}).`
+              : `Flagged as duplicate: the customer ordered the same product again on their own (${label}).`,
+            metadata: { reason: 'FOLLOW_UP_REORDERED', orderId: r.order_id },
+            branchId: r.follow_up_branch_id ?? null,
+          };
+        }),
+      );
+      if (badgeOrderIds.length > 0) {
+        const cleared = await tx
+          .update(schema.orders)
+          .set({ isDuplicate: null, updatedAt: now })
+          .where(
+            and(
+              inArray(schema.orders.id, badgeOrderIds),
+              eq(schema.orders.isDuplicate, 'FLAGGED'),
+              isNull(schema.orders.duplicateOfId),
+            ),
+          )
+          .returning({ id: schema.orders.id, branchId: schema.orders.branchId });
+        if (cleared.length > 0) {
+          await tx.insert(schema.orderTimelineEvents).values(
+            cleared.map((o) => ({
+              orderId: o.id,
+              eventType: 'ORDER_DUPLICATE_FLAGGED' as const,
+              actorId: null,
+              actorName: 'System' as const,
+              description: 'Duplicate badge cleared: the matching follow-up copy was removed, so this is the order to keep.',
+              metadata: { reason: 'FOLLOW_UP_REORDERED_KEPT_ORDER' },
+              branchId: o.branchId ?? null,
+            })),
+          );
+        }
+      }
+    });
+
+    await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
+    this.logger.log(
+      `Follow-up copy cleanup: ${toDelete.length} deleted, ${toFlag.length} flagged, ${badgeOrderIds.length} order badge(s) checked.`,
+    );
+    return { deleted: toDelete.length, flagged: toFlag.length };
+  }
+}
