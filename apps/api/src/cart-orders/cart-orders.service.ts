@@ -278,12 +278,17 @@ export class CartOrdersService {
    * withActor + a timeline event naming the real order on every write.
    */
   private async reconcileOwnOrderCartOrders(): Promise<number> {
+    // Runs every 2 minutes, so keep it to recent cart orders: an own order can
+    // only appear within CART_LINK_WINDOW_SQL (72h) of the cart order, and 30
+    // days still sweeps the backlog. Without this bound the progressed pass
+    // matched every delivered cart order in history against every order.
+    const recent = sql`co.created_at >= now() - INTERVAL '30 days'`;
     const unworked = (await this.db.execute(sql`
-      ${cartRealOrderMatchesQuery(sql`co.status IN ('UNPROCESSED','CS_ASSIGNED')`, { ownOrderOnly: true })}
+      ${cartRealOrderMatchesQuery(sql`${recent} AND co.status IN ('UNPROCESSED','CS_ASSIGNED')`, { ownOrderOnly: true })}
       LIMIT 500
     `)) as unknown as CartRealOrderMatch[];
     const worked = (await this.db.execute(sql`
-      ${cartRealOrderMatchesQuery(sql`co.status NOT IN ('UNPROCESSED','CS_ASSIGNED') AND co.is_duplicate IS NULL`, { ownOrderOnly: true })}
+      ${cartRealOrderMatchesQuery(sql`${recent} AND co.status NOT IN ('UNPROCESSED','CS_ASSIGNED') AND co.is_duplicate IS NULL`, { ownOrderOnly: true })}
       LIMIT 500
     `)) as unknown as CartRealOrderMatch[];
     if (unworked.length === 0 && worked.length === 0) return 0;
