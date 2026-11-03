@@ -1265,6 +1265,11 @@ function getFormScript(
       var btn = document.getElementById('yannisSubmitBtn');
       var selectedProduct = null;
       var selectedOffer = null;
+      // The first offer is pre-ticked so a submit can never fail on "Please
+      // select an offer" (owner 2026-11-03). offerUserChosen records whether the
+      // CUSTOMER picked it: the cart only stores an offer they chose, so the
+      // unsubmitted-form converter and cart reports keep their meaning.
+      var offerUserChosen = false;
       var products = ${safeJsonForScript(products)};
       var card = form ? form.closest('.yannis-form-card') : null;
 
@@ -1392,6 +1397,7 @@ function getFormScript(
         // Reset custom dropdowns back to placeholder state.
         document.querySelectorAll('[data-yd]').forEach(function(yd) { if (yd._ydReset) yd._ydReset(); });
         selectedOffer = null;
+        offerUserChosen = false;
         selectedProduct = singleProductId || null;
         document.querySelectorAll('.product-option').forEach(function(o) { o.classList.remove('selected'); });
         document.querySelectorAll('.offer-option').forEach(function(o) { o.classList.remove('selected'); });
@@ -1404,6 +1410,7 @@ function getFormScript(
           var activeOffers = document.getElementById('offers-' + selectedProduct);
           if (activeOffers) { activeOffers.style.display = 'flex'; }
         }
+        preselectFirstOffer();
         var paymentMethodEl = form.querySelector('#paymentMethod');
         if (paymentMethodEl) {
           var evt = document.createEvent('HTMLEvents');
@@ -1474,7 +1481,8 @@ function getFormScript(
       form.addEventListener('change', clearError);
       form.addEventListener('focusin', clearError);
 
-      // Single-product: set product only, do not preselect offer
+      // Single-product: set the product here; the first offer is pre-ticked by
+      // preselectFirstOffer() below (submit only, not stored on the cart)
       singleProductId = form.dataset.singleProduct;
       if (singleProductId) {
         selectedProduct = singleProductId;
@@ -1487,9 +1495,11 @@ function getFormScript(
           el.classList.add('selected');
           selectedProduct = el.dataset.productId;
           selectedOffer = null;
+          offerUserChosen = false;
           document.querySelectorAll('.offer-group').forEach(function(g) { g.style.display = 'none'; });
           var offerGroup = document.getElementById('offers-' + selectedProduct);
           if (offerGroup) { offerGroup.style.display = 'flex'; }
+          preselectFirstOffer();
           maybeSaveCart();
         });
       });
@@ -1498,6 +1508,7 @@ function getFormScript(
       document.querySelectorAll('.offer-radio').forEach(function(radio) {
         radio.addEventListener('change', function() {
           selectedOffer = JSON.parse(radio.dataset.offer);
+          offerUserChosen = true;
           // Highlight selected offer option
           var parent = radio.closest('.offer-group');
           if (parent) {
@@ -1507,6 +1518,25 @@ function getFormScript(
           maybeSaveCart();
         });
       });
+
+      // Pre-tick the first offer of the active product (see offerUserChosen).
+      // Display + submit only; wrapped so it can never break the form.
+      function preselectFirstOffer() {
+        try {
+          if (!selectedProduct || selectedOffer) return;
+          var group = document.getElementById('offers-' + selectedProduct);
+          if (!group) return;
+          var first = group.querySelector('.offer-radio');
+          if (!first || !first.dataset.offer) return;
+          first.checked = true;
+          selectedOffer = JSON.parse(first.dataset.offer);
+          offerUserChosen = false;
+          group.querySelectorAll('.offer-option').forEach(function(o) { o.classList.remove('selected'); });
+          var opt = first.closest('.offer-option');
+          if (opt) opt.classList.add('selected');
+        } catch (e) { selectedOffer = null; }
+      }
+      preselectFirstOffer();
 
       // Currency switcher — re-price the visible offers on change. Additive: only
       // present when the API supplied 2+ currencies and the MB enabled it.
@@ -1792,7 +1822,7 @@ function getFormScript(
           };
           // Progressive — include product/offer only once the customer selected them.
           if (selectedProduct) payload.productId = selectedProduct;
-          if (selectedOffer && selectedOffer.label) payload.offerLabel = selectedOffer.label;
+          if (selectedOffer && selectedOffer.label && offerUserChosen) payload.offerLabel = selectedOffer.label;
           // Name is optional — phone alone captures the cart.
           if (name.length >= 1) payload.customerName = name;
           // Progressive capture — only include fields that have a value right now.
@@ -2452,6 +2482,8 @@ function getFormScript(
             msg.textContent = result.data.message || 'Order received successfully! We will contact you shortly.';
             form.reset();
             selectedOffer = null;
+            offerUserChosen = false;
+            preselectFirstOffer();
           } else {
             msg.className = 'msg msg-error';
             // Parse validation errors into friendly messages instead of showing raw JSON
