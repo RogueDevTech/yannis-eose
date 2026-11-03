@@ -48,7 +48,7 @@ import {
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { router, publicProcedure, authedProcedure, permissionProcedure, edgeProcedure } from '../trpc';
+import { router, publicProcedure, authedProcedure, permissionProcedure } from '../trpc';
 import { FORM_VISITOR_OUTCOMES, MarketingService } from '../../marketing/marketing.service';
 import { getBranchTeamsService, listBranchesForUser } from './branches.router';
 import {
@@ -2407,10 +2407,12 @@ export const marketingRouter = router({
    * Submit-attempt beacon from the edge worker (/track-submit): a public-form
    * submit that did not go through. Telemetry only, never fails the caller.
    */
-  // edgeProcedure: only the edge worker (X-Edge-Api-Key) may write telemetry,
-  // so the CEO's report cannot be flooded with fake rows. Fail-open when the
-  // key is unconfigured (see edgeProcedure). Telemetry only: never intake.
-  trackSubmitAttempt: edgeProcedure
+  // publicProcedure, same as trackView and cart.save: the prod worker's forward
+  // does not carry an X-Edge-Api-Key the API accepts, so edgeProcedure 401'd
+  // every beacon and form_submit_attempts recorded nothing after 2026-10-07.
+  // Telemetry only (no PII, never intake); a fake row can only add noise to the
+  // Form failures report, the same exposure trackView already accepts.
+  trackSubmitAttempt: publicProcedure
     .input(
       z.object({
         campaignId: z.string().uuid(),
