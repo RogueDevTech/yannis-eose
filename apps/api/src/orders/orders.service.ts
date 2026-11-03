@@ -8106,6 +8106,71 @@ export class OrdersService {
   }
 
   /**
+   * After a manual assignment: which closers were given orders in a currency
+   * they hold no country grant for in that order's company?
+   *
+   * The closer still sees those orders on My Orders (see
+   * `currencyScopeForCloserSelfQuery` in orders.router), but every other
+   * country-scoped page of theirs leaves them out, so whoever assigned should
+   * fix the closer's country access. Mirrors the session rule in trpc/context:
+   * no grant at all in a company = base currency (NGN) only; countries.view_all
+   * sees everything. Read-only, never blocks the assignment: returns a message
+   * or null, and swallows its own errors.
+   */
+  async closerCountryAccessWarning(orderIds: string[]): Promise<string | null> {
+    if (orderIds.length === 0) return null;
+    try {
+      const ids = sql.join(orderIds.map((id) => sql`${id}::uuid`), sql`, `);
+      const result = await this.db.execute(sql`
+        SELECT u.name AS closer_name,
+               bg.name AS company_name,
+               upper(coalesce(o.currency_code, 'NGN')) AS currency_code,
+               count(*)::int AS orders
+        FROM orders o
+        JOIN users u ON u.id = o.assigned_cs_id
+        JOIN branches sb ON sb.id = o.servicing_branch_id
+        JOIN branch_groups bg ON bg.id = sb.group_id
+        WHERE o.id IN (${ids})
+          AND u.role = 'CS_CLOSER'
+          AND NOT EXISTS (
+            SELECT 1 FROM user_permissions up
+            JOIN permissions p ON p.id = up.permission_id
+            WHERE up.user_id = u.id AND up.granted AND p.code = 'countries.view_all'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM user_countries uc
+            WHERE uc.user_id = u.id AND uc.group_id = sb.group_id
+              AND uc.currency_code = upper(coalesce(o.currency_code, 'NGN'))
+          )
+          AND NOT (
+            upper(coalesce(o.currency_code, 'NGN')) = 'NGN'
+            AND NOT EXISTS (
+              SELECT 1 FROM user_countries uc2
+              WHERE uc2.user_id = u.id AND uc2.group_id = sb.group_id
+            )
+          )
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 2, 3
+      `);
+      type GapRow = { closer_name: string; company_name: string; currency_code: string; orders: number };
+      const rows: GapRow[] = Array.isArray(result)
+        ? (result as unknown as GapRow[])
+        : ((result as unknown as { rows?: GapRow[] })?.rows ?? []);
+      if (rows.length === 0) return null;
+      const parts = rows.map(
+        (r) =>
+          `${r.closer_name} has no ${r.currency_code} access in ${r.company_name} (${r.orders} order${r.orders === 1 ? '' : 's'})`,
+      );
+      return `${parts.join('; ')}. They can still see these orders in My Orders. Add the country in their user settings so their other pages count them.`;
+    } catch (err) {
+      this.logger.warn(
+        `closerCountryAccessWarning skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Manually assign an order to a Sales closer.
    * Callers with `orders.reassign` (HoCS / Admin), or a branch Sales team supervisor for in-team agents
    * on orders in UNPROCESSED or CS_ASSIGNED (supervisors only).

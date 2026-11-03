@@ -63,10 +63,15 @@ export function useFetcherToast(
     if (fetcherData === prevRef.current) return;
     prevRef.current = fetcherData;
     if (!fetcherData || typeof fetcherData !== 'object') return;
-    const data = fetcherData as { success?: boolean; error?: string; message?: string };
+    const data = fetcherData as { success?: boolean; error?: string; message?: string; warning?: string | null };
     if (data.success) {
       if (!options?.skipSuccessToast) {
         toast.success(data.message ?? options?.successMessage ?? 'Action completed');
+      }
+      // A successful action can still carry something the user should fix
+      // (e.g. a closer assigned orders in a country they have no access to).
+      if (typeof data.warning === 'string' && data.warning.length > 0) {
+        toast.warning('Heads up', data.warning);
       }
     } else if (data.error && !options?.skipErrorToast) {
       toast.error('Error', data.error);
