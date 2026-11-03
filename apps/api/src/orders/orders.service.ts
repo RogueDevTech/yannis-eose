@@ -4638,6 +4638,10 @@ export class OrdersService {
 
     // The customer already has a real order from this visit (another browser,
     // or a submit we have not linked): this cart is that order, not a new one.
+    // SAME PHONE only (hash or last 9 digits). The browser session alone is NOT
+    // the same customer (CLAUDE.md): a media buyer typing many customers into
+    // one browser shares one session, and matching on it skipped every
+    // properly filled cart after their first order (2026-11-03).
     const since = new Date(new Date(cart.createdAt).getTime() - 2 * 60 * 60 * 1000);
     const [existing] = await this.db
       .select({ id: schema.orders.id })
@@ -4647,7 +4651,6 @@ export class OrdersService {
           // "Same phone" = hash OR last 9 raw digits (CLAUDE.md: 803… vs 0803…).
           or(
             eq(schema.orders.customerPhoneHash, cart.customerPhoneHash),
-            ...(cart.sessionId ? [eq(schema.orders.sessionId, cart.sessionId)] : []),
             ...((cart.customerPhone ?? '').replace(/\D/g, '').length >= 9
               ? [sql`right(regexp_replace(coalesce(${schema.orders.customerPhone}, ''), '\\D', '', 'g'), 9) = ${(cart.customerPhone ?? '').replace(/\D/g, '').slice(-9)}`]
               : []),

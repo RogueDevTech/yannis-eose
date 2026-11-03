@@ -48,6 +48,16 @@ const VALID_TIMELINE_EVENT_TYPES = new Set([
   'ORDER_FROZEN', 'ORDER_REMITTED',
 ]);
 
+/** Timeline wording for a cart order matched to a real order. */
+function cartRealOrderReasonText(m: CartRealOrderMatch, label: string): string {
+  switch (m.match_type) {
+    case 'CART_LINK': return `the customer completed this cart as order ${label}`;
+    case 'CART_CONVERTED': return `this cart was converted into order ${label}`;
+    case 'SAME_PRODUCT': return `the customer already has order ${label} for the same product`;
+    case 'SAME_SESSION': return `the customer placed order ${label} in the same session`;
+  }
+}
+
 @Injectable()
 export class CartOrdersService {
 
@@ -241,8 +251,99 @@ export class CartOrdersService {
    *    real order (Pillar 4).
    *  - Per-company switch DUPLICATE_RULES.cartReconcile: DELETE (above), FLAG
    *    (early stages are flagged like progressed ones, never deleted), OFF.
+   *
+   * Runs the always-on own-order pass first (see `reconcileOwnOrderCartOrders`),
+   * then the duplicate-rule pass.
    */
   async reconcileDuplicateCartOrders(): Promise<number> {
+    const own = await this.reconcileOwnOrderCartOrders();
+    return own + (await this.reconcileRuleDuplicateCartOrders());
+  }
+
+  /**
+   * ALWAYS ON, not a duplicate rule: close the cart order once the cart's OWN
+   * order exists (cart_id link, CONVERTED source cart, or the same phone in the
+   * cart's session; see OWN_ORDER_MATCH_TYPES).
+   *
+   * Why (2026-11-03): with DUPLICATE_RULES.cartReconcile OFF (the default) a
+   * cart pulled a moment before its submit landed, or a customer typed in again
+   * an hour later, kept a live cart order next to the real order, so CS chased
+   * a customer who had already ordered and the media buyer saw the order "stuck
+   * in Cart Orders". The pull already applies this same check as always-on; this
+   * covers orders that land after the pull.
+   *
+   *  - UNPROCESSED / CS_ASSIGNED (nobody has called yet) → soft-deleted.
+   *  - CS_ENGAGED and beyond → flagged only (CS is working it; called cart
+   *    orders are never auto-closed, owner decision).
+   * withActor + a timeline event naming the real order on every write.
+   */
+  private async reconcileOwnOrderCartOrders(): Promise<number> {
+    const unworked = (await this.db.execute(sql`
+      ${cartRealOrderMatchesQuery(sql`co.status IN ('UNPROCESSED','CS_ASSIGNED')`, { ownOrderOnly: true })}
+      LIMIT 500
+    `)) as unknown as CartRealOrderMatch[];
+    const worked = (await this.db.execute(sql`
+      ${cartRealOrderMatchesQuery(sql`co.status NOT IN ('UNPROCESSED','CS_ASSIGNED') AND co.is_duplicate IS NULL`, { ownOrderOnly: true })}
+      LIMIT 500
+    `)) as unknown as CartRealOrderMatch[];
+    if (unworked.length === 0 && worked.length === 0) return 0;
+
+    const all = [...unworked, ...worked];
+    const cartRows = await this.db
+      .select({ id: schema.cartOrders.id, branchId: schema.cartOrders.branchId })
+      .from(schema.cartOrders)
+      .where(inArray(schema.cartOrders.id, all.map((m) => m.cart_order_id)));
+    const branchByCartOrder = new Map(cartRows.map((r) => [r.id, r.branchId ?? null]));
+    const prefixOf = this.memoizedOrderPrefix();
+    const labelByOrder = new Map<string, string>();
+    for (const m of all) {
+      labelByOrder.set(m.order_id, formatOrderNumber(Number(m.order_number), await prefixOf(m.order_branch_id)));
+    }
+    const reason = (m: CartRealOrderMatch) => cartRealOrderReasonText(m, labelByOrder.get(m.order_id) ?? '');
+
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      const now = new Date();
+      for (const m of unworked) {
+        await tx
+          .update(schema.cartOrders)
+          .set({ status: 'DELETED', deletedAt: now, updatedAt: now, isDuplicate: 'CART_EDGE_FORM_DUPE', duplicateOfId: m.order_id })
+          .where(and(eq(schema.cartOrders.id, m.cart_order_id), isNull(schema.cartOrders.deletedAt)));
+      }
+      for (const m of worked) {
+        await tx
+          .update(schema.cartOrders)
+          .set({ isDuplicate: 'CART_EDGE_FORM_DUPE', duplicateOfId: m.order_id, updatedAt: now })
+          .where(and(eq(schema.cartOrders.id, m.cart_order_id), isNull(schema.cartOrders.isDuplicate)));
+      }
+      await tx.insert(schema.cartOrderTimelineEvents).values([
+        ...unworked.map((m) => ({
+          cartOrderId: m.cart_order_id,
+          eventType: 'ORDER_DELETED',
+          actorId: null,
+          actorName: 'System',
+          description: `Cart order deleted: ${reason(m)}. Not yet called, so closed automatically.`,
+          metadata: { reason: 'RECONCILED_OWN_ORDER', matchType: m.match_type, orderId: m.order_id },
+          branchId: branchByCartOrder.get(m.cart_order_id) ?? null,
+        })),
+        ...worked.map((m) => ({
+          cartOrderId: m.cart_order_id,
+          eventType: 'CS_COMMENT',
+          actorId: null,
+          actorName: 'System',
+          description: `Already ordered: ${reason(m)}. Flagged, not deleted, because CS is already working this cart order.`,
+          metadata: { reason: 'FLAGGED_OWN_ORDER', matchType: m.match_type, orderId: m.order_id },
+          branchId: branchByCartOrder.get(m.cart_order_id) ?? null,
+        })),
+      ]);
+    });
+    this.logger.log(
+      `Reconciled cart orders against their own orders: ${unworked.length} deleted, ${worked.length} flagged`,
+    );
+    return unworked.length + worked.length;
+  }
+
+  /** The duplicate-rule pass (DUPLICATE_RULES.cartReconcile), see reconcileDuplicateCartOrders. */
+  private async reconcileRuleDuplicateCartOrders(): Promise<number> {
     const { byGroup, fallback } = await this.duplicateRules.allCompanies();
     const offGroups = [...byGroup.entries()].filter(([, r]) => r.cartReconcile.mode === 'OFF').map(([g]) => g);
     if (fallback.cartReconcile.mode === 'OFF' && offGroups.length === byGroup.size) return 0;
@@ -297,15 +398,7 @@ export class CartOrdersService {
     for (const m of all) {
       labelByOrder.set(m.order_id, formatOrderNumber(Number(m.order_number), await prefixOf(m.order_branch_id)));
     }
-    const reasonText = (m: CartRealOrderMatch) => {
-      const label = labelByOrder.get(m.order_id);
-      switch (m.match_type) {
-        case 'CART_LINK': return `the customer completed this cart as order ${label}`;
-        case 'CART_CONVERTED': return `this cart was converted into order ${label}`;
-        case 'SAME_PRODUCT': return `the customer already has order ${label} for the same product`;
-        case 'SAME_SESSION': return `the customer placed order ${label} in the same session (different product)`;
-      }
-    };
+    const reasonText = (m: CartRealOrderMatch) => cartRealOrderReasonText(m, labelByOrder.get(m.order_id) ?? '');
 
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
       const now = new Date();
