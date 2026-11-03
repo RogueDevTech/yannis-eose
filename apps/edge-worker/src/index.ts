@@ -1110,6 +1110,7 @@ function getFormStyles(accentColor: string): string {
     .yannis-form-card .msg-success{background:#ecfdf5;color:#059669;border:1px solid #a7f3d0}
     .yannis-form-card .msg-error{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
     .yannis-form-card .msg-info{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}
+    .yannis-form-card .msg-near-btn{margin:0 0 .75rem;font-weight:600}
     .yannis-form-card .hidden{display:none}
     .yannis-form-card .required{color:#dc2626;font-weight:700}
     .yannis-form-card .field-error{color:#dc2626;font-size:.75rem;margin:-0.75rem 0 .75rem;display:block}
@@ -1265,6 +1266,11 @@ function getFormScript(
       var btn = document.getElementById('yannisSubmitBtn');
       var selectedProduct = null;
       var selectedOffer = null;
+      // The first offer is pre-ticked so a submit can never fail on "Please
+      // select an offer" (owner 2026-11-03). offerUserChosen records whether the
+      // CUSTOMER picked it: the cart only stores an offer they chose, so the
+      // unsubmitted-form converter and cart reports keep their meaning.
+      var offerUserChosen = false;
       var products = ${safeJsonForScript(products)};
       var card = form ? form.closest('.yannis-form-card') : null;
 
@@ -1330,6 +1336,75 @@ function getFormScript(
           }).observe(msg, { attributes: true, attributeFilter: ['class'], childList: true, characterData: true, subtree: true });
         }
       } catch (e) { /* tracking must never break the form */ }
+
+      // ── Blocked-submit message next to the button (owner 2026-11-03) ──────
+      // Media buyers typing orders fast pressed Submit, the form blocked it for
+      // an empty field (mostly Delivery State / Address), and the only signs were
+      // a banner at the TOP of the form or the browser's own bubble, so they
+      // moved on thinking it went through. Display only: a second message box
+      // right above the button that (a) mirrors every error/info in #yannisMsg
+      // and (b) names the fields the BROWSER refused (required textarea etc.),
+      // which never reached #yannisMsg at all. It is a separate element, so the
+      // failed-submit tracker above (which watches #yannisMsg) logs exactly as
+      // before. Every line wrapped: if anything here throws, the form is unchanged.
+      try {
+        if (form && btn && msg && btn.parentNode) {
+          var __yNear = document.createElement('div');
+          __yNear.className = 'msg msg-near-btn hidden';
+          __yNear.setAttribute('role', 'alert');
+          btn.parentNode.insertBefore(__yNear, btn);
+          var __yNearHide = function() {
+            __yNear.className = 'msg msg-near-btn hidden';
+            __yNear.textContent = '';
+          };
+          var __yNearShow = function(cls, text) {
+            __yNear.className = 'msg msg-near-btn ' + cls;
+            __yNear.textContent = text;
+          };
+          // (a) Mirror #yannisMsg errors / info (form checks, server errors).
+          if (window.MutationObserver) {
+            new MutationObserver(function() {
+              try {
+                var c = msg.className || '';
+                var t = (msg.textContent || '').trim();
+                if (!t || c.indexOf('hidden') !== -1) { __yNearHide(); return; }
+                if (c.indexOf('msg-error') !== -1) __yNearShow('msg-error', t);
+                else if (c.indexOf('msg-info') !== -1) __yNearShow('msg-info', t);
+                else __yNearHide();
+              } catch (e) {}
+            }).observe(msg, { attributes: true, attributeFilter: ['class'], childList: true, characterData: true, subtree: true });
+          }
+          // (b) Fields the browser refused: name them and mark them red.
+          var __yNative = [];
+          form.addEventListener('invalid', function(ev) {
+            try {
+              var t = ev.target;
+              if (!t) return;
+              var lbl = t.id ? form.querySelector('label[for="' + t.id + '"]') : null;
+              var name = lbl ? lbl.textContent.replace(/\\s*\\*\\s*$/, '').trim() : (t.getAttribute('placeholder') || t.name || 'a required field');
+              if (__yNative.indexOf(name) === -1) __yNative.push(name);
+              if (t.classList) t.classList.add('input-error');
+              if (__yNative.length === 1) {
+                setTimeout(function() {
+                  try {
+                    __yNearShow('msg-error', __yNative.length === 1
+                      ? 'Not submitted: ' + __yNative[0] + ' is required.'
+                      : 'Not submitted. Please fill in: ' + __yNative.join(', ') + '.');
+                  } catch (e) {}
+                  __yNative = [];
+                }, 0);
+              }
+            } catch (e) {}
+          }, true);
+          // Clear the native-field message once they start fixing it.
+          form.addEventListener('input', function(ev) {
+            try {
+              if (ev.target && ev.target.classList) ev.target.classList.remove('input-error');
+              if ((msg.className || '').indexOf('hidden') !== -1) __yNearHide();
+            } catch (e) {}
+          });
+        }
+      } catch (e) { /* display only: never break the form */ }
       var singleProductId = form ? form.dataset.singleProduct : null;
 
       // ── Multi-currency (additive; no-op when single-currency) ──────────────
@@ -1392,6 +1467,7 @@ function getFormScript(
         // Reset custom dropdowns back to placeholder state.
         document.querySelectorAll('[data-yd]').forEach(function(yd) { if (yd._ydReset) yd._ydReset(); });
         selectedOffer = null;
+        offerUserChosen = false;
         selectedProduct = singleProductId || null;
         document.querySelectorAll('.product-option').forEach(function(o) { o.classList.remove('selected'); });
         document.querySelectorAll('.offer-option').forEach(function(o) { o.classList.remove('selected'); });
@@ -1404,6 +1480,7 @@ function getFormScript(
           var activeOffers = document.getElementById('offers-' + selectedProduct);
           if (activeOffers) { activeOffers.style.display = 'flex'; }
         }
+        preselectFirstOffer();
         var paymentMethodEl = form.querySelector('#paymentMethod');
         if (paymentMethodEl) {
           var evt = document.createEvent('HTMLEvents');
@@ -1474,7 +1551,8 @@ function getFormScript(
       form.addEventListener('change', clearError);
       form.addEventListener('focusin', clearError);
 
-      // Single-product: set product only, do not preselect offer
+      // Single-product: set the product here; the first offer is pre-ticked by
+      // preselectFirstOffer() below (submit only, not stored on the cart)
       singleProductId = form.dataset.singleProduct;
       if (singleProductId) {
         selectedProduct = singleProductId;
@@ -1487,9 +1565,11 @@ function getFormScript(
           el.classList.add('selected');
           selectedProduct = el.dataset.productId;
           selectedOffer = null;
+          offerUserChosen = false;
           document.querySelectorAll('.offer-group').forEach(function(g) { g.style.display = 'none'; });
           var offerGroup = document.getElementById('offers-' + selectedProduct);
           if (offerGroup) { offerGroup.style.display = 'flex'; }
+          preselectFirstOffer();
           maybeSaveCart();
         });
       });
@@ -1498,6 +1578,7 @@ function getFormScript(
       document.querySelectorAll('.offer-radio').forEach(function(radio) {
         radio.addEventListener('change', function() {
           selectedOffer = JSON.parse(radio.dataset.offer);
+          offerUserChosen = true;
           // Highlight selected offer option
           var parent = radio.closest('.offer-group');
           if (parent) {
@@ -1507,6 +1588,25 @@ function getFormScript(
           maybeSaveCart();
         });
       });
+
+      // Pre-tick the first offer of the active product (see offerUserChosen).
+      // Display + submit only; wrapped so it can never break the form.
+      function preselectFirstOffer() {
+        try {
+          if (!selectedProduct || selectedOffer) return;
+          var group = document.getElementById('offers-' + selectedProduct);
+          if (!group) return;
+          var first = group.querySelector('.offer-radio');
+          if (!first || !first.dataset.offer) return;
+          first.checked = true;
+          selectedOffer = JSON.parse(first.dataset.offer);
+          offerUserChosen = false;
+          group.querySelectorAll('.offer-option').forEach(function(o) { o.classList.remove('selected'); });
+          var opt = first.closest('.offer-option');
+          if (opt) opt.classList.add('selected');
+        } catch (e) { selectedOffer = null; }
+      }
+      preselectFirstOffer();
 
       // Currency switcher — re-price the visible offers on change. Additive: only
       // present when the API supplied 2+ currencies and the MB enabled it.
@@ -1792,7 +1892,7 @@ function getFormScript(
           };
           // Progressive — include product/offer only once the customer selected them.
           if (selectedProduct) payload.productId = selectedProduct;
-          if (selectedOffer && selectedOffer.label) payload.offerLabel = selectedOffer.label;
+          if (selectedOffer && selectedOffer.label && offerUserChosen) payload.offerLabel = selectedOffer.label;
           // Name is optional — phone alone captures the cart.
           if (name.length >= 1) payload.customerName = name;
           // Progressive capture — only include fields that have a value right now.
@@ -2452,6 +2552,8 @@ function getFormScript(
             msg.textContent = result.data.message || 'Order received successfully! We will contact you shortly.';
             form.reset();
             selectedOffer = null;
+            offerUserChosen = false;
+            preselectFirstOffer();
           } else {
             msg.className = 'msg msg-error';
             // Parse validation errors into friendly messages instead of showing raw JSON

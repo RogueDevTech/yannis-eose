@@ -298,6 +298,29 @@ function aggregateBranchIdForCloserSelfQuery(
 }
 
 /**
+ * Country scope for a CS_CLOSER looking at their OWN assigned orders: none.
+ *
+ * An order assigned to a closer must always be visible to that closer, even in
+ * a currency they hold no country grant for in this company (2026-11-03: a
+ * Kenya closer with KES granted only in 2B21 was assigned KES orders serviced
+ * by a Yannis Marketing branch; she got the notification but the list and the
+ * Assigned tile showed 0). The `assigned_cs_id = me` filter already limits the
+ * rows to her own orders, and the company bound (effectiveBranchIds) still
+ * applies, so this widens nothing beyond "orders assigned to me".
+ *
+ * Every other viewer, and a closer querying anything other than themselves,
+ * keeps the normal country scope.
+ */
+export function currencyScopeForCloserSelfQuery(
+  user: { id: string; role: string },
+  narrowedAssignedCsId: string | undefined,
+  effectiveCurrencyCodes: string[] | null,
+): string[] | null {
+  if (user.role === 'CS_CLOSER' && narrowedAssignedCsId === user.id) return null;
+  return effectiveCurrencyCodes;
+}
+
+/**
  * Branch filter for endpoints that ALSO scope Media Buyers by ownership
  * (`media_buyer_id = me`). A Media Buyer's branch is their header data lens:
  *   - currentBranchId = a branch  → their orders attributed to that branch
@@ -847,7 +870,9 @@ export const ordersRouter = router({
       // countries by default. So skip the global country scope for marketing;
       // every other surface stays scoped by the switcher.
       baseOpts.effectiveCurrencyCodes =
-        input.branchScope === 'marketing' ? null : ctx.effectiveCurrencyCodes;
+        input.branchScope === 'marketing'
+          ? null
+          : currencyScopeForCloserSelfQuery(ctx.user, effectiveInput.assignedCsId, ctx.effectiveCurrencyCodes);
       // Exclude graduated follow-up orders from list views — they belong in
       // the Follow-Up strip only. CS also excludes cart-graduated (own strip);
       // Marketing keeps cart-graduated (MB credit). Logistics passes
@@ -1139,7 +1164,9 @@ export const ordersRouter = router({
         invalidateOrdersAggregatesCache(),
         invalidateOrderDetailCache(input.orderId),
       ]);
-      return res;
+      // Warn (never block) when the closer lacks country access for the order.
+      const countryAccessWarning = await getOrdersService().closerCountryAccessWarning([input.orderId]);
+      return { ...res, countryAccessWarning };
     }),
 
   /**
@@ -1161,7 +1188,8 @@ export const ordersRouter = router({
         invalidateOrdersAggregatesCache(),
         invalidateOrderDetailCacheMany(input.orderIds),
       ]);
-      return res;
+      const countryAccessWarning = await getOrdersService().closerCountryAccessWarning(input.orderIds);
+      return { ...res, countryAccessWarning };
     }),
 
   /**
@@ -1294,6 +1322,13 @@ export const ordersRouter = router({
       // Keep the company bound even when the closer self-query drops the branch
       // (see `aggregateBranchIdForCloserSelfQuery`).
       const countsEffectiveBranchIds = ctx.effectiveBranchIds;
+      // A closer always sees their own assigned orders, whatever the currency
+      // (see `currencyScopeForCloserSelfQuery`), so strip == list.
+      const countsCurrencyCodes = currencyScopeForCloserSelfQuery(
+        ctx.user,
+        narrowed.assignedCsId,
+        ctx.effectiveCurrencyCodes,
+      );
 
       const isFollowUp = input?.isFollowUp;
 
@@ -1342,7 +1377,7 @@ export const ordersRouter = router({
           teamMemberIds,
           input?.onlyGraduateNonMarketing,
           input?.currencyCode,
-          ctx.effectiveCurrencyCodes,
+          countsCurrencyCodes,
         );
       }
 
@@ -1361,7 +1396,7 @@ export const ordersRouter = router({
           onlyGraduateNonMarketing: input?.onlyGraduateNonMarketing,
           onlyOffline: input?.onlyOffline,
           currencyCode: input?.currencyCode,
-          effectiveCurrencyCodes: ctx.effectiveCurrencyCodes,
+          effectiveCurrencyCodes: countsCurrencyCodes,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
@@ -1385,7 +1420,7 @@ export const ordersRouter = router({
           teamMemberIds,
           input?.onlyGraduateNonMarketing,
           input?.currencyCode,
-          ctx.effectiveCurrencyCodes,
+          countsCurrencyCodes,
         ),
       );
     }),
@@ -1418,7 +1453,7 @@ export const ordersRouter = router({
         branchScope,
         countsEffBranchIds,
         undefined,
-        ctx.effectiveCurrencyCodes,
+        currencyScopeForCloserSelfQuery(ctx.user, narrowed.assignedCsId, ctx.effectiveCurrencyCodes),
       );
     }),
 
@@ -1675,6 +1710,12 @@ export const ordersRouter = router({
       // Keep the company bound even when the closer self-query drops the branch
       // (see `aggregateBranchIdForCloserSelfQuery`).
       const aggregateEffectiveBranchIds = ctx.effectiveBranchIds;
+      // A closer always sees their own assigned orders, whatever the currency.
+      const aggregateCurrencyCodes = currencyScopeForCloserSelfQuery(
+        ctx.user,
+        scope.assignedCsId,
+        ctx.effectiveCurrencyCodes,
+      );
 
       const trendFilters = {
         mediaBuyerId: scope.mediaBuyerId,
@@ -1744,7 +1785,7 @@ export const ordersRouter = router({
           bundleTeamMemberIds, // teamMemberIds
           !input.orderSource ? true : undefined, // onlyGraduateNonMarketing — Total strip only
           input.currencyCode, // currencyCode — mirror orders.list so strip == table
-          ctx.effectiveCurrencyCodes, // country data-scope
+          aggregateCurrencyCodes, // country data-scope (closer self-query: none)
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
         getOrdersService().getOrdersTimeSeriesByCreated(
@@ -1754,9 +1795,9 @@ export const ordersRouter = router({
           trendFilters,
           bundleBranchScope,
           aggregateEffectiveBranchIds,
-          ctx.effectiveCurrencyCodes,
+          aggregateCurrencyCodes,
         ),
-        getOrdersService().scheduleCalendarHeat(scheduleHeatInput, aggregateBranchId, aggregateEffectiveBranchIds, ctx.effectiveCurrencyCodes),
+        getOrdersService().scheduleCalendarHeat(scheduleHeatInput, aggregateBranchId, aggregateEffectiveBranchIds, aggregateCurrencyCodes),
         // csWorkloads requires `orders.csWorkloads` permission. Defense-in-depth
         // — bundle gate is `orders.read` so we re-check before exposing the
         // agent roster.
@@ -2613,7 +2654,8 @@ export const ordersRouter = router({
         invalidateOrdersAggregatesCache(),
         invalidateOrderDetailCacheMany(input.orderIds),
       ]);
-      return res;
+      const countryAccessWarning = await getOrdersService().closerCountryAccessWarning(input.orderIds);
+      return { ...res, countryAccessWarning };
     }),
 
   // ── Order Timeline ─────────────────────────────────────

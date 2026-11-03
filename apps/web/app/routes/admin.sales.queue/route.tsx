@@ -10,6 +10,7 @@ import {
   requirePermission,
   requirePermissionForAction,
   safeStatus,
+  assignCountryWarning,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
@@ -348,7 +349,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: extractApiErrorMessage(res.data, 'Assignment failed') }, { status: safeStatus(res.status) });
     }
 
-    return json({ success: true });
+    return json({ success: true, warning: assignCountryWarning(res.data) });
   }
 
   if (intent === 'bulkAssignToCS') {
@@ -403,7 +404,11 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: extractApiErrorMessage(res.data, 'Bulk assignment failed') }, { status: safeStatus(res.status) });
     }
     const data = res.data as { result?: { data?: { assigned?: number } } };
-    return json({ success: true, assigned: data?.result?.data?.assigned ?? orderIds.length });
+    return json({
+      success: true,
+      assigned: data?.result?.data?.assigned ?? orderIds.length,
+      warning: assignCountryWarning(res.data),
+    });
   }
 
   if (intent === 'bulkReassign') {
@@ -439,7 +444,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: extractApiErrorMessage(res.data, 'Reassignment failed') }, { status: safeStatus(res.status) });
     }
 
-    return json({ success: true });
+    return json({ success: true, warning: assignCountryWarning(res.data) });
   }
 
   if (intent === 'redistribute') {

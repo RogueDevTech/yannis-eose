@@ -1018,6 +1018,17 @@ export async function requireGlobalAuditAccess(
  * Other 5xx (500/502/etc.) still collapse to 422 because Remix v2 treats a
  * thrown 5xx as an unhandled error — and some callers `throw` the result.
  */
+/**
+ * The `countryAccessWarning` an order-assignment procedure returns when a closer
+ * was given orders in a country they have no access to. Pass it to the client as
+ * `warning`; `useFetcherToast` shows it next to the success toast.
+ */
+export function assignCountryWarning(data: unknown): string | null {
+  const w = (data as { result?: { data?: { countryAccessWarning?: unknown } } } | null)?.result?.data
+    ?.countryAccessWarning;
+  return typeof w === 'string' && w.length > 0 ? w : null;
+}
+
 export function safeStatus(apiStatus: number): number {
   if (apiStatus === 401) return 401;
   if (apiStatus === 403) return 403;

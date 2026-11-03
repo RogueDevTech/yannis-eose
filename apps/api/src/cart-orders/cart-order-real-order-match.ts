@@ -41,11 +41,23 @@ export const CART_LINK_WINDOW_SQL = `INTERVAL '72 hours'`;
 export const PHONE_TAIL_DIGITS = 9;
 
 /**
+ * The match types that mean "this cart BECAME this order" (the cart's own
+ * order): a cart_id link, a CONVERTED source cart, or the same phone inside the
+ * cart's session. Not a duplicate rule, so never gated on DUPLICATE_RULES
+ * (CLAUDE.md: "a cart's own same-session order" is always on). SAME_PRODUCT is
+ * the 14-day repeat-customer match and IS a duplicate rule.
+ */
+export const OWN_ORDER_MATCH_TYPES: readonly CartRealOrderMatchType[] = ['CART_LINK', 'CART_CONVERTED', 'SAME_SESSION'];
+
+/**
  * Best real-order match per live cart order in `scope` (a condition on alias
  * `co` = cart_orders). Returns `CartRealOrderMatch` rows. Excludes the cart
  * order's own graduated copy.
+ *
+ * `ownOrderOnly`: match only the cart's own order (OWN_ORDER_MATCH_TYPES),
+ * leaving out the SAME_PRODUCT repeat-customer match.
  */
-export function cartRealOrderMatchesQuery(scope: SQL): SQL {
+export function cartRealOrderMatchesQuery(scope: SQL, opts: { ownOrderOnly?: boolean } = {}): SQL {
   const head = `
     WITH co AS MATERIALIZED (
       SELECT co.id, co.created_at, co.customer_phone_hash, co.graduated_order_id, co.source_cart_id,
@@ -82,13 +94,13 @@ export function cartRealOrderMatchesQuery(scope: SQL): SQL {
       SELECT co.id, o.id, 2, 'CART_CONVERTED'
       FROM co JOIN ord o ON o.id = co.converted_order_id
       WHERE o.created_at BETWEEN co.cart_started_at - ${CART_SESSION_WINDOW_SQL} AND co.created_at + ${CART_LINK_WINDOW_SQL}
-      UNION ALL
+      ${opts.ownOrderOnly ? '' : `UNION ALL
       SELECT co.id, o.id, 3, 'SAME_PRODUCT'
       FROM phone p JOIN co ON co.id = p.co_id JOIN ord o ON o.id = p.o_id
       WHERE o.created_at >= co.created_at - INTERVAL '14 days'
         AND EXISTS (SELECT 1 FROM order_items oi JOIN cart_order_items coi
                       ON coi.cart_order_id = co.id AND coi.product_id = oi.product_id
-                    WHERE oi.order_id = o.id)
+                    WHERE oi.order_id = o.id)`}
       UNION ALL
       SELECT co.id, o.id, 4, 'SAME_SESSION'
       FROM phone p JOIN co ON co.id = p.co_id JOIN ord o ON o.id = p.o_id

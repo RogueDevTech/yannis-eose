@@ -11,6 +11,7 @@ import {
   ORDER_VOIP_ACTION_TIMEOUT_MS,
   requirePermission,
   safeStatus,
+  assignCountryWarning,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
@@ -823,7 +824,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       const err = extractApiErrorMessage(res.data, 'Assign failed');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
-    return json({ success: true });
+    return json({ success: true, warning: assignCountryWarning(res.data) });
   }
 
   if (intent === 'ensureInvoice') {
