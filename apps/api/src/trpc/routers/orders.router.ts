@@ -2714,6 +2714,26 @@ export const ordersRouter = router({
       return res;
     }),
 
+  /**
+   * Clear "Already a cart order" once CS has checked with the customer that they
+   * want this order as well. The order cannot be confirmed while it is set.
+   */
+  clearCartOrderCheck: authedProcedure
+    .meta({ branchScopedMutation: true })
+    .input(
+      z.object({
+        orderId: z.string().uuid(),
+        note: z.string().min(1).max(500),
+        branchId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await getOrdersService().assertOrderInCompanyScope(input.orderId, ctx.effectiveBranchIds);
+      const res = await getOrdersService().clearCartOrderCheck(input.orderId, ctx.user, { note: input.note });
+      await Promise.all([invalidateOrderDetailCache(input.orderId), invalidateOrdersAggregatesCache()]);
+      return res;
+    }),
+
   // ── Claim Mode ────────────────────────────────────────
 
   /**

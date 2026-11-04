@@ -1968,6 +1968,7 @@ export function OrderDetailPage({
       )}
 
       {order.offerCheck && <OfferCheckBanner order={order} canClear={canEditOrder} />}
+      {order.cartOrderCheck && <CartOrderCheckBanner order={order} canClear={canEditOrder} />}
 
       {canEditOrder && order.pendingOrderLinePriceRequestId && (
         <>
@@ -5084,6 +5085,94 @@ function renderCustomFieldValue(
  * The order was accepted but cannot be confirmed until CS agrees the price with
  * the customer and records it here (audited on the timeline).
  */
+const CART_ORDER_STAGE_LABEL: Record<string, string> = {
+  CS_ENGAGED: 'being called',
+  CONFIRMED: 'confirmed',
+  AGENT_ASSIGNED: 'out for delivery',
+  DISPATCHED: 'out for delivery',
+  IN_TRANSIT: 'out for delivery',
+  DELIVERED: 'delivered',
+  REMITTED: 'delivered and paid',
+};
+
+/**
+ * "Already a cart order": the customer already has a cart order CS is working
+ * or has delivered for the same product. Blocks Confirm until CS checks with the
+ * customer and presses "Checked" (orders.clearCartOrderCheck).
+ */
+function CartOrderCheckBanner({
+  order,
+  canClear,
+}: {
+  order: { id: string; branchId?: string | null; cartOrderCheckInfo?: { id: string; label: string; status: string } | null };
+  canClear: boolean;
+}) {
+  const fetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const { errorMatchingIntent } = useFetcherActionSurface(fetcher);
+  useFetcherToast(fetcher.data, { skipErrorToast: open });
+  useCloseOnFetcherSuccess(fetcher, () => {
+    setOpen(false);
+    setNote('');
+  });
+  const saving = fetcher.state !== 'idle';
+  const info = order.cartOrderCheckInfo ?? null;
+  const stage = info ? CART_ORDER_STAGE_LABEL[info.status] ?? info.status.toLowerCase().replace(/_/g, ' ') : null;
+  return (
+    <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="text-sm text-warning-900 dark:text-warning-100">
+          <p className="font-semibold">Already a cart order</p>
+          <p className="mt-0.5 text-warning-800 dark:text-warning-200/90">
+            This customer already has cart order{' '}
+            {info ? (
+              <Link to={`/admin/orders/${info.id}`} className="font-semibold underline">
+                {info.label}
+              </Link>
+            ) : (
+              'for this product'
+            )}
+            {stage ? ` (${stage})` : ''}. Check with the customer before confirming. Confirm only if they want another order.
+          </p>
+        </div>
+        {canClear && (
+          <Button type="button" variant="primary" size="sm" className="shrink-0" onClick={() => setOpen(true)}>
+            Checked
+          </Button>
+        )}
+      </div>
+      {open && (
+        <Modal open onClose={() => setOpen(false)} maxWidth="max-w-md" contentClassName="p-0">
+          <fetcher.Form method="post" className="p-6 space-y-4">
+            <input type="hidden" name="intent" value="clearCartOrderCheck" />
+            {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+            <h2 className="text-lg font-semibold text-app-fg">Checked with the customer</h2>
+            <TextInput
+              label="What the customer said"
+              name="note"
+              required
+              maxLength={500}
+              placeholder="e.g. Wants a second pack for a friend"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+            <ModalFetcherInlineError message={errorMatchingIntent('clearCartOrderCheck')} />
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={saving}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving || note.trim().length === 0}>
+                Save
+              </Button>
+            </div>
+          </fetcher.Form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 function OfferCheckBanner({ order, canClear }: { order: { id: string; branchId?: string | null }; canClear: boolean }) {
   const fetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
   const [open, setOpen] = useState(false);

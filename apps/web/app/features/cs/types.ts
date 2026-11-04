@@ -28,6 +28,7 @@ export interface CloserWorkloadOrder {
   currencyCode?: string;
   /** "Check price": form submit matched no active offer; blocks Confirm until cleared. */
   offerCheck?: string | null;
+  cartOrderCheck?: string | null;
   items: CloserWorkloadOrderItem[];
 }
 
@@ -58,6 +59,7 @@ export interface CSOrder {
   duplicateOfId?: string | null;
   /** "Check price": form submit matched no active offer; blocks Confirm until cleared. */
   offerCheck?: string | null;
+  cartOrderCheck?: string | null;
   items?: unknown;
 }
 

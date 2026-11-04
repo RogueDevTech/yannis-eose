@@ -65,7 +65,7 @@ import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fe
 import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
 import { useBranchesCatalog } from '~/contexts/branches-catalog-context';
 import { CSQueueDataSkeleton } from '~/features/cs/CSOverviewSkeleton';
-import { CheckPriceBadge } from '~/components/ui/check-price-badge';
+import { AlreadyCartOrderBadge, CheckPriceBadge } from '~/components/ui/check-price-badge';
 import {
   parseCSQueueTabFromSearchParam,
   type CSDashboardCriticalPayload,
@@ -382,6 +382,7 @@ function AgentWorkloadDetailModal({
                 <div className="flex flex-wrap items-center gap-2 mb-1.5">
                   <OrderStatusBadge status={ord.status} />
                   <CheckPriceBadge offerCheck={ord.offerCheck} />
+                  <AlreadyCartOrderBadge cartOrderCheck={ord.cartOrderCheck} />
                   <span className="text-sm font-medium text-app-fg truncate min-w-0 flex-1">{ord.customerName}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -2492,6 +2493,7 @@ function CSDashboardPageLoaded({
                             <span className="inline-flex items-center gap-1.5">
                               <OrderStatusBadge status={order.status} />
                               <CheckPriceBadge offerCheck={order.offerCheck} />
+                              <AlreadyCartOrderBadge cartOrderCheck={order.cartOrderCheck} />
                             </span>
                             <span className="whitespace-nowrap text-xs text-app-fg-muted">
                               {formatOrderTimestamp(order.createdAt)}
