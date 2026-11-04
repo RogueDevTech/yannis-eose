@@ -131,6 +131,14 @@ export const orders = pgTable('orders', {
    */
   offerCheck: text('offer_check'),
   /**
+   * "Already a cart order" (migration 0359). Set on a form order whose customer
+   * already has a cart order CS has called, confirmed or delivered (same phone +
+   * product, 14 days): holds that cart order's id. The order is created anyway
+   * and cannot be CONFIRMED until CS clears it (clearCartOrderCheck). NULL = none.
+   * No FK on purpose: written on the intake path (see 0359).
+   */
+  cartOrderCheck: uuid('cart_order_check'),
+  /**
    * How the order was captured (migration 0353). NULL = submitted by the
    * customer (or created by staff). 'UNSUBMITTED_FORM' = a properly filled form
    * the customer never submitted, created as an order ~30 min after they went

@@ -1555,6 +1555,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true, message: 'Price checked' });
   }
 
+  if (intent === 'clearCartOrderCheck') {
+    const note = formData.get('note')?.toString().trim() ?? '';
+    if (!note) {
+      return json({ error: 'Say what the customer told you.' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.clearCartOrderCheck', {
+      method: 'POST',
+      cookie,
+      body: { orderId, note: note.slice(0, 500), ...branchIdFromForm(formData) },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Could not clear the cart order check') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true, message: 'Checked' });
+  }
+
   if (intent === 'retrackOrder') {
     // Multi-hop retrack (e.g. REMITTED → CONFIRMED). Auth enforced per-hop server-side.
     const targetStatus = formData.get('targetStatus')?.toString()?.trim() ?? '';

@@ -237,6 +237,39 @@ function parsePlausibleOrderDate(value: string): Date | undefined {
 const isCartGraduatedCopy = () =>
   sql`(${schema.orders.orderSource} = 'online' OR (${schema.orders.orderSource} IS NULL AND ${schema.orders.cartId} IS NOT NULL AND ${schema.orders.status} IN ('DELIVERED', 'REMITTED')))`;
 
+/**
+ * A form order arrived for a customer who has cart orders for the same product.
+ * `unworked` (nobody has called yet: UNPROCESSED / CS_ASSIGNED) are replaced by
+ * the form order and deleted. `worked` (called, confirmed, out for delivery,
+ * delivered) are NEVER deleted; newest first, the first one is the cart order
+ * the new order is checked against (orders.cart_order_check).
+ */
+export function partitionCartOrdersForNewFormOrder<T extends { status: string; createdAt: Date | string }>(
+  rows: T[],
+): { unworked: T[]; worked: T[] } {
+  const isUnworked = (s: string) => s === 'UNPROCESSED' || s === 'CS_ASSIGNED';
+  return {
+    unworked: rows.filter((r) => isUnworked(r.status)),
+    worked: rows
+      .filter((r) => !isUnworked(r.status))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+  };
+}
+
+/** Plain-words stage of a cart order, for timeline text. */
+function cartOrderStageLabel(status: string): string {
+  switch (status) {
+    case 'CS_ENGAGED': return 'CS is calling the customer';
+    case 'CONFIRMED': return 'confirmed';
+    case 'AGENT_ASSIGNED':
+    case 'DISPATCHED':
+    case 'IN_TRANSIT': return 'out for delivery';
+    case 'DELIVERED': return 'delivered';
+    case 'REMITTED': return 'delivered and paid';
+    default: return status.toLowerCase().replace(/_/g, ' ');
+  }
+}
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -3096,20 +3129,29 @@ export class OrdersService {
         .catch(() => {});
     }
 
-    // Supersede any cart_orders created by the abandonment cron for the same
-    // phone+product. The real form submission won the race — the cart order is
-    // now a duplicate. Soft-delete it so it doesn't appear in CS queues.
+    // Cart orders for the same phone + product (14 days). The real form order
+    // replaces ONLY cart orders nobody has called yet (UNPROCESSED /
+    // CS_ASSIGNED): those are soft-deleted as before. A cart order CS has
+    // called, confirmed, dispatched or delivered is NEVER deleted here
+    // (2026-11-04: this step deleted every stage, so CO-146896, delivered Nov 3,
+    // was deleted on Nov 4 by YNS-147334 and the customer could be delivered
+    // twice). Instead this order is created anyway and marked
+    // orders.cart_order_check, which blocks CONFIRMED until CS clears it.
+    // Wrapped: a failure here never affects the order that was just created.
     if (orderSource === 'edge-form' && orderInput.customerPhoneHash) {
       const primaryProductId = orderInput.items?.[0]?.productId;
       if (primaryProductId) {
         try {
           // 14-day window to match the abandonment cron's pull guard
-          // (`findExistingOrderForDedup`, 14 days). A narrower window here left
-          // cart orders pulled 8-14 days before the form submit un-superseded,
-          // so one purchase ended up as both a live order and a live cart order.
+          // (`findExistingOrderForDedup`, 14 days).
           const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
           const matchingCartOrders = await this.db
-            .select({ id: schema.cartOrders.id })
+            .selectDistinct({
+              id: schema.cartOrders.id,
+              status: schema.cartOrders.status,
+              orderNumber: schema.cartOrders.orderNumber,
+              createdAt: schema.cartOrders.createdAt,
+            })
             .from(schema.cartOrders)
             .innerJoin(schema.cartOrderItems, eq(schema.cartOrderItems.cartOrderId, schema.cartOrders.id))
             .where(
@@ -3122,41 +3164,69 @@ export class OrdersService {
               ),
             )
             .limit(5);
+          const { unworked, worked } = partitionCartOrdersForNewFormOrder(matchingCartOrders);
           if (matchingCartOrders.length > 0) {
-            const cartOrderIds = matchingCartOrders.map((c) => c.id);
-            const supersededAt = new Date();
+            const prefix = await this.resolveOrderPrefix(order);
+            const newOrderLabel = formatOrderNumber(order.orderNumber, prefix);
+            const kept = worked[0];
             await withActor(this.db, { id: actorId ?? EDGE_FORM_ACTOR_ID }, async (tx) => {
-              await tx
-                .update(schema.cartOrders)
-                .set({ status: 'DELETED', deletedAt: supersededAt, updatedAt: supersededAt })
-                .where(inArray(schema.cartOrders.id, cartOrderIds));
-              // Detailed deletion comment on each superseded cart order so its
-              // activity log explains it was replaced by the real form order.
-              const supersededByLabel = formatOrderNumber(
-                order.orderNumber,
-                await this.resolveOrderPrefix(order),
-              );
-              await tx.insert(schema.cartOrderTimelineEvents).values(
-                cartOrderIds.map((cid) => ({
-                  cartOrderId: cid,
-                  eventType: 'ORDER_DELETED',
+              const now = new Date();
+              if (unworked.length > 0) {
+                await tx
+                  .update(schema.cartOrders)
+                  .set({ status: 'DELETED', deletedAt: now, updatedAt: now })
+                  .where(inArray(schema.cartOrders.id, unworked.map((c) => c.id)));
+                // Detailed deletion comment on each superseded cart order so its
+                // activity log explains it was replaced by the real form order.
+                await tx.insert(schema.cartOrderTimelineEvents).values(
+                  unworked.map((c) => ({
+                    cartOrderId: c.id,
+                    eventType: 'ORDER_DELETED',
+                    actorId: null,
+                    actorName: 'System',
+                    description: `Order deleted because it was superseded by a real order (${newOrderLabel}) submitted for the same customer and product.`,
+                    metadata: { reason: 'GRADUATION_SUPERSEDED', supersededByOrderId: order.id },
+                    branchId: order.branchId ?? null,
+                  })),
+                );
+              }
+              if (kept) {
+                const keptLabel = formatOrderNumber(kept.orderNumber, prefix);
+                await tx
+                  .update(schema.orders)
+                  .set({ cartOrderCheck: kept.id, updatedAt: now })
+                  .where(eq(schema.orders.id, order.id));
+                await tx.insert(schema.orderTimelineEvents).values({
+                  orderId: order.id,
+                  eventType: 'ORDER_DUPLICATE_FLAGGED',
                   actorId: null,
                   actorName: 'System',
-                  description: `Order deleted because it was superseded by a real order (${supersededByLabel}) submitted for the same customer and product.`,
-                  metadata: { reason: 'GRADUATION_SUPERSEDED', supersededByOrderId: order.id },
+                  description: `This customer already has cart order ${keptLabel} for the same product (${cartOrderStageLabel(kept.status)}). Check with the customer before confirming: confirm only if they want another order.`,
+                  metadata: { reason: 'CART_ORDER_CHECK', cartOrderId: kept.id, cartOrderStatus: kept.status },
                   branchId: order.branchId ?? null,
-                })),
-              );
+                });
+                await tx.insert(schema.cartOrderTimelineEvents).values(
+                  worked.map((c) => ({
+                    cartOrderId: c.id,
+                    eventType: 'CS_COMMENT',
+                    actorId: null,
+                    actorName: 'System',
+                    description: `The customer also submitted the form: order ${newOrderLabel}. This cart order was kept because CS is already working it. The new order cannot be confirmed until CS checks it.`,
+                    metadata: { reason: 'KEPT_WORKED_CART_ORDER', newOrderId: order.id },
+                    branchId: order.branchId ?? null,
+                  })),
+                );
+              }
             });
             this.logger.log(
-              { orderId: order.id, supersededCartOrderIds: cartOrderIds },
-              'edge-form order superseded matching cart orders',
+              { orderId: order.id, deletedCartOrderIds: unworked.map((c) => c.id), keptCartOrderIds: worked.map((c) => c.id) },
+              'edge-form order checked against cart orders',
             );
           }
         } catch (err) {
           this.logger.warn(
             { err: err instanceof Error ? err.message : String(err), orderId: order.id },
-            'failed to supersede cart orders after edge-form order creation — non-fatal',
+            'failed to check cart orders after edge-form order creation — non-fatal',
           );
         }
       }
@@ -5136,9 +5206,32 @@ export class OrdersService {
     const remittanceStatus = remittanceRow[0]?.remittanceStatus ?? null;
     const remittanceId = remittanceRow[0]?.remittanceId ?? null;
 
+    // "Already a cart order": the cart order this order may duplicate, for the
+    // banner. Best-effort: a missing row just shows the banner without a number.
+    let cartOrderCheckInfo: { id: string; label: string; status: string } | null = null;
+    if (order.cartOrderCheck) {
+      try {
+        const [co] = await this.db
+          .select({ id: schema.cartOrders.id, orderNumber: schema.cartOrders.orderNumber, status: schema.cartOrders.status })
+          .from(schema.cartOrders)
+          .where(eq(schema.cartOrders.id, order.cartOrderCheck))
+          .limit(1);
+        if (co) {
+          cartOrderCheckInfo = {
+            id: co.id,
+            label: formatOrderNumber(co.orderNumber, await this.resolveOrderPrefix(order).catch(() => null)),
+            status: co.status,
+          };
+        }
+      } catch {
+        cartOrderCheckInfo = null;
+      }
+    }
+
     const { customerPhone: _rawPhone, ...orderSafe } = order;
     return {
       ...orderSafe,
+      cartOrderCheckInfo,
       customerPhoneDisplay: formatOrderCustomerPhoneDisplay(order.customerPhone, order.customerPhoneHash, order.currencyCode),
       orderItems: items,
       callLogs: calls,
@@ -6393,6 +6486,8 @@ export class OrdersService {
       isDuplicate: schema.orders.isDuplicate,
       // "Check price" flag (offer_check) — shown as a badge; blocks Confirm.
       offerCheck: schema.orders.offerCheck,
+      // "Already a cart order" (cart_order_check) — shown as a badge; blocks Confirm.
+      cartOrderCheck: schema.orders.cartOrderCheck,
       // Follow-up flag — shown as a badge when order was reopened via Follow Up page.
       isFollowUp: schema.orders.isFollowUp,
       // Frozen flag — order pulled into follow-up pipeline, no further mutations.
@@ -6879,6 +6974,16 @@ export class OrdersService {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'Check the price first. This order did not match an active offer on the form. Agree the price with the customer, fix it if needed, then press "Price checked".',
+      });
+    }
+
+    // "Already a cart order" (orders.cart_order_check): the customer already has
+    // a cart order CS is working or has delivered for the same product. Confirm
+    // only after CS checks with the customer and clears it (clearCartOrderCheck).
+    if (newStatus === 'CONFIRMED' && order.cartOrderCheck) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'This customer already has a cart order for this product. Check with the customer first, then press "Checked" on this order. Confirm only if they want another order.',
       });
     }
 
@@ -9400,6 +9505,7 @@ export class OrdersService {
         totalAmount: schema.orders.totalAmount,
         currencyCode: schema.orders.currencyCode,
         offerCheck: schema.orders.offerCheck,
+        cartOrderCheck: schema.orders.cartOrderCheck,
       })
       .from(schema.orders)
       .where(and(...conditions))
@@ -12122,6 +12228,60 @@ export class OrdersService {
           ? `Price approved outside the form's offers: ${note}`
           : `Price checked: ${note}`,
         metadata: { reason: 'OFFER_CHECK_CLEARED', previous: order.offerCheck, note, offOffer: !!stillOff },
+        branchId: order.branchId ?? null,
+      });
+    });
+    return { success: true as const };
+  }
+
+  /**
+   * Clear "Already a cart order" (orders.cart_order_check) once CS has checked
+   * with the customer that they want this order as well. Anyone allowed to
+   * update the order may clear it; a note is required. Audited via withActor + a
+   * CS_ORDER_COMMENT event naming the cart order.
+   */
+  async clearCartOrderCheck(orderId: string, actor: SessionUser, body: { note: string }) {
+    const note = body.note.trim();
+    if (note.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Say what the customer told you.' });
+    }
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+    if (!order.cartOrderCheck) return { success: true as const };
+
+    await this.assertActorMayUpdateOrder(actor, {
+      branchId: order.branchId ?? null,
+      assignedCsId: order.assignedCsId ?? null,
+      status: order.status,
+    });
+
+    const [co] = await this.db
+      .select({ orderNumber: schema.cartOrders.orderNumber, status: schema.cartOrders.status })
+      .from(schema.cartOrders)
+      .where(eq(schema.cartOrders.id, order.cartOrderCheck))
+      .limit(1);
+    const coLabel = co
+      ? formatOrderNumber(co.orderNumber, await this.resolveOrderPrefix(order).catch(() => null))
+      : 'the cart order';
+
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.orders)
+        .set({ cartOrderCheck: null, updatedAt: new Date() })
+        .where(eq(schema.orders.id, orderId));
+      await tx.insert(schema.orderTimelineEvents).values({
+        orderId,
+        eventType: 'CS_ORDER_COMMENT',
+        actorId: actor.id,
+        actorName: actor.name ?? null,
+        description: `Checked against cart order ${coLabel}: ${note}`,
+        metadata: { reason: 'CART_ORDER_CHECK_CLEARED', cartOrderId: order.cartOrderCheck, cartOrderStatus: co?.status ?? null, note },
         branchId: order.branchId ?? null,
       });
     });

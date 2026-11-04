@@ -538,6 +538,9 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       // until its price is checked: the follow-up copy has no such gate and
       // would carry the unchecked price to CONFIRMED and graduation.
       isNull(schema.orders.offerCheck),
+      // Same for "Already a cart order" (orders.cart_order_check): CS must check
+      // it against the customer's cart order first, not copy it into follow-up.
+      isNull(schema.orders.cartOrderCheck),
       eq(schema.orders.isFollowUp, false),
       isNull(schema.orders.deletedAt),
     ];
