@@ -39,6 +39,12 @@ export interface StaffMetricsInput {
    * non-CS staff (revenue is left 0 and never feeds their base).
    */
   servicingBranchIds?: string[] | null;
+  /**
+   * Head of CS team scope (PM 2026-11-04): when set, teamDr is the delivery rate
+   * of the orders SERVICED by this branch (every closer working them, whatever
+   * their own branch), offline orders excluded. Takes precedence over reporteeIds.
+   */
+  teamServicingBranchId?: string | null;
 }
 
 /**
@@ -314,10 +320,7 @@ export class PayrollMetricsService {
       input.servicingBranchIds,
     );
 
-    let teamDr: number | undefined;
-    if (input.reporteeIds?.length) {
-      teamDr = await this.computeTeamDr(tx, input.reporteeIds, input.periodStart, input.periodEnd);
-    }
+    const teamDr = await this.resolveTeamDr(tx, input, input.periodStart, input.periodEnd);
 
     let cpa: number | null = null;
     if (input.staffRole === 'MEDIA_BUYER' || input.staffRole === 'HEAD_OF_MARKETING') {
@@ -586,10 +589,7 @@ export class PayrollMetricsService {
       Number(ordCarryOver[0]?.count ?? 0) + Number(cartCarryOver[0]?.count ?? 0);
     const individualDr = totalOrders > 0 ? (deliveredCohortCount / totalOrders) * 100 : 0;
 
-    let teamDr: number | undefined;
-    if (input.reporteeIds?.length) {
-      teamDr = await this.computeTeamDr(tx, input.reporteeIds, periodStart, periodEnd);
-    }
+    const teamDr = await this.resolveTeamDr(tx, input, periodStart, periodEnd);
 
     const missingData =
       input.staffRole !== 'HR_MANAGER' &&
@@ -1092,6 +1092,70 @@ export class PayrollMetricsService {
       m.ppdAdSpend = Number(r.total ?? 0);
       m.ppdRoas = m.ppdAdSpend > 0 ? m.ppdRevenue / m.ppdAdSpend : null;
     }
+    return out;
+  }
+
+  private async resolveTeamDr(
+    tx: TxLike,
+    input: Pick<StaffMetricsInput, 'reporteeIds' | 'teamServicingBranchId'>,
+    periodStart: Date,
+    periodEnd: Date,
+  ): Promise<number | undefined> {
+    if (input.teamServicingBranchId) {
+      return this.computeServicedTeamDr(tx, input.teamServicingBranchId, periodStart, periodEnd);
+    }
+    if (input.reporteeIds?.length) {
+      return this.computeTeamDr(tx, input.reporteeIds, periodStart, periodEnd);
+    }
+    return undefined;
+  }
+
+  /**
+   * Head of CS team delivery rate (PM 2026-11-04): orders serviced by the Head's
+   * branch and handled by a closer, created in the period, offline excluded.
+   * DELIVERED/REMITTED over everything except DELETED. Matches HR's figure
+   * (Ile-Ife Oct 2026: 1799 / 4524 = 39.8%).
+   */
+  private async computeServicedTeamDr(
+    tx: TxLike,
+    servicingBranchId: string,
+    periodStart: Date,
+    periodEnd: Date,
+  ): Promise<number> {
+    const [row] = await tx
+      .select({
+        delivered: sql<number>`count(*) FILTER (WHERE ${schema.orders.status} IN ('DELIVERED', 'REMITTED'))`,
+        total: count(),
+      })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.servicingBranchId, servicingBranchId),
+          sql`${schema.orders.status} <> 'DELETED'`,
+          sql`${schema.orders.assignedCsId} IS NOT NULL`,
+          sql`${schema.orders.orderSource} IS DISTINCT FROM 'offline'`,
+          gte(schema.orders.createdAt, periodStart),
+          lte(schema.orders.createdAt, periodEnd),
+        ),
+      );
+    const delivered = Number(row?.delivered ?? 0);
+    const total = Number(row?.total ?? 0);
+    return total > 0 ? (delivered / total) * 100 : 0;
+  }
+
+  /** Batched twin of computeServicedTeamDr: Map<headId, servicingBranchId> → Map<headId, dr%>. */
+  async computeServicedTeamDrBatched(
+    tx: TxLike,
+    branchByHead: Map<string, string>,
+    periodStart: Date,
+    periodEnd: Date,
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    await Promise.all(
+      [...branchByHead.entries()].map(async ([headId, branchId]) => {
+        out.set(headId, await this.computeServicedTeamDr(tx, branchId, periodStart, periodEnd));
+      }),
+    );
     return out;
   }
 

@@ -761,8 +761,8 @@ export class HrService {
         groupId,
         user.primaryBranchId ?? null,
         // Team-DR is required for Head bonus/subsidy tiers (they're keyed on
-        // TEAM_DR). It's cheap (one reportee lookup + two counts), so the Outlook
-        // computes it too — scoped company-wide so multi-branch teams count.
+        // TEAM_DR), so the Outlook computes it too. Head of CS: orders serviced by
+        // her branch, offline excluded. Other heads: reportees company-wide.
         { effectiveBranchIds },
       );
     } catch (err) {

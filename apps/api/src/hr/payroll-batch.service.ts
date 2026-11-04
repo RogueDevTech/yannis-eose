@@ -1476,7 +1476,14 @@ export class PayrollBatchService {
       HEAD_OF_MARKETING: ['MEDIA_BUYER'],
       HEAD_OF_LOGISTICS: ['TPL_MANAGER', 'STOCK_MANAGER'],
     };
-    const heads = staff.filter((s) => subordinateRoles[s.role]?.length);
+    // Head of CS (PM 2026-11-04): team DR = orders serviced by the Head's own
+    // branch, offline excluded (see computeServicedTeamDr). No reportee set.
+    const csHeadBranch = new Map<string, string>();
+    for (const s of staff) {
+      const b = s.role === 'HEAD_OF_CS' ? memberBranchByUser.get(s.id)?.branchId : null;
+      if (b) csHeadBranch.set(s.id, b);
+    }
+    const heads = staff.filter((s) => subordinateRoles[s.role]?.length && s.role !== 'HEAD_OF_CS');
     // Union of every role/branch pair we need reportees for → one query.
     const reporteeBranchScope = new Map<string, string[]>(); // headId → teamBranchIds
     const allSubRoles = new Set<string>();
@@ -1551,12 +1558,11 @@ export class PayrollBatchService {
     );
 
     // --- 4) Team-DR per Head + CPA for MB/HoM, batched. ------------------------
-    const teamDrByHead = await this.payrollMetrics.computeTeamDrBatched(
-      tx,
-      reporteesByHead,
-      periodStart,
-      periodEnd,
-    );
+    const [teamDrByHead, csHeadTeamDr] = await Promise.all([
+      this.payrollMetrics.computeTeamDrBatched(tx, reporteesByHead, periodStart, periodEnd),
+      this.payrollMetrics.computeServicedTeamDrBatched(tx, csHeadBranch, periodStart, periodEnd),
+    ]);
+    for (const [headId, dr] of csHeadTeamDr) teamDrByHead.set(headId, dr);
     const cpaStaffIds = staff
       .filter((s) => s.role === 'MEDIA_BUYER' || s.role === 'HEAD_OF_MARKETING')
       .map((s) => s.id);
