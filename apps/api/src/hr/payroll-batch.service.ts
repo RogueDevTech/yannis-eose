@@ -2404,9 +2404,9 @@ export class PayrollBatchService {
         .limit(1)
     )[0];
 
-    // Head team-DR counts reportees across the whole company (all branches sharing
-    // the member's groupId), not just their primary branch — multi-branch teams
-    // otherwise under-count and the team bonus silently drops to zero.
+    // Head of Marketing/Logistics team-DR counts reportees across the whole company
+    // (all branches sharing the member's groupId). Head of CS uses the orders her
+    // primary branch serviced (computeServicedTeamDr), so this scope is unused there.
     let effectiveBranchIds: string[] | null = null;
     if (branchRow?.groupId) {
       const companyBranches = await tx

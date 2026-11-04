@@ -116,7 +116,8 @@ export class PayrollComputeService {
     // Head of CS (PM 2026-11-04): team = every closer working orders serviced by
     // the Head's own branch, offline excluded. No reportee lookup needed.
     const teamServicingBranchId = member.role === 'HEAD_OF_CS' ? branchId ?? null : null;
-    const subRoles = teamServicingBranchId ? undefined : subordinateRoles[member.role];
+    // A Head of CS never falls back to company reportees (batch path doesn't either).
+    const subRoles = member.role === 'HEAD_OF_CS' ? undefined : subordinateRoles[member.role];
     // Team-DR resolution is cheap (one reportee-id lookup + two count queries) and
     // is required even on the Earnings Outlook path: Head bonus/subsidy tiers are
     // keyed on TEAM_DR, so skipping it collapses the whole variable-pay estimate

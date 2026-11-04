@@ -721,9 +721,9 @@ export class HrService {
     }
 
     // Company scope for product tiers + PAYE config comes from the staff's
-    // primary branch. For Head roles, the team-DR bonus basis counts reportees
-    // across the whole company (all branches sharing the staff's groupId), not
-    // just the staff's primary branch — multi-branch teams otherwise under-count.
+    // primary branch. For Heads of Marketing/Logistics, the team-DR bonus basis
+    // counts reportees across the whole company (all branches sharing the staff's
+    // groupId). Head of CS uses the orders her primary branch serviced instead.
     let groupId: string | null = null;
     let effectiveBranchIds: string[] | null = null;
     if (user.primaryBranchId) {
