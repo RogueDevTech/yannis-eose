@@ -6,6 +6,7 @@ import { Button } from '~/components/ui/button';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { useCurrenciesCatalog } from '~/contexts/currencies-catalog-context';
+import { formCountryOptions } from './form-country-options';
 import { regionsForCountry } from '@yannis/shared';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -45,6 +46,8 @@ export interface MarketingFormEditPageProps {
   picklistsPromise: Promise<MarketingFormEditPicklists> | MarketingFormEditPicklists;
   /** `marketing.offerTemplate` — enables Offer tiers panel on this form. */
   canManageOfferTemplates?: boolean;
+  /** `formCountryCurrencyCodes(user)`: null = any country, else the user's countries. */
+  formCountryCodes?: string[] | null;
 }
 
 /** Type guard — distinguishes a pre-resolved payload from a Promise. */
@@ -84,6 +87,7 @@ export function MarketingFormEditPage({
   campaign,
   picklistsPromise,
   canManageOfferTemplates = false,
+  formCountryCodes = null,
 }: MarketingFormEditPageProps) {
   // Bridge the deferred picklists to local state so the rest of the form
   // (heading, subtitle, button text, accent, custom fields, preview, status
@@ -186,6 +190,19 @@ export function MarketingFormEditPage({
   );
   const [additionalSelectOptions, setAdditionalSelectOptions] = useState(() =>
     additionalFieldSelectOptionsFromConfig(campaign.formConfig),
+  );
+  // A Media Buyer only gets the countries they are assigned (server enforces too).
+  // The saved country stays listed so an untouched form can still be saved.
+  const countryOptions = useMemo(
+    () =>
+      formCountryOptions(
+        configuredCountries,
+        currenciesForForm,
+        formCountryCodes,
+        (cfg as { deliveryCountry?: string } | null)?.deliveryCountry,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cfg is stable per campaign
+    [configuredCountries, currenciesForForm, formCountryCodes, campaign.id],
   );
   // Delivery country drives the "Delivery State" region list. Defaults to Nigeria.
   const [deliveryCountry, setDeliveryCountry] = useState<string>(
@@ -581,7 +598,7 @@ export function MarketingFormEditPage({
                       label="Country"
                       value={deliveryCountry}
                       onChange={(e) => onDeliveryCountryChange(e.target.value)}
-                      options={configuredCountries.map((country) => ({ value: country, label: country }))}
+                      options={countryOptions.map((country) => ({ value: country, label: country }))}
                       disabled={!selectedOfferGroupId}
                     />
                     <p className="mt-2 text-xs text-app-fg-muted">

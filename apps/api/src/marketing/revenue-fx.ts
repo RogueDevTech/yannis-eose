@@ -87,3 +87,47 @@ export function convertRevenueToBase(
   }
   return { base, unconverted, invalid };
 }
+
+/** One grouped ₦ amount (ad spend is always logged in ₦), keyed by company. */
+export type BaseAmountSlice = {
+  groupId: string | null;
+  total: number | string | null;
+};
+
+/**
+ * Convert ₦ amounts INTO one country's currency (1 unit of X = rate ₦, so
+ * X = ₦ / rate), per company. Returns null when any non-zero slice's company
+ * has no usable rate for `code`: the caller shows "Set FX rate" rather than a
+ * ₦ number labelled as another currency. Reporting lens only.
+ */
+export function baseToCurrency(
+  slices: BaseAmountSlice[],
+  code: string,
+  rateOf: FxRateLookup,
+): number | null {
+  let out = 0;
+  for (const s of slices) {
+    const amount = Number(s.total ?? 0);
+    if (!Number.isFinite(amount) || amount === 0) continue;
+    const rate = rateOf(s.groupId, code);
+    if (rate == null) return null;
+    out += amount / rate;
+  }
+  return out;
+}
+
+/**
+ * Raw revenue already in `code` (orders freeze their own currency, so a
+ * country-filtered query needs no conversion). NULL currency counts as NGN,
+ * matching `countryScopeCondition` and the rest of the revenue code.
+ */
+export function revenueInCurrency(slices: RevenueSlice[], code: string): number {
+  const upper = code.toUpperCase();
+  let out = 0;
+  for (const s of slices) {
+    const amount = Number(s.total ?? 0);
+    if (!Number.isFinite(amount)) continue;
+    if ((s.currencyCode ?? BASE_CODE).toUpperCase() === upper) out += amount;
+  }
+  return out;
+}

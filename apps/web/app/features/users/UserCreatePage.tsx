@@ -1357,7 +1357,7 @@ export function UserCreatePage({
                   </div>
                 </div>
                 <p className="text-xs text-app-fg-muted">
-                  Leave empty for base country only. Media Buyers and Admins always see all countries.
+                  Leave empty for base country only. Media Buyers see every country but can only create forms for the ones ticked here.
                 </p>
               </div>
             ) : null}

@@ -10,6 +10,11 @@ interface Props {
   byCurrency?: Record<string, number> | null;
   /** Raw amounts the API could not convert (no FX rate). Shown beside the total. */
   unconverted?: Record<string, number> | null;
+  /**
+   * When set, `amount` is already in this currency (a single country picked in
+   * the top bar): render it as-is, no ₦ conversion or breakdown.
+   */
+  currencyCode?: string | null;
   className?: string;
 }
 
@@ -19,13 +24,17 @@ interface Props {
  * A currency with no FX rate is never folded in 1:1: it is listed separately,
  * with a "Set FX rate" link for users who can edit rates.
  */
-export function ConvertedRevenue({ amount, byCurrency, unconverted, className }: Props) {
+export function ConvertedRevenue({ amount, byCurrency, unconverted, currencyCode, className }: Props) {
   const currencies = useCurrenciesCatalog();
   const adminData = useRouteLoaderData('routes/admin') as
     | { user?: { role: string; permissions?: string[] | null } | null }
     | undefined;
   const canSetRate = canManageCurrencies(adminData?.user);
   const fmt = (value: number, code: string) => formatMoney(Math.round(value), currencyByCode(currencies, code));
+
+  if (currencyCode) {
+    return <span className={className}>{fmt(amount, currencyCode)}</span>;
+  }
 
   const slices = Object.entries(byCurrency ?? {}).filter(([, v]) => v);
   const hasForeign = slices.some(([code]) => code.toUpperCase() !== NGN.code);

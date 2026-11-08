@@ -39,6 +39,7 @@ import {
   transitionFollowUpOrderSchema,
   dateOrDateTimeOptional,
 } from '@yannis/shared';
+import { selectedCountryCode } from '../context';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { canonicalPermissionCode } from '@yannis/shared';
@@ -864,14 +865,15 @@ export const ordersRouter = router({
       // CS (servicing-scoped) and marketing (marketing-scoped) pages correctly.
       if (input.branchScope) baseOpts.branchScope = input.branchScope;
       baseOpts.effectiveBranchIds = ctx.effectiveBranchIds;
-      // Multi-country: the MARKETING orders surface is governed by its own
-      // per-page currency filter (`input.currencyCode`, default "all"), NOT by
-      // the global top-bar country switcher — an MB sees all their orders across
-      // countries by default. So skip the global country scope for marketing;
-      // every other surface stays scoped by the switcher.
+      // Multi-country: MARKETING order lists follow only the top-bar country
+      // pick ("All countries" = every country). An MB is cross-country by
+      // design, so their country grants are not applied here. The per-page
+      // `input.currencyCode` filter still stacks on top. Every other surface
+      // stays scoped by `effectiveCurrencyCodes`.
+      const marketingCountry = selectedCountryCode(ctx);
       baseOpts.effectiveCurrencyCodes =
         input.branchScope === 'marketing'
-          ? null
+          ? (marketingCountry ? [marketingCountry] : null)
           : currencyScopeForCloserSelfQuery(ctx.user, effectiveInput.assignedCsId, ctx.effectiveCurrencyCodes);
       // Exclude graduated follow-up orders from list views — they belong in
       // the Follow-Up strip only. CS also excludes cart-graduated (own strip);

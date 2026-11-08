@@ -9,6 +9,7 @@ import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { TRPCError } from '@trpc/server';
 import { withActor } from '../common/db/with-actor';
+import { campaignCurrencyCodeSql } from '../common/db/campaign-currency';
 import { assertEntityInScope } from '../common/db/assert-entity-in-scope';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { CartOrdersService } from '../cart-orders/cart-orders.service';
@@ -1278,7 +1279,15 @@ export class CartService {
    * counts today, because a cart row is rewritten as the customer types.
    */
   async getEntryBreakdown(
-    opts: { mediaBuyerId?: string | null; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string | null; endDate?: string | null } = {},
+    opts: {
+      mediaBuyerId?: string | null;
+      branchId?: string | null;
+      effectiveBranchIds?: string[] | null;
+      startDate?: string | null;
+      endDate?: string | null;
+      /** Country filter(s) (currency codes); every code must match. Empty/absent = all countries. */
+      currencyCodes?: string[] | null;
+    } = {},
   ): Promise<{ converted: number; pending: number; abandoned: number; blocked: number; total: number }> {
     const conditions: SQL[] = [];
     if (opts.mediaBuyerId) {
@@ -1299,6 +1308,7 @@ export class CartService {
     if (opts.endDate) {
       conditions.push(lte(schema.cartAbandonments.updatedAt, nigeriaDayEnd(opts.endDate)));
     }
+    conditions.push(...this.cartCountryConditions(opts.currencyCodes));
     const rows = await this.db
       .select({ status: schema.cartAbandonments.status, count: count() })
       .from(schema.cartAbandonments)
@@ -1329,6 +1339,18 @@ export class CartService {
     if (opts.endDate) {
       cfaConditions.push(lte(schema.crossFunnelAttempts.attemptedAt, nigeriaDayEnd(opts.endDate)));
     }
+    // Blocked attempts have no currency: place them by their form's country.
+    for (const code of normalizeCountryCodes(opts.currencyCodes)) {
+      cfaConditions.push(
+        inArray(
+          schema.crossFunnelAttempts.campaignId,
+          this.db
+            .select({ id: schema.campaigns.id })
+            .from(schema.campaigns)
+            .where(sql`${campaignCurrencyCodeSql(schema.campaigns.formConfig, schema.campaigns.branchId)} = ${code}`),
+        ),
+      );
+    }
     const [cfaRow] = await this.db
       .select({ count: count() })
       .from(schema.crossFunnelAttempts)
@@ -1344,8 +1366,28 @@ export class CartService {
     };
   }
 
+  /**
+   * Country filter for cart_abandonments (joined to campaigns). A cart's country
+   * is the currency the customer picked; a phone-only save made before any
+   * currency was picked falls back to the form's country.
+   */
+  private cartCountryConditions(codes: string[] | null | undefined): SQL[] {
+    return normalizeCountryCodes(codes).map(
+      (code) =>
+        sql`upper(coalesce(${schema.cartAbandonments.currencyCode}, ${campaignCurrencyCodeSql(schema.campaigns.formConfig, schema.campaigns.branchId)})) = ${code}`,
+    );
+  }
+
   async countAllCarts(
-    opts: { mediaBuyerId?: string | null; branchId?: string | null; effectiveBranchIds?: string[] | null; startDate?: string | null; endDate?: string | null } = {},
+    opts: {
+      mediaBuyerId?: string | null;
+      branchId?: string | null;
+      effectiveBranchIds?: string[] | null;
+      startDate?: string | null;
+      endDate?: string | null;
+      /** Country filter(s) (currency codes); every code must match. Empty/absent = all countries. */
+      currencyCodes?: string[] | null;
+    } = {},
   ): Promise<number> {
     const conditions: SQL[] = [
       eq(schema.cartAbandonments.status, 'ABANDONED'),
@@ -1368,6 +1410,7 @@ export class CartService {
     if (opts.endDate) {
       conditions.push(lte(schema.cartAbandonments.updatedAt, nigeriaDayEnd(opts.endDate)));
     }
+    conditions.push(...this.cartCountryConditions(opts.currencyCodes));
     const res = await this.db
       .select({ count: count() })
       .from(schema.cartAbandonments)
@@ -1375,4 +1418,9 @@ export class CartService {
       .where(and(...conditions));
     return Number(res[0]?.count ?? 0);
   }
+}
+
+/** Distinct, upper-cased, non-empty currency codes. */
+function normalizeCountryCodes(codes: string[] | null | undefined): string[] {
+  return [...new Set((codes ?? []).map((c) => c.trim().toUpperCase()).filter(Boolean))];
 }

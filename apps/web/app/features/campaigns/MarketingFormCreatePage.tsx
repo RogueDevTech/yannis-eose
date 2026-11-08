@@ -34,6 +34,7 @@ import {
   normalizeStandardFields,
 } from './standard-fields';
 import { StandardFieldsEditor } from './standard-fields-editor';
+import { formCountryOptions } from './form-country-options';
 
 export interface MarketingFormCreatePageProps {
   /**
@@ -50,6 +51,8 @@ export interface MarketingFormCreatePageProps {
    * NOT seeded: it stays blank for the Media Buyer to name the copy.
    */
   duplicateFrom?: Campaign | null;
+  /** `formCountryCurrencyCodes(user)`: null = any country, else the user's countries. */
+  formCountryCodes?: string[] | null;
 }
 
 /**
@@ -59,6 +62,7 @@ export interface MarketingFormCreatePageProps {
 export function MarketingFormCreatePage({
   offerGroupsPromise,
   duplicateFrom = null,
+  formCountryCodes = null,
 }: MarketingFormCreatePageProps) {
   // Bridge the deferred offer-groups payload to local state so the rest of the
   // form (heading/subtitle/preview/custom field builder) renders immediately.
@@ -151,17 +155,30 @@ export function MarketingFormCreatePage({
     }
     return out;
   }, [currenciesForForm]);
-  const [additionalSelectOptions, setAdditionalSelectOptions] = useState(() =>
-    dupCfg ? additionalFieldSelectOptionsFromConfig(dupCfg) : cloneDefaultAdditionalFieldSelectOptions(),
+  // A Media Buyer only gets the countries they are assigned (server enforces too).
+  const countryOptions = useMemo(
+    () => formCountryOptions(configuredCountries, currenciesForForm, formCountryCodes),
+    [configuredCountries, currenciesForForm, formCountryCodes],
   );
+  // Starting country: the duplicated form's, else Nigeria, else the user's first
+  // allowed country when that one is out of their reach.
+  const [initialCountry] = useState<string>(() => {
+    const wanted = (dupCfg as { deliveryCountry?: string } | null)?.deliveryCountry ?? 'Nigeria';
+    if (formCountryCodes == null || countryOptions.length === 0) return wanted;
+    return countryOptions.find((c) => c.toLowerCase() === wanted.toLowerCase()) ?? countryOptions[0]!;
+  });
+  const [additionalSelectOptions, setAdditionalSelectOptions] = useState(() => {
+    const base = dupCfg ? additionalFieldSelectOptionsFromConfig(dupCfg) : cloneDefaultAdditionalFieldSelectOptions();
+    const dupCountry = (dupCfg as { deliveryCountry?: string } | null)?.deliveryCountry ?? 'Nigeria';
+    const regions = initialCountry !== dupCountry ? regionsForCountry(initialCountry) : [];
+    return regions.length > 0 ? { ...base, deliveryStateOptions: [...regions] } : base;
+  });
   const [selectedOfferGroupId, setSelectedOfferGroupId] = useState(duplicateFrom?.offerGroupId ?? '');
 
   // Delivery country — drives the "Delivery State" region list. Defaults from the
   // form's currency; the MB can override it below. Picking a country fills the
   // delivery-state options with that country's regions (still editable).
-  const [deliveryCountry, setDeliveryCountry] = useState<string>(
-    (dupCfg as { deliveryCountry?: string } | null)?.deliveryCountry ?? 'Nigeria',
-  );
+  const [deliveryCountry, setDeliveryCountry] = useState<string>(initialCountry);
   // Country-only mode: the form is always locked to one country (no customer
   // country picker) and to that country's single currency. Both selection
   // toggles were removed; the hidden inputs submit false.
@@ -269,6 +286,18 @@ export function MarketingFormCreatePage({
     return [...codes];
   }, [compatibleOfferGroups, selectedOfferGroupId]);
   const offerHasMultiCurrency = selectedOfferCurrencies.length > 0;
+
+  // Keep the currency in step with the country when the offer changes, so a
+  // country that was set without touching the picker (an MB with one country)
+  // still gets its own currency once the offer is chosen.
+  useEffect(() => {
+    const countryCurrency = currenciesForForm.find(
+      (c) => c.active && c.countryName.toLowerCase() === deliveryCountry.toLowerCase(),
+    );
+    if (!countryCurrency || countryCurrency.isDefault) return;
+    if (selectedOfferCurrencies.includes(countryCurrency.code.toUpperCase())) setPinnedCurrency(countryCurrency.code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sync on offer change only
+  }, [selectedOfferCurrencies]);
 
   const { previewMultiProduct, previewOffers, previewProducts } = useMemo(() => {
     if (!selectedOfferGroupId) {
@@ -485,7 +514,7 @@ export function MarketingFormCreatePage({
                     label="Country"
                     value={deliveryCountry}
                     onChange={(e) => onDeliveryCountryChange(e.target.value)}
-                    options={configuredCountries.map((country) => ({ value: country, label: country }))}
+                    options={countryOptions.map((country) => ({ value: country, label: country }))}
                     disabled={!selectedOfferGroupId}
                   />
                   <p className="mt-2 text-xs text-app-fg-muted">

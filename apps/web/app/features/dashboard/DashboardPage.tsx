@@ -17,6 +17,7 @@ import { formatNaira } from '~/lib/format-amount';
 import { LensedMoney } from '~/components/ui/lensed-money';
 import { dashboardLink } from '~/lib/dashboard-link';
 import { ConvertedRevenue } from '~/components/ui/converted-revenue';
+import { useMetricsMoney, NO_FX_RATE_LABEL } from '~/hooks/useMetricsMoney';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
 import { isAdminLevel, hasFinanceAccess } from '~/lib/rbac';
@@ -703,6 +704,8 @@ function CSDashboard({
 
 function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBuyerId, cartOrdersCounts, marketingStatusCounts, startDate, endDate }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; abandonedCartCount?: number; mediaBuyerId?: string; cartOrdersCounts?: Record<string, number>; marketingStatusCounts?: Record<string, number>; startDate?: string; endDate?: string }) {
   const [breakdownOpen, setBreakdownOpen] = useState(false);
+  // Money is in the top-bar country's currency when one is picked (see useMetricsMoney).
+  const money = useMetricsMoney(metrics);
   /** Append `&mediaBuyerId=…` when viewing personal performance so the orders
    *  page lands on the "My Orders" tab with the correct filter pre-selected. */
   const q = (base: string) => {
@@ -770,10 +773,16 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
             valueClassName: 'text-success-600 dark:text-success-400',
             to: q('/admin/marketing/orders?status=DELIVERED'),
           },
-          { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: cpaColorClass(metrics.cpa), to: '/admin/marketing/expenses' },
+          {
+            label: 'CPA',
+            value: money.fxRateMissing ? NO_FX_RATE_LABEL : money.fmt(metrics.cpa),
+            // Thresholds are in ₦, so colour from the ₦ CPA whatever the display currency.
+            valueClassName: money.fxRateMissing ? 'text-app-fg-muted' : cpaColorClass(metrics.cpaBase ?? metrics.cpa),
+            to: '/admin/marketing/expenses',
+          },
           {
             label: 'True ROAS',
-            value: `${metrics.trueRoas.toFixed(2)}x`,
+            value: money.fxRateMissing ? NO_FX_RATE_LABEL : `${metrics.trueRoas.toFixed(2)}x`,
             valueClassName: metrics.trueRoas >= 2 ? 'text-success-600 dark:text-success-400' : metrics.trueRoas >= 1 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400',
             to: '/admin/marketing/overview',
           },
@@ -806,12 +815,13 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0, mediaBu
           },
           {
             label: 'Ad Spend',
-            value: naira(Math.round(metrics.approvedSpend ?? metrics.totalSpend)),
-            valueClassName: 'text-app-fg',
+            value: money.fxRateMissing ? NO_FX_RATE_LABEL : money.fmt(metrics.approvedSpend ?? metrics.totalSpend),
+            valueClassName: money.fxRateMissing ? 'text-app-fg-muted' : 'text-app-fg',
             to: '/admin/marketing/expenses',
-            title:
-              (metrics.pendingSpend ?? 0) > 0
-                ? `Approved ad spend (basis for CPA/ROAS). Pending unapproved: ${naira(Math.round(metrics.pendingSpend ?? 0))}`
+            title: money.fxRateMissing
+              ? `No FX rate for ${money.code}, so naira ad spend can't be shown in ${money.code}.`
+              : (metrics.pendingSpend ?? 0) > 0
+                ? `Approved ad spend (basis for CPA/ROAS). Pending unapproved: ${money.fmt(metrics.pendingSpend ?? 0)}`
                 : 'Approved ad spend (basis for CPA/ROAS)',
           },
         ]}
@@ -855,7 +865,7 @@ function MarketingPerformanceSummary({ metrics, naira, cartOrdersCounts, marketi
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{deliveredOrders}</span></div>
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{Math.max(0, confirmedOrders - deliveredOrders)}</span></div>
         <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{cr.toFixed(1)}%</span></div>
-        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered Revenue</span><ConvertedRevenue className="text-sm font-medium text-app-fg" amount={metrics.deliveredRevenue} byCurrency={metrics.deliveredRevenueByCurrency} unconverted={metrics.unconvertedRevenueByCurrency} /></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered Revenue</span><ConvertedRevenue className="text-sm font-medium text-app-fg" amount={metrics.deliveredRevenue} byCurrency={metrics.deliveredRevenueByCurrency} unconverted={metrics.unconvertedRevenueByCurrency} currencyCode={metrics.currencyCode} /></div>
       </div>
     </div>
   );

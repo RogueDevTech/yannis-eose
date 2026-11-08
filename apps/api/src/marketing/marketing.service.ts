@@ -61,7 +61,16 @@ import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
-import { buildFxRateLookup, convertRevenueToBase, type FxRateLookup, type RevenueSlice } from './revenue-fx';
+import {
+  baseToCurrency,
+  buildFxRateLookup,
+  convertRevenueToBase,
+  revenueInCurrency,
+  type FxRateLookup,
+  type RevenueSlice,
+} from './revenue-fx';
+import { campaignCurrencyCodeSql } from '../common/db/campaign-currency';
+import { countryScopeCondition } from '../common/db/country-scope-condition';
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 import { BranchTeamsService } from '../branches/branch-teams.service';
@@ -5684,7 +5693,16 @@ export class MarketingService {
     /** Which branch column to scope orders by. Defaults to `branchId` (marketing).
      *  CS/Sales roles should pass `'servicing'` so orders scope by `servicing_branch_id`. */
     orderBranchScope?: 'marketing' | 'servicing',
+    /**
+     * One country (currency code) picked in the top-bar switcher, or null for
+     * all countries. When set: orders and cart orders are only that currency,
+     * ad spend is only spend logged on that country's forms, and every money
+     * figure comes back in that currency (see `currencyCode` / `fxRateMissing`
+     * on the result). When null, money stays consolidated in ₦ via FX.
+     */
+    opts?: { currencyCode?: string | null },
   ) {
+    const countryCode = opts?.currencyCode?.trim().toUpperCase() || null;
     // Started now so it overlaps the campaign / branch lookups below.
     const rateOfPromise = this.loadFxRateLookup();
     // Early returns below never await it; keep a failure from going unhandled.
@@ -5739,6 +5757,9 @@ export class MarketingService {
         funnelCpa: 0,
         trueRoas: 0,
         deliveryRate: 0,
+        currencyCode: countryCode,
+        fxRateMissing: false,
+        cpaBase: 0,
       };
     }
     // Helper: push the same scope condition into all spend arrays.
@@ -5816,6 +5837,20 @@ export class MarketingService {
     if (periodEnd) {
       pushSpendScope(lte(schema.adSpendLogs.spendDate, periodEnd));
     }
+    if (countryCode) {
+      // Spend has no currency of its own: it belongs to the country of the form
+      // it was logged against. Spend with no form (legacy daily flow) can't be
+      // placed in a country, so it only shows under "All countries".
+      pushSpendScope(
+        inArray(
+          schema.adSpendLogs.campaignId,
+          this.db
+            .select({ id: schema.campaigns.id })
+            .from(schema.campaigns)
+            .where(sql`${campaignCurrencyCodeSql(schema.campaigns.formConfig, schema.campaigns.branchId)} = ${countryCode}`),
+        ),
+      );
+    }
     const spendWhere = and(...spendConditions);
     const pendingSpendWhere = and(...pendingSpendConditions);
     const otherExpenseWhere = and(...otherExpenseConditions);
@@ -5843,6 +5878,14 @@ export class MarketingService {
       const branchCol = orderBranchScope === 'servicing' ? schema.orders.servicingBranchId : schema.orders.branchId;
       const bCond = branchScopeCondition(branchCol, branchId, effectiveBranchIds);
       if (bCond) conditions.push(bCond);
+      // Same country condition as orders.statusCounts, so the money tiles and
+      // the count tiles describe the same orders.
+      const cCond = countryScopeCondition(schema.orders.currencyCode, countryCode ? [countryCode] : null);
+      if (cCond) conditions.push(cCond);
+    };
+    const appendCartCountryScope = (conds: SQL[]) => {
+      const cCond = countryScopeCondition(schema.cartOrders.currencyCode, countryCode ? [countryCode] : null);
+      if (cCond) conds.push(cCond);
     };
 
     // CS/servicing scope includes ALL order sources (offline, edge-form, online).
@@ -5969,6 +6012,7 @@ export class MarketingService {
           ];
           const bCond = branchScopeCondition(schema.cartOrders.branchId, branchId, effectiveBranchIds);
           if (bCond) cartConds.push(bCond);
+          appendCartCountryScope(cartConds);
           if (mediaBuyerId && mediaBuyerId !== '__system__') cartConds.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
           if (supervisorScope?.mediaBuyerIds && supervisorScope.mediaBuyerIds.length > 0) {
             cartConds.push(inArray(schema.cartOrders.mediaBuyerId, supervisorScope.mediaBuyerIds));
@@ -5992,6 +6036,7 @@ export class MarketingService {
           ];
           const bCond = branchScopeCondition(schema.cartOrders.branchId, branchId, effectiveBranchIds);
           if (bCond) cartConds.push(bCond);
+          appendCartCountryScope(cartConds);
           if (mediaBuyerId && mediaBuyerId !== '__system__') cartConds.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
           if (supervisorScope?.mediaBuyerIds && supervisorScope.mediaBuyerIds.length > 0) {
             cartConds.push(inArray(schema.cartOrders.mediaBuyerId, supervisorScope.mediaBuyerIds));
@@ -6007,6 +6052,21 @@ export class MarketingService {
         })()
       : Promise.resolve([{ deliveredCount: 0 }] as { deliveredCount: number }[]);
 
+    // Spend summed per company (via the form's branch): FX rates are per
+    // company, so converting ₦ spend into a country's currency needs the split.
+    // Spend with no form lands in the NULL-company slice.
+    const spendByCompany = (where: SQL | undefined) =>
+      this.db
+        .select({
+          groupId: schema.branches.groupId,
+          total: sql<number>`coalesce(sum(${schema.adSpendLogs.spendAmount}), 0)`.mapWith(Number),
+        })
+        .from(schema.adSpendLogs)
+        .leftJoin(schema.campaigns, eq(schema.campaigns.id, schema.adSpendLogs.campaignId))
+        .leftJoin(schema.branches, eq(schema.branches.id, schema.campaigns.branchId))
+        .where(where)
+        .groupBy(schema.branches.groupId);
+
     const [
       totalSpendRows,
       pendingSpendRows,
@@ -6021,18 +6081,9 @@ export class MarketingService {
       cartRevenueByCurrencyRows,
       rateOf,
     ] = await Promise.all([
-      this.db
-        .select({ total: sum(schema.adSpendLogs.spendAmount) })
-        .from(schema.adSpendLogs)
-        .where(spendWhere),
-      this.db
-        .select({ total: sum(schema.adSpendLogs.spendAmount) })
-        .from(schema.adSpendLogs)
-        .where(pendingSpendWhere),
-      this.db
-        .select({ total: sum(schema.adSpendLogs.spendAmount) })
-        .from(schema.adSpendLogs)
-        .where(otherExpenseWhere),
+      spendByCompany(spendWhere),
+      spendByCompany(pendingSpendWhere),
+      spendByCompany(otherExpenseWhere),
       this.db.select({ count: count() }).from(schema.orders).where(orderWhere),
       this.db.select({ count: count() }).from(schema.orders).where(deliveredWhere),
       this.db.select({ count: count() }).from(schema.orders).where(confirmedWhere),
@@ -6061,6 +6112,7 @@ export class MarketingService {
             ];
             const bCond = branchScopeCondition(schema.cartOrders.branchId, branchId, effectiveBranchIds);
             if (bCond) cartConds.push(bCond);
+            appendCartCountryScope(cartConds);
             if (mediaBuyerId && mediaBuyerId !== '__system__') cartConds.push(eq(schema.cartOrders.mediaBuyerId, mediaBuyerId));
             if (supervisorScope?.mediaBuyerIds && supervisorScope.mediaBuyerIds.length > 0) {
               cartConds.push(inArray(schema.cartOrders.mediaBuyerId, supervisorScope.mediaBuyerIds));
@@ -6082,30 +6134,30 @@ export class MarketingService {
       rateOfPromise,
     ]);
 
-    const approvedSpend = Number(totalSpendRows[0]?.total ?? 0);
-    const pendingSpend = Number(pendingSpendRows[0]?.total ?? 0);
-    const otherExpenses = Number(otherExpenseRows[0]?.total ?? 0);
-    const totalSpend = approvedSpend + pendingSpend;
+    const sumSlices = (rows: { total: number }[]) => rows.reduce((t, r) => t + Number(r.total ?? 0), 0);
+    // ₦ figures. CPA/ROAS ratios are computed in ₦ first.
+    const approvedSpendBase = sumSlices(totalSpendRows);
+    const pendingSpendBase = sumSlices(pendingSpendRows);
+    const otherExpensesBase = sumSlices(otherExpenseRows);
     const cartDelivered = cartDeliveredRows[0]?.deliveredCount ?? 0;
     // Revenue in ₦: each company × currency slice converted at its FX rate.
     // Currencies with no rate stay out (returned raw in `unconvertedRevenueByCurrency`).
     const metricsContext = `metrics ${mediaBuyerId ?? 'all media buyers'}`;
     const funnelFx = this.convertRevenueLogged(funnelRevenueByCurrencyRows, rateOf, `${metricsContext}, funnel`);
     const cartFx = this.convertRevenueLogged(cartRevenueByCurrencyRows, rateOf, `${metricsContext}, cart`);
-    const funnelRevenue = funnelFx.base;
-    const cartRevenue = cartFx.base;
-    const unconvertedRevenueByCurrency: Record<string, number> = { ...funnelFx.unconverted };
+    const unconvertedBase: Record<string, number> = { ...funnelFx.unconverted };
     for (const [code, amount] of Object.entries(cartFx.unconverted)) {
-      unconvertedRevenueByCurrency[code] = (unconvertedRevenueByCurrency[code] ?? 0) + amount;
+      unconvertedBase[code] = (unconvertedBase[code] ?? 0) + amount;
     }
     // Pure funnel cohort (orders table only) — Funnel CPA's denominator,
     // before cart-graduated deliveries are added into `totalOrders` below.
     const funnelOrders = totalOrdersRows[0]?.count ?? 0;
     const totalOrders = funnelOrders + cartDelivered;
     const deliveredOrders = (deliveredOrdersRows[0]?.count ?? 0) + cartDelivered;
-    const deliveredRevenue = funnelRevenue + cartRevenue;
+    const deliveredRevenueBase = funnelFx.base + cartFx.base;
     // Per-currency delivered revenue (funnel + cart), raw amounts keyed by ISO
-    // code. `deliveredRevenue` above is the same money converted to ₦.
+    // code. `deliveredRevenue` is the same money converted to ₦ (all countries)
+    // or kept in the selected country's currency.
     const deliveredRevenueByCurrency: Record<string, number> = {};
     for (const r of [...funnelRevenueByCurrencyRows, ...cartRevenueByCurrencyRows]) {
       const code = (r.currencyCode ?? 'NGN').toUpperCase();
@@ -6117,8 +6169,46 @@ export class MarketingService {
     const deliveredThisMonth =
       (deliveredThisMonthRows[0]?.count ?? 0) + (cartDeliveredThisMonthRows[0]?.deliveredCount ?? 0);
 
+    // ROAS is a ratio, so it is the same in any currency: both sides in ₦.
+    // Revenue with no FX rate is left out (never counted 1:1).
+    const trueRoasBase = approvedSpendBase > 0 ? deliveredRevenueBase / approvedSpendBase : 0;
+
+    // Money in the selected country's currency. Revenue is already in it (the
+    // orders are filtered to it); ₦ spend is converted at the company FX rate.
+    // No rate → `fxRateMissing`, and the UI shows "Set FX rate" instead of a ₦
+    // number under another country's symbol.
+    let money = {
+      approvedSpend: approvedSpendBase,
+      pendingSpend: pendingSpendBase,
+      otherExpenses: otherExpensesBase,
+      funnelRevenue: funnelFx.base,
+      cartRevenue: cartFx.base,
+      unconvertedRevenueByCurrency: unconvertedBase,
+      trueRoas: trueRoasBase,
+      fxRateMissing: false,
+    };
+    if (countryCode) {
+      const approvedLocal = baseToCurrency(totalSpendRows, countryCode, rateOf);
+      const pendingLocal = baseToCurrency(pendingSpendRows, countryCode, rateOf);
+      const otherLocal = baseToCurrency(otherExpenseRows, countryCode, rateOf);
+      const fxRateMissing =
+        approvedLocal == null || pendingLocal == null || otherLocal == null || Object.keys(unconvertedBase).length > 0;
+      money = {
+        approvedSpend: approvedLocal ?? 0,
+        pendingSpend: pendingLocal ?? 0,
+        otherExpenses: otherLocal ?? 0,
+        funnelRevenue: revenueInCurrency(funnelRevenueByCurrencyRows, countryCode),
+        cartRevenue: revenueInCurrency(cartRevenueByCurrencyRows, countryCode),
+        unconvertedRevenueByCurrency: {},
+        trueRoas: fxRateMissing ? 0 : trueRoasBase,
+        fxRateMissing,
+      };
+    }
+    const { approvedSpend, pendingSpend, otherExpenses } = money;
+    const deliveredRevenue = money.funnelRevenue + money.cartRevenue;
+
     return {
-      totalSpend,
+      totalSpend: approvedSpend + pendingSpend,
       pendingSpend,
       approvedSpend,
       otherExpenses,
@@ -6131,14 +6221,13 @@ export class MarketingService {
       deliveredRevenue,
       /** Pieces of `deliveredRevenue` for CEO hero breakdown modals. */
       deliveredRevenueBreakdown: {
-        funnel: funnelRevenue,
-        cart: cartRevenue,
+        funnel: money.funnelRevenue,
+        cart: money.cartRevenue,
       },
-      /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }), raw
-       *  amounts. `deliveredRevenue` is these converted to ₦ via FX. */
+      /** Delivered revenue split by frozen currency ({ NGN: x, GHS: y }), raw amounts. */
       deliveredRevenueByCurrency,
       /** Raw amounts per currency with no FX rate, left out of `deliveredRevenue` and ROAS. */
-      unconvertedRevenueByCurrency,
+      unconvertedRevenueByCurrency: money.unconvertedRevenueByCurrency,
       confirmedOrders,
       confirmationRate,
       // CPA uses approved spend only — pending spend is unverified and would
@@ -6148,13 +6237,19 @@ export class MarketingService {
       // Ad spend / front-end orders only (excludes cart-graduated deliveries
       // that `totalOrders` carries). Approved-spend numerator, same as `cpa`.
       funnelCpa: funnelOrders > 0 ? approvedSpend / funnelOrders : 0,
-      trueRoas: approvedSpend > 0 ? deliveredRevenue / approvedSpend : 0,
+      trueRoas: money.trueRoas,
       // DR = delivered cohort / total cohort (DELETED-excluded) — same
       // denominator as CR so the two read as a funnel: of every N orders
       // taken in period, X% reached confirmed-or-beyond and Y% delivered.
       // (The conditional rate delivered/confirmed lives on the CS Closer
       // leaderboard's `engaged` denominator, which is also total.)
       deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0,
+      /** Currency every money field above is in: the selected country, or null = ₦ (all countries, FX-consolidated). */
+      currencyCode: countryCode,
+      /** True when the selected country has no FX rate: spend, CPA and ROAS can't be shown in its currency. */
+      fxRateMissing: money.fxRateMissing,
+      /** CPA in ₦ whatever the display currency, so CPA colour thresholds (set in ₦) still apply. */
+      cpaBase: totalOrders > 0 ? approvedSpendBase / totalOrders : 0,
     };
   }
 
@@ -7135,6 +7230,75 @@ export class MarketingService {
     return derived ? derived : undefined;
   }
 
+  /**
+   * The currency codes a form config sells in: its pinned currency, the
+   * currency of its delivery country, or the company base when it names neither.
+   * `allowMultiCurrency` / `allowCountrySelection` mean "any country" ('*').
+   */
+  private formConfigCurrencyCodes(
+    cfg: Record<string, unknown> | null | undefined,
+    companyCurrencies: { code: string; countryName: string; isDefault: boolean }[],
+  ): Set<string> {
+    const codes = new Set<string>();
+    if (cfg?.['allowMultiCurrency'] === true || cfg?.['allowCountrySelection'] === true) codes.add('*');
+    const pinned = typeof cfg?.['pinnedCurrency'] === 'string' ? cfg['pinnedCurrency'].trim().toUpperCase() : '';
+    if (pinned) codes.add(pinned);
+    const country = typeof cfg?.['deliveryCountry'] === 'string' ? cfg['deliveryCountry'].trim().toLowerCase() : '';
+    const countryCurrency = country
+      ? companyCurrencies.find((c) => c.countryName.trim().toLowerCase() === country)
+      : undefined;
+    if (countryCurrency) codes.add(countryCurrency.code.toUpperCase());
+    if (!pinned && !countryCurrency) {
+      const base = companyCurrencies.find((c) => c.isDefault);
+      codes.add((base?.code ?? 'NGN').toUpperCase());
+    }
+    return codes;
+  }
+
+  /**
+   * A Media Buyer may only build forms for the countries they are assigned
+   * (`formCountryCurrencyCodes`). `allowed` null = any country; [] = base only.
+   * On update, pass `previousConfig`: a form whose country is unchanged can
+   * always be edited, so a revoked grant never locks an MB out of a live form.
+   */
+  private async assertFormCountryAllowed(
+    groupId: string | null,
+    nextConfig: Record<string, unknown> | null | undefined,
+    allowed: string[] | null | undefined,
+    previousConfig?: Record<string, unknown> | null,
+  ): Promise<void> {
+    if (allowed == null) return;
+    const companyCurrencies = await this.db
+      .select({
+        code: schema.currencies.code,
+        countryName: schema.currencies.countryName,
+        isDefault: schema.currencies.isDefault,
+      })
+      .from(schema.currencies)
+      .where(and(this.currencyGroupEq(groupId), eq(schema.currencies.active, true)));
+    const next = this.formConfigCurrencyCodes(nextConfig, companyCurrencies);
+    if (previousConfig !== undefined) {
+      const prev = this.formConfigCurrencyCodes(previousConfig, companyCurrencies);
+      if (prev.size === next.size && [...next].every((c) => prev.has(c))) return;
+    }
+    const baseCode = (companyCurrencies.find((c) => c.isDefault)?.code ?? 'NGN').toUpperCase();
+    const permitted = new Set(allowed.length > 0 ? allowed.map((c) => c.toUpperCase()) : [baseCode]);
+    if ([...next].every((c) => permitted.has(c))) return;
+
+    const nameFor = (code: string) =>
+      companyCurrencies.find((c) => c.code.toUpperCase() === code)?.countryName || code;
+    const permittedNames = [...permitted].map(nameFor).join(', ');
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: next.has('*')
+        ? `You can only create forms for ${permittedNames}. Turn off country and currency selection.`
+        : `You can only create forms for ${permittedNames}. Ask an admin to give you access to ${[...next]
+            .filter((c) => !permitted.has(c))
+            .map(nameFor)
+            .join(', ')}.`,
+    });
+  }
+
   /** currencies.group_id = X (or IS NULL) predicate. */
   private currencyGroupEq(groupId: string | null) {
     return groupId == null ? sql`${schema.currencies.groupId} IS NULL` : eq(schema.currencies.groupId, groupId);
@@ -8070,7 +8234,12 @@ export class MarketingService {
     input: CreateCampaignInput,
     mediaBuyerId: string,
     branchId?: string | null,
-    opts?: { activeGroupId?: string | null; effectiveBranchIds?: string[] | null },
+    opts?: {
+      activeGroupId?: string | null;
+      effectiveBranchIds?: string[] | null;
+      /** formCountryCurrencyCodes(actor): null = any country. */
+      formCountryCodes?: string[] | null;
+    },
   ) {
     return withActor(this.db, { id: mediaBuyerId }, async (tx) => {
       // Never leave a form branchless. When no specific branch is selected (e.g.
@@ -8083,6 +8252,13 @@ export class MarketingService {
           tx,
           opts?.activeGroupId ?? null,
           opts?.effectiveBranchIds ?? null,
+        );
+      }
+      if (opts?.formCountryCodes != null) {
+        await this.assertFormCountryAllowed(
+          (await this.resolveGroupIdForBranch(resolvedBranchId)) ?? opts.activeGroupId ?? null,
+          input.formConfig as Record<string, unknown> | undefined,
+          opts.formCountryCodes,
         );
       }
       // Form names are unique org-wide, case-insensitive. Pre-check so callers
@@ -8149,7 +8325,13 @@ export class MarketingService {
     });
   }
 
-  async updateCampaign(input: UpdateCampaignInput, actorId: string, effectiveBranchIds?: string[] | null) {
+  async updateCampaign(
+    input: UpdateCampaignInput,
+    actorId: string,
+    effectiveBranchIds?: string[] | null,
+    /** formCountryCurrencyCodes(actor): null = any country. */
+    formCountryCodes?: string[] | null,
+  ) {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const existing = await tx
         .select()
@@ -8236,6 +8418,14 @@ export class MarketingService {
             tx,
             pid,
             merged.selectedOfferTemplateIds as string[] | undefined,
+          );
+        }
+        if (formCountryCodes != null) {
+          await this.assertFormCountryAllowed(
+            await this.resolveGroupIdForBranch(prevRow.branchId ?? null),
+            merged,
+            formCountryCodes,
+            prev,
           );
         }
       }
