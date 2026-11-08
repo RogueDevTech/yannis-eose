@@ -31,6 +31,12 @@ export interface DashboardData {
     cpa: number;
     trueRoas: number;
     deliveryRate: number;
+    /** Currency of every money field: the top-bar country, or null = ₦ (all countries, FX-consolidated). */
+    currencyCode?: string | null;
+    /** The picked country has no FX rate: spend, CPA and ROAS can't be shown in its currency. */
+    fxRateMissing?: boolean;
+    /** CPA in ₦ regardless of display currency (CPA colour thresholds are in ₦). */
+    cpaBase?: number;
   };
   profit: {
     revenue: number;

@@ -47,6 +47,7 @@ import {
   canonicalPermissionCode,
   formCountryCurrencyCodes,
 } from '@yannis/shared';
+import { selectedCountryCode } from '../context';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, publicProcedure, authedProcedure, permissionProcedure } from '../trpc';
@@ -665,9 +666,17 @@ export const marketingRouter = router({
         endDate: dateOrDateTimeOptional,
         /** When true, skip supervisor scope expansion — return only the caller's own metrics. */
         personalOnly: z.boolean().optional(),
+        /**
+         * Follow the top-bar country pick: only that country's orders, carts
+         * and form spend, money in its currency. Opt-in, because some callers
+         * (Ad Spend page, HR profile) pair these numbers with ₦ lists that
+         * are not country-filtered and must keep matching them.
+         */
+        countryView: z.boolean().optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
+      const country = { currencyCode: input.countryView ? selectedCountryCode(ctx) : null };
       let mediaBuyerId = input.mediaBuyerId;
       let assignedCsId = input.assignedCsId;
 
@@ -705,6 +714,8 @@ export const marketingRouter = router({
             undefined,
             narrowed.supervisorScope,
             ctx.effectiveBranchIds,
+            undefined,
+            country,
           );
         }
         mediaBuyerId = ctx.user.id;
@@ -771,6 +782,9 @@ export const marketingRouter = router({
         undefined,
         ctx.effectiveBranchIds,
         orderBranchScope,
+        // Top-bar country pick (null = all countries). Closers return above:
+        // their own assigned orders are never hidden by country.
+        country,
       );
     }),
 
@@ -1201,13 +1215,13 @@ export const marketingRouter = router({
     )
     .query(async ({ input, ctx }) => {
       const { mediaBuyerId, status, startDate, endDate, includeMarketingExportPicklists, currencyCode } = input;
-      // Multi-country: the Marketing Orders surface is governed by its OWN
-      // per-page currency filter (`currencyCode`, default "all currencies"), NOT
-      // by the global top-bar country switcher. So an MB (and marketing viewers)
-      // see ALL their orders across countries by default and can slice by
-      // currency here. We therefore ignore marketingCurrencyScope on this
-      // bundle and let `currencyCode` be the sole currency control.
-      const marketingCurrencyScope: string[] | null = null;
+      // Multi-country: the top-bar country pick narrows this page (strip,
+      // metrics, carts), the same as the table (`orders.list`). "All countries"
+      // (no pick) shows every country: a Media Buyer is cross-country by
+      // design, so the user's country grants are NOT applied here. The per-page
+      // `currencyCode` filter still stacks on top.
+      const viewCountry = selectedCountryCode(ctx);
+      const marketingCurrencyScope: string[] | null = viewCountry ? [viewCountry] : null;
       // Branch scope must mirror `orders.list` (`orderListBranchIdOwnerAware`)
       // so the overview strip matches the orders table:
       //  - A plain Media Buyer scopes by their header branch lens — the
@@ -1310,6 +1324,8 @@ export const marketingRouter = router({
           ordersScope.assignedCsId,
           ordersScope.supervisorScope,
           ctx.effectiveBranchIds,
+          undefined,
+          { currencyCode: viewCountry ?? currencyCode ?? null },
         ),
         getOrdersService().getOrdersTimeSeriesByCreated(
           ordersScope.startDate,
@@ -1383,6 +1399,7 @@ export const marketingRouter = router({
           effectiveBranchIds: ctx.effectiveBranchIds,
           startDate,
           endDate,
+          currencyCodes: [viewCountry, currencyCode].filter((c): c is string => !!c),
         }).catch(() => 0),
         // Every form entry in the period, split by what it became (converted /
         // still open / abandoned). Same scope as countAllCarts above so the
@@ -1393,6 +1410,7 @@ export const marketingRouter = router({
           effectiveBranchIds: ctx.effectiveBranchIds,
           startDate,
           endDate,
+          currencyCodes: [viewCountry, currencyCode].filter((c): c is string => !!c),
         }).catch(() => ({ converted: 0, pending: 0, abandoned: 0, blocked: 0, total: 0 })),
         // Supplementary counts: offline + duplicate — same scope as statusCounts.
         getOrdersService().getSupplementaryCounts(
@@ -1405,6 +1423,7 @@ export const marketingRouter = router({
           'marketing',
           ctx.effectiveBranchIds,
           currencyCode,
+          marketingCurrencyScope,
         ),
         // "Total Delivered This Month" (carry-over-inclusive, by delivered_at).
         // SAME scope as statusCounts/cartStatusCounts above so it's comparable.

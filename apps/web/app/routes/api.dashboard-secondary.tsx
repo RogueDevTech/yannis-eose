@@ -87,11 +87,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // applies supervisor scope to aggregate the whole team. Regular MBs self-scope.
   const mediaBuyerIdParam =
     role === 'MEDIA_BUYER' && !isActualMbSupervisor ? { mediaBuyerId: user.id } : {};
-  const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam });
+  // countryView: money tiles follow the top-bar country, like the count tiles.
+  const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam, countryView: true });
   // Personal metrics: the user's own funnel (scoped to own mediaBuyerId).
   // Both MB-supervisors and HoM can run ads — "My Performance" shows their own orders.
   const personalMetricsInput = isSupervisor
-    ? JSON.stringify({ startDate, endDate, mediaBuyerId: user.id, personalOnly: true })
+    ? JSON.stringify({ startDate, endDate, mediaBuyerId: user.id, personalOnly: true, countryView: true })
     : null;
   const profitInput = JSON.stringify({ groupBy: 'product', startDate, endDate });
 

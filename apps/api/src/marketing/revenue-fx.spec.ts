@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildFxRateLookup, convertRevenueToBase, type FxRateRow } from './revenue-fx';
+import { baseToCurrency, buildFxRateLookup, convertRevenueToBase, revenueInCurrency, type FxRateRow } from './revenue-fx';
 
 /**
  * Delivered revenue → ₦ for media buyer ROAS (Team Analysis ticket, Oct 2026).
@@ -102,5 +102,60 @@ describe('convertRevenueToBase', () => {
     expect(base).toBeCloseTo(70_930, 2);
     expect(unconverted).toEqual({});
     expect(invalid).toEqual([{ groupId: CO, currencyCode: 'NGN', total: Number.NaN }]);
+  });
+});
+
+/**
+ * Country filter on the MB dashboard (ticket, Nov 2026): with Zambia picked,
+ * money must be in ZMW, not ₦ figures under a ₦ symbol.
+ */
+describe('baseToCurrency', () => {
+  it('converts ₦ ad spend into the picked country (₦ / rate)', () => {
+    // ZMW rate 70.93: ₦709,300 of spend = K10,000.
+    expect(baseToCurrency([{ groupId: CO, total: 709_300 }], 'ZMW', rateOf)).toBeCloseTo(10_000, 6);
+  });
+
+  it('uses each company its own rate', () => {
+    const out = baseToCurrency(
+      [
+        { groupId: CO, total: 70_930 }, // K1,000 at 70.93
+        { groupId: OTHER, total: 80_000 }, // K1,000 at 80
+      ],
+      'ZMW',
+      rateOf,
+    );
+    expect(out).toBeCloseTo(2_000, 6);
+  });
+
+  it('is unchanged for the base currency', () => {
+    expect(baseToCurrency([{ groupId: CO, total: '1750000' }], 'NGN', rateOf)).toBe(1_750_000);
+  });
+
+  it('returns null when the country has no rate, never a ₦ number', () => {
+    expect(baseToCurrency([{ groupId: CO, total: 5_000 }], 'GHS', rateOf)).toBeNull();
+  });
+
+  it('ignores empty slices, so a missing rate with no spend is not an error', () => {
+    expect(baseToCurrency([{ groupId: CO, total: 0 }, { groupId: CO, total: null }], 'GHS', rateOf)).toBe(0);
+  });
+});
+
+describe('revenueInCurrency', () => {
+  it('sums only the picked currency, raw (no FX)', () => {
+    expect(
+      revenueInCurrency(
+        [
+          { groupId: CO, currencyCode: 'ZMW', total: 1_200 },
+          { groupId: OTHER, currencyCode: 'zmw', total: 2_400 },
+          { groupId: CO, currencyCode: 'TZS', total: 150_000 },
+        ],
+        'ZMW',
+      ),
+    ).toBe(3_600);
+  });
+
+  it('counts NULL currency as NGN', () => {
+    expect(revenueInCurrency([{ groupId: CO, currencyCode: null, total: 60_000 }], 'NGN')).toBe(60_000);
+    expect(revenueInCurrency([{ groupId: CO, currencyCode: null, total: 60_000 }], 'ZMW')).toBe(0);
   });
 });

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { router, publicProcedure, permissionProcedure } from '../trpc';
 import { CartService } from '../../cart/cart.service';
 import { isAdminLevel } from '../../common/authz';
+import { selectedCountryCode } from '../context';
 import { saveCartSchema } from '@yannis/shared';
 
 let cartServiceInstance: CartService | null = null;
@@ -226,6 +227,8 @@ export const cartRouter = router({
           effectiveBranchIds: !input?.branchId ? ctx.effectiveBranchIds : null,
           startDate: input?.startDate,
           endDate: input?.endDate,
+          // Top-bar country pick, same as the dashboard's other tiles.
+          currencyCodes: [selectedCountryCode(ctx)].filter((c): c is string => !!c),
         }),
       };
     }),

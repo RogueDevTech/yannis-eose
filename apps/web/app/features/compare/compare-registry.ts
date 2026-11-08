@@ -132,7 +132,7 @@ const marketingOrdersSource: CompareSource<MarketingMetricsPayload> = {
   },
   fetchPeriod: async (period, cookie) => {
     const input = encodeURIComponent(
-      JSON.stringify({ startDate: period.startDate, endDate: period.endDate }),
+      JSON.stringify({ startDate: period.startDate, endDate: period.endDate, countryView: true }),
     );
     const res = await apiRequest<unknown>(
       `/trpc/marketing.metrics?input=${input}`,

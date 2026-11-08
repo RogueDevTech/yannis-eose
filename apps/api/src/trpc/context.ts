@@ -270,3 +270,20 @@ export function resolveWriteCurrencyCode(
     message: 'Pick a country in the header first, so this is created in the right country.',
   });
 }
+
+/**
+ * The single country picked in the top-bar switcher, or null for "All
+ * countries". Marketing surfaces (MB dashboard, Marketing Orders) filter by
+ * this pick only: a Media Buyer is cross-country by design, so with no pick
+ * they keep seeing every country. A stale pick outside the user's permission
+ * (after a revoke) is ignored, same as `effectiveCurrencyCodes`.
+ */
+export function selectedCountryCode(
+  ctx: Pick<TrpcContext, 'currentCurrencyCode' | 'permittedCurrencyCodes'>,
+): string | null {
+  const code = ctx.currentCurrencyCode?.toUpperCase() || null;
+  if (!code) return null;
+  const permitted = ctx.permittedCurrencyCodes;
+  if (permitted && !permitted.map((c) => c.toUpperCase()).includes(code)) return null;
+  return code;
+}

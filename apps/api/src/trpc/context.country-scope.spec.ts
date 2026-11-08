@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { Request, Response } from 'express';
-import { createContext } from './context';
+import { createContext, selectedCountryCode } from './context';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 function ctxFor(user: Partial<SessionUser> | null) {
@@ -112,5 +112,28 @@ describe('permittedCurrencyCodes', () => {
     const ctx = ctxFor({ ...baseUser, role: 'SUPER_ADMIN', currentCurrencyCode: 'ZMW' });
     expect(ctx.effectiveCurrencyCodes).toEqual(['ZMW']);
     expect(ctx.permittedCurrencyCodes).toBeNull();
+  });
+});
+
+describe('selectedCountryCode (marketing surfaces)', () => {
+  it('is null with no pick: a Media Buyer sees every country', () => {
+    const ctx = ctxFor({ ...baseUser, role: 'MEDIA_BUYER' });
+    expect(selectedCountryCode(ctx)).toBeNull();
+  });
+
+  it('is the pick for a Media Buyer, even with no country grants', () => {
+    // The Godwin case: assigned Nigeria only, but cross-country as an MB.
+    const ctx = ctxFor({ ...baseUser, role: 'MEDIA_BUYER', currencyCodes: ['NGN'], currentCurrencyCode: 'zmw' });
+    expect(selectedCountryCode(ctx)).toBe('ZMW');
+  });
+
+  it('ignores a stale pick outside a scoped user grants', () => {
+    const ctx = ctxFor({
+      ...baseUser,
+      role: 'FINANCE_OFFICER',
+      currencyCodes: ['KES'],
+      currentCurrencyCode: 'ZMW',
+    });
+    expect(selectedCountryCode(ctx)).toBeNull();
   });
 });
