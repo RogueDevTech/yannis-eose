@@ -7135,6 +7135,75 @@ export class MarketingService {
     return derived ? derived : undefined;
   }
 
+  /**
+   * The currency codes a form config sells in: its pinned currency, the
+   * currency of its delivery country, or the company base when it names neither.
+   * `allowMultiCurrency` / `allowCountrySelection` mean "any country" ('*').
+   */
+  private formConfigCurrencyCodes(
+    cfg: Record<string, unknown> | null | undefined,
+    companyCurrencies: { code: string; countryName: string; isDefault: boolean }[],
+  ): Set<string> {
+    const codes = new Set<string>();
+    if (cfg?.['allowMultiCurrency'] === true || cfg?.['allowCountrySelection'] === true) codes.add('*');
+    const pinned = typeof cfg?.['pinnedCurrency'] === 'string' ? cfg['pinnedCurrency'].trim().toUpperCase() : '';
+    if (pinned) codes.add(pinned);
+    const country = typeof cfg?.['deliveryCountry'] === 'string' ? cfg['deliveryCountry'].trim().toLowerCase() : '';
+    const countryCurrency = country
+      ? companyCurrencies.find((c) => c.countryName.trim().toLowerCase() === country)
+      : undefined;
+    if (countryCurrency) codes.add(countryCurrency.code.toUpperCase());
+    if (!pinned && !countryCurrency) {
+      const base = companyCurrencies.find((c) => c.isDefault);
+      codes.add((base?.code ?? 'NGN').toUpperCase());
+    }
+    return codes;
+  }
+
+  /**
+   * A Media Buyer may only build forms for the countries they are assigned
+   * (`formCountryCurrencyCodes`). `allowed` null = any country; [] = base only.
+   * On update, pass `previousConfig`: a form whose country is unchanged can
+   * always be edited, so a revoked grant never locks an MB out of a live form.
+   */
+  private async assertFormCountryAllowed(
+    groupId: string | null,
+    nextConfig: Record<string, unknown> | null | undefined,
+    allowed: string[] | null | undefined,
+    previousConfig?: Record<string, unknown> | null,
+  ): Promise<void> {
+    if (allowed == null) return;
+    const companyCurrencies = await this.db
+      .select({
+        code: schema.currencies.code,
+        countryName: schema.currencies.countryName,
+        isDefault: schema.currencies.isDefault,
+      })
+      .from(schema.currencies)
+      .where(and(this.currencyGroupEq(groupId), eq(schema.currencies.active, true)));
+    const next = this.formConfigCurrencyCodes(nextConfig, companyCurrencies);
+    if (previousConfig !== undefined) {
+      const prev = this.formConfigCurrencyCodes(previousConfig, companyCurrencies);
+      if (prev.size === next.size && [...next].every((c) => prev.has(c))) return;
+    }
+    const baseCode = (companyCurrencies.find((c) => c.isDefault)?.code ?? 'NGN').toUpperCase();
+    const permitted = new Set(allowed.length > 0 ? allowed.map((c) => c.toUpperCase()) : [baseCode]);
+    if ([...next].every((c) => permitted.has(c))) return;
+
+    const nameFor = (code: string) =>
+      companyCurrencies.find((c) => c.code.toUpperCase() === code)?.countryName || code;
+    const permittedNames = [...permitted].map(nameFor).join(', ');
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: next.has('*')
+        ? `You can only create forms for ${permittedNames}. Turn off country and currency selection.`
+        : `You can only create forms for ${permittedNames}. Ask an admin to give you access to ${[...next]
+            .filter((c) => !permitted.has(c))
+            .map(nameFor)
+            .join(', ')}.`,
+    });
+  }
+
   /** currencies.group_id = X (or IS NULL) predicate. */
   private currencyGroupEq(groupId: string | null) {
     return groupId == null ? sql`${schema.currencies.groupId} IS NULL` : eq(schema.currencies.groupId, groupId);
@@ -8070,7 +8139,12 @@ export class MarketingService {
     input: CreateCampaignInput,
     mediaBuyerId: string,
     branchId?: string | null,
-    opts?: { activeGroupId?: string | null; effectiveBranchIds?: string[] | null },
+    opts?: {
+      activeGroupId?: string | null;
+      effectiveBranchIds?: string[] | null;
+      /** formCountryCurrencyCodes(actor): null = any country. */
+      formCountryCodes?: string[] | null;
+    },
   ) {
     return withActor(this.db, { id: mediaBuyerId }, async (tx) => {
       // Never leave a form branchless. When no specific branch is selected (e.g.
@@ -8083,6 +8157,13 @@ export class MarketingService {
           tx,
           opts?.activeGroupId ?? null,
           opts?.effectiveBranchIds ?? null,
+        );
+      }
+      if (opts?.formCountryCodes != null) {
+        await this.assertFormCountryAllowed(
+          (await this.resolveGroupIdForBranch(resolvedBranchId)) ?? opts.activeGroupId ?? null,
+          input.formConfig as Record<string, unknown> | undefined,
+          opts.formCountryCodes,
         );
       }
       // Form names are unique org-wide, case-insensitive. Pre-check so callers
@@ -8149,7 +8230,13 @@ export class MarketingService {
     });
   }
 
-  async updateCampaign(input: UpdateCampaignInput, actorId: string, effectiveBranchIds?: string[] | null) {
+  async updateCampaign(
+    input: UpdateCampaignInput,
+    actorId: string,
+    effectiveBranchIds?: string[] | null,
+    /** formCountryCurrencyCodes(actor): null = any country. */
+    formCountryCodes?: string[] | null,
+  ) {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const existing = await tx
         .select()
@@ -8236,6 +8323,14 @@ export class MarketingService {
             tx,
             pid,
             merged.selectedOfferTemplateIds as string[] | undefined,
+          );
+        }
+        if (formCountryCodes != null) {
+          await this.assertFormCountryAllowed(
+            await this.resolveGroupIdForBranch(prevRow.branchId ?? null),
+            merged,
+            formCountryCodes,
+            prev,
           );
         }
       }

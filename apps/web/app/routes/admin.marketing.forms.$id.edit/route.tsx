@@ -23,6 +23,7 @@ import {
 } from '~/features/campaigns/standard-fields';
 import type { Campaign, CampaignFormConfig, OfferGroupRow, Product } from '~/features/campaigns/types';
 import type { MinimalOfferTemplateForPreview } from '~/features/campaigns/offer-template-preview';
+import { formCountryCurrencyCodes } from '@yannis/shared';
 
 function parseOfferGroups(payload: unknown): OfferGroupRow[] {
   const data = payload as { result?: { data?: { groups?: unknown[] } } } | null;
@@ -178,6 +179,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return defer({
     campaign,
     canManageOfferTemplates: userCanManageOfferTemplates(user),
+    formCountryCodes: formCountryCurrencyCodes(user),
     picklistsPromise,
   });
 }
@@ -346,13 +348,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function MarketingFormEditRoute() {
-  const { campaign, picklistsPromise, canManageOfferTemplates } = useLoaderData<typeof loader>();
+  const { campaign, picklistsPromise, canManageOfferTemplates, formCountryCodes } = useLoaderData<typeof loader>();
   return (
     <MarketingFormEditPage
       key={`${campaign.id}-${campaign.status}`}
       campaign={campaign}
       picklistsPromise={picklistsPromise}
       canManageOfferTemplates={canManageOfferTemplates}
+      formCountryCodes={formCountryCodes}
     />
   );
 }

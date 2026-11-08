@@ -45,6 +45,7 @@ import {
   type ListFundingRequestsInput,
   dateOrDateTimeOptional,
   canonicalPermissionCode,
+  formCountryCurrencyCodes,
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -1115,6 +1116,7 @@ export const marketingRouter = router({
       return getMarketingService().createCampaign(campaignInput, ctx.user.id, branchId ?? ctx.currentBranchId, {
         activeGroupId: ctx.activeGroupId,
         effectiveBranchIds: ctx.effectiveBranchIds,
+        formCountryCodes: formCountryCurrencyCodes(ctx.user),
       });
     }),
 
@@ -1123,7 +1125,12 @@ export const marketingRouter = router({
     .input(updateCampaignSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...campaignInput } = input;
-      return getMarketingService().updateCampaign(campaignInput, ctx.user.id, ctx.effectiveBranchIds);
+      return getMarketingService().updateCampaign(
+        campaignInput,
+        ctx.user.id,
+        ctx.effectiveBranchIds,
+        formCountryCurrencyCodes(ctx.user),
+      );
     }),
 
   getCampaign: authedProcedure

@@ -21,6 +21,7 @@ import {
   toLegacyStandardFieldFlags,
 } from '~/features/campaigns/standard-fields';
 import type { Campaign, OfferGroupRow } from '~/features/campaigns/types';
+import { formCountryCurrencyCodes } from '@yannis/shared';
 
 export const meta: MetaFunction = () => [{ title: 'New form — Yannis EOSE' }];
 
@@ -72,7 +73,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  return defer({ offerGroupsPromise, duplicateFrom });
+  return defer({ offerGroupsPromise, duplicateFrom, formCountryCodes: formCountryCurrencyCodes(user) });
 }
 
 export const clientLoader = cachedClientLoader;
@@ -209,6 +210,7 @@ export default function MarketingFormNewRoute() {
     <MarketingFormCreatePage
       offerGroupsPromise={data.offerGroupsPromise}
       duplicateFrom={data.duplicateFrom}
+      formCountryCodes={data.formCountryCodes}
     />
   );
 }

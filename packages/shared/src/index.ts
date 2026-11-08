@@ -20,6 +20,7 @@ export * from './rbac/permission-codes';
 export * from './rbac/permission-catalog';
 export * from './rbac/permission-bitmask';
 export * from './rbac/permission-snapshot-merge';
+export * from './rbac/form-country-scope';
 export * from './messaging/template-catalog';
 export * from './marketing/form-field-order';
 export * from './storage/asset-storage';
