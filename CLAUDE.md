@@ -32,6 +32,10 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → AGENT_ASSIGNED → 
 No state skipping. CANCELLED is legacy-only — use DELETED. CS never marks REMITTED (accountant only).
 - **A call never moves an order backwards (2026-11-11):** "Call customer" / `initiateCall` / phone reveal may only move UNPROCESSED or CS_ASSIGNED to CS_ENGAGED. Never gate an auto-transition on `isTransitionAllowed` alone: CONFIRMED → CS_ENGAGED is the managers' retrack move. That mistake in `voip.service.ts` silently un-confirmed ~4,350 orders (June to Nov 2026).
 
+## Money across countries (2026-11-11)
+- Never SUM order money (`total_amount`, `landed_cost`, `delivery_fee`, `unit_price`) across currencies 1:1: KSh/ZK/GH₵ summed as ₦ broke Awaiting remittance, true profit and dashboard revenue. A ₦ total multiplies each row by `loadFxToNgn(db).byBranch(currency, servicing_branch_id)` (or `.byGroup`): current rate, unrated currency = NULL = left out and reported, never 1:1. Same rates as marketing `revenue-fx`. Load once per request; never a per-row subquery (8.8 s on 150k rows).
+- Remittance totals: one country in scope = raw in that currency; several/all = ₦. Order-level costs (landed cost, delivery fee) are in the order's currency; ad spend and commission are ₦.
+
 ## CS closer pickers follow the country (2026-11-11)
 - Every closer list (Assign, Reassign, closer filters, workload roster) passes `ctx.effectiveCurrencyCodes` and filters with `closerInCountriesCondition` (`apps/api/src/common/db/closer-country-condition.ts`). One rule: `countries.view_all` grant, or a `user_countries` row in the closer's company, or no grant in that company = NGN only. Never write a parallel check. Auto-dispatch does not use it.
 
