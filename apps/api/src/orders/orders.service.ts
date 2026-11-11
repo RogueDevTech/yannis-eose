@@ -68,6 +68,7 @@ import { permissionRequestTypeTextEq } from '../common/db/permission-request-typ
 import { branchScopeCondition, closerBranchOrAssignedCondition } from '../common/db/branch-scope-condition';
 import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
+import { closerInCountriesCondition } from '../common/db/closer-country-condition';
 import { offerLabelMatches } from '../common/db/offer-label-match';
 import { EventsService } from '../events/events.service';
 import { emitOrderAutomationEvents } from '../automation/automation-hooks';
@@ -8751,8 +8752,16 @@ export class OrdersService {
   /**
    * List active Sales closers (id + name) for Hot Swap dropdowns (HoCS/SuperAdmin only).
    * Agent-initiated order transfers have been removed — reassignment is management-only.
+   *
+   * `effectiveCurrencyCodes` (top-bar country) narrows the list to closers who
+   * work that country, so an order is never assigned to another country's team.
    */
-  async listCSClosers(actor: SessionUser, effectiveBranchIds?: string[] | null): Promise<Array<{ agentId: string; agentName: string }>> {
+  async listCSClosers(
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
+  ): Promise<Array<{ agentId: string; agentName: string }>> {
+    const countryCond = closerInCountriesCondition(schema.users.id, effectiveCurrencyCodes, effectiveBranchIds);
     const hasReassign =
       (actor.permissions ?? [])
         .map((p) => canonicalPermissionCode(p))
@@ -8768,13 +8777,18 @@ export class OrdersService {
             eq(schema.users.role, 'CS_CLOSER'),
             eq(schema.users.status, 'ACTIVE'),
             inArray(schema.userBranches.branchId, effectiveBranchIds),
+            ...(countryCond ? [countryCond] : []),
           ));
         return agents.map((a) => ({ agentId: a.id, agentName: a.name }));
       }
       const agents = await this.db
         .select({ id: schema.users.id, name: schema.users.name })
         .from(schema.users)
-        .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')));
+        .where(and(
+          eq(schema.users.role, 'CS_CLOSER'),
+          eq(schema.users.status, 'ACTIVE'),
+          ...(countryCond ? [countryCond] : []),
+        ));
       return agents.map((a) => ({ agentId: a.id, agentName: a.name }));
     }
     const branchId = actor.currentBranchId;
@@ -8784,17 +8798,25 @@ export class OrdersService {
     const agents = await this.db
       .select({ id: schema.users.id, name: schema.users.name })
       .from(schema.users)
-      .where(and(inArray(schema.users.id, ids), eq(schema.users.status, 'ACTIVE')));
+      .where(and(
+        inArray(schema.users.id, ids),
+        eq(schema.users.status, 'ACTIVE'),
+        ...(countryCond ? [countryCond] : []),
+      ));
     return agents.map((a) => ({ agentId: a.id, agentName: a.name }));
   }
 
   /** Like listCSClosers but includes branch memberships for filtering in the UI. */
-  async listCSClosersWithBranches(actor: SessionUser, effectiveBranchIds?: string[] | null): Promise<Array<{
+  async listCSClosersWithBranches(
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+    effectiveCurrencyCodes?: string[] | null,
+  ): Promise<Array<{
     agentId: string;
     agentName: string;
     branches: Array<{ branchId: string; branchName: string }>;
   }>> {
-    const closers = await this.listCSClosers(actor, effectiveBranchIds);
+    const closers = await this.listCSClosers(actor, effectiveBranchIds, effectiveCurrencyCodes);
     if (closers.length === 0) return [];
 
     const agentIds = closers.map((c) => c.agentId);
@@ -9386,6 +9408,13 @@ export class OrdersService {
     effectiveCurrencyCodes?: string[] | null,
   ) {
     const pendingCountsAcrossAllBranches = opts?.pendingCountsAcrossAllBranches === true;
+    // Top-bar country: only list closers who work that country.
+    const agentCountryCond = closerInCountriesCondition(schema.users.id, effectiveCurrencyCodes, effectiveBranchIds);
+    const agentWhere = and(
+      eq(schema.users.role, 'CS_CLOSER'),
+      eq(schema.users.status, 'ACTIVE'),
+      ...(agentCountryCond ? [agentCountryCond] : []),
+    );
 
     const agentCols = {
       id: schema.users.id,
@@ -9405,7 +9434,7 @@ export class OrdersService {
               eq(schema.userBranches.branchId, branchId),
             ),
           )
-          .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')))
+          .where(agentWhere)
       : effectiveBranchIds?.length
         ? this.db
             .select(agentCols)
@@ -9417,12 +9446,12 @@ export class OrdersService {
                 inArray(schema.userBranches.branchId, effectiveBranchIds),
               ),
             )
-            .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')))
+            .where(agentWhere)
             .groupBy(schema.users.id, schema.users.name, schema.users.capacity, schema.users.lastActionAt)
         : this.db
             .select(agentCols)
             .from(schema.users)
-            .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')));
+            .where(agentWhere);
 
     const bCond = branchScopeCondition(schema.orders.servicingBranchId, branchId, effectiveBranchIds);
     const cCond = countryScopeCondition(schema.orders.currencyCode, effectiveCurrencyCodes);

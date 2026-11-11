@@ -1234,12 +1234,12 @@ export const ordersRouter = router({
    * List Sales closers for assign dropdowns — full roster with `orders.reassign`, else supervised team agents only.
    */
   listCSClosers: authedProcedure.query(async ({ ctx }) => {
-    return getOrdersService().listCSClosers(ctx.user, ctx.effectiveBranchIds);
+    return getOrdersService().listCSClosers(ctx.user, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
   }),
 
   /** Like listCSClosers but includes branch memberships — used by follow-up group modal. */
   listCSClosersWithBranches: permissionProcedure('orders.followUp').query(async ({ ctx }) => {
-    return getOrdersService().listCSClosersWithBranches(ctx.user, ctx.effectiveBranchIds);
+    return getOrdersService().listCSClosersWithBranches(ctx.user, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
   }),
 
   /**
