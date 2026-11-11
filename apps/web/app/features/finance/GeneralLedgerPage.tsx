@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { txnReference } from '~/lib/txn-reference';
 import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -85,7 +86,7 @@ export function GeneralLedgerPage({
         hideable: false,
         nowrap: true,
         render: (e) => {
-          const shortId = `TXN-${e.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`;
+          const shortId = txnReference(e.id);
           return (
             <OrderIdBadge
               id={shortId}
@@ -416,7 +417,7 @@ export function GeneralLedgerPage({
         title="Export General Ledger"
         description={`${filters.periodAllTime ? 'All time' : `${filters.startDate} to ${filters.endDate}`}`}
         rows={entries.map((e) => ({
-          txnId: `TXN-${e.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`,
+          txnId: txnReference(e.id),
           date: new Date(e.eventDate).toLocaleDateString('en-NG', {
             day: 'numeric',
             month: 'short',
@@ -467,7 +468,7 @@ export function GeneralLedgerPage({
               <h2 className="text-base font-semibold text-app-fg">Transaction Detail</h2>
               <div className="mt-1">
                 <OrderIdBadge
-                  id={`TXN-${detailEntry.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`}
+                  id={txnReference(detailEntry.id)}
                   length={20}
                   ellipsis=""
                   textClassName="font-mono text-xs text-app-fg-muted"

@@ -158,6 +158,10 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'marketing.funding.request', resource: 'marketing.funding', action: 'request', description: 'Submit a funding request (Media Buyer → HoM, or HoM → Finance)' },
   { code: 'marketing.funding.approve', resource: 'marketing.funding', action: 'approve', description: 'Approve or reject a funding request (HoM, Finance, Admin)' },
   { code: 'marketing.funding.reverse', resource: 'marketing.funding', action: 'reverse', description: 'Resolve funding disputes: reverse an erroneous funding back to the sender. Admin: any funding. Others (HoM default): only their own sends that are not yet marked received.' },
+  { code: 'marketing.funding.refund', resource: 'marketing.funding', action: 'refund', description: 'Return unspent funding to the person who funded you (refund request). The funder approves and confirms it.' },
+  { code: 'marketing.funding.reconcile', resource: 'marketing.funding', action: 'reconcile', description: 'View and export the funding reconciliation (opening, movements, closing) of anyone in your company scope' },
+  { code: 'marketing.funding.adjust', resource: 'marketing.funding', action: 'adjust', description: 'Request and approve funding balance adjustments (credit/debit corrections). The approver must be a different person.' },
+  { code: 'marketing.funding.closePeriod', resource: 'marketing.funding', action: 'close_period', description: 'Close a funding month for the company: freezes every recipient balance for that month' },
   { code: 'marketing.adSpend.approve', resource: 'marketing.ad_spend', action: 'approve', description: 'Approve or reject Media Buyer ad-spend submissions' },
   { code: 'finance.cashRemittance.create', resource: 'finance.cash_remittance', action: 'create', description: 'Record a cash remittance (accountant-led close-out of delivered orders)' },
   { code: 'finance.cashRemittance.markReceived', resource: 'finance.cash_remittance', action: 'mark_received', description: 'Mark a cash remittance Received and cascade orders to COMPLETED' },
@@ -307,6 +311,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'marketing.funding.request',
     'marketing.funding.approve',
     'marketing.funding.reverse',
+    'marketing.funding.refund',
+    'marketing.funding.reconcile',
     'marketing.adSpend',
     'marketing.adSpend.approve',
     // `products.read` removed by CEO directive — Marketing should not access
@@ -333,6 +339,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     // HEAD_OF_MARKETING above. The product picker on the ad-spend modal
     // still works (authedProcedure on `products.list` / `products.options`).
     'marketing.funding.request',
+    'marketing.funding.refund',
     // Multi-country: MB sees every country's data for their own attributed
     // orders. Also enforced in code via canViewAllCountries(role==='MEDIA_BUYER');
     // listed here so the session permission array stays honest.
@@ -423,6 +430,12 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'data.export',
     'payroll.config.read',
     'payroll.run.disburse',
+    // Funding reconciliation (2026-11-10): Finance reviews MB balances, posts
+    // approved corrections and closes funding months. Read + correct only; it
+    // still does not send marketing funding.
+    'marketing.funding.reconcile',
+    'marketing.funding.adjust',
+    'marketing.funding.closePeriod',
   ],
   // ACCOUNTANT = bookkeeping role. Full accounting.* (chart of accounts,
   // journals, GL, reports) + read context for reconciliation. Deliberately
@@ -440,6 +453,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'finance.export',
     'audit.export',
     'data.export',
+    'marketing.funding.reconcile',
   ],
   // Permission inbox: order line price + archive approvals from CS (`permission_requests.*`),
   // plus direct line-price edits via `orders.line_price.edit`. Org-wide scope via

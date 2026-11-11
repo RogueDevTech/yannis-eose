@@ -47,6 +47,17 @@ import {
   canonicalPermissionCode,
   formCountryCurrencyCodes,
 } from '@yannis/shared';
+import {
+  requestFundingRefundSchema,
+  reviewFundingRefundSchema,
+  fundingRefundIdSchema,
+  listFundingRefundsSchema,
+  createFundingAdjustmentSchema,
+  reviewFundingAdjustmentSchema,
+  listFundingAdjustmentsSchema,
+  fundingReconciliationSchema,
+  closeFundingPeriodSchema,
+} from '@yannis/shared';
 import { selectedCountryCode } from '../context';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -226,6 +237,70 @@ export const marketingRouter = router({
       return getMarketingService().listFundingDisputes(input, ctx.user, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
+  // ── Refunds (mig 0361) ──────────────────────────
+  /** Fundings the caller can still return money on, and their available balance. */
+  listRefundableFundings: permissionProcedure('marketing.funding.refund')
+    .query(async ({ ctx }) => getMarketingService().refunds.listRefundableFundings(ctx.user)),
+
+  requestFundingRefund: permissionProcedure('marketing.funding.refund')
+    .input(requestFundingRefundSchema)
+    .mutation(async ({ input, ctx }) => getMarketingService().refunds.requestRefund(input, ctx.user)),
+
+  /** Original funder (or Admin; Finance for company money) approves or rejects. */
+  reviewFundingRefund: authedProcedure
+    .input(reviewFundingRefundSchema)
+    .mutation(async ({ input, ctx }) => getMarketingService().refunds.reviewRefund(input, ctx.user, ctx.effectiveBranchIds)),
+
+  /** Funder confirms the money arrived: debits the refunder, credits the funder. */
+  completeFundingRefund: authedProcedure
+    .input(fundingRefundIdSchema)
+    .mutation(async ({ input, ctx }) => getMarketingService().refunds.completeRefund(input.refundId, ctx.user, ctx.effectiveBranchIds)),
+
+  cancelFundingRefund: authedProcedure
+    .input(fundingRefundIdSchema)
+    .mutation(async ({ input, ctx }) => getMarketingService().refunds.cancelRefund(input.refundId, ctx.user)),
+
+  listFundingRefunds: authedProcedure
+    .input(listFundingRefundsSchema)
+    .query(async ({ input, ctx }) => getMarketingService().refunds.listRefunds(input, ctx.user, ctx.effectiveBranchIds)),
+
+  // ── Adjustments (mig 0361) ──────────────────────
+  createFundingAdjustment: permissionProcedure('marketing.funding.adjust')
+    .input(createFundingAdjustmentSchema)
+    .mutation(async ({ input, ctx }) => getMarketingService().refunds.createAdjustment(input, ctx.user, ctx.effectiveBranchIds)),
+
+  reviewFundingAdjustment: permissionProcedure('marketing.funding.adjust')
+    .input(reviewFundingAdjustmentSchema)
+    .mutation(async ({ input, ctx }) => getMarketingService().refunds.reviewAdjustment(input, ctx.user, ctx.effectiveBranchIds)),
+
+  listFundingAdjustments: permissionProcedure('marketing.funding.adjust', 'marketing.funding.reconcile')
+    .input(listFundingAdjustmentsSchema)
+    .query(async ({ input, ctx }) => getMarketingService().refunds.listAdjustments(input, ctx.user, ctx.effectiveBranchIds)),
+
+  // ── Reconciliation + month close (mig 0361) ─────
+  fundingReconciliation: authedProcedure
+    .input(fundingReconciliationSchema)
+    .query(async ({ input, ctx }) =>
+      getMarketingService().reconciliation.getReconciliation(input, ctx.user, {
+        currentBranchId: ctx.currentBranchId,
+        effectiveBranchIds: ctx.effectiveBranchIds,
+      }),
+    ),
+
+  fundingReconcilableUsers: authedProcedure.query(async ({ ctx }) =>
+    getMarketingService().reconciliation.listReconcilableUsers(ctx.user, {
+      currentBranchId: ctx.currentBranchId,
+      effectiveBranchIds: ctx.effectiveBranchIds,
+    }),
+  ),
+
+  listFundingPeriodCloses: permissionProcedure('marketing.funding.closePeriod', 'marketing.funding.reconcile')
+    .query(async ({ ctx }) => getMarketingService().reconciliation.listCloses(ctx.user)),
+
+  closeFundingPeriod: permissionProcedure('marketing.funding.closePeriod')
+    .input(closeFundingPeriodSchema)
+    .mutation(async ({ input, ctx }) => getMarketingService().reconciliation.closePeriod(input, ctx.user)),
+
   listFunding: authedProcedure
     .input(listFundingSchema)
     .query(async ({ input, ctx }) => {
@@ -279,14 +354,19 @@ export const marketingRouter = router({
     }),
 
   /** Chronological ledger of all funding events for a user — transfers, expenses, requests. */
-  fundingLedger: permissionProcedure('marketing.fundingSummary', 'marketing.read', 'users.read')
+  /**
+   * Funding Ledger: one person's movements with the running balance. Same
+   * movement list as the reconciliation. Access: self, Admin, Finance, HoM /
+   * reconcile holders, or their marketing supervisor; always within the
+   * caller's company.
+   */
+  fundingLedger: permissionProcedure('marketing.fundingSummary', 'marketing.read', 'users.read', 'marketing.funding.reconcile')
     .input(fundingLedgerSchema)
     .query(async ({ input, ctx }) => {
-      // MBs can only view their own ledger
-      if (ctx.user.role === 'MEDIA_BUYER' && input.userId !== ctx.user.id) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only view your own funding ledger.' });
-      }
-      return getMarketingService().getFundingLedger(input, ctx.currentBranchId, ctx.effectiveBranchIds);
+      return getMarketingService().reconciliation.getLedger(input, ctx.user, {
+        currentBranchId: ctx.currentBranchId,
+        effectiveBranchIds: ctx.effectiveBranchIds,
+      });
     }),
 
   /** List funding balances for recipients. HoM sees self + Media Buyers; SA/FO see all HoM + MB.

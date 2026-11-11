@@ -408,6 +408,13 @@ export interface FundingDirectionSummary {
   pendingMarkReceivedAmount?: string;
   disputedAsReceiver: number;
   disputedAsSender: number;
+  /** Completed refunds in the period (mig 0361), kept apart from funding received / distributed. */
+  refundsMade?: string;
+  refundsMadeCount?: number;
+  refundsReceived?: string;
+  refundsReceivedCount?: number;
+  /** Open refunds (pending / approved) waiting on the viewer. */
+  refundsToReview?: number;
 }
 
 /** `/admin/marketing/funding` loader + component props (post 2026-04-26 split) */
@@ -419,6 +426,10 @@ export interface MarketingFundingLoaderData {
   canSendFunding: boolean;
   /** Can open the dispute / reversal queue (`marketing.funding.reverse`). */
   canReverseFunding?: boolean;
+  /** Can return unspent funding (`marketing.funding.refund`). */
+  canRefundFunding?: boolean;
+  /** Can open other people's reconciliation. */
+  canReconcileFunding?: boolean;
   canRequestFunding: boolean;
   /** HoM/Admin: primary tab "Funds I Distribute" + outgoing slices. False for MB. */
   canDistribute: boolean;
@@ -610,7 +621,17 @@ export interface MarketingAdSpendLoaderData {
 
 export interface FundingLedgerEntry {
   id: string;
-  entryType: 'transfer_in' | 'transfer_out' | 'expense' | 'request';
+  entryType:
+    | 'transfer_in'
+    | 'transfer_out'
+    | 'expense'
+    | 'request'
+    | 'refund_in'
+    | 'refund_out'
+    | 'adjustment'
+    | 'correction';
+  /** TXN-…, EXP-…, RF-…, ADJ-…, REQ-… (from the API). */
+  reference?: string;
   eventDate: string;
   amount: string;
   balanceEffect: number;
@@ -686,6 +707,8 @@ export interface FundingLedgerLoaderData {
     totalDebits: string;
     closingBalance: string;
     openingBalance?: string;
+    /** Pending expenses + open refunds: out of the available balance, not yet final. */
+    onHold?: string;
   };
   selectedUserId: string;
   selectedUserName: string;
@@ -764,4 +787,210 @@ export interface FormVisitorsPage {
   page: number;
   pageSize: number;
   total: number;
+}
+
+// ── Funding refunds, adjustments, reconciliation (mig 0361) ─────────────────
+
+export type FundingRefundStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED' | 'CANCELLED';
+export type FundingRefundView = 'mine' | 'to_review' | 'all';
+
+export interface FundingRefundRecord {
+  id: string;
+  reference: string;
+  fundingId: string;
+  fundingReference: string;
+  fundingAmount: string;
+  fundingSentAt: string;
+  fundingReceivedAt: string | null;
+  refunderId: string;
+  refunderName: string | null;
+  funderId: string;
+  funderName: string | null;
+  amount: string;
+  currencyCode: string;
+  reason: string;
+  receiptUrl: string | null;
+  status: FundingRefundStatus;
+  requestedAt: string;
+  reviewedAt: string | null;
+  reviewedByName: string | null;
+  reviewNote: string | null;
+  completedAt: string | null;
+  completedByName: string | null;
+  cancelledAt: string | null;
+  canReview: boolean;
+}
+
+export interface RefundableFunding {
+  id: string;
+  reference: string;
+  amount: string;
+  alreadyRefunded: string;
+  refundable: string;
+  receivedAt: string;
+  funderId: string;
+  funderName: string;
+  notes: string | null;
+}
+
+export interface FundingRefundsLoaderData {
+  view: FundingRefundView;
+  views: FundingRefundView[];
+  status: FundingRefundStatus | null;
+  search: string;
+  records: FundingRefundRecord[];
+  page: number;
+  limit: number;
+  total: number;
+  filteredTotalAmount: string;
+  statusCounts: Record<FundingRefundStatus, number>;
+  canRefund: boolean;
+  refundable: { available: string; fundings: RefundableFunding[] } | null;
+}
+
+export type ReconciliationView = 'day' | 'week' | 'month' | 'custom' | 'all';
+export type ReconciliationCompare = 'none' | 'previous' | 'year';
+
+export interface ReconciliationFigures {
+  opening: string;
+  received: string;
+  distributed: string;
+  expenses: string;
+  refundsOut: string;
+  refundsIn: string;
+  credits: string;
+  debits: string;
+  corrections: string;
+  closing: string;
+}
+
+export interface ReconciliationChangedItem {
+  id: string;
+  kind: string;
+  reference: string;
+  date: string;
+  amount: string;
+  status: string;
+  changedAt: string;
+  description: string;
+}
+
+export interface ReconciliationMovement {
+  id: string;
+  kind: string;
+  reference: string;
+  date: string;
+  amount: string;
+  effect: string;
+  runningBalance: string;
+  status: string;
+  counterpartyName: string | null;
+  description: string;
+  fundingReference: string | null;
+}
+
+export interface FundingReconciliation {
+  user: { id: string; name: string; role: string };
+  period: { view: ReconciliationView; startDate: string | null; endDate: string | null };
+  summary: ReconciliationFigures;
+  frozen: boolean;
+  overlapsClosed: boolean;
+  closedPeriod: null | {
+    month: string;
+    closedAt: string;
+    closedByName: string | null;
+    frozen: ReconciliationFigures;
+    live: ReconciliationFigures;
+    drift: string;
+    changedItems: ReconciliationChangedItem[];
+  };
+  priorCorrection: null | { month: string; amount: string; changedItems: ReconciliationChangedItem[] };
+  toDate: ReconciliationFigures & { pendingExpenses: string; pendingRefunds: string; available: string };
+  check: {
+    ok: boolean;
+    systemAvailable: string;
+    derivedAvailable: string;
+    difference: string;
+    components: Array<{ key: string; label: string; system: string; derived: string; difference: string }>;
+    /** The transactions that make the two sides differ (first 100). */
+    items: Array<{
+      reference: string;
+      kind: string;
+      date: string;
+      status: string;
+      description: string;
+      derived: string;
+      system: string;
+      difference: string;
+      reason: string;
+    }>;
+    itemCount: number;
+  };
+  comparison: null | { startDate: string; endDate: string; summary: ReconciliationFigures };
+  breakdown: Array<ReconciliationFigures & { label: string; startDate: string; endDate: string }>;
+  movements: ReconciliationMovement[];
+  holds: Array<{ id: string; kind: string; reference: string; date: string; amount: string; status: string; description: string; counterpartyName: string | null }>;
+  funders: Array<{
+    sourceId: string;
+    kind: 'funding' | 'refund_in' | 'adjustment' | 'correction';
+    reference: string;
+    funderName: string | null;
+    at: string;
+    amount: string;
+    refunded: string;
+    used: string;
+    remaining: string;
+  }>;
+  overdraft: string;
+  closedMonths: Array<{ month: string; closing: string; closedAt: string }>;
+}
+
+export interface FundingPeriodClose {
+  id: string;
+  periodMonth: string;
+  closedAt: string;
+  closedByName: string | null;
+  userCount: number;
+  totalClosing: string;
+  note: string | null;
+}
+
+export interface FundingAdjustmentRecord {
+  id: string;
+  reference: string;
+  userId: string;
+  userName: string | null;
+  direction: 'CREDIT' | 'DEBIT';
+  amount: string;
+  reason: string;
+  relatedFundingReference: string | null;
+  relatedPeriodMonth: string | null;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  requestedByName: string | null;
+  requestedAt: string;
+  reviewedByName: string | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  canReview: boolean;
+}
+
+export interface FundingReconciliationLoaderData {
+  users: Array<{ id: string; name: string; role: string }>;
+  selectedUserId: string;
+  view: ReconciliationView;
+  startDate: string;
+  endDate: string;
+  compare: ReconciliationCompare;
+  data: FundingReconciliation | null;
+  error: string | null;
+  canAdjust: boolean;
+  canClosePeriod: boolean;
+  closes: {
+    closes: FundingPeriodClose[];
+    nextMonth: string | null;
+    /** Months that can be closed now: just the next one, or a choice before the first close. */
+    closableMonths: string[];
+    groupId: string | null;
+  } | null;
+  adjustments: FundingAdjustmentRecord[];
 }

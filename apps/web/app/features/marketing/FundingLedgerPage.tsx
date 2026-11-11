@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { txnReference } from '~/lib/txn-reference';
 import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -26,6 +27,8 @@ const ENTRY_TYPE_TABS = [
   { value: 'transfer_in', label: 'Transfers In' },
   { value: 'transfer_out', label: 'Transfers Out' },
   { value: 'expense', label: 'Expenses' },
+  { value: 'refund', label: 'Refunds' },
+  { value: 'adjustment', label: 'Adjustments' },
   { value: 'request', label: 'Requests' },
 ] as const;
 
@@ -34,6 +37,10 @@ const TYPE_LABELS: Record<string, string> = {
   transfer_out: 'Transfer Out',
   expense: 'Expense',
   request: 'Request',
+  refund_out: 'Refund Out',
+  refund_in: 'Refund In',
+  adjustment: 'Adjustment',
+  correction: 'Correction',
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -41,7 +48,20 @@ const TYPE_COLORS: Record<string, string> = {
   transfer_out: 'text-danger-600 dark:text-danger-400',
   expense: 'text-warning-600 dark:text-warning-400',
   request: 'text-brand-600 dark:text-brand-400',
+  refund_out: 'text-danger-600 dark:text-danger-400',
+  refund_in: 'text-success-600 dark:text-success-400',
+  adjustment: 'text-brand-600 dark:text-brand-400',
+  correction: 'text-brand-600 dark:text-brand-400',
 };
+
+/** API reference (TXN-…, EXP-…, RF-…, ADJ-…) or the legacy short id. */
+function txnRef(e: FundingLedgerEntry): string {
+  return e.reference ?? txnReference(e.id);
+}
+
+/** Rows with a counterparty shown as From / To. */
+const DIRECTIONAL = new Set(['transfer_in', 'transfer_out', 'refund_in', 'refund_out']);
+const isIncoming = (t: string) => t === 'transfer_in' || t === 'refund_in';
 
 function formatNaira(n: number): string {
   return new Intl.NumberFormat('en-NG', {
@@ -88,8 +108,7 @@ export function FundingLedgerPage({
         hideable: false,
         render: (e) => {
           if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
-          const shortId = `TXN-${e.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`;
-          return <OrderIdBadge id={shortId} length={20} ellipsis="" textClassName="font-mono text-xs text-app-fg-muted" />;
+          return <OrderIdBadge id={txnRef(e)} length={20} ellipsis="" textClassName="font-mono text-xs text-app-fg-muted" />;
         },
       },
       {
@@ -154,8 +173,8 @@ export function FundingLedgerPage({
         header: 'From / To',
         render: (e) => {
           if (e.id === '__opening_balance__' || e.id === '__closing_balance__') return null;
-          if (e.counterpartyName && (e.entryType === 'transfer_in' || e.entryType === 'transfer_out')) {
-            const prefix = e.entryType === 'transfer_in' ? 'From' : 'To';
+          if (e.counterpartyName && DIRECTIONAL.has(e.entryType)) {
+            const prefix = isIncoming(e.entryType) ? 'From' : 'To';
             return (
               <span className="text-sm text-app-fg truncate block max-w-[10rem]" title={`${prefix}: ${e.counterpartyName}`}>
                 <span className="text-app-fg-muted">{prefix}:</span> {e.counterpartyName}
@@ -242,6 +261,7 @@ export function FundingLedgerPage({
   );
 
   const closingBal = Number(summary.closingBalance);
+  const onHold = Number(summary.onHold ?? '0');
   const openingBal = Number(summary.openingBalance ?? '0');
   const hasDateFilter = !filters.periodAllTime;
 
@@ -360,6 +380,9 @@ export function FundingLedgerPage({
                 value: formatNaira(closingBal),
                 valueClassName: `tabular-nums ${closingBal < 50000 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`,
               },
+              ...(onHold > 0
+                ? [{ label: 'On hold', value: formatNaira(onHold), valueClassName: 'tabular-nums text-warning-600 dark:text-warning-400', title: 'Pending expenses and refunds: out of the available balance, not yet final' }]
+                : []),
               { label: 'Transactions', value: total.toString() },
             ]}
           />
@@ -578,7 +601,7 @@ export function FundingLedgerPage({
         title="Export Funding Ledger"
         description={`${selectedUserName ?? 'All members'}: ${filters.periodAllTime ? 'All time' : `${filters.startDate} to ${filters.endDate}`}`}
         rows={entries.map((e) => ({
-          txnId: `TXN-${e.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`,
+          txnId: txnRef(e),
           date: new Date(e.eventDate).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }),
           type: TYPE_LABELS[e.entryType] ?? e.entryType,
           description: e.description,
@@ -613,7 +636,7 @@ export function FundingLedgerPage({
             <div>
               <h2 className="text-base font-semibold text-app-fg">Transaction Detail</h2>
               <div className="mt-1">
-                <OrderIdBadge id={`TXN-${detailEntry.id.replace(/-/g, '').slice(0, 6).toUpperCase()}`} length={20} ellipsis="" textClassName="font-mono text-xs text-app-fg-muted" />
+                <OrderIdBadge id={txnRef(detailEntry)} length={20} ellipsis="" textClassName="font-mono text-xs text-app-fg-muted" />
               </div>
             </div>
 
@@ -665,18 +688,18 @@ export function FundingLedgerPage({
 
             {(detailEntry.description || detailEntry.counterpartyName) && (
               <div className="space-y-3 pt-3 border-t border-app-border">
-                {detailEntry.counterpartyName && (detailEntry.entryType === 'transfer_in' || detailEntry.entryType === 'transfer_out') ? (
+                {detailEntry.counterpartyName && DIRECTIONAL.has(detailEntry.entryType) ? (
                   <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                     <div>
                       <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">From</p>
                       <p className="text-sm font-medium text-app-fg">
-                        {detailEntry.entryType === 'transfer_in' ? detailEntry.counterpartyName : selectedUserName}
+                        {isIncoming(detailEntry.entryType) ? detailEntry.counterpartyName : selectedUserName}
                       </p>
                     </div>
                     <div>
                       <p className="text-app-fg-muted text-xs uppercase tracking-wider mb-1">To</p>
                       <p className="text-sm font-medium text-app-fg">
-                        {detailEntry.entryType === 'transfer_out' ? detailEntry.counterpartyName : selectedUserName}
+                        {!isIncoming(detailEntry.entryType) ? detailEntry.counterpartyName : selectedUserName}
                       </p>
                     </div>
                   </div>

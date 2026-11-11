@@ -129,6 +129,29 @@ export const fundingRequestStatusEnum = pgEnum('funding_request_status', [
   'REJECTED',
 ]);
 
+/**
+ * Funding refund lifecycle (mig 0361). PENDING and APPROVED hold the amount out
+ * of the refunder's available balance; only COMPLETED moves money between the
+ * two balances; REJECTED and CANCELLED release the hold.
+ */
+export const fundingRefundStatusEnum = pgEnum('funding_refund_status', [
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+  'COMPLETED',
+  'CANCELLED',
+]);
+
+/** Funding adjustment direction (mig 0361): CREDIT adds to the balance, DEBIT takes from it. */
+export const fundingAdjustmentDirectionEnum = pgEnum('funding_adjustment_direction', ['CREDIT', 'DEBIT']);
+
+/** Funding adjustment lifecycle (mig 0361). Only APPROVED adjustments touch a balance. */
+export const fundingAdjustmentStatusEnum = pgEnum('funding_adjustment_status', [
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+]);
+
 export const mbFundTransferStatusEnum = pgEnum('mb_fund_transfer_status', [
   'PENDING',   // MB created, awaiting HoM/Supervisor approval
   'APPROVED',  // HoM/Supervisor approved, awaiting recipient acceptance

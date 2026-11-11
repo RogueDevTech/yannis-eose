@@ -37,6 +37,15 @@ export function getNotificationAction(notif: NotificationForLink): { link: strin
       if (notif.type === 'funding:rejected') return { link: '/admin/marketing/funding', label: 'View funding' };
     }
     if (data.orderId) return { link: `/admin/orders/${data.orderId}`, label: 'View order' };
+    // Funding refunds + adjustments (mig 0361).
+    if (data.refundId) {
+      const review = notif.type === 'funding:refund_requested';
+      return {
+        link: `/admin/marketing/funding/refunds?view=${review ? 'to_review' : 'mine'}&search=${encodeURIComponent(String(data.reference ?? ''))}`,
+        label: review ? 'Review refund' : 'View refund',
+      };
+    }
+    if (data.adjustmentId) return { link: '/admin/marketing/funding/reconciliation', label: 'View adjustment' };
     // Peer MB fund transfers use transferId too — must not fall through to inventory.
     if (notif.type?.startsWith('mb_fund_transfer:')) {
       const direction =
