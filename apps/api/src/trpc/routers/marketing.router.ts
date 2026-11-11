@@ -806,7 +806,10 @@ export const marketingRouter = router({
           supervisorBranch
         ) {
           const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, supervisorBranch, {
-            mediaBuyerId: input.teamScope ? undefined : ctx.user.id,
+            // No id (dashboard "Team", Ad Spend page) = self + team; their own
+            // id = "My performance". Before, the own id was always forced in,
+            // so the dashboard's Team totals were really personal.
+            mediaBuyerId: input.teamScope ? undefined : input.mediaBuyerId,
             startDate: input.startDate,
             endDate: input.endDate,
           });
@@ -2608,6 +2611,15 @@ export const marketingRouter = router({
   listMbFundTransfers: authedProcedure
     .input(listMbFundTransfersSchema)
     .query(async ({ input, ctx }) => {
+      // Branch-wide view: approvers (HoM, admins, funding.approve) and Finance
+      // (read-only). Anyone else, e.g. CS or Logistics, only sees transfers
+      // they are a party to, the same self scope a Media Buyer gets.
+      const seesBranchTransfers =
+        isAdminLevel(ctx.user) ||
+        ctx.user.role === 'HEAD_OF_MARKETING' ||
+        (ctx.user.permissions ?? []).includes('marketing.funding.approve') ||
+        hasFinanceAccess(ctx.user);
+      const scopeRole = ctx.user.role === 'MEDIA_BUYER' || !seesBranchTransfers ? 'MEDIA_BUYER' : ctx.user.role;
       const supervisedTeamIds =
         input.direction === 'pending_approval' && ctx.user.role === 'MEDIA_BUYER'
           ? await getBranchTeamsService().listMarketingSuperviseeIdsAnywhere(ctx.user.id)
@@ -2615,7 +2627,7 @@ export const marketingRouter = router({
       return getMarketingService().listMbFundTransfers(
         input,
         ctx.user.id,
-        ctx.user.role,
+        scopeRole,
         ctx.currentBranchId,
         ctx.effectiveBranchIds,
         supervisedTeamIds,

@@ -550,11 +550,17 @@ function CreateTransferModal({
 }) {
   const fetcher = useFetcher();
   useFetcherToast(fetcher.data);
-  useCloseOnFetcherSuccess(fetcher, () => onClose());
-
   const [receiverId, setReceiverId] = useState('');
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
+  // The modal stays mounted between opens: clear the form after a send so
+  // the next transfer does not start with the last recipient and reason.
+  useCloseOnFetcherSuccess(fetcher, () => {
+    setReceiverId('');
+    setAmount('');
+    setReason('');
+    onClose();
+  });
   const busy = fetcher.state !== 'idle';
 
   const recipientOptions = useMemo(

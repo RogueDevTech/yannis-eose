@@ -4209,13 +4209,15 @@ export class MarketingService {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Recipient not found' });
       }
 
+      // Every sender: peer money only goes to an active marketer.
+      if (receiver[0].status !== 'ACTIVE' || !PEER_TRANSFER_RECEIVER_ROLES.has(receiver[0].role)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Peer transfers can only go to an active Media Buyer, supervisor or Head of Marketing.',
+        });
+      }
+
       if (senderIsSupervisor) {
-        if (receiver[0].status !== 'ACTIVE' || !PEER_TRANSFER_RECEIVER_ROLES.has(receiver[0].role)) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Peer transfers can only go to an active Media Buyer, supervisor or Head of Marketing.',
-          });
-        }
         const [senderCompanies, receiverCompanies] = await Promise.all([
           userCompanyIds(tx, actor.id),
           userCompanyIds(tx, input.receiverMbId),
@@ -4787,6 +4789,8 @@ export class MarketingService {
         and(
           eq(schema.userBranches.branchId, branchId),
           eq(schema.users.status, 'ACTIVE'),
+          // Same receivers createMbFundTransfer accepts (not HR, CS, ...).
+          inArray(schema.users.role, [...PEER_TRANSFER_RECEIVER_ROLES] as Array<'MEDIA_BUYER' | 'HEAD_OF_MARKETING'>),
         ),
       )
       .orderBy(asc(schema.users.name));

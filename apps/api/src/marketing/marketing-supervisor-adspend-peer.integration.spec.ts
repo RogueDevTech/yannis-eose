@@ -231,6 +231,31 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing team supervisors: ad spend approval an
     ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('same branch') });
   });
 
+  it('a plain Media Buyer cannot send to a non-marketing user on their branch', async () => {
+    const svc = mkMarketing();
+    const s = await setup();
+    await setSessionActor(pgClient, s.admin.id);
+    await db.insert(schema.marketingFunding).values({
+      senderId: s.hom.id,
+      receiverId: s.mb2.id,
+      amount: sql`${10_000}::numeric`,
+      status: 'COMPLETED',
+      sentAt: new Date(),
+      verifiedAt: new Date(),
+    });
+    await expect(
+      svc.createMbFundTransfer({ receiverMbId: s.cs.id, amount: 1_000 }, s.mb2, s.branchA.id, [s.branchA.id]),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('Media Buyer') });
+  });
+
+  it('branch recipient list only offers marketers', async () => {
+    const svc = mkMarketing();
+    const s = await setup();
+    const ids = (await svc.listBranchMembersForTransfer(s.branchA.id)).map((r) => r.id);
+    expect(ids).toEqual(expect.arrayContaining([s.s1.id, s.mb2.id, s.hom.id]));
+    expect(ids).not.toContain(s.cs.id);
+  });
+
   it('a receiver cannot approve a transfer into their own balance', async () => {
     const svc = mkMarketing();
     const s = await setup();
