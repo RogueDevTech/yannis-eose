@@ -1025,6 +1025,56 @@ export class GeneralLedgerService implements OnApplicationBootstrap {
     });
   }
 
+  /**
+   * A completed funding refund (mig 0361) returns part of a disbursement that
+   * `postMarketingFunding` expensed. Offset exactly that part, on the same
+   * accounts and company as the original voucher:
+   *
+   *   Dr <original credit account, Bank>        amount
+   *     Cr <original debit account, Marketing>  amount
+   *
+   * Idempotent per refund id, non-fatal by contract. Nothing is posted when the
+   * original funding never reached the GL (e.g. sent directly, not via a request).
+   */
+  async postMarketingFundingRefund(
+    refundId: string,
+    fundingRequestId: string,
+    amount: number,
+    actor: Actor,
+  ): Promise<{ posted: boolean; reason?: string }> {
+    return withActor(this.db, actor, async (tx) => {
+      if (await this.alreadyPosted(tx, 'EXPENSE', refundId)) {
+        return { posted: false, reason: 'already-posted' };
+      }
+      if (amount <= 0) return { posted: false, reason: 'zero-amount' };
+
+      const original = await tx
+        .select({
+          accountId: schema.glEntries.accountId,
+          groupId: schema.glEntries.groupId,
+          debit: schema.glEntries.debit,
+          credit: schema.glEntries.credit,
+        })
+        .from(schema.glEntries)
+        .where(and(eq(schema.glEntries.voucherType, 'EXPENSE'), eq(schema.glEntries.voucherId, fundingRequestId)));
+      const expenseLine = original.find((l) => Number(l.debit) > 0);
+      const bankLine = original.find((l) => Number(l.credit) > 0);
+      if (!expenseLine || !bankLine) return { posted: false, reason: 'nothing-posted' };
+
+      await this.postVoucher(tx, {
+        groupId: expenseLine.groupId,
+        postingDate: nigeriaCalendarDate(),
+        voucherType: 'EXPENSE',
+        voucherId: refundId,
+        lines: [
+          { accountId: bankLine.accountId, debit: amount, credit: 0, remarks: 'Ad spend refund returned' },
+          { accountId: expenseLine.accountId, debit: 0, credit: amount, remarks: 'Ad spend refund returned' },
+        ],
+      });
+      return { posted: true };
+    });
+  }
+
   // ─── Supplier Payment (DR AP / CR Bank) ─────────────────────────────────────
 
   /**

@@ -849,6 +849,12 @@ export function DisbursementsPage({
             desktopActions
             desktop={
               <div className="flex flex-wrap items-center gap-2">
+                <Link to="/admin/marketing/funding/reconciliation" className="btn-secondary btn-sm">
+                  Reconciliation
+                </Link>
+                <Link to="/admin/marketing/funding/refunds?view=to_review" className="btn-secondary btn-sm">
+                  Refunds
+                </Link>
                 <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
@@ -960,6 +966,12 @@ export function DisbursementsPage({
                 >
                   Generate report
                 </Button>
+                <Link to="/admin/marketing/funding/reconciliation" className="btn-secondary h-12 w-full inline-flex items-center justify-center">
+                  Reconciliation
+                </Link>
+                <Link to="/admin/marketing/funding/refunds?view=to_review" className="btn-secondary h-12 w-full inline-flex items-center justify-center">
+                  Refunds
+                </Link>
                 {canCreate ? (
                   <Button
                     variant="secondary"

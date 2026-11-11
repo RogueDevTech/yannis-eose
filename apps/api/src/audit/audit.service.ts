@@ -43,6 +43,8 @@ const AUDITABLE_TABLES = [
   'offer_templates', 'campaigns',
   'orders', 'order_items', 'stock_transfers',
   'marketing_funding', 'marketing_funding_requests', 'ad_spend_logs',
+  // Funding refunds + adjustments (mig 0361): system-versioned, no branch_id.
+  'marketing_funding_refunds', 'marketing_funding_adjustments',
   'invoices', 'approval_requests', 'budgets', 'settlement_configs',
   'commission_plans', 'payout_records', 'earnings_adjustments',
   'payroll_batches', 'payroll_pay_roles', 'payroll_product_tier_configs',

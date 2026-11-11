@@ -54,7 +54,6 @@ import type {
   CreateCampaignInput,
   UpdateCampaignInput,
   ListCampaignsInput,
-  FundingLedgerInput,
 } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
@@ -77,6 +76,15 @@ import { BranchTeamsService } from '../branches/branch-teams.service';
 import { SettingsService } from '../settings/settings.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { runGlPostWithFinanceAlert } from '../finance/gl-posting-notify';
+import {
+  emptyExtraTerms,
+  extraNet,
+  loadFundingExtraTerms,
+  loadFundingExtraTermsForUser,
+  type FundingExtraTerms,
+} from './funding-balance-terms';
+import { FundingRefundsService } from './funding-refunds.service';
+import { FundingReconciliationService } from './funding-reconciliation.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevel, canViewAllBranches } from '../common/authz';
 import {
@@ -161,7 +169,28 @@ export class MarketingService {
     private readonly branchTeams: BranchTeamsService,
     private readonly settings: SettingsService,
     private readonly generalLedger: GeneralLedgerService,
-  ) {}
+  ) {
+    this.refunds = new FundingRefundsService({
+      db: this.db,
+      events: this.events,
+      notifications: this.notifications,
+      generalLedger: this.generalLedger,
+      logger: this.logger,
+      computeAvailableInTx: (tx, userId) => this.computeMbBalanceInTx(tx, userId, null, null),
+      getScopeUserIds: (actor, effectiveBranchIds) => this.getReversalScopeUserIds(actor, null, effectiveBranchIds),
+    });
+    this.reconciliation = new FundingReconciliationService({
+      db: this.db,
+      branchTeams: this.branchTeams,
+      getScopeUserIds: (actor, effectiveBranchIds) => this.getReversalScopeUserIds(actor, null, effectiveBranchIds),
+      getSystemBalance: (userId) => this.getFundingBalance(userId, null, null),
+    });
+  }
+
+  /** Funding refunds + adjustments (mig 0361). */
+  readonly refunds: FundingRefundsService;
+  /** Funding reconciliation, ledger and month close (mig 0361). */
+  readonly reconciliation: FundingReconciliationService;
 
   /**
    * Reads the org-wide profitability config from `system_settings`. SuperAdmin sets it on
@@ -311,8 +340,10 @@ export class MarketingService {
     branchId: string | null,
     effectiveBranchIds?: string[] | null,
   ): Promise<number> {
-    await this.lockFundingBalanceInTx(tx, userId);
+    // Campaign lookup runs on its own connection: do it BEFORE taking the lock,
+    // so a transaction never holds the lock while waiting for a second pool slot.
     const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
+    await this.lockFundingBalanceInTx(tx, userId);
 
     // Credits: only COMPLETED — receiver must mark-received before funds count.
     // SENT funds are in-flight and deducted from the sender, but not yet
@@ -359,7 +390,10 @@ export class MarketingService {
     const received = Number(inRow?.total ?? '0');
     const outgoing = Number(outRow?.total ?? '0');
     const spend = Number(spendTotalStr);
-    return Math.max(0, received - outgoing - spend);
+    // Refunds + approved adjustments (mig 0361): a completed refund back to this
+    // HoM is spendable again; refunds they owe are held.
+    const extra = extraNet(await loadFundingExtraTermsForUser(tx, userId));
+    return Math.max(0, received - outgoing - spend + extra);
   }
 
   private assertSufficientMarketingDisbursable(disbursable: number, transferAmount: number): void {
@@ -385,8 +419,10 @@ export class MarketingService {
     branchId: string | null,
     effectiveBranchIds?: string[] | null,
   ): Promise<number> {
-    await this.lockFundingBalanceInTx(tx, userId);
+    // Campaign lookup runs on its own connection: do it BEFORE taking the lock,
+    // so a transaction never holds the lock while waiting for a second pool slot.
     const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
+    await this.lockFundingBalanceInTx(tx, userId);
 
     const [receivedRow, outRow] = await Promise.all([
       tx
@@ -433,7 +469,10 @@ export class MarketingService {
     const received = Number(receivedRow?.total ?? '0');
     const outgoing = Number(outRow?.total ?? '0');
     const spend = Number(spendTotalStr);
-    return received - outgoing - spend;
+    // Refunds + approved adjustments (mig 0361). Pending/approved refunds are
+    // held here, so the same money cannot be spent or refunded twice.
+    const extra = extraNet(await loadFundingExtraTermsForUser(tx, userId));
+    return received - outgoing - spend + extra;
   }
 
   private assertSufficientMbBalance(balance: number, expenseAmount: number): void {
@@ -1260,6 +1299,24 @@ export class MarketingService {
           message: 'This is a peer transfer between media buyers and cannot be reversed here.',
         });
       }
+      // A refund already returned (or is returning) part of this funding. Reversing
+      // the whole amount on top would give the sender the money back twice.
+      const [refund] = await tx
+        .select({ reference: schema.marketingFundingRefunds.reference })
+        .from(schema.marketingFundingRefunds)
+        .where(
+          and(
+            eq(schema.marketingFundingRefunds.fundingId, found.id),
+            inArray(schema.marketingFundingRefunds.status, ['PENDING', 'APPROVED', 'COMPLETED']),
+          ),
+        )
+        .limit(1);
+      if (refund) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `This funding has a refund (${refund.reference}). Reject or cancel open refunds first; a completed refund cannot be reversed again. Use an adjustment to correct the rest.`,
+        });
+      }
       // Non-admin holders (Head of Marketing) resolve disputes on their OWN sends
       // only, and only before the receiver accepted the money. Clawing back a
       // received (COMPLETED) funding stays with Admin.
@@ -1982,6 +2039,8 @@ export class MarketingService {
           ),
       ]);
 
+    const refunds = await this.refundDirectionSummary(input, { actorId });
+
     return {
       totalReceived: received[0]?.total ?? '0',
       receivedCount: Number(received[0]?.c ?? 0),
@@ -1991,6 +2050,51 @@ export class MarketingService {
       pendingMarkReceivedAmount: pendingReceiveRow[0]?.total ?? '0',
       disputedAsReceiver: Number(disputedReceiveRow[0]?.c ?? 0),
       disputedAsSender: Number(disputedSendRow[0]?.c ?? 0),
+      ...refunds,
+    };
+  }
+
+  /**
+   * Refund totals for the Funding summary strip (mig 0361). Completed refunds
+   * only, dated by completion, kept apart from funding received / distributed
+   * so a refund is never counted as new funding.
+   *   refundsMade      = refunds completed BY the actor (or anyone in scope)
+   *   refundsReceived  = refunds completed TO the actor (or anyone in scope)
+   *   refundsToReview  = PENDING + APPROVED refunds waiting on the actor (or scope)
+   */
+  private async refundDirectionSummary(
+    input: { startDate?: string; endDate?: string },
+    who: { actorId: string } | { scopeUserIds: string[] | null },
+  ): Promise<{ refundsMade: string; refundsMadeCount: number; refundsReceived: string; refundsReceivedCount: number; refundsToReview: number }> {
+    const r = schema.marketingFundingRefunds;
+    const dates: SQL[] = [];
+    if (input.startDate) dates.push(gte(r.completedAt, nigeriaDayStart(input.startDate)));
+    if (input.endDate) dates.push(lte(r.completedAt, nigeriaDayEnd(input.endDate)));
+    const empty = { refundsMade: '0', refundsMadeCount: 0, refundsReceived: '0', refundsReceivedCount: 0, refundsToReview: 0 };
+    let made: SQL | undefined;
+    let got: SQL | undefined;
+    let review: SQL | undefined;
+    if ('actorId' in who) {
+      made = eq(r.refunderId, who.actorId);
+      got = eq(r.funderId, who.actorId);
+      review = eq(r.funderId, who.actorId);
+    } else if (who.scopeUserIds) {
+      if (who.scopeUserIds.length === 0) return empty;
+      made = inArray(r.refunderId, who.scopeUserIds);
+      got = inArray(r.funderId, who.scopeUserIds);
+      review = or(inArray(r.refunderId, who.scopeUserIds), inArray(r.funderId, who.scopeUserIds));
+    }
+    const [madeRow, gotRow, reviewRow] = await Promise.all([
+      this.db.select({ total: sum(r.amount), c: count() }).from(r).where(and(eq(r.status, 'COMPLETED'), made, ...dates)),
+      this.db.select({ total: sum(r.amount), c: count() }).from(r).where(and(eq(r.status, 'COMPLETED'), got, ...dates)),
+      this.db.select({ c: count() }).from(r).where(and(inArray(r.status, ['PENDING', 'APPROVED']), review)),
+    ]);
+    return {
+      refundsMade: madeRow[0]?.total ?? '0',
+      refundsMadeCount: Number(madeRow[0]?.c ?? 0),
+      refundsReceived: gotRow[0]?.total ?? '0',
+      refundsReceivedCount: Number(gotRow[0]?.c ?? 0),
+      refundsToReview: Number(reviewRow[0]?.c ?? 0),
     };
   }
 
@@ -2035,6 +2139,12 @@ export class MarketingService {
         .where(and(eq(schema.marketingFunding.status, 'DISPUTED'), ...dateConditions, ...branchFilter)),
     ]);
 
+    const scopeUserIds =
+      effectiveBranchIds && effectiveBranchIds.length > 0
+        ? await this.getBranchUserIds(null, effectiveBranchIds)
+        : null;
+    const refunds = await this.refundDirectionSummary(input, { scopeUserIds });
+
     return {
       totalReceived: received[0]?.total ?? '0',
       receivedCount: Number(received[0]?.c ?? 0),
@@ -2044,6 +2154,7 @@ export class MarketingService {
       pendingMarkReceivedAmount: pendingRow[0]?.total ?? '0',
       disputedAsReceiver: Number(disputedRow[0]?.c ?? 0),
       disputedAsSender: 0,
+      ...refunds,
     };
   }
 
@@ -2057,11 +2168,23 @@ export class MarketingService {
     branchId?: string | null,
     effectiveBranchIds?: string[] | null,
     dateRange?: { startDate?: string; endDate?: string },
-  ): Promise<{ totalReceived: string; totalDistributed: string; totalSpend: string; balance: string }> {
+  ): Promise<{
+    totalReceived: string;
+    totalDistributed: string;
+    totalSpend: string;
+    balance: string;
+    /** Refund + adjustment terms (mig 0361), already included in `balance`. */
+    refundsHeld: string;
+    refundsOut: string;
+    refundsIn: string;
+    credits: string;
+    debits: string;
+  }> {
     const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
-    if (branchCampaignIds && branchCampaignIds.length === 0) {
-      return { totalReceived: '0', totalDistributed: '0', totalSpend: '0', balance: '0' };
-    }
+    // A branch with no campaigns has no campaign spend in scope, but the person's
+    // funding still counts. (Returning all zeros here showed a funded Head of
+    // Marketing a ₦0 balance.) Spend logged without a campaign still applies.
+    const noCampaigns = !!branchCampaignIds && branchCampaignIds.length === 0;
 
     const fundingDateConds: SQL[] = [];
     const spendDateConds: SQL[] = [];
@@ -2108,7 +2231,11 @@ export class MarketingService {
           and(
             eq(schema.adSpendLogs.mediaBuyerId, userId),
             inArray(schema.adSpendLogs.status, ['PENDING', 'APPROVED']),
-            branchCampaignIds ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId)) : undefined,
+            noCampaigns
+              ? isNull(schema.adSpendLogs.campaignId)
+              : branchCampaignIds
+                ? or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId))
+                : undefined,
             ...spendDateConds,
           ),
         )
@@ -2118,12 +2245,26 @@ export class MarketingService {
     const totalReceived = receivedRow?.total ?? '0';
     const totalDistributed = distributedRow?.total ?? '0';
     const totalSpend = spendRow?.total ?? '0';
+    const extra = await loadFundingExtraTermsForUser(this.db, userId, {
+      start: dateRange?.startDate ? nigeriaDayStart(dateRange.startDate) : undefined,
+      end: dateRange?.endDate ? nigeriaDayEnd(dateRange.endDate) : undefined,
+    });
     // Show actual balance (can be negative for historical overspend).
     const balance = String(
-      Number(totalReceived) - Number(totalDistributed) - Number(totalSpend),
+      Number(totalReceived) - Number(totalDistributed) - Number(totalSpend) + extraNet(extra),
     );
 
-    return { totalReceived, totalDistributed, totalSpend, balance };
+    return {
+      totalReceived,
+      totalDistributed,
+      totalSpend,
+      balance,
+      refundsHeld: String(extra.refundsHeld),
+      refundsOut: String(extra.refundsOut),
+      refundsIn: String(extra.refundsIn),
+      credits: String(extra.credits),
+      debits: String(extra.debits),
+    };
   }
 
   /**
@@ -2151,6 +2292,8 @@ export class MarketingService {
         otherExpenses: string;
       };
       balance: string;
+      refunds: { held: string; out: string; in: string };
+      adjustmentsNet: string;
     }>
   > {
     // `activeOnly` drops DEACTIVATED / ARCHIVED *zero-balance* ghost rows so the
@@ -2309,6 +2452,11 @@ export class MarketingService {
         .from(schema.users)
         .where(inArray(schema.users.id, recipientUserIds)),
     ]);
+    // Refunds + approved adjustments (mig 0361), same window as the funding dates.
+    const extraByUser = await loadFundingExtraTerms(this.db, recipientUserIds, {
+      start: opts?.startDate ? nigeriaDayStart(opts.startDate) : undefined,
+      end: opts?.endDate ? nigeriaDayEnd(opts.endDate) : undefined,
+    });
 
     const receivedMap = new Map<string, string>();
     for (const r of fundingByReceiver) {
@@ -2352,13 +2500,17 @@ export class MarketingService {
         otherExpenses: string;
       };
       balance: string;
+      /** Refunds + adjustments (mig 0361), already included in `balance`. */
+      refunds: { held: string; out: string; in: string };
+      adjustmentsNet: string;
     }> = [];
     for (const u of userRows) {
       const totalReceived = receivedMap.get(u.id) ?? '0';
       const totalDistributed = distributedMap.get(u.id) ?? '0';
       const totalSpend = String(spendMap.get(u.id) ?? 0);
+      const extra: FundingExtraTerms = extraByUser.get(u.id) ?? emptyExtraTerms();
       const balance = String(
-        Number(totalReceived) - Number(totalDistributed) - Number(totalSpend),
+        Number(totalReceived) - Number(totalDistributed) - Number(totalSpend) + extraNet(extra),
       );
       // `activeOnly` drops DEACTIVATED / ARCHIVED "ghost" rows (funding ₦0, dashes
       // for every metric) so the roster matches the ACTIVE-only leaderboard — BUT a
@@ -2381,6 +2533,8 @@ export class MarketingService {
           otherExpenses: String(otherExpensesMap.get(u.id) ?? 0),
         },
         balance,
+        refunds: { held: String(extra.refundsHeld), out: String(extra.refundsOut), in: String(extra.refundsIn) },
+        adjustmentsNet: String(extra.credits - extra.debits),
       });
     }
 
@@ -2846,9 +3000,11 @@ export class MarketingService {
       this.db.select({ count: count() }).from(schema.marketingFundingRequests).where(whereClause),
     ]);
 
-    // Compute requester balance at time of each request. For each request row,
-    // balance = total received by requester before this request minus total distributed
-    // and ad spend before this request.
+    // Requester's available balance when each request was made: the same terms as
+    // the wallet (computeMbBalanceInTx), each counted as of the request time.
+    //   received (marked Received by then) - sent on - expenses logged (pending +
+    //   approved, still not rejected) - refunds asked for (held from request)
+    //   + refunds received back + approved adjustments.
     const requesterIds = Array.from(new Set(rows.map((r) => r.requesterId)));
     let balanceByRowId: Map<string, string> | null = null;
     if (requesterIds.length > 0) {
@@ -2861,7 +3017,7 @@ export class MarketingService {
               FROM marketing_funding mf
               WHERE mf.receiver_id = fr.requester_id
                 AND mf.status = 'COMPLETED'
-                AND mf.sent_at <= fr.created_at
+                AND COALESCE(mf.verified_at, mf.sent_at) <= fr.created_at
             ), 0)
             - COALESCE((
               SELECT SUM(mf2.amount)
@@ -2874,8 +3030,29 @@ export class MarketingService {
               SELECT SUM(al.spend_amount)
               FROM ad_spend_logs al
               WHERE al.media_buyer_id = fr.requester_id
-                AND al.status = 'APPROVED'
+                AND al.status IN ('PENDING', 'APPROVED')
                 AND al.created_at <= fr.created_at
+            ), 0)
+            - COALESCE((
+              SELECT SUM(rf.amount)
+              FROM marketing_funding_refunds rf
+              WHERE rf.refunder_id = fr.requester_id
+                AND rf.status IN ('PENDING', 'APPROVED', 'COMPLETED')
+                AND rf.requested_at <= fr.created_at
+            ), 0)
+            + COALESCE((
+              SELECT SUM(rf2.amount)
+              FROM marketing_funding_refunds rf2
+              WHERE rf2.funder_id = fr.requester_id
+                AND rf2.status = 'COMPLETED'
+                AND rf2.completed_at <= fr.created_at
+            ), 0)
+            + COALESCE((
+              SELECT SUM(CASE WHEN fa.direction = 'CREDIT' THEN fa.amount ELSE -fa.amount END)
+              FROM marketing_funding_adjustments fa
+              WHERE fa.user_id = fr.requester_id
+                AND fa.status = 'APPROVED'
+                AND fa.reviewed_at <= fr.created_at
             ), 0)
           )::text AS "balanceAtRequest"
         FROM marketing_funding_requests fr
@@ -9698,270 +9875,6 @@ export class MarketingService {
         };
       }),
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
-    };
-  }
-
-  // ── Funding Ledger ─────────────────────────────────────────
-
-  async getFundingLedger(input: FundingLedgerInput, branchId?: string | null, effectiveBranchIds?: string[] | null) {
-    const { userId, startDate, endDate, entryType, page, limit } = input;
-
-    // Date bounds
-    const dStart = startDate ? nigeriaDayStart(startDate) : undefined;
-    const dEnd = endDate ? nigeriaDayEnd(endDate) : undefined;
-
-    const sender = alias(schema.users, 'sender');
-    const receiver = alias(schema.users, 'receiver');
-
-    // ── 1) Transfers IN (user is receiver) ──
-    const transferInConds: SQL[] = [
-      eq(schema.marketingFunding.receiverId, userId),
-      inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED']),
-    ];
-    if (dStart) transferInConds.push(gte(schema.marketingFunding.sentAt, dStart));
-    if (dEnd) transferInConds.push(lte(schema.marketingFunding.sentAt, dEnd));
-
-    // ── 2) Transfers OUT (user is sender) ──
-    const transferOutConds: SQL[] = [
-      eq(schema.marketingFunding.senderId, userId),
-      inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']),
-    ];
-    if (dStart) transferOutConds.push(gte(schema.marketingFunding.sentAt, dStart));
-    if (dEnd) transferOutConds.push(lte(schema.marketingFunding.sentAt, dEnd));
-
-    // ── 3) Expenses ──
-    const branchCampaignIds = await this.getBranchCampaignIds(branchId, effectiveBranchIds);
-    const expenseConds: SQL[] = [
-      eq(schema.adSpendLogs.mediaBuyerId, userId),
-      eq(schema.adSpendLogs.status, 'APPROVED'),
-    ];
-    if (branchCampaignIds) {
-      expenseConds.push(
-        or(inArray(schema.adSpendLogs.campaignId, branchCampaignIds), isNull(schema.adSpendLogs.campaignId))!,
-      );
-    }
-    if (dStart) expenseConds.push(gte(schema.adSpendLogs.spendDate, dStart));
-    if (dEnd) expenseConds.push(lte(schema.adSpendLogs.spendDate, dEnd));
-
-    // ── 4) Requests ──
-    const requestConds: SQL[] = [eq(schema.marketingFundingRequests.requesterId, userId)];
-    if (dStart) requestConds.push(gte(schema.marketingFundingRequests.createdAt, dStart));
-    if (dEnd) requestConds.push(lte(schema.marketingFundingRequests.createdAt, dEnd));
-
-    // Fetch all in parallel
-    const [transfersIn, transfersOut, expenses, requests] = await Promise.all([
-      entryType === 'all' || entryType === 'transfer_in'
-        ? this.db
-            .select({
-              id: schema.marketingFunding.id,
-              amount: schema.marketingFunding.amount,
-              status: schema.marketingFunding.status,
-              sentAt: schema.marketingFunding.sentAt,
-              senderName: sender.name,
-            })
-            .from(schema.marketingFunding)
-            .leftJoin(sender, eq(sender.id, schema.marketingFunding.senderId))
-            .where(and(...transferInConds))
-        : Promise.resolve([]),
-
-      entryType === 'all' || entryType === 'transfer_out'
-        ? this.db
-            .select({
-              id: schema.marketingFunding.id,
-              amount: schema.marketingFunding.amount,
-              status: schema.marketingFunding.status,
-              sentAt: schema.marketingFunding.sentAt,
-              receiverName: receiver.name,
-            })
-            .from(schema.marketingFunding)
-            .leftJoin(receiver, eq(receiver.id, schema.marketingFunding.receiverId))
-            .where(and(...transferOutConds))
-        : Promise.resolve([]),
-
-      entryType === 'all' || entryType === 'expense'
-        ? this.db
-            .select({
-              id: schema.adSpendLogs.id,
-              spendAmount: schema.adSpendLogs.spendAmount,
-              spendDate: schema.adSpendLogs.spendDate,
-              status: schema.adSpendLogs.status,
-              platform: schema.adSpendLogs.platform,
-              category: schema.adSpendLogs.category,
-              description: schema.adSpendLogs.description,
-            })
-            .from(schema.adSpendLogs)
-            .where(and(...expenseConds))
-        : Promise.resolve([]),
-
-      entryType === 'all' || entryType === 'request'
-        ? this.db
-            .select({
-              id: schema.marketingFundingRequests.id,
-              amount: schema.marketingFundingRequests.amount,
-              status: schema.marketingFundingRequests.status,
-              reason: schema.marketingFundingRequests.reason,
-              createdAt: schema.marketingFundingRequests.createdAt,
-            })
-            .from(schema.marketingFundingRequests)
-            .where(and(...requestConds))
-        : Promise.resolve([]),
-    ]);
-
-    // ── Normalize into unified entries ──
-    type LedgerEntry = {
-      id: string;
-      entryType: 'transfer_in' | 'transfer_out' | 'expense' | 'request';
-      eventDate: Date;
-      amount: number;
-      balanceEffect: number;
-      status: string;
-      description: string;
-      counterpartyName: string | null;
-    };
-
-    const entries: LedgerEntry[] = [];
-
-    for (const t of transfersIn) {
-      const amt = Number(t.amount);
-      // Only COMPLETED transfers credit the receiver's balance.
-      // SENT transfers are in-flight — deducted from sender, not yet available to receiver.
-      const isCompleted = t.status === 'COMPLETED';
-      entries.push({
-        id: t.id,
-        entryType: 'transfer_in',
-        eventDate: t.sentAt,
-        amount: amt,
-        balanceEffect: isCompleted ? amt : 0,
-        status: t.status,
-        description: `From ${t.senderName ?? 'Unknown'}`,
-        counterpartyName: t.senderName ?? null,
-      });
-    }
-
-    for (const t of transfersOut) {
-      const amt = Number(t.amount);
-      entries.push({
-        id: t.id,
-        entryType: 'transfer_out',
-        eventDate: t.sentAt,
-        amount: amt,
-        balanceEffect: -amt,
-        status: t.status,
-        description: `To ${t.receiverName ?? 'Unknown'}`,
-        counterpartyName: t.receiverName ?? null,
-      });
-    }
-
-    for (const e of expenses) {
-      const amt = Number(e.spendAmount);
-      const parts = [e.platform, e.category, e.description].filter(Boolean);
-      entries.push({
-        id: e.id,
-        entryType: 'expense',
-        eventDate: e.spendDate,
-        amount: amt,
-        balanceEffect: -amt,
-        status: e.status ?? 'APPROVED',
-        description: parts.length > 0 ? parts.join(' · ') : 'Ad spend',
-        counterpartyName: null,
-      });
-    }
-
-    for (const r of requests) {
-      entries.push({
-        id: r.id,
-        entryType: 'request',
-        eventDate: r.createdAt,
-        amount: Number(r.amount),
-        balanceEffect: 0, // requests don't affect balance directly
-        status: r.status,
-        description: r.reason ?? 'Funding request',
-        counterpartyName: null,
-      });
-    }
-
-    // Sort oldest-first so the ledger reads chronologically (opening balance → transactions → closing)
-    entries.sort((a, b) => a.eventDate.getTime() - b.eventDate.getTime());
-
-    const total = entries.length;
-    const totalPages = Math.max(1, Math.ceil(total / limit));
-    const offset = (page - 1) * limit;
-    const paged = entries.slice(offset, offset + limit);
-
-    // Opening balance: sum of all balance effects for transactions BEFORE the date range.
-    // When no date filter is applied (all-time), opening balance is 0.
-    let openingBalance = 0;
-    if (dStart) {
-      // We need to query all transactions before dStart to compute the opening balance.
-      // Since we already have the filtered entries (within range), we compute the
-      // opening balance from a separate query-free approach: use the all-time
-      // cumulative minus the in-range effects.
-      // Actually, the entries array only has in-range items. We need a separate calc.
-      // Use getFundingBalance-style logic but only for pre-startDate transactions.
-      // Only COMPLETED transfers credit the receiver (matches computeMarketingDisbursableInTx)
-      const preRangeTransfersIn = await this.db
-        .select({ total: sum(schema.marketingFunding.amount) })
-        .from(schema.marketingFunding)
-        .where(and(
-          eq(schema.marketingFunding.receiverId, userId),
-          eq(schema.marketingFunding.status, 'COMPLETED'),
-          lt(schema.marketingFunding.sentAt, dStart),
-        ));
-      const preRangeTransfersOut = await this.db
-        .select({ total: sum(schema.marketingFunding.amount) })
-        .from(schema.marketingFunding)
-        .where(and(
-          eq(schema.marketingFunding.senderId, userId),
-          inArray(schema.marketingFunding.status, ['SENT', 'COMPLETED', 'DISPUTED']),
-          lt(schema.marketingFunding.sentAt, dStart),
-        ));
-      const preRangeExpenses = await this.db
-        .select({ total: sum(schema.adSpendLogs.spendAmount) })
-        .from(schema.adSpendLogs)
-        .where(and(
-          eq(schema.adSpendLogs.mediaBuyerId, userId),
-          inArray(schema.adSpendLogs.status, ['PENDING', 'APPROVED']),
-          lt(schema.adSpendLogs.spendDate, dStart),
-        ));
-      const preIn = Number(preRangeTransfersIn[0]?.total ?? 0);
-      const preOut = Number(preRangeTransfersOut[0]?.total ?? 0);
-      const preExp = Number(preRangeExpenses[0]?.total ?? 0);
-      openingBalance = preIn - preOut - preExp;
-    }
-
-    // Running balance: opening balance + cumulative effects oldest→newest
-    const prefixSums: number[] = new Array(entries.length);
-    let cumulative = openingBalance;
-    for (let i = 0; i < entries.length; i++) {
-      cumulative += entries[i]!.balanceEffect;
-      prefixSums[i] = cumulative;
-    }
-
-    // Summary
-    const totalCredits = entries.reduce((s, e) => s + (e.balanceEffect > 0 ? e.balanceEffect : 0), 0);
-    const totalDebits = entries.reduce((s, e) => s + (e.balanceEffect < 0 ? -e.balanceEffect : 0), 0);
-
-    return {
-      entries: paged.map((e, i) => ({
-        id: e.id,
-        entryType: e.entryType,
-        eventDate: e.eventDate.toISOString(),
-        amount: String(e.amount),
-        balanceEffect: e.balanceEffect,
-        runningBalance: prefixSums[offset + i] ?? 0,
-        status: e.status,
-        description: e.description,
-        counterpartyName: e.counterpartyName,
-      })),
-      total,
-      page,
-      totalPages,
-      summary: {
-        totalCredits: String(totalCredits),
-        totalDebits: String(totalDebits),
-        closingBalance: String(cumulative),
-        openingBalance: String(openingBalance),
-      },
     };
   }
 }

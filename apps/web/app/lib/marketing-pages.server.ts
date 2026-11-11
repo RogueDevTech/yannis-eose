@@ -391,6 +391,14 @@ export interface MarketingRoleFlags {
   canApproveAdSpend: boolean;
   /** Capability — can resolve funding disputes by reversing an erroneous funding. */
   canReverseFunding: boolean;
+  /** Capability: can return unspent funding to the original funder (refund request). */
+  canRefundFunding: boolean;
+  /** Capability: can view other people's funding reconciliation (scope enforced by the API). */
+  canReconcileFunding: boolean;
+  /** Capability: can request and approve funding balance adjustments. */
+  canAdjustFunding: boolean;
+  /** Capability: can close a funding month for the company. */
+  canCloseFundingPeriod: boolean;
 }
 
 /**
@@ -449,7 +457,24 @@ export function getMarketingRoleFlags(
   // Admin by default (SuperAdmin/Support bypass like permissionProcedure).
   const canReverseFunding =
     role === 'SUPER_ADMIN' || role === 'SUPPORT' || has('marketing.funding.reverse');
-  return { isMediaBuyer, isFundingAdmin, canRequestFunding, canApproveAdSpend, canReverseFunding };
+  // Funding refunds + reconciliation (mig 0361). The API enforces scope; these
+  // only decide which buttons and links show.
+  const canRefundFunding = has('marketing.funding.refund');
+  const canReconcileFunding =
+    role === 'SUPER_ADMIN' || role === 'SUPPORT' || role === 'ADMIN' || has('marketing.funding.reconcile') || isMarketingSupervisorOnBranch;
+  const canAdjustFunding = role === 'SUPER_ADMIN' || role === 'SUPPORT' || has('marketing.funding.adjust');
+  const canCloseFundingPeriod = role === 'SUPER_ADMIN' || role === 'SUPPORT' || has('marketing.funding.closePeriod');
+  return {
+    isMediaBuyer,
+    isFundingAdmin,
+    canRequestFunding,
+    canApproveAdSpend,
+    canReverseFunding,
+    canRefundFunding,
+    canReconcileFunding,
+    canAdjustFunding,
+    canCloseFundingPeriod,
+  };
 }
 
 export async function runMarketingFundingAction(cookie: string, formData: FormData) {

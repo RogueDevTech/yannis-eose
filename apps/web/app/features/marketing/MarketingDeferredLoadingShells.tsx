@@ -255,6 +255,8 @@ export function MarketingFundingLoadingShell({
   canRequestFunding,
   canSendFunding,
   canReverseFunding = false,
+  canRefundFunding = false,
+  canReconcileFunding = false,
 }: {
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
   canDistribute: boolean;
@@ -263,6 +265,8 @@ export function MarketingFundingLoadingShell({
   canRequestFunding: boolean;
   canSendFunding: boolean;
   canReverseFunding?: boolean;
+  canRefundFunding?: boolean;
+  canReconcileFunding?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedSearch = searchParams.get('search') ?? '';
@@ -370,6 +374,16 @@ export function MarketingFundingLoadingShell({
                 {canReverseFunding && (
                   <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
                     Disputes
+                  </Button>
+                )}
+                {(canRefundFunding || canDistribute || canSendFunding) && (
+                  <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
+                    Refunds
+                  </Button>
+                )}
+                {(canReconcileFunding || isMediaBuyer) && (
+                  <Button type="button" variant="secondary" size="sm" className="h-12 w-full justify-center" disabled>
+                    Reconciliation
                   </Button>
                 )}
               </>

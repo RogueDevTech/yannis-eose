@@ -54,8 +54,11 @@ export const BUNDLE_TTL_SECONDS = 60;
  *   bitmask (`p` field). v1 cookies are now rejected because their permissions
  *   wouldn't decode against the bitmask index — the auto-fallback to /auth/me
  *   re-issues a v2 cookie on the very next request, so users won't notice.
+ * v2 → v3 (2026-11-10): four marketing.funding.* codes joined the catalog, which
+ *   shifts the alphabetical bitmask index. Old cookies would decode to the wrong
+ *   permissions for up to BUNDLE_TTL_SECONDS, so they are rejected instead.
  */
-const BUNDLE_VERSION = 2;
+const BUNDLE_VERSION = 3;
 
 export interface SessionBundlePayload {
   /** Format version — see `BUNDLE_VERSION`. */

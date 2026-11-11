@@ -1,9 +1,10 @@
-import { uuid, pgTable, text, numeric, jsonb, timestamp, index, integer } from 'drizzle-orm/pg-core';
-import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, mbFundTransferStatusEnum, recordStatusEnum, adSpendStatusEnum, adPlatformEnum, expenseCategoryEnum } from './enums';
+import { uuid, pgTable, text, numeric, jsonb, timestamp, index, integer, date, uniqueIndex } from 'drizzle-orm/pg-core';
+import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, fundingRefundStatusEnum, fundingAdjustmentDirectionEnum, fundingAdjustmentStatusEnum, mbFundTransferStatusEnum, recordStatusEnum, adSpendStatusEnum, adPlatformEnum, expenseCategoryEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { products } from './products';
 import { branches } from './branches';
+import { branchGroups } from './branch-groups';
 
 // Table: offer_groups — reusable multi-item offers
 export const offerGroups = pgTable('offer_groups', {
@@ -198,6 +199,140 @@ export const marketingFundingReversals = pgTable('marketing_funding_reversals', 
   reversedAt: timestamp('reversed_at', { withTimezone: true }).defaultNow().notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+/**
+ * marketing_funding_refunds (mig 0361): a funding receiver returns unspent money
+ * to the person who funded them. Always linked to ONE original funding row,
+ * which is never edited. PENDING/APPROVED hold the amount out of the refunder's
+ * balance; COMPLETED debits the refunder and credits the funder; REJECTED and
+ * CANCELLED release the hold. System-versioned (history twin).
+ */
+export const marketingFundingRefunds = pgTable('marketing_funding_refunds', {
+  id: uuidv7Pk(),
+  /** Human reference shown everywhere, e.g. RF-0F3A9C21. Unique. */
+  reference: text('reference').notNull(),
+  fundingId: uuid('funding_id')
+    .notNull()
+    .references(() => marketingFunding.id),
+  /** The receiver of the original funding, returning money. */
+  refunderId: uuid('refunder_id')
+    .notNull()
+    .references(() => users.id),
+  /** The sender of the original funding, receiving the money back. */
+  funderId: uuid('funder_id')
+    .notNull()
+    .references(() => users.id),
+  /** The company both parties share (refunds never cross companies). Null only for company-money funders with no branch. */
+  groupId: uuid('group_id').references(() => branchGroups.id),
+  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+  /** Funding is naira-only today; recorded for the audit trail. */
+  currencyCode: text('currency_code').default('NGN').notNull(),
+  reason: text('reason').notNull(),
+  receiptUrl: text('receipt_url'),
+  status: fundingRefundStatusEnum('status').default('PENDING').notNull(),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
+  /** Funder (or admin) who approved or rejected. */
+  reviewedBy: uuid('reviewed_by').references(() => users.id),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  /** Rejection reason, or an optional approval note. */
+  reviewNote: text('review_note'),
+  completedBy: uuid('completed_by').references(() => users.id),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
+/**
+ * marketing_funding_adjustments (mig 0361): approved credit/debit corrections to
+ * a funding balance. Requested by one Finance/Admin user and approved by a
+ * different one. Only APPROVED rows touch a balance, dated by reviewed_at.
+ */
+export const marketingFundingAdjustments = pgTable('marketing_funding_adjustments', {
+  id: uuidv7Pk(),
+  /** e.g. ADJ-0F3A9C21. Unique. */
+  reference: text('reference').notNull(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id),
+  direction: fundingAdjustmentDirectionEnum('direction').notNull(),
+  amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+  currencyCode: text('currency_code').default('NGN').notNull(),
+  reason: text('reason').notNull(),
+  relatedFundingId: uuid('related_funding_id').references(() => marketingFunding.id),
+  /** First day of the closed month this corrects, if any. */
+  relatedPeriodMonth: date('related_period_month'),
+  status: fundingAdjustmentStatusEnum('status').default('PENDING').notNull(),
+  requestedBy: uuid('requested_by')
+    .notNull()
+    .references(() => users.id),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
+  reviewedBy: uuid('reviewed_by').references(() => users.id),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  reviewNote: text('review_note'),
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
+/**
+ * marketing_funding_period_closes (mig 0361): Finance closes a month per company.
+ * Append-only (DB trigger). One row per company per month.
+ */
+export const marketingFundingPeriodCloses = pgTable(
+  'marketing_funding_period_closes',
+  {
+    id: uuidv7Pk(),
+    groupId: uuid('group_id')
+      .notNull()
+      .references(() => branchGroups.id),
+    /** First day of the closed month, 'YYYY-MM-01' (Lagos calendar). */
+    periodMonth: date('period_month').notNull(),
+    closedBy: uuid('closed_by')
+      .notNull()
+      .references(() => users.id),
+    closedAt: timestamp('closed_at', { withTimezone: true }).defaultNow().notNull(),
+    userCount: integer('user_count').default(0).notNull(),
+    totalClosing: numeric('total_closing', { precision: 14, scale: 2 }).default('0').notNull(),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    groupMonthUq: uniqueIndex('marketing_funding_period_closes_group_month_uq').on(t.groupId, t.periodMonth),
+  }),
+);
+
+/**
+ * marketing_funding_period_balances (mig 0361): each recipient's frozen figures
+ * for a closed month. Append-only (DB trigger).
+ */
+export const marketingFundingPeriodBalances = pgTable(
+  'marketing_funding_period_balances',
+  {
+    id: uuidv7Pk(),
+    closeId: uuid('close_id')
+      .notNull()
+      .references(() => marketingFundingPeriodCloses.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    opening: numeric('opening', { precision: 14, scale: 2 }).notNull(),
+    received: numeric('received', { precision: 14, scale: 2 }).notNull(),
+    distributed: numeric('distributed', { precision: 14, scale: 2 }).notNull(),
+    expenses: numeric('expenses', { precision: 14, scale: 2 }).notNull(),
+    refundsOut: numeric('refunds_out', { precision: 14, scale: 2 }).notNull(),
+    refundsIn: numeric('refunds_in', { precision: 14, scale: 2 }).notNull(),
+    credits: numeric('credits', { precision: 14, scale: 2 }).notNull(),
+    debits: numeric('debits', { precision: 14, scale: 2 }).notNull(),
+    corrections: numeric('corrections', { precision: 14, scale: 2 }).notNull(),
+    closing: numeric('closing', { precision: 14, scale: 2 }).notNull(),
+    pendingExpenses: numeric('pending_expenses', { precision: 14, scale: 2 }).notNull(),
+    pendingRefunds: numeric('pending_refunds', { precision: 14, scale: 2 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    closeUserUq: uniqueIndex('marketing_funding_period_balances_close_user_uq').on(t.closeId, t.userId),
+  }),
+);
 
 // Table 15: ad_spend_logs — daily ad spend records
 export const adSpendLogs = pgTable('ad_spend_logs', {

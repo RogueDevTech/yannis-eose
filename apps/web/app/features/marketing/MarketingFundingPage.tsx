@@ -148,6 +148,8 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     currentUserRole,
     canSendFunding,
     canReverseFunding = false,
+    canRefundFunding = false,
+    canReconcileFunding = false,
     canRequestFunding,
     canDistribute,
     activeSection,
@@ -881,6 +883,22 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             className="btn-secondary btn-sm h-12 md:h-auto inline-flex w-full justify-center md:w-auto"
           >
             Disputes
+          </Link>
+        )}
+        {(canRefundFunding || canDistribute || canSendFunding) && (
+          <Link
+            to="/admin/marketing/funding/refunds"
+            className="btn-secondary btn-sm h-12 md:h-auto inline-flex w-full justify-center md:w-auto"
+          >
+            Refunds
+          </Link>
+        )}
+        {(canReconcileFunding || viewMode === 'media_buyer') && (
+          <Link
+            to="/admin/marketing/funding/reconciliation"
+            className="btn-secondary btn-sm h-12 md:h-auto inline-flex w-full justify-center md:w-auto"
+          >
+            Reconciliation
           </Link>
         )}
         {/* Peer send is MB-only; HoM/Admin already use Send Funding. */}
@@ -1941,6 +1959,9 @@ function RecipientBalancesPanel({
           >
             Ledger
           </CompactTableActionButton>
+          <CompactTableActionButton to={`/admin/marketing/funding/reconciliation?userId=${b.userId}`}>
+            Reconcile
+          </CompactTableActionButton>
           {canSendFunding && (
             <CompactTableActionButton tone="brand" onClick={onSendFunding}>
               Send funds
@@ -2148,6 +2169,40 @@ function FundingMetricsStrip({
       onClick: () => onFilter({ section: 'received', entryType: 'request', entryStatus: 'PENDING' }),
       active: isActive('received', 'request', 'PENDING'),
     },
+    // Refunds (mig 0361): completed in the period, never counted as funding received / distributed.
+    ...(Number(summary.refundsMade ?? '0') > 0 || !canDistribute
+      ? [
+          {
+            label: `Refunds Made (${summary.refundsMadeCount ?? 0})`,
+            value: <NairaPrice amount={Number(summary.refundsMade ?? '0')} />,
+            valueClassName: 'text-app-fg',
+            title: 'Unspent funding returned to the original funder (completed refunds)',
+            to: '/admin/marketing/funding/refunds?view=mine&status=COMPLETED',
+          },
+        ]
+      : []),
+    ...(Number(summary.refundsReceived ?? '0') > 0 || canDistribute
+      ? [
+          {
+            label: `Refunds Received (${summary.refundsReceivedCount ?? 0})`,
+            value: <NairaPrice amount={Number(summary.refundsReceived ?? '0')} />,
+            valueClassName: Number(summary.refundsReceived ?? '0') > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+            title: 'Money returned to you by people you funded (completed refunds)',
+            to: '/admin/marketing/funding/refunds?view=to_review&status=COMPLETED',
+          },
+        ]
+      : []),
+    ...((summary.refundsToReview ?? 0) > 0
+      ? [
+          {
+            label: 'Refunds to review',
+            value: String(summary.refundsToReview),
+            valueClassName: 'text-warning-600 dark:text-warning-400',
+            title: 'Refunds waiting for approval or for you to confirm the money arrived',
+            to: '/admin/marketing/funding/refunds?view=to_review',
+          },
+        ]
+      : []),
     {
       label: 'Disputed',
       value: (summary.disputedAsReceiver + summary.disputedAsSender).toString(),

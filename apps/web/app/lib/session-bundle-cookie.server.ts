@@ -22,7 +22,7 @@ import { decodePermissionsFromBitmask } from '@yannis/shared';
 
 export const BUNDLE_COOKIE_NAME = 'yannis_bundle';
 
-const BUNDLE_VERSION = 2;
+const BUNDLE_VERSION = 3; // keep in step with apps/api/src/auth/session-bundle-cookie.ts
 
 /** Wire shape of the bundle payload — `p` is the bitmask (decoded by the caller). */
 interface RawSessionBundlePayload {

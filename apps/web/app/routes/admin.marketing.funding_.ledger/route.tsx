@@ -1,7 +1,8 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, parsePerPage } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, parsePerPage, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
 import { FundingLedgerPage } from '~/features/marketing/FundingLedgerPage';
 import type { FundingLedgerLoaderData, FundingLedgerEntry } from '~/features/marketing/types';
@@ -80,18 +81,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     total: number;
     page: number;
     totalPages: number;
-    summary: { totalCredits: string; totalDebits: string; closingBalance: string };
+    summary: { totalCredits: string; totalDebits: string; closingBalance: string; openingBalance?: string; onHold?: string };
   };
 
-  const ledger: LedgerResponse = res.ok
-    ? ((res.data as { result?: { data?: LedgerResponse } })?.result?.data ?? {
-        entries: [],
-        total: 0,
-        page: 1,
-        totalPages: 1,
-        summary: { totalCredits: '0', totalDebits: '0', closingBalance: '0' },
-      })
-    : { entries: [], total: 0, page: 1, totalPages: 1, summary: { totalCredits: '0', totalDebits: '0', closingBalance: '0' } };
+  // Fail loudly: an access or load error must not read as "no transactions".
+  if (!res.ok) {
+    throw json(
+      { error: extractApiErrorMessage(res.data, 'Failed to load the funding ledger') },
+      { status: safeStatus(res.status) },
+    );
+  }
+  const ledger: LedgerResponse = (res.data as { result?: { data?: LedgerResponse } })?.result?.data ?? {
+    entries: [],
+    total: 0,
+    page: 1,
+    totalPages: 1,
+    summary: { totalCredits: '0', totalDebits: '0', closingBalance: '0' },
+  };
 
   const data: FundingLedgerLoaderData = {
     ...ledger,

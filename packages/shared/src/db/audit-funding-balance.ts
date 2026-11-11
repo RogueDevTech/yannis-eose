@@ -137,6 +137,29 @@ async function audit() {
   // Alt: credits(ALL) - debits(ALL) - adSpend(APPROVED)
   const balanceAll = creditsAll - debitsAll - adSpendApproved;
 
+  // Refunds + adjustments (mig 0361). Same terms as apps/api/src/marketing/funding-balance-terms.ts.
+  const [extra] = await sql`
+    SELECT
+      coalesce((SELECT sum(amount) FROM marketing_funding_refunds WHERE refunder_id = ${uid} AND status IN ('PENDING','APPROVED')), 0)::numeric AS held,
+      coalesce((SELECT sum(amount) FROM marketing_funding_refunds WHERE refunder_id = ${uid} AND status = 'COMPLETED'), 0)::numeric AS refunds_out,
+      coalesce((SELECT sum(amount) FROM marketing_funding_refunds WHERE funder_id = ${uid} AND status = 'COMPLETED'), 0)::numeric AS refunds_in,
+      coalesce((SELECT sum(CASE WHEN direction = 'CREDIT' THEN amount ELSE -amount END) FROM marketing_funding_adjustments WHERE user_id = ${uid} AND status = 'APPROVED'), 0)::numeric AS adjustments
+  `;
+  const held = Number(extra?.held ?? 0);
+  const refundsOut = Number(extra?.refunds_out ?? 0);
+  const refundsIn = Number(extra?.refunds_in ?? 0);
+  const adjustmentsNet = Number(extra?.adjustments ?? 0);
+  console.log(`Refunds held (pending):       ₦${held.toLocaleString()}`);
+  console.log(`Refunds paid out (completed): ₦${refundsOut.toLocaleString()}`);
+  console.log(`Refunds received (completed): ₦${refundsIn.toLocaleString()}`);
+  console.log(`Adjustments (net, approved):  ₦${adjustmentsNet.toLocaleString()}`);
+  console.log('');
+  // The app's available balance (wallet checks, Recipient Balances, reconciliation):
+  // received COMPLETED - sent (SENT+COMPLETED+DISPUTED) - spend (PENDING+APPROVED) + refunds/adjustments.
+  const debitsLive = sumByStatus(debitsByStatus, 'SENT') + debitsCompleted + sumByStatus(debitsByStatus, 'DISPUTED');
+  const appBalance =
+    creditsCompleted - debitsLive - adSpendApproved - adSpendPending + refundsIn + adjustmentsNet - held - refundsOut;
+  console.log(`Available balance (app formula): ₦${appBalance.toLocaleString()}`);
   console.log(`Balance (COMPLETED only):     ₦${balanceStrict.toLocaleString()}`);
   console.log(`Balance (ALL statuses):       ₦${balanceAll.toLocaleString()}`);
   console.log(`Total transactions:           ${sumAll(creditsByStatus.map((r) => ({ total: r.n }))) + sumAll(debitsByStatus.map((r) => ({ total: r.n })))}`);

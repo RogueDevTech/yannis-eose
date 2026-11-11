@@ -428,3 +428,79 @@ export async function generateCashFlowPdf(data: CashFlowData): Promise<jsPDF> {
   drawFooter(doc);
   return doc;
 }
+
+// ---------------------------------------------------------------------------
+// Sectioned report (headings + key/value blocks + tables). Used by the
+// Funding Reconciliation export so the PDF carries the same figures as the page.
+// ---------------------------------------------------------------------------
+export interface PdfReportTable {
+  heading: string;
+  /** Column widths in mm; they should add up to about 180 (A4 content width). */
+  columns: Array<{ label: string; width: number; align?: 'left' | 'right' }>;
+  rows: string[][];
+  /** Optional bold totals row. */
+  totals?: string[];
+  emptyText?: string;
+}
+
+export interface PdfReportKeyValues {
+  heading: string;
+  items: Array<[string, string]>;
+}
+
+export interface SectionedReportData {
+  title: string;
+  subtitle: string;
+  sections: Array<PdfReportTable | PdfReportKeyValues>;
+}
+
+/** Cut text to roughly fit a column at 8pt (about 1.9 characters per mm). */
+function fitText(text: string, widthMm: number): string {
+  const max = Math.max(4, Math.floor(widthMm * 1.9) - 2);
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+export async function generateSectionedReportPdf(data: SectionedReportData): Promise<jsPDF> {
+  const doc = await createDoc();
+  let y = await drawLetterhead(doc, data.title, data.subtitle);
+
+  for (const section of data.sections) {
+    y = ensurePage(doc, y, 18);
+    doc.setFontSize(10).setFont(FONT_FAMILY, 'bold').text(section.heading, MARGIN, y);
+    y += 5;
+    if ('items' in section) {
+      doc.setFontSize(8);
+      for (const [k, v] of section.items) {
+        y = ensurePage(doc, y);
+        doc.setFont(FONT_FAMILY, 'normal').text(k, MARGIN + 2, y + 3.5);
+        doc.setFont(FONT_FAMILY, 'bold').text(v, PAGE_W - MARGIN - 2, y + 3.5, { align: 'right' });
+        y += 5.5;
+      }
+      y += 4;
+      continue;
+    }
+    const cols: Column[] = section.columns.map((c) => ({ label: c.label, width: c.width, align: c.align }));
+    y = drawTableHeader(doc, cols, y);
+    if (section.rows.length === 0) {
+      doc.setFontSize(8).setFont(FONT_FAMILY, 'normal').text(section.emptyText ?? 'None', MARGIN + 2, y + 3.5);
+      y += 6;
+    }
+    for (const row of section.rows) {
+      const before = y;
+      y = ensurePage(doc, y);
+      // New page: repeat the column headings.
+      if (y < before) y = drawTableHeader(doc, cols, y);
+      y = drawRow(doc, cols, row.map((v, i) => fitText(v, cols[i]?.width ?? 20)), y);
+    }
+    if (section.totals) {
+      y = ensurePage(doc, y, 10);
+      doc.setDrawColor(100).setLineWidth(0.4).line(MARGIN, y, PAGE_W - MARGIN, y);
+      y += 1;
+      y = drawRow(doc, cols, section.totals.map((v, i) => fitText(v, cols[i]?.width ?? 20)), y, { bold: true, fill: true });
+    }
+    y += 5;
+  }
+
+  drawFooter(doc);
+  return doc;
+}
