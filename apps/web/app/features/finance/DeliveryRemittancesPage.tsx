@@ -238,10 +238,11 @@ export function DeliveryRemittancesPage({
   const companyPrefix = useActiveCompanyOrderPrefix();
   const [searchParams, setSearchParams] = useSearchParams();
   const baseCurrency = useBaseCurrency();
-  // The currency all stat totals + summary amounts display in. The active
-  // country is scoped session-wide by the global switcher, so we simply show
-  // the base currency symbol here (e.g. GH₵ instead of always ₦).
-  const activeCurrencyCode = baseCurrency.code;
+  // The currency all stat totals + summary amounts display in. The API reports
+  // it: the one country in scope (top-bar switcher), or NGN when several
+  // countries were converted at current FX rates (never a 1:1 mix).
+  const activeCurrencyCode =
+    ((summary as unknown as { summaryCurrencyCode?: string } | null)?.summaryCurrencyCode) ?? baseCurrency.code;
   const location = useLocation();
   const navigation = useNavigation();
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
@@ -1355,6 +1356,7 @@ export function DeliveryRemittancesPage({
 
         {/* Info modals */}
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'delivered'}
           onClose={() => setInfoModal(null)}
           title="Delivered"
@@ -1368,6 +1370,7 @@ export function DeliveryRemittancesPage({
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'remitted'}
           onClose={() => setInfoModal(null)}
           title="Remitted"
@@ -1378,6 +1381,7 @@ export function DeliveryRemittancesPage({
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'awaiting'}
           onClose={() => setInfoModal(null)}
           title="Awaiting Remittance"
@@ -1389,6 +1393,7 @@ export function DeliveryRemittancesPage({
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'pending'}
           onClose={() => setInfoModal(null)}
           title="Pending"
@@ -1398,6 +1403,7 @@ export function DeliveryRemittancesPage({
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'disputed'}
           onClose={() => setInfoModal(null)}
           title="Disputed"
@@ -1407,6 +1413,7 @@ export function DeliveryRemittancesPage({
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'gross'}
           onClose={() => setInfoModal(null)}
           title="Gross Order Value"
@@ -1416,6 +1423,7 @@ export function DeliveryRemittancesPage({
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'net'}
           onClose={() => setInfoModal(null)}
           title="Expected Net"

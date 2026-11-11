@@ -151,6 +151,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const remSummary = bundle?.remittanceSummary;
     let pulse: FinanceOverviewPulse = {
       ...emptyPulse,
+      summaryCurrencyCode: typeof remSummary?.summaryCurrencyCode === 'string' ? remSummary.summaryCurrencyCode : undefined,
+      fxConverted: (remSummary as Record<string, unknown> | null)?.fxConverted === true,
+      unconvertedCurrencies: ((remSummary as Record<string, unknown> | null)?.unconvertedCurrencies as string[] | undefined) ?? [],
+      awaitingPeriodByCurrency: (
+        ((remSummary as Record<string, unknown> | null)?.awaitingPeriodByCurrency as Array<{ currencyCode: string; count: string | number; amount: string | number }> | undefined) ?? []
+      ).map((r) => ({ currencyCode: r.currencyCode, count: Number(r.count), amount: Number(r.amount) })),
       awaitingCash: Number(remSummary?.awaitingGrossAmount ?? remSummary?.awaitingAmount ?? 0),
       awaitingOrderCount: Number(remSummary?.awaitingCount ?? 0),
       // Period-scoped awaiting (follows the page date filter; this month by default).

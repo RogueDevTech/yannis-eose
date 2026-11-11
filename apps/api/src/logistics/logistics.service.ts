@@ -21,6 +21,7 @@ import {
   or,
   sql,
   type SQL,
+  type Column,
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -53,6 +54,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
+import { fxToNgnRateSql } from '../common/db/fx-to-ngn-sql';
 import { isAdminLevel } from '../common/authz';
 import { OrdersService } from '../orders/orders.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
@@ -2879,37 +2881,65 @@ export class LogisticsService implements OnModuleInit {
     // is applied to baseSummaryWhere (orders-joined) below instead.
     const summaryWhere = summaryConditions.length > 0 ? and(...summaryConditions) : undefined;
 
+    // ── Currency of the summary totals (CEO 2026-11-11) ───────────────────────
+    // Money from different countries is never added 1:1: KSh/ZK/GH₵ amounts were
+    // summed as ₦ and dragged the "Awaiting" average below the cheapest product.
+    // One country in scope (explicit currencyCode, or the top-bar country / a
+    // single assigned country) → raw totals in that currency. Several or all
+    // countries → each amount converted to ₦ at its company's current FX rate
+    // (same rule as the CEO "Delivered revenue" tiles, see fxToNgnRateSql);
+    // currencies with no rate are left out and listed in `unconvertedCurrencies`.
+    // Per-batch rows above stay in their own currency.
+    const scopedCodes = effectiveCurrencyCodes && effectiveCurrencyCodes.length > 0
+      ? [...new Set(effectiveCurrencyCodes.map((c) => c.toUpperCase()))]
+      : null;
+    const summaryCurrency = input.currencyCode ?? (scopedCodes && scopedCodes.length === 1 ? scopedCodes[0] : undefined);
+    const fxConvert = !summaryCurrency;
+    const orderCountryCond = fxConvert && scopedCodes ? countryScopeCondition(schema.orders.currencyCode, scopedCodes) : null;
+    const batchCountryCond = fxConvert && scopedCodes ? countryScopeCondition(schema.deliveryRemittances.currencyCode, scopedCodes) : null;
+    const orderFx = fxToNgnRateSql(
+      sql`${schema.orders.currencyCode}`,
+      sql`(SELECT fxg.group_id FROM branches fxg WHERE fxg.id = ${schema.orders.servicingBranchId})`,
+    );
+    const batchFx = fxToNgnRateSql(
+      sql`${schema.deliveryRemittances.currencyCode}`,
+      sql`(SELECT fxg.group_id FROM delivery_remittance_orders fxd JOIN orders fxo ON fxo.id = fxd.order_id JOIN branches fxg ON fxg.id = fxo.servicing_branch_id WHERE fxd.delivery_remittance_id = ${schema.deliveryRemittances.id} LIMIT 1)`,
+    );
+    const oTotal = fxConvert ? sql`(${schema.orders.totalAmount} * ${orderFx})` : sql`${schema.orders.totalAmount}`;
+    const oFee = fxConvert ? sql`(COALESCE(${schema.orders.deliveryFee}, 0) * ${orderFx})` : sql`COALESCE(${schema.orders.deliveryFee}, 0)`;
+    const bAmt = (col: SQL | Column) => (fxConvert ? sql`(COALESCE(${col}, 0) * ${batchFx})` : sql`COALESCE(${col}, 0)`);
+
     // Sum order value on remittance batches. Do NOT require orders.status = DELIVERED — after
     // Finance marks received, orders move to REMITTED and must still count toward batch totals.
     const baseSummaryQuery = this.db
       .select({
-        totalRemitted: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
-        pendingAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN (${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) ELSE 0 END), 0)::text`,
+        totalRemitted: sql<string>`COALESCE(SUM(${oTotal} - ${oFee}), 0)::text`,
+        pendingAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN (${oTotal} - ${oFee}) ELSE 0 END), 0)::text`,
         totalCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittances.id})::text`,
         // Order counts (not batch counts) so the stat strip is consistent with Delivered/Awaiting
         batchedOrderCount: sql<string>`COUNT(DISTINCT ${schema.deliveryRemittanceOrders.orderId})::text`,
         receivedOrderCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
         pendingCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
         disputedOrderCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
-        pendingGrossAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
-        disputedGrossAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        pendingGrossAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${oTotal} ELSE 0 END), 0)::text`,
+        disputedGrossAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${oTotal} ELSE 0 END), 0)::text`,
         // Deduction breakdown — RECEIVED batches only. Gross count/value are
         // overridden below with remittedOnly* so Remitted and Gross Order Value
         // always tally (same orders.status = REMITTED source). Delivery fees
         // only count REMITTED, non-deleted orders on RECEIVED batches.
-        grossOrderValue: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND ${schema.orders.status} = 'REMITTED' AND ${schema.orders.deletedAt} IS NULL THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        grossOrderValue: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND ${schema.orders.status} = 'REMITTED' AND ${schema.orders.deletedAt} IS NULL THEN ${oTotal} ELSE 0 END), 0)::text`,
         grossOrderCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND ${schema.orders.status} = 'REMITTED' AND ${schema.orders.deletedAt} IS NULL THEN ${schema.deliveryRemittanceOrders.orderId} END)::text`,
-        totalDeliveryFees: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND ${schema.orders.status} = 'REMITTED' AND ${schema.orders.deletedAt} IS NULL THEN COALESCE(${schema.orders.deliveryFee}, 0) ELSE 0 END), 0)::text`,
+        totalDeliveryFees: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND ${schema.orders.status} = 'REMITTED' AND ${schema.orders.deletedAt} IS NULL THEN ${oFee} ELSE 0 END), 0)::text`,
         deliveryFeeCount: sql<string>`COUNT(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND ${schema.orders.status} = 'REMITTED' AND ${schema.orders.deletedAt} IS NULL AND COALESCE(${schema.orders.deliveryFee}, 0) > 0 THEN 1 END)::text`,
-        totalCommitmentFees: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0 THEN ${schema.deliveryRemittances.commitmentFee} ELSE 0 END), 0)::text`,
+        totalCommitmentFees: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0 THEN ${bAmt(schema.deliveryRemittances.commitmentFee)} ELSE 0 END), 0)::text`,
         commitmentFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.commitmentFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
-        totalPosFees: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0 THEN ${schema.deliveryRemittances.posFee} ELSE 0 END), 0)::text`,
+        totalPosFees: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0 THEN ${bAmt(schema.deliveryRemittances.posFee)} ELSE 0 END), 0)::text`,
         posFeeCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.posFee}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
-        totalFailedDeliveryCosts: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0 THEN ${schema.deliveryRemittances.failedDeliveryCost} ELSE 0 END), 0)::text`,
+        totalFailedDeliveryCosts: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0 THEN ${bAmt(schema.deliveryRemittances.failedDeliveryCost)} ELSE 0 END), 0)::text`,
         failedDeliveryCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.failedDeliveryCost}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
-        totalDiscounts: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.discount}, 0) > 0 THEN ${schema.deliveryRemittances.discount} ELSE 0 END), 0)::text`,
+        totalDiscounts: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.discount}, 0) > 0 THEN ${bAmt(schema.deliveryRemittances.discount)} ELSE 0 END), 0)::text`,
         discountCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.discount}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
-        totalWaybillCosts: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.waybillCost}, 0) > 0 THEN ${schema.deliveryRemittances.waybillCost} ELSE 0 END), 0)::text`,
+        totalWaybillCosts: sql<string>`COALESCE(SUM(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.waybillCost}, 0) > 0 THEN ${bAmt(schema.deliveryRemittances.waybillCost)} ELSE 0 END), 0)::text`,
         waybillCostCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' AND COALESCE(${schema.deliveryRemittances.waybillCost}, 0) > 0 THEN ${schema.deliveryRemittances.id} END)::text`,
       })
       .from(schema.deliveryRemittances)
@@ -2948,8 +2978,10 @@ export class LogisticsService implements OnModuleInit {
     if (input.sentBy) {
       outcomeCountConditions.push(sql`dr.sent_by = ${input.sentBy}`);
     }
-    if (input.currencyCode) {
-      outcomeCountConditions.push(sql`o.currency_code = ${input.currencyCode}`);
+    if (summaryCurrency) {
+      outcomeCountConditions.push(sql`o.currency_code = ${summaryCurrency}`);
+    } else if (scopedCodes) {
+      outcomeCountConditions.push(sql`(o.currency_code IS NULL OR o.currency_code IN (${sql.join(scopedCodes.map((c) => sql`${c}`), sql`, `)}))`);
     }
     // Outcome amounts + order counts. The old approach used expensive correlated
     // scalar subqueries (SELECT COUNT(...) FROM ... WHERE ... IN (SELECT ...))
@@ -2957,8 +2989,8 @@ export class LogisticsService implements OnModuleInit {
     // walks outcomes → remittance → orders once.
     const outcomeSummaryQuery = this.db
       .select({
-        receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
-        disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
+        receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${bAmt(schema.deliveryRemittanceOutcomes.amount)} ELSE 0 END), 0)::text`,
+        disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${bAmt(schema.deliveryRemittanceOutcomes.amount)} ELSE 0 END), 0)::text`,
       })
       .from(schema.deliveryRemittanceOutcomes)
       .innerJoin(
@@ -2996,7 +3028,8 @@ export class LogisticsService implements OnModuleInit {
           .from(schema.deliveryRemittanceOrders)
           .where(eq(schema.deliveryRemittanceOrders.orderId, schema.orders.id)),
       ),
-      ...(input.currencyCode ? [eq(schema.orders.currencyCode, input.currencyCode)] : []),
+      ...(summaryCurrency ? [eq(schema.orders.currencyCode, summaryCurrency)] : []),
+      ...(orderCountryCond ? [orderCountryCond] : []),
     ];
     // Company-group isolation on awaiting orders — scope via logistics location's provider group.
     // Include orders with NULL logisticsLocationId (not yet assigned to a 3PL).
@@ -3021,10 +3054,10 @@ export class LogisticsService implements OnModuleInit {
 
     const awaitingSummaryQuery = this.db
       .select({
-        awaitingAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        awaitingAmount: sql<string>`COALESCE(SUM(${oTotal} - ${oFee}), 0)::text`,
         awaitingCount: sql<string>`COUNT(*)::text`,
-        awaitingGrossAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
-        awaitingDeliveryFees: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        awaitingGrossAmount: sql<string>`COALESCE(SUM(${oTotal}), 0)::text`,
+        awaitingDeliveryFees: sql<string>`COALESCE(SUM(${oFee}), 0)::text`,
         awaitingDeliveryFeeCount: sql<string>`COUNT(CASE WHEN COALESCE(${schema.orders.deliveryFee}, 0) > 0 THEN 1 END)::text`,
       })
       .from(schema.orders)
@@ -3036,9 +3069,9 @@ export class LogisticsService implements OnModuleInit {
     if (input.endDate) awaitingPeriodConditions.push(lte(dateScopeCol, nigeriaDayEnd(input.endDate)));
     const awaitingPeriodQuery = this.db
       .select({
-        awaitingPeriodAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        awaitingPeriodAmount: sql<string>`COALESCE(SUM(${oTotal} - ${oFee}), 0)::text`,
         awaitingPeriodCount: sql<string>`COUNT(*)::text`,
-        awaitingPeriodGrossAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        awaitingPeriodGrossAmount: sql<string>`COALESCE(SUM(${oTotal}), 0)::text`,
       })
       .from(schema.orders)
       .where(and(...awaitingPeriodConditions));
@@ -3051,7 +3084,8 @@ export class LogisticsService implements OnModuleInit {
     const deliveredConditions: SQL[] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
       isNull(schema.orders.deletedAt),
-      ...(input.currencyCode ? [eq(schema.orders.currencyCode, input.currencyCode)] : []),
+      ...(summaryCurrency ? [eq(schema.orders.currencyCode, summaryCurrency)] : []),
+      ...(orderCountryCond ? [orderCountryCond] : []),
     ];
     if (isTplCaller && !canListGlobal) {
       deliveredConditions.push(eq(schema.orders.logisticsLocationId, actor.logisticsLocationId!));
@@ -3065,14 +3099,14 @@ export class LogisticsService implements OnModuleInit {
     const deliveredCountQuery = this.db
       .select({
         deliveredCount: sql<string>`COUNT(*)::text`,
-        deliveredAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
-        deliveredNetAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        deliveredAmount: sql<string>`COALESCE(SUM(${oTotal}), 0)::text`,
+        deliveredNetAmount: sql<string>`COALESCE(SUM(${oTotal} - ${oFee}), 0)::text`,
         // Per-status breakdown so stat strip can show Delivered vs Remitted
         // using the same date scope — no batch-join needed.
         deliveredOnlyCount: sql<string>`COUNT(CASE WHEN ${schema.orders.status} = 'DELIVERED' THEN 1 END)::text`,
-        deliveredOnlyAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.status} = 'DELIVERED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        deliveredOnlyAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.status} = 'DELIVERED' THEN ${oTotal} ELSE 0 END), 0)::text`,
         remittedOnlyCount: sql<string>`COUNT(CASE WHEN ${schema.orders.status} = 'REMITTED' THEN 1 END)::text`,
-        remittedOnlyAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.status} = 'REMITTED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        remittedOnlyAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.status} = 'REMITTED' THEN ${oTotal} ELSE 0 END), 0)::text`,
       })
       .from(schema.orders)
       .where(and(...deliveredConditions));
@@ -3084,7 +3118,8 @@ export class LogisticsService implements OnModuleInit {
     if (input.endDate) batchDateConditions.push(lte(dateScopeCol, nigeriaDayEnd(input.endDate)));
     // Currency scope for the orders-joined summary (baseSummaryQuery) — kept out of
     // the shared summaryWhere because outcomeSummaryQuery has no orders join.
-    if (input.currencyCode) batchDateConditions.push(eq(schema.orders.currencyCode, input.currencyCode));
+    if (summaryCurrency) batchDateConditions.push(eq(schema.orders.currencyCode, summaryCurrency));
+    if (orderCountryCond) batchDateConditions.push(orderCountryCond);
     const baseSummaryWhere = summaryWhere
       ? (batchDateConditions.length > 0 ? and(summaryWhere, ...batchDateConditions) : summaryWhere)
       : (batchDateConditions.length > 0 ? and(...batchDateConditions) : undefined);
@@ -3096,9 +3131,9 @@ export class LogisticsService implements OnModuleInit {
       // join. A batch is single-currency (enforced at creation), so scope by the
       // batch's own currency_code — combine with summaryWhere (batch-level filters).
       (() => {
-        const outcomeCurrencyWhere = input.currencyCode
-          ? eq(schema.deliveryRemittances.currencyCode, input.currencyCode)
-          : undefined;
+        const outcomeCurrencyWhere = summaryCurrency
+          ? eq(schema.deliveryRemittances.currencyCode, summaryCurrency)
+          : (batchCountryCond ?? undefined);
         const combined =
           summaryWhere && outcomeCurrencyWhere
             ? and(summaryWhere, outcomeCurrencyWhere)
@@ -3111,6 +3146,26 @@ export class LogisticsService implements OnModuleInit {
       this.db.execute(outcomeOrderCountsQuery),
     ]);
 
+    // Raw per-currency breakdown of the "Awaiting this period" card, and the
+    // currencies left out of a ₦ total for lack of an FX rate.
+    const [awaitingPeriodByCurrencyRows, unconvertedRows] = await Promise.all([
+      this.db
+        .select({
+          currencyCode: sql<string>`upper(coalesce(${schema.orders.currencyCode}, 'NGN'))`,
+          count: sql<string>`COUNT(*)::text`,
+          amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        })
+        .from(schema.orders)
+        .where(and(...awaitingPeriodConditions))
+        .groupBy(sql`1`),
+      fxConvert
+        ? this.db
+            .selectDistinct({ currencyCode: sql<string>`upper(coalesce(${schema.orders.currencyCode}, 'NGN'))` })
+            .from(schema.orders)
+            .where(and(or(and(...awaitingConditions), and(...deliveredConditions)), sql`${orderFx} IS NULL`))
+        : Promise.resolve([] as { currencyCode: string }[]),
+    ]);
+
     const baseSummary = baseSummaryRows[0];
     const outcomeSummary = outcomeSummaryRows[0];
     const awaitingSummary = awaitingSummaryRows[0];
@@ -3120,6 +3175,11 @@ export class LogisticsService implements OnModuleInit {
     const receivedOrderCount = outcomeCounts?.received_cnt ?? '0';
     const disputedOrderCount = outcomeCounts?.disputed_cnt ?? '0';
     const summary = {
+      /** Currency every amount below is in: the single country in scope, else NGN (converted). */
+      summaryCurrencyCode: summaryCurrency ?? 'NGN',
+      fxConverted: fxConvert,
+      unconvertedCurrencies: unconvertedRows.map((r) => r.currencyCode),
+      awaitingPeriodByCurrency: awaitingPeriodByCurrencyRows,
       totalRemitted: baseSummary?.totalRemitted ?? '0',
       pendingAmount: baseSummary?.pendingAmount ?? '0',
       receivedAmount: outcomeSummary?.receivedAmount ?? '0',
@@ -3170,6 +3230,8 @@ export class LogisticsService implements OnModuleInit {
     };
 
     const fallbackSummary = {
+      summaryCurrencyCode: 'NGN', fxConverted: false, unconvertedCurrencies: [] as string[],
+      awaitingPeriodByCurrency: [] as { currencyCode: string; count: string; amount: string }[],
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
       totalCount: '0', batchedOrderCount: '0', receivedOrderCount: '0', pendingCount: '0', disputedOrderCount: '0', pendingGrossAmount: '0', disputedGrossAmount: '0', receivedCount: '0', disputedCount: '0',
       awaitingAmount: '0', awaitingCount: '0', awaitingGrossAmount: '0', awaitingDeliveryFees: '0', awaitingDeliveryFeeCount: '0',

@@ -46,6 +46,14 @@ export interface ProfitReport {
 
 /** Live ops counts for the finance overview rail (not tied to profit date range). */
 export interface FinanceOverviewPulse {
+  /** Currency every amount is in: the one country in scope, else NGN (FX-converted). */
+  summaryCurrencyCode?: string;
+  /** True when several countries were converted to ₦ at current FX rates. */
+  fxConverted?: boolean;
+  /** Countries left out of a ₦ total because they have no FX rate. */
+  unconvertedCurrencies?: string[];
+  /** Raw per-country split of "Awaiting this period" (each in its own currency). */
+  awaitingPeriodByCurrency?: { currencyCode: string; count: number; amount: number }[];
   /** All-time awaiting (delivered, not on any remittance) — date-independent. */
   awaitingCash: number;
   awaitingOrderCount: number;

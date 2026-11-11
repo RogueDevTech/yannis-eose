@@ -30,6 +30,10 @@ Local dev: no Docker needed — Postgres + Redis via `.env` connection strings.
 UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → AGENT_ASSIGNED → DISPATCHED → IN_TRANSIT → DELIVERED → REMITTED
 ```
 No state skipping. CANCELLED is legacy-only — use DELETED. CS never marks REMITTED (accountant only).
+- **A call never moves an order backwards (2026-11-11):** "Call customer" / `initiateCall` / phone reveal may only move UNPROCESSED or CS_ASSIGNED to CS_ENGAGED. Never gate an auto-transition on `isTransitionAllowed` alone: CONFIRMED → CS_ENGAGED is the managers' retrack move. That mistake in `voip.service.ts` silently un-confirmed ~4,350 orders (June to Nov 2026).
+
+## CS closer pickers follow the country (2026-11-11)
+- Every closer list (Assign, Reassign, closer filters, workload roster) passes `ctx.effectiveCurrencyCodes` and filters with `closerInCountriesCondition` (`apps/api/src/common/db/closer-country-condition.ts`). One rule: `countries.view_all` grant, or a `user_countries` row in the closer's company, or no grant in that company = NGN only. Never write a parallel check. Auto-dispatch does not use it.
 
 ## RBAC
 - `SUPER_ADMIN` + `SUPPORT` bypass `permissionProcedure`. `ADMIN` has all codes via snapshot.

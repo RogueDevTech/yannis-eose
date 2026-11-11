@@ -337,7 +337,7 @@ export const logisticsRouter = router({
   listDeliveryRemittances: authedProcedure
     .input(listDeliveryRemittancesSchema)
     .query(async ({ input, ctx }) => {
-      return getLogisticsService().listDeliveryRemittances(input, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds);
+      return getLogisticsService().listDeliveryRemittances(input, ctx.user, ctx.activeGroupId, ctx.effectiveBranchIds, ctx.effectiveCurrencyCodes);
     }),
 
   /** Flat list of individual orders across remittance batches (unbatched view). */
