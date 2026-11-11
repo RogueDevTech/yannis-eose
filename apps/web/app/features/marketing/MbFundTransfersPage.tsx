@@ -494,7 +494,8 @@ function TransferActions({
   useFetcherToast(fetcher.data);
   const busy = fetcher.state !== 'idle';
 
-  if (canApprove && transfer.status === 'PENDING') {
+  // Nobody approves their own transfer (the API refuses it too).
+  if (canApprove && transfer.status === 'PENDING' && transfer.senderMbId !== currentUserId) {
     return (
       <div className="flex items-center gap-1.5">
         <TableActionButton
@@ -693,7 +694,7 @@ function TransferDetailModal({
         )}
       </div>
 
-      {canApprove && transfer.status === 'PENDING' && (
+      {canApprove && transfer.status === 'PENDING' && transfer.senderMbId !== currentUserId && (
         <div className="mt-4 flex gap-2">
           <Button
             className="flex-1"

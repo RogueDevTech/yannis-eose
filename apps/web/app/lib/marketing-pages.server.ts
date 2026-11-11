@@ -389,6 +389,12 @@ export interface MarketingRoleFlags {
   canRequestFunding: boolean;
   /** Capability — can approve or reject Media Buyer ad-spend submissions. */
   canApproveAdSpend: boolean;
+  /** Approve rights come only from supervising a team: their team's entries, never their own. */
+  adSpendTeamOnlyModeration: boolean;
+  /** Can send a peer transfer (Media Buyers, including team supervisors). */
+  canPeerTransfer: boolean;
+  /** Sees Approve / Reject on peer transfers (the API decides per transfer). */
+  canApprovePeerTransfers: boolean;
   /** Capability — can resolve funding disputes by reversing an erroneous funding. */
   canReverseFunding: boolean;
   /** Capability: can return unspent funding to the original funder (refund request). */
@@ -449,10 +455,21 @@ export function getMarketingRoleFlags(
       has('marketing.funding.request') ||
       isMarketingSupervisorOnBranch
     );
-  const canApproveAdSpend =
-    ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'].includes(role) ||
-    has('marketing.adSpend.approve') ||
-    isMarketingSupervisorOnBranch;
+  // A marketing team supervisor approves their team's ad spend on any branch
+  // selection, including "All branches" (the API checks team membership).
+  const isMarketingTeamSupervisorAnywhere =
+    typeof user !== 'string' && user.isMarketingTeamSupervisorOnActiveBranch === true;
+  const approvesAllAdSpend =
+    ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'].includes(role) || has('marketing.adSpend.approve');
+  const canApproveAdSpend = approvesAllAdSpend || isMarketingTeamSupervisorAnywhere;
+  const adSpendTeamOnlyModeration = !approvesAllAdSpend && isMarketingTeamSupervisorAnywhere;
+  const canPeerTransfer = role === 'MEDIA_BUYER';
+  // Mirrors the API: HoM, admins, marketing.funding.approve holders, and team
+  // supervisors (for transfers inside their team). Finance does not approve.
+  const canApprovePeerTransfers =
+    ['SUPER_ADMIN', 'ADMIN', 'SUPPORT', 'HEAD_OF_MARKETING'].includes(role) ||
+    has('marketing.funding.approve') ||
+    isMarketingTeamSupervisorAnywhere;
   // Reversing an erroneous funding moves money between balances: permission-first,
   // Admin by default (SuperAdmin/Support bypass like permissionProcedure).
   const canReverseFunding =
@@ -469,6 +486,9 @@ export function getMarketingRoleFlags(
     isFundingAdmin,
     canRequestFunding,
     canApproveAdSpend,
+    adSpendTeamOnlyModeration,
+    canPeerTransfer,
+    canApprovePeerTransfers,
     canReverseFunding,
     canRefundFunding,
     canReconcileFunding,

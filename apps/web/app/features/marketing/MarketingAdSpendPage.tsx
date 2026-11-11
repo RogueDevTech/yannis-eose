@@ -192,6 +192,7 @@ export function MarketingAdSpendPage({
   filters,
   viewMode = 'admin',
   canApproveAdSpend = false,
+  adSpendTeamOnlyModeration = false,
   groups: initialGroups,
   groupsPage,
   groupsTotalPages,
@@ -430,21 +431,28 @@ export function MarketingAdSpendPage({
   }, [adSpend, optimisticPatches]);
 
   /** All PENDING IDs on the current page (both views merged, deduped). */
+  // Team supervisors approve their team's entries, never their own.
+  const canModerateRow = useCallback(
+    (mediaBuyerId: string | null | undefined) =>
+      canApproveAdSpend && (!adSpendTeamOnlyModeration || (!!mediaBuyerId && mediaBuyerId !== currentUserId)),
+    [canApproveAdSpend, adSpendTeamOnlyModeration, currentUserId],
+  );
+
   const pendingIdsOnPage = useMemo(() => {
     const ids: string[] = [];
     // Daily view: lines inside groups
     for (const g of groups) {
       for (const line of g.lines) {
-        if (line.status === 'PENDING') ids.push(line.id);
+        if (line.status === 'PENDING' && canModerateRow(line.mediaBuyerId)) ids.push(line.id);
       }
     }
     // Detailed view: flat list (uses patched data for optimistic updates)
     for (const row of patchedAdSpend ?? []) {
-      if ((row.status ?? 'PENDING') === 'PENDING') ids.push(row.id);
+      if ((row.status ?? 'PENDING') === 'PENDING' && canModerateRow(row.mediaBuyerId)) ids.push(row.id);
     }
     // Dedupe across views (a line can appear in both)
     return [...new Set(ids)];
-  }, [groups, patchedAdSpend]);
+  }, [groups, patchedAdSpend, canModerateRow]);
 
   const [formCampaignId, setFormCampaignId] = useState('');
   const [formProductId, setFormProductId] = useState('');
@@ -836,7 +844,7 @@ export function MarketingAdSpendPage({
         nowrap: true,
         render: (s) => {
           const isPending = (s.status ?? 'PENDING') === 'PENDING';
-          const checkbox = canApproveAdSpend ? (
+          const checkbox = canModerateRow(s.mediaBuyerId) ? (
             <input
               type="checkbox"
               checked={isPending && selectedIds.has(s.id)}
@@ -958,7 +966,7 @@ export function MarketingAdSpendPage({
                   label: 'Approve',
                   tone: 'success',
                   onClick: () => setConfirmApprove(s),
-                  show: canApproveAdSpend && isPending,
+                  show: canModerateRow(s.mediaBuyerId) && isPending,
                 },
                 {
                   key: 'reject',
@@ -966,7 +974,7 @@ export function MarketingAdSpendPage({
                   label: 'Reject',
                   tone: 'danger',
                   onClick: () => { setConfirmReject(s); setRejectReason(''); },
-                  show: canApproveAdSpend && isPending,
+                  show: canModerateRow(s.mediaBuyerId) && isPending,
                 },
                 {
                   key: 'edit',
@@ -983,7 +991,7 @@ export function MarketingAdSpendPage({
     );
     return cols;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- setSelectedIds is stable
-  }, [viewMode, selectedCategory, isFilteringNonAdSpend, users, products, campaigns, canApproveAdSpend, fetcher.state, fetcher.formData, selectedIds, toggleSelect, patchedAdSpend, clearSelection]);
+  }, [viewMode, selectedCategory, isFilteringNonAdSpend, users, products, campaigns, canApproveAdSpend, canModerateRow, fetcher.state, fetcher.formData, selectedIds, toggleSelect, patchedAdSpend, clearSelection]);
 
   const adSpendToolbarFilterBadge = useMemo(() => {
     let n = 0;
@@ -1781,7 +1789,7 @@ export function MarketingAdSpendPage({
             )}
 
             {/* Reject form (inline, not in footer) */}
-            {canApproveAdSpend && adSpendDetailModal.status === 'PENDING' && rejectStep && (
+            {canModerateRow(adSpendDetailModal.mediaBuyerId) && adSpendDetailModal.status === 'PENDING' && rejectStep && (
               <fetcher.Form method="post" className="space-y-2">
                 <input type="hidden" name="intent" value="rejectAdSpend" />
                 <input type="hidden" name="adSpendId" value={adSpendDetailModal.id} />
@@ -1812,7 +1820,7 @@ export function MarketingAdSpendPage({
           {/* Footer actions — single compact row */}
           <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-t border-app-border shrink-0">
             <div className="flex items-center gap-2">
-              {canApproveAdSpend && adSpendDetailModal.status === 'PENDING' && !rejectStep && (
+              {canModerateRow(adSpendDetailModal.mediaBuyerId) && adSpendDetailModal.status === 'PENDING' && !rejectStep && (
                 <>
                   <fetcher.Form method="post" className="inline">
                     <input type="hidden" name="intent" value="approveAdSpend" />

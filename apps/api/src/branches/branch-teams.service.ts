@@ -743,6 +743,61 @@ export class BranchTeamsService {
   }
 
   /**
+   * Media Buyers this user supervises in a MARKETING team on ANY branch
+   * (supervisee rows only, never the supervisor themselves). Used where the
+   * top-bar selection must not decide whose ad spend a supervisor can review.
+   */
+  async listMarketingSuperviseeIdsAnywhere(actorId: string): Promise<string[]> {
+    return this.safeBranchTeamsRead<string[]>([], async () => {
+      const sup = alias(schema.branchTeamMembers, 'sup_ma');
+      const mem = alias(schema.branchTeamMembers, 'mem_ma');
+      const rows = await this.db
+        .selectDistinct({ userId: mem.userId })
+        .from(sup)
+        .innerJoin(mem, eq(mem.teamId, sup.teamId))
+        .innerJoin(schema.branchTeams, eq(schema.branchTeams.id, sup.teamId))
+        .innerJoin(schema.users, eq(schema.users.id, mem.userId))
+        .where(
+          and(
+            eq(sup.userId, actorId),
+            eq(sup.isSupervisor, true),
+            eq(mem.isSupervisor, false),
+            ne(mem.userId, actorId),
+            eq(schema.branchTeams.department, 'MARKETING'),
+            eq(schema.users.role, 'MEDIA_BUYER'),
+          ),
+        );
+      return rows.map((r) => r.userId);
+    });
+  }
+
+  /** True when the user is a supervisor of at least one MARKETING team, on any branch. */
+  async isMarketingTeamSupervisorAnywhere(userId: string): Promise<boolean> {
+    return this.safeBranchTeamsRead(false, async () => {
+      const rows = await this.db
+        .select({ x: sql`1` })
+        .from(schema.branchTeamMembers)
+        .innerJoin(schema.branchTeams, eq(schema.branchTeams.id, schema.branchTeamMembers.teamId))
+        .where(
+          and(
+            eq(schema.branchTeamMembers.userId, userId),
+            eq(schema.branchTeamMembers.isSupervisor, true),
+            eq(schema.branchTeams.department, 'MARKETING'),
+          ),
+        )
+        .limit(1);
+      return rows.length > 0;
+    });
+  }
+
+  /** True when `actorId` supervises `superviseeId` in a MARKETING team on any branch. */
+  async isMarketingSupervisorOfAnywhere(actorId: string, superviseeId: string): Promise<boolean> {
+    if (actorId === superviseeId) return false;
+    const ids = await this.listMarketingSuperviseeIdsAnywhere(actorId);
+    return ids.includes(superviseeId);
+  }
+
+  /**
    * Branch/department-agnostic version of `isCsSupervisorOf` / `isMarketingSupervisorOf`.
    * True if `actorId` is a team supervisor anywhere they share a team with
    * `superviseeId` (where the supervisee row has `is_supervisor = false`).

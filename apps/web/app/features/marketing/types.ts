@@ -428,6 +428,9 @@ export interface MarketingFundingLoaderData {
   canReverseFunding?: boolean;
   /** Can return unspent funding (`marketing.funding.refund`). */
   canRefundFunding?: boolean;
+  /** Media Buyers, including team supervisors, can send peer transfers. */
+  canPeerTransfer?: boolean;
+  canApprovePeerTransfers?: boolean;
   /** Can open other people's reconciliation. */
   canReconcileFunding?: boolean;
   canRequestFunding: boolean;
@@ -602,6 +605,8 @@ export interface MarketingAdSpendLoaderData {
    * Approve/Reject buttons even though they're not in media-buyer view.
    */
   canApproveAdSpend: boolean;
+  /** Team supervisor: may approve/reject only their team's entries, never their own. */
+  adSpendTeamOnlyModeration?: boolean;
   /** Grouped accordion view (Phase 17). Groups are page-sliced — pagination is on groups. */
   /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
   groups: AdSpendGroup[] | null;

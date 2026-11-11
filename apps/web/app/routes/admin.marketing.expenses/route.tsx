@@ -32,7 +32,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // CEO directive 2026-05-10: ad-spend listing is a "today's spend" workflow
   // for HoM / team leads, so default the date filter to today (not this month).
   const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url, 'today');
-  const { isMediaBuyer, isFundingAdmin, canApproveAdSpend } = getMarketingRoleFlags(user);
+  const { isMediaBuyer, isFundingAdmin, canApproveAdSpend, adSpendTeamOnlyModeration } = getMarketingRoleFlags(user);
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   // URL-driven page sizes — flat list keyed on `?perPage=`, the daily-grouped
@@ -138,6 +138,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     filters,
     viewMode: isMediaBuyer ? ('media_buyer' as const) : ('admin' as const),
     canApproveAdSpend,
+    adSpendTeamOnlyModeration,
   };
 
   // Single deferred block — both listAdSpend + picklistsBundle run in parallel
@@ -170,6 +171,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const data: MarketingAdSpendLoaderData = {
     viewMode: isMediaBuyer ? 'media_buyer' : 'admin',
     canApproveAdSpend,
+    adSpendTeamOnlyModeration,
     currentUserId: user.id,
     adSpend: adSpendData?.records ?? [],
     totalAdSpend: totalRows,
@@ -293,6 +295,7 @@ export default function AdminMarketingAdSpendRoute() {
       filters: MarketingAdSpendLoaderData['filters'];
       viewMode: MarketingAdSpendLoaderData['viewMode'];
       canApproveAdSpend: boolean;
+      adSpendTeamOnlyModeration?: boolean;
     };
     pageData: Promise<MarketingAdSpendLoaderData>;
     picklistsPromise: Promise<AdSpendPicklists> | AdSpendPicklists;
