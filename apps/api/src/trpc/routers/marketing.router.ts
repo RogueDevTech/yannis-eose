@@ -57,6 +57,7 @@ import {
   listFundingAdjustmentsSchema,
   fundingReconciliationSchema,
   closeFundingPeriodSchema,
+  expenseCategorySchema,
 } from '@yannis/shared';
 import { selectedCountryCode } from '../context';
 import { z } from 'zod';
@@ -765,6 +766,12 @@ export const marketingRouter = router({
         /** When true, skip supervisor scope expansion — return only the caller's own metrics. */
         personalOnly: z.boolean().optional(),
         /**
+         * Team supervisor only: aggregate across self + team. Without it the
+         * aggregate helper treats the supervisor's own id as "My performance".
+         * The Ad Spend page sends it so the ₦ strip matches its team table.
+         */
+        teamScope: z.boolean().optional(),
+        /**
          * Follow the top-bar country pick: only that country's orders, carts
          * and form spend, money in its currency. Opt-in, because some callers
          * (Ad Spend page, HR profile) pair these numbers with ₦ lists that
@@ -799,7 +806,10 @@ export const marketingRouter = router({
           supervisorBranch
         ) {
           const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, supervisorBranch, {
-            mediaBuyerId: ctx.user.id,
+            // No id (dashboard "Team", Ad Spend page) = self + team; their own
+            // id = "My performance". Before, the own id was always forced in,
+            // so the dashboard's Team totals were really personal.
+            mediaBuyerId: input.teamScope ? undefined : input.mediaBuyerId,
             startDate: input.startDate,
             endDate: input.endDate,
           });
@@ -1791,9 +1801,15 @@ export const marketingRouter = router({
       }).optional(),
     )
     .query(async ({ input, ctx }) => {
+      // Same viewer scope as listAdSpend: MB = self, supervisor = self + team.
+      const scoped = await scopeAdSpendForViewer(ctx, {
+        mediaBuyerId: input?.mediaBuyerId,
+        mediaBuyerIds: undefined as string[] | undefined,
+      });
       return getMarketingService().getOtherExpensesSummary(
         {
-          mediaBuyerId: input?.mediaBuyerId,
+          mediaBuyerId: scoped.mediaBuyerId,
+          mediaBuyerIds: scoped.mediaBuyerIds,
           startDate: input?.startDate,
           endDate: input?.endDate,
         },
@@ -1861,6 +1877,9 @@ export const marketingRouter = router({
         search: z.string().trim().max(200).optional(),
         productId: z.string().uuid().optional(),
         campaignId: z.string().uuid().optional(),
+        // Ad Spend vs Others tab: without these the counts mixed both tabs.
+        category: expenseCategorySchema.optional(),
+        excludeCategory: expenseCategorySchema.optional(),
         // The campaigns dropdown — non-paginated for the picker.
         campaignsLimit: z.number().int().min(1).max(500).optional().default(20),
       }),
@@ -2592,7 +2611,27 @@ export const marketingRouter = router({
   listMbFundTransfers: authedProcedure
     .input(listMbFundTransfersSchema)
     .query(async ({ input, ctx }) => {
-      return getMarketingService().listMbFundTransfers(input, ctx.user.id, ctx.user.role, ctx.currentBranchId, ctx.effectiveBranchIds);
+      // Branch-wide view: approvers (HoM, admins, funding.approve) and Finance
+      // (read-only). Anyone else, e.g. CS or Logistics, only sees transfers
+      // they are a party to, the same self scope a Media Buyer gets.
+      const seesBranchTransfers =
+        isAdminLevel(ctx.user) ||
+        ctx.user.role === 'HEAD_OF_MARKETING' ||
+        (ctx.user.permissions ?? []).includes('marketing.funding.approve') ||
+        hasFinanceAccess(ctx.user);
+      const scopeRole = ctx.user.role === 'MEDIA_BUYER' || !seesBranchTransfers ? 'MEDIA_BUYER' : ctx.user.role;
+      const supervisedTeamIds =
+        input.direction === 'pending_approval' && ctx.user.role === 'MEDIA_BUYER'
+          ? await getBranchTeamsService().listMarketingSuperviseeIdsAnywhere(ctx.user.id)
+          : undefined;
+      return getMarketingService().listMbFundTransfers(
+        input,
+        ctx.user.id,
+        scopeRole,
+        ctx.currentBranchId,
+        ctx.effectiveBranchIds,
+        supervisedTeamIds,
+      );
     }),
 
   /** Recipients for the peer transfer selector (branch members, or company marketers for supervisors). */

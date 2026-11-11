@@ -168,6 +168,8 @@ const DEFAULT_AD_SPEND_STATUS_COUNTS: AdSpendStatusCounts = {
   REJECTED: 0,
 };
 
+const NO_BUYERS: Array<{ id: string; name: string }> = [];
+
 export function MarketingAdSpendPage({
   adSpend,
   totalAdSpend,
@@ -202,7 +204,7 @@ export function MarketingAdSpendPage({
 }: MarketingAdSpendLoaderData & { picklistsLoading?: boolean }) {
   const statusCounts = statusCountsProp ?? DEFAULT_AD_SPEND_STATUS_COUNTS;
   const campaigns = campaignsProp ?? [];
-  const mediaBuyersForFilter = mediaBuyersForFilterProp ?? [];
+  const mediaBuyersForFilter = mediaBuyersForFilterProp ?? NO_BUYERS;
   const marketingTeams = marketingTeamsProp ?? [];
   const dateFilters = filters;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -808,8 +810,13 @@ export function MarketingAdSpendPage({
     resolvedProducts.find((p) => p.id === productId)?.name ?? 'Unknown product';
   const getCampaignName = (campaignId: string): string =>
     campaigns.find((c: Campaign) => c.id === campaignId)?.name ?? 'Unknown campaign';
+  // `users` comes from users.list, which Media Buyers (team supervisors
+  // included) cannot read; the picklists bundle's buyer list carries the
+  // supervisor's team names, so fall back to it.
   const getUserName = (userId: string, resolvedUsers: User[]): string =>
-    resolvedUsers.find((u) => u.id === userId)?.name ?? 'Unknown user';
+    resolvedUsers.find((u) => u.id === userId)?.name ??
+    mediaBuyersForFilter.find((b) => b.id === userId)?.name ??
+    'Unknown user';
 
   const isFilteringNonAdSpend = selectedCategory !== 'AD_SPEND';
 
@@ -991,7 +998,7 @@ export function MarketingAdSpendPage({
     );
     return cols;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- setSelectedIds is stable
-  }, [viewMode, selectedCategory, isFilteringNonAdSpend, users, products, campaigns, canApproveAdSpend, canModerateRow, fetcher.state, fetcher.formData, selectedIds, toggleSelect, patchedAdSpend, clearSelection]);
+  }, [viewMode, selectedCategory, isFilteringNonAdSpend, users, mediaBuyersForFilter, products, campaigns, canApproveAdSpend, canModerateRow, fetcher.state, fetcher.formData, selectedIds, toggleSelect, patchedAdSpend, clearSelection]);
 
   const adSpendToolbarFilterBadge = useMemo(() => {
     let n = 0;
@@ -1206,8 +1213,8 @@ export function MarketingAdSpendPage({
               },
               {
                 label: `Others (${!secondary && !otherCountsRef.current ? '—' : otherCounts.APPROVED})`,
-                value: !secondary && !otherCountsRef.current ? skeleton : <>{'\u20A6'}{Math.round(otherCounts.totalSpend - otherCounts.pendingSpend).toLocaleString()}</>,
-                valueClassName: (otherCounts.totalSpend - otherCounts.pendingSpend) > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted',
+                value: !secondary && !otherCountsRef.current ? skeleton : <>{'\u20A6'}{Math.round(otherCounts.totalSpend).toLocaleString()}</>,
+                valueClassName: otherCounts.totalSpend > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg-muted',
                 onClick: () => handleOverviewClick('NOT_AD_SPEND', 'APPROVED'),
                 active: isFilteringNonAdSpend && selectedStatus === 'APPROVED',
               },

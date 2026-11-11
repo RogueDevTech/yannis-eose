@@ -32,7 +32,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // CEO directive 2026-05-10: ad-spend listing is a "today's spend" workflow
   // for HoM / team leads, so default the date filter to today (not this month).
   const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url, 'today');
-  const { isMediaBuyer, isFundingAdmin, canApproveAdSpend, adSpendTeamOnlyModeration } = getMarketingRoleFlags(user);
+  const { isMediaBuyer: isMediaBuyerRole, isMarketingTeamSupervisorAnywhere, isFundingAdmin, canApproveAdSpend, adSpendTeamOnlyModeration } = getMarketingRoleFlags(user);
+  // Supervisors see their team (the API scopes it), even on "All branches"
+  // where the role flags still call them a plain Media Buyer.
+  const isMediaBuyer = isMediaBuyerRole && !isMarketingTeamSupervisorAnywhere;
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   // URL-driven page sizes — flat list keyed on `?perPage=`, the daily-grouped
@@ -283,10 +286,20 @@ function AdSpendWithPicklists({
     };
   }, [picklistsPromise]);
 
+  // `pageData` already carries the real picklists (fetched with listAdSpend);
+  // `picklistsPromise` only resolves to the empty fallback. Prefer the real
+  // values, or the fallback's zeros hide the status counts and buyer names.
+  const fallback = picklists ?? AD_SPEND_PICKLISTS_FALLBACK;
+  const merged: AdSpendPicklists = {
+    statusCounts: sync.statusCounts ?? fallback.statusCounts,
+    campaigns: sync.campaigns ?? fallback.campaigns,
+    mediaBuyersForFilter: sync.mediaBuyersForFilter ?? fallback.mediaBuyersForFilter,
+    marketingTeams: sync.marketingTeams ?? fallback.marketingTeams,
+  };
   if (picklists === null) {
-    return <MarketingAdSpendPage {...sync} {...AD_SPEND_PICKLISTS_FALLBACK} picklistsLoading />;
+    return <MarketingAdSpendPage {...sync} {...merged} picklistsLoading />;
   }
-  return <MarketingAdSpendPage {...sync} {...picklists} />;
+  return <MarketingAdSpendPage {...sync} {...merged} />;
 }
 
 export default function AdminMarketingAdSpendRoute() {

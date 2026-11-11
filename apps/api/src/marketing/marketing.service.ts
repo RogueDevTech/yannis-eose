@@ -4209,13 +4209,15 @@ export class MarketingService {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Recipient not found' });
       }
 
+      // Every sender: peer money only goes to an active marketer.
+      if (receiver[0].status !== 'ACTIVE' || !PEER_TRANSFER_RECEIVER_ROLES.has(receiver[0].role)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Peer transfers can only go to an active Media Buyer, supervisor or Head of Marketing.',
+        });
+      }
+
       if (senderIsSupervisor) {
-        if (receiver[0].status !== 'ACTIVE' || !PEER_TRANSFER_RECEIVER_ROLES.has(receiver[0].role)) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Peer transfers can only go to an active Media Buyer, supervisor or Head of Marketing.',
-          });
-        }
         const [senderCompanies, receiverCompanies] = await Promise.all([
           userCompanyIds(tx, actor.id),
           userCompanyIds(tx, input.receiverMbId),
@@ -4649,6 +4651,12 @@ export class MarketingService {
     actorRole: string,
     branchId: string | null,
     effectiveBranchIds?: string[] | null,
+    /**
+     * Media Buyer callers only: the team they supervise (excluding self). In
+     * the approval inbox they see only transfers between two team members,
+     * the same rule `assertMayApprovePeerTransfer` enforces.
+     */
+    supervisedTeamIds?: string[],
   ) {
     const conditions: Parameters<typeof and>[0][] = [];
 
@@ -4660,6 +4668,15 @@ export class MarketingService {
       if (branchId) conditions.push(eq(schema.mbFundTransfers.branchId, branchId));
       if (effectiveBranchIds?.length) {
         conditions.push(inArray(schema.mbFundTransfers.branchId, effectiveBranchIds));
+      }
+      if (actorRole === 'MEDIA_BUYER') {
+        const team = supervisedTeamIds ?? [];
+        if (team.length === 0) {
+          conditions.push(sql`false`);
+        } else {
+          conditions.push(inArray(schema.mbFundTransfers.senderMbId, team));
+          conditions.push(inArray(schema.mbFundTransfers.receiverMbId, team));
+        }
       }
     } else if (actorRole === 'MEDIA_BUYER') {
       if (input.direction === 'sent') {
@@ -4772,6 +4789,8 @@ export class MarketingService {
         and(
           eq(schema.userBranches.branchId, branchId),
           eq(schema.users.status, 'ACTIVE'),
+          // Same receivers createMbFundTransfer accepts (not HR, CS, ...).
+          inArray(schema.users.role, [...PEER_TRANSFER_RECEIVER_ROLES] as Array<'MEDIA_BUYER' | 'HEAD_OF_MARKETING'>),
         ),
       )
       .orderBy(asc(schema.users.name));
@@ -5882,6 +5901,7 @@ export class MarketingService {
   async getOtherExpensesSummary(
     input: {
       mediaBuyerId?: string;
+      mediaBuyerIds?: string[];
       startDate?: string;
       endDate?: string;
     },
@@ -5900,6 +5920,9 @@ export class MarketingService {
     ];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
+    }
+    if (input.mediaBuyerIds && input.mediaBuyerIds.length > 0) {
+      conditions.push(inArray(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerIds));
     }
     if (input.startDate) {
       conditions.push(gte(schema.adSpendLogs.spendDate, nigeriaDayStart(input.startDate)));

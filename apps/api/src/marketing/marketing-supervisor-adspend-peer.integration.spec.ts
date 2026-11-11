@@ -231,6 +231,31 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing team supervisors: ad spend approval an
     ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('same branch') });
   });
 
+  it('a plain Media Buyer cannot send to a non-marketing user on their branch', async () => {
+    const svc = mkMarketing();
+    const s = await setup();
+    await setSessionActor(pgClient, s.admin.id);
+    await db.insert(schema.marketingFunding).values({
+      senderId: s.hom.id,
+      receiverId: s.mb2.id,
+      amount: sql`${10_000}::numeric`,
+      status: 'COMPLETED',
+      sentAt: new Date(),
+      verifiedAt: new Date(),
+    });
+    await expect(
+      svc.createMbFundTransfer({ receiverMbId: s.cs.id, amount: 1_000 }, s.mb2, s.branchA.id, [s.branchA.id]),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('Media Buyer') });
+  });
+
+  it('branch recipient list only offers marketers', async () => {
+    const svc = mkMarketing();
+    const s = await setup();
+    const ids = (await svc.listBranchMembersForTransfer(s.branchA.id)).map((r) => r.id);
+    expect(ids).toEqual(expect.arrayContaining([s.s1.id, s.mb2.id, s.hom.id]));
+    expect(ids).not.toContain(s.cs.id);
+  });
+
   it('a receiver cannot approve a transfer into their own balance', async () => {
     const svc = mkMarketing();
     const s = await setup();
@@ -267,6 +292,59 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing team supervisors: ad spend approval an
     const s = await setup();
     const transfer = (await svc.createMbFundTransfer({ receiverMbId: s.s2.id, amount: 5_000 }, s.s1, null, null)) as any;
     await expect(svc.rejectMbFundTransfer(transfer.id, 'Not mine to reject', s.mb2)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('approval inbox: a supervisor sees only transfers between their own team members', async () => {
+    const svc = mkMarketing();
+    const s = await setup();
+    await setSessionActor(pgClient, s.admin.id);
+    // MB2 joins S1's team, so MB1 -> MB2 is an in-team transfer S1 may approve.
+    const [teamA] = await db
+      .select({ teamId: schema.branchTeamMembers.teamId })
+      .from(schema.branchTeamMembers)
+      .where(eq(schema.branchTeamMembers.userId, s.s1.id));
+    await db.insert(schema.branchTeamMembers).values({ teamId: teamA!.teamId, userId: s.mb2.id, isSupervisor: false });
+    const pending = async (from: string, to: string) => {
+      const [row] = await db
+        .insert(schema.mbFundTransfers)
+        .values({ senderMbId: from, receiverMbId: to, amount: sql`${1_000}::numeric`, branchId: s.branchA.id })
+        .returning();
+      return row!.id;
+    };
+    const inTeam = await pending(s.mb1.id, s.mb2.id);
+    const toOtherTeam = await pending(s.mb1.id, s.s2.id);
+
+    const inbox = { direction: 'pending_approval', page: 1, limit: 50 };
+    const ids = async (...args: [string, string, string[] | undefined]) =>
+      ((await svc.listMbFundTransfers(inbox, args[0], args[1], null, null, args[2])) as any).transfers.map(
+        (t: { id: string }) => t.id,
+      );
+
+    const team = await teams().listMarketingSuperviseeIdsAnywhere(s.s1.id);
+    expect(await ids(s.s1.id, 'MEDIA_BUYER', team)).toEqual([inTeam]);
+    // A plain Media Buyer approves nothing, so their inbox is empty.
+    expect(await ids(s.mb2.id, 'MEDIA_BUYER', [])).toEqual([]);
+    // The Head of Marketing still sees both.
+    expect(await ids(s.hom.id, 'HEAD_OF_MARKETING', undefined)).toEqual(expect.arrayContaining([inTeam, toOtherTeam]));
+  });
+
+  it('other expenses summary counts only the Media Buyers passed in', async () => {
+    const svc = mkMarketing();
+    const s = await setup();
+    await setSessionActor(pgClient, s.admin.id);
+    const other = (mediaBuyerId: string, amount: number) =>
+      db.insert(schema.adSpendLogs).values({
+        mediaBuyerId,
+        spendAmount: sql`${amount}::numeric`,
+        spendDate: new Date(),
+        status: 'PENDING',
+        category: 'UGC_PRODUCTION',
+      });
+    await other(s.mb1.id, 3_000);
+    await other(s.mb3.id, 7_000);
+    const summary = await svc.getOtherExpensesSummary({ mediaBuyerIds: [s.s1.id, s.mb1.id] }, null, null);
+    expect(summary.PENDING).toBe(1);
+    expect(summary.pendingSpend).toBe(3_000);
   });
 
   it('recipient list for a supervisor: company marketers on every branch, nobody else', async () => {

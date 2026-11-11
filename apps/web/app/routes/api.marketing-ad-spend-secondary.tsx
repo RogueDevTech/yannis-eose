@@ -50,7 +50,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const startDate = url.searchParams.get('startDate') ?? undefined;
   const endDate = url.searchParams.get('endDate') ?? undefined;
   const periodAllTime = url.searchParams.get('periodAllTime') === 'true';
-  const isMediaBuyer = url.searchParams.get('view') === 'media_buyer' || user.role === 'MEDIA_BUYER';
+  // A Media Buyer who supervises a marketing team sees the team's rows; the
+  // API scopes them (self + team), so do not pin these calls to self.
+  const isTeamSupervisor =
+    user.role === 'MEDIA_BUYER' && user.isMarketingTeamSupervisorOnActiveBranch === true;
+  const isMediaBuyer =
+    !isTeamSupervisor && (url.searchParams.get('view') === 'media_buyer' || user.role === 'MEDIA_BUYER');
 
   const status = url.searchParams.get('status') ?? undefined;
   const category = url.searchParams.get('category') || 'AD_SPEND';
@@ -92,6 +97,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const metricsInput = JSON.stringify({
       ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
+      ...(isTeamSupervisor ? { teamScope: true } : {}),
       ...(startDate && !periodAllTime ? { startDate } : {}),
       ...(endDate && !periodAllTime ? { endDate } : {}),
     });

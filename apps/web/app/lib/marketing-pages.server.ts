@@ -391,6 +391,8 @@ export interface MarketingRoleFlags {
   canApproveAdSpend: boolean;
   /** Approve rights come only from supervising a team: their team's entries, never their own. */
   adSpendTeamOnlyModeration: boolean;
+  /** Media Buyer who supervises a marketing team on any branch. */
+  isMarketingTeamSupervisorAnywhere: boolean;
   /** Can send a peer transfer (Media Buyers, including team supervisors). */
   canPeerTransfer: boolean;
   /** Sees Approve / Reject on peer transfers (the API decides per transfer). */
@@ -487,6 +489,7 @@ export function getMarketingRoleFlags(
     canRequestFunding,
     canApproveAdSpend,
     adSpendTeamOnlyModeration,
+    isMarketingTeamSupervisorAnywhere,
     canPeerTransfer,
     canApprovePeerTransfers,
     canReverseFunding,
