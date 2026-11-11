@@ -19,6 +19,7 @@ import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import { branchScopeCondition, closerBranchOrAssignedCondition } from '../common/db/branch-scope-condition';
 import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
+import { loadFxToNgn } from '../common/db/fx-to-ngn-sql';
 import { CacheService } from '../common/cache/cache.service';
 import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { EventsService } from '../events/events.service';
@@ -1076,6 +1077,12 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     const confirmedStatuses = ['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'REMITTED'];
     const deliveredStatuses = ['DELIVERED', 'REMITTED'];
 
+    // Delivered revenue in ₦: other countries converted at the current FX rate,
+    // never added 1:1 (CEO 2026-11-11). A branch serves several countries.
+    const fuFx = (await loadFxToNgn(this.db)).byBranch(
+      sql`${schema.followUpOrders.currencyCode}`,
+      sql`${schema.followUpOrders.servicingBranchId}`,
+    );
     const rows = await this.db
       .select({
         branchId: schema.followUpOrders.servicingBranchId,
@@ -1084,7 +1091,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         assigned: sql<number>`count(*) filter (where ${schema.followUpOrders.status} in ('CS_ASSIGNED', 'CS_ENGAGED'))::int`,
         confirmed: sql<number>`count(*) filter (where ${schema.followUpOrders.status} in (${sql.join(confirmedStatuses.map((s) => sql`${s}`), sql`, `)}))::int`,
         delivered: sql<number>`count(*) filter (where ${schema.followUpOrders.status} in (${sql.join(deliveredStatuses.map((s) => sql`${s}`), sql`, `)}))::int`,
-        deliveredRevenue: sql<string>`coalesce(sum(${schema.followUpOrders.totalAmount}) filter (where ${schema.followUpOrders.status} in (${sql.join(deliveredStatuses.map((s) => sql`${s}`), sql`, `)})), 0)::text`,
+        deliveredRevenue: sql<string>`coalesce(sum(${schema.followUpOrders.totalAmount} * ${fuFx}) filter (where ${schema.followUpOrders.status} in (${sql.join(deliveredStatuses.map((s) => sql`${s}`), sql`, `)})), 0)::text`,
       })
       .from(schema.followUpOrders)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
