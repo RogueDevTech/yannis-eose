@@ -54,7 +54,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { branchScopeCondition } from '../common/db/branch-scope-condition';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
-import { fxToNgnRateSql } from '../common/db/fx-to-ngn-sql';
+import { loadFxToNgn } from '../common/db/fx-to-ngn-sql';
 import { isAdminLevel } from '../common/authz';
 import { OrdersService } from '../orders/orders.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
@@ -2887,7 +2887,7 @@ export class LogisticsService implements OnModuleInit {
     // One country in scope (explicit currencyCode, or the top-bar country / a
     // single assigned country) → raw totals in that currency. Several or all
     // countries → each amount converted to ₦ at its company's current FX rate
-    // (same rule as the CEO "Delivered revenue" tiles, see fxToNgnRateSql);
+    // (same rule as the CEO "Delivered revenue" tiles, see loadFxToNgn);
     // currencies with no rate are left out and listed in `unconvertedCurrencies`.
     // Per-batch rows above stay in their own currency.
     const scopedCodes = effectiveCurrencyCodes && effectiveCurrencyCodes.length > 0
@@ -2897,11 +2897,9 @@ export class LogisticsService implements OnModuleInit {
     const fxConvert = !summaryCurrency;
     const orderCountryCond = fxConvert && scopedCodes ? countryScopeCondition(schema.orders.currencyCode, scopedCodes) : null;
     const batchCountryCond = fxConvert && scopedCodes ? countryScopeCondition(schema.deliveryRemittances.currencyCode, scopedCodes) : null;
-    const orderFx = fxToNgnRateSql(
-      sql`${schema.orders.currencyCode}`,
-      sql`(SELECT fxg.group_id FROM branches fxg WHERE fxg.id = ${schema.orders.servicingBranchId})`,
-    );
-    const batchFx = fxToNgnRateSql(
+    const fxToNgn = await loadFxToNgn(this.db);
+    const orderFx = fxToNgn.byBranch(sql`${schema.orders.currencyCode}`, sql`${schema.orders.servicingBranchId}`);
+    const batchFx = fxToNgn.byGroup(
       sql`${schema.deliveryRemittances.currencyCode}`,
       sql`(SELECT fxg.group_id FROM delivery_remittance_orders fxd JOIN orders fxo ON fxo.id = fxd.order_id JOIN branches fxg ON fxg.id = fxo.servicing_branch_id WHERE fxd.delivery_remittance_id = ${schema.deliveryRemittances.id} LIMIT 1)`,
     );

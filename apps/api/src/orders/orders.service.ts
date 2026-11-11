@@ -68,6 +68,7 @@ import { permissionRequestTypeTextEq } from '../common/db/permission-request-typ
 import { branchScopeCondition, closerBranchOrAssignedCondition } from '../common/db/branch-scope-condition';
 import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
+import { loadFxToNgn } from '../common/db/fx-to-ngn-sql';
 import { closerInCountriesCondition } from '../common/db/closer-country-condition';
 import { offerLabelMatches } from '../common/db/offer-label-match';
 import { EventsService } from '../events/events.service';
@@ -9639,6 +9640,15 @@ export class OrdersService {
    * Get delivered orders aggregated by day — for CEO overview time-series chart.
    * Returns { date: YYYY-MM-DD, revenue, orderCount }[] for the given date range (delivered_at).
    */
+  /**
+   * `orders` row → ₦ rate (FX at the current rate; NULL = no rate, left out of
+   * SUMs). Revenue reported in ₦ must never add KSh/ZK/GH₵ 1:1 (CEO 2026-11-11).
+   */
+  private async orderFxToNgn(): Promise<SQL> {
+    const fx = await loadFxToNgn(this.db);
+    return fx.byBranch(sql`${schema.orders.currencyCode}`, sql`${schema.orders.servicingBranchId}`);
+  }
+
   async getDeliveredOrdersTimeSeries(startDate?: string, endDate?: string, branchId?: string | null, effectiveBranchIds?: string[] | null, effectiveCurrencyCodes?: string[] | null): Promise<{ date: string; revenue: number; orderCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [
       inArray(schema.orders.status, ['DELIVERED', 'REMITTED']),
@@ -9654,11 +9664,13 @@ export class OrdersService {
     }
     const whereClause = and(...conditions);
     const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.deliveredAt})::date`;
+    // Money in ₦: other countries converted at the current FX rate, never 1:1 (CEO 2026-11-11).
+    const ordFx = await this.orderFxToNgn();
 
     const rows = await this.db
       .select({
         date: dateTrunc,
-        revenue: sql<string>`COALESCE(SUM(CAST(${schema.orders.totalAmount} AS numeric)), 0)`,
+        revenue: sql<string>`COALESCE(SUM(CAST(${schema.orders.totalAmount} AS numeric) * ${ordFx}), 0)`,
         orderCount: count(),
       })
       .from(schema.orders)
@@ -9807,13 +9819,15 @@ export class OrdersService {
       WHEN ${schema.orders.orderSource} = 'graduated_follow_up' OR ${schema.orders.isFollowUp} = true THEN 'follow-up'
       ELSE COALESCE(${schema.orders.orderSource}, 'edge-form')
     END`;
+    // Money in ₦: other countries converted at the current FX rate, never 1:1 (CEO 2026-11-11).
+    const ordFx = await this.orderFxToNgn();
 
     const rows = await this.db
       .select({
         source: sourceCase,
         status: schema.orders.status,
-        gross: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
-        net: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)), 0)::text`,
+        gross: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} * ${ordFx}), 0)::text`,
+        net: sql<string>`COALESCE(SUM((${schema.orders.totalAmount} - COALESCE(${schema.orders.deliveryFee}, 0)) * ${ordFx}), 0)::text`,
       })
       .from(schema.orders)
       .where(and(...conditions))
@@ -10043,11 +10057,14 @@ export class OrdersService {
       if (cCond) conditions.push(cCond);
     }
 
+    // Money in ₦: other countries converted at the current FX rate, never 1:1 (CEO 2026-11-11).
+    const ordFx = await this.orderFxToNgn();
+
     const [row] = await this.db
       .select({
-        today: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${todayIso}::timestamptz THEN CAST(${schema.orders.totalAmount} AS numeric) ELSE 0 END), 0)`,
-        thisWeek: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${weekIso}::timestamptz THEN CAST(${schema.orders.totalAmount} AS numeric) ELSE 0 END), 0)`,
-        thisMonth: sql<string>`COALESCE(SUM(CAST(${schema.orders.totalAmount} AS numeric)), 0)`,
+        today: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${todayIso}::timestamptz THEN CAST(${schema.orders.totalAmount} AS numeric) * ${ordFx} ELSE 0 END), 0)`,
+        thisWeek: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${weekIso}::timestamptz THEN CAST(${schema.orders.totalAmount} AS numeric) * ${ordFx} ELSE 0 END), 0)`,
+        thisMonth: sql<string>`COALESCE(SUM(CAST(${schema.orders.totalAmount} AS numeric) * ${ordFx}), 0)`,
         deliveredThisMonth: sql<string>`COUNT(*)`,
       })
       .from(schema.orders)
@@ -14120,13 +14137,15 @@ export class OrdersService {
 
     // Get per-batch order status breakdown in one query
     const batchIds = batches.map((b) => b.id);
+    const ordFx = batchIds.length > 0 ? await this.orderFxToNgn() : sql`1`;
     const statusBreakdown = batchIds.length > 0
       ? await this.db
           .select({
             batchId: schema.followUpBatchItems.batchId,
             status: schema.orders.status,
             count: sql<number>`count(*)::int`,
-            revenue: sql<string>`coalesce(sum(${schema.orders.totalAmount}), 0)::text`,
+            // ₦: other countries converted at the current FX rate, never 1:1.
+            revenue: sql<string>`coalesce(sum(${schema.orders.totalAmount} * ${ordFx}), 0)::text`,
           })
           .from(schema.followUpBatchItems)
           .innerJoin(schema.orders, eq(schema.orders.id, schema.followUpBatchItems.orderId))

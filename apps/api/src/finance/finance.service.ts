@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, desc, gte, lte, count, sum, sql, inArray, isNotNull, isNull, type SQL } from 'drizzle-orm';
+import { eq, and, or, desc, gte, lte, count, sum, sql, inArray, isNotNull, isNull, type SQL, type Column } from 'drizzle-orm';
+import { loadFxToNgn } from '../common/db/fx-to-ngn-sql';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
@@ -484,6 +485,25 @@ export class FinanceService {
     if (input.currencyCode) orderConditions.push(eq(schema.orders.currencyCode, input.currencyCode));
     const orderWhere = and(...orderConditions);
 
+    // ── Money is in ₦ (CEO 2026-11-11) ────────────────────
+    // Order money (revenue, landed cost, delivery fee) is frozen in the order's
+    // own currency: a ZMW order's revenue is ZK and its FIFO landed cost comes
+    // from ZMW batches. Ad spend and commission are always ₦. Summing ZK as ₦
+    // made true profit and margin collapse for every foreign order, so every
+    // order amount is converted to ₦ at its company's current FX rate (same
+    // rule as the CEO "Delivered revenue" tiles). Unrated currencies are left
+    // out and reported in `unconvertedRevenueByCurrency`, never counted 1:1.
+    const fxToNgn = await loadFxToNgn(this.db);
+    const orderFx = fxToNgn.byBranch(sql`${schema.orders.currencyCode}`, sql`${schema.orders.servicingBranchId}`);
+    const batchUnitCostNgn = (productIdCol: SQL | Column) => sql`(
+      SELECT COALESCE(AVG(
+        CAST(sb.total_landed_cost AS numeric) / NULLIF(sb.quantity, 0)
+        * ${fxToNgn.byGroup(sql`sb.currency_code`, sql`(SELECT pg.group_id FROM products pg WHERE pg.id = sb.product_id)`)}
+      ), 0)
+      FROM stock_batches sb
+      WHERE sb.product_id = ${productIdCol}
+    )`;
+
     // ── Branch-group scoping helpers ──────────────────────
     // When effectiveBranchIds is set, ad spend and commission must be scoped
     // to the active company group. Ad spend goes through campaigns.branchId;
@@ -639,9 +659,9 @@ export class FinanceService {
       // Revenue + COGS + delivery fee from delivered orders
       this.db
         .select({
-          totalRevenue: sum(schema.orders.totalAmount),
-          totalLandedCost: sum(schema.orders.landedCost),
-          totalDeliveryFee: sum(schema.orders.deliveryFee),
+          totalRevenue: sql<string>`COALESCE(SUM(${schema.orders.totalAmount} * ${orderFx}), 0)`,
+          totalLandedCost: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.landedCost}, 0) * ${orderFx}), 0)`,
+          totalDeliveryFee: sql<string>`COALESCE(SUM(COALESCE(${schema.orders.deliveryFee}, 0) * ${orderFx}), 0)`,
           orderCount: count(),
         })
         .from(schema.orders)
@@ -653,6 +673,7 @@ export class FinanceService {
         .select({
           currencyCode: schema.orders.currencyCode,
           total: sql<number>`coalesce(sum(${schema.orders.totalAmount}), 0)`.mapWith(Number),
+          unconverted: sql<number>`coalesce(sum(${schema.orders.totalAmount}) FILTER (WHERE ${orderFx} IS NULL), 0)`.mapWith(Number),
         })
         .from(schema.orders)
         .where(orderWhere)
@@ -679,14 +700,7 @@ export class FinanceService {
       this.db
         .select({
           totalLoss: sql<string>`COALESCE(SUM(
-            ${schema.stockMovements.quantity} * (
-              SELECT COALESCE(
-                AVG(CAST(${schema.stockBatches.totalLandedCost} AS numeric) / NULLIF(${schema.stockBatches.quantity}, 0)),
-                0
-              )
-              FROM ${schema.stockBatches}
-              WHERE ${schema.stockBatches.productId} = ${schema.stockMovements.productId}
-            )
+            ${schema.stockMovements.quantity} * ${batchUnitCostNgn(schema.stockMovements.productId)}
           ), 0)`,
         })
         .from(schema.stockMovements)
@@ -696,14 +710,7 @@ export class FinanceService {
       this.db
         .select({
           totalLoss: sql<string>`COALESCE(SUM(
-            (${schema.stockTransfers.quantitySent} - COALESCE(${schema.stockTransfers.quantityReceived}, 0)) * (
-              SELECT COALESCE(
-                AVG(CAST(${schema.stockBatches.totalLandedCost} AS numeric) / NULLIF(${schema.stockBatches.quantity}, 0)),
-                0
-              )
-              FROM ${schema.stockBatches}
-              WHERE ${schema.stockBatches.productId} = ${schema.stockTransfers.productId}
-            )
+            (${schema.stockTransfers.quantitySent} - COALESCE(${schema.stockTransfers.quantityReceived}, 0)) * ${batchUnitCostNgn(schema.stockTransfers.productId)}
           ), 0)`,
         })
         .from(schema.stockTransfers)
@@ -714,9 +721,13 @@ export class FinanceService {
     const revenue = Number(revenueRows[0]?.totalRevenue ?? 0);
     // Per-currency revenue map for the currency lens ({ NGN: x, GHS: y }).
     const revenueByCurrency: Record<string, number> = {};
+    const unconvertedRevenueByCurrency: Record<string, number> = {};
     for (const r of revenueByCurrencyRows) {
       const code = (r.currencyCode ?? 'NGN').toUpperCase();
       revenueByCurrency[code] = (revenueByCurrency[code] ?? 0) + Number(r.total ?? 0);
+      if (Number(r.unconverted ?? 0) !== 0) {
+        unconvertedRevenueByCurrency[code] = (unconvertedRevenueByCurrency[code] ?? 0) + Number(r.unconverted);
+      }
     }
     const landedCost = Number(revenueRows[0]?.totalLandedCost ?? 0);
     const deliveryFee = Number(revenueRows[0]?.totalDeliveryFee ?? 0);
@@ -738,7 +749,7 @@ export class FinanceService {
       orderWhere &&
       adSpendWhere
     ) {
-      byProduct = await this.computeProductProfitBreakdown(orderWhere, adSpendWhere, {
+      byProduct = await this.computeProductProfitBreakdown(orderWhere, adSpendWhere, orderFx, {
         revenue,
         commission,
         fulfillmentCost,
@@ -747,8 +758,11 @@ export class FinanceService {
     }
 
     return {
+      /** Every amount below except revenueByCurrency is in ₦ (FX-converted). */
+      currencyCode: 'NGN' as const,
       revenue,
       revenueByCurrency,
+      unconvertedRevenueByCurrency,
       landedCost,
       deliveryFee,
       adSpend,
@@ -769,6 +783,7 @@ export class FinanceService {
   private async computeProductProfitBreakdown(
     orderWhere: SQL,
     adSpendWhere: SQL,
+    orderFx: SQL,
     pools: {
       revenue: number;
       commission: number;
@@ -785,6 +800,8 @@ export class FinanceService {
         unitPrice: schema.orderItems.unitPrice,
         orderLanded: schema.orders.landedCost,
         orderDelivery: schema.orders.deliveryFee,
+        // ₦ per unit of the order's currency; NULL = no FX rate (line left out).
+        fx: sql<string | null>`${orderFx}`,
       })
       .from(schema.orderItems)
       .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
@@ -800,14 +817,17 @@ export class FinanceService {
     const byOrder = new Map<string, OrderAgg>();
 
     for (const row of lineRows) {
+      // Order money is in the order's currency; convert to ₦ like the totals.
+      const fx = row.fx == null ? NaN : Number(row.fx);
+      if (!(fx > 0)) continue;
       // unitPrice is the offer/line total — use directly
-      const lineRev = Number(row.unitPrice);
+      const lineRev = Number(row.unitPrice) * fx;
       let agg = byOrder.get(row.orderId);
       if (!agg) {
         agg = {
           lines: [],
-          landed: Number(row.orderLanded ?? 0),
-          delivery: Number(row.orderDelivery ?? 0),
+          landed: Number(row.orderLanded ?? 0) * fx,
+          delivery: Number(row.orderDelivery ?? 0) * fx,
         };
         byOrder.set(row.orderId, agg);
       }
