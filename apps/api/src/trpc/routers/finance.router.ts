@@ -332,6 +332,7 @@ export const financeRouter = router({
               ctx.user,
               ctx.activeGroupId,
               ctx.effectiveBranchIds,
+              ctx.effectiveCurrencyCodes,
             )
             .catch(() => null),
           getPayrollBatchService()

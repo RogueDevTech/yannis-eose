@@ -61,7 +61,17 @@ export function FinanceCashRemittanceSection({
   // The currency all Cash-remittance figures display in. The active country is
   // scoped session-wide by the global switcher, so tiles show the base currency
   // symbol (e.g. GH₵) instead of always ₦.
-  const activeCurrencyCode = baseCurrency.code;
+  // The API says which currency its totals are in: the one country in scope, or
+  // NGN when several countries were converted at current FX rates.
+  const activeCurrencyCode = pulse.summaryCurrencyCode ?? baseCurrency.code;
+  const fxNote = pulse.fxConverted
+    ? `Other countries converted to ₦ at current FX rates.${
+        pulse.unconvertedCurrencies?.length
+          ? ` Left out (no FX rate set): ${pulse.unconvertedCurrencies.join(', ')}.`
+          : ''
+      }`
+    : undefined;
+  const awaitingByCountry = (pulse.awaitingPeriodByCurrency ?? []).filter((r) => r.count > 0);
 
   // Use gross delivered amount to match the Cash Remittances page
   const totalDelivered = pulse.deliveredAmount ?? pulse.deliveredNetAmount ?? (pulse.awaitingCash + pulse.receivedAmount + pulse.pendingRemittanceAmount + pulse.disputedRemittanceAmount);
@@ -236,6 +246,7 @@ export function FinanceCashRemittanceSection({
         )}
         {/* Info modals */}
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'delivered'}
           onClose={() => setInfoModal(null)}
           title="Total Delivered"
@@ -245,6 +256,7 @@ export function FinanceCashRemittanceSection({
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'remitted'}
           onClose={() => setInfoModal(null)}
           title="Remitted"
@@ -258,11 +270,23 @@ export function FinanceCashRemittanceSection({
           onClose={() => setInfoModal(null)}
           title={`Awaiting: ${periodLabel}`}
           description="Gross value of delivered orders in the selected period (this month by default) that are not yet on any remittance batch. This is what is due for the current period."
+          currencyCode={activeCurrencyCode}
+          note={fxNote}
           lines={[
-            { label: `Delivered ${periodLabel === 'This period' ? 'this period' : `in ${periodLabel}`}, not on any batch (gross)`, amount: pulse.awaitingPeriodCash, type: 'value', count: pulse.awaitingPeriodOrderCount },
+            // Each country in its own money first, then the total (₦-converted when several).
+            ...(awaitingByCountry.length > 1
+              ? awaitingByCountry.map((r) => ({ label: r.currencyCode, amount: r.amount, type: 'value' as const, count: r.count, currencyCode: r.currencyCode }))
+              : []),
+            {
+              label: `Delivered ${periodLabel === 'This period' ? 'this period' : `in ${periodLabel}`}, not on any batch (gross)`,
+              amount: pulse.awaitingPeriodCash,
+              type: awaitingByCountry.length > 1 ? ('result' as const) : ('value' as const),
+              count: pulse.awaitingPeriodOrderCount,
+            },
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'awaiting'}
           onClose={() => setInfoModal(null)}
           title="Awaiting: All time"
@@ -274,6 +298,7 @@ export function FinanceCashRemittanceSection({
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'pending'}
           onClose={() => setInfoModal(null)}
           title="Pending Batches"
@@ -283,6 +308,7 @@ export function FinanceCashRemittanceSection({
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'disputed'}
           onClose={() => setInfoModal(null)}
           title="Disputed"
@@ -292,6 +318,7 @@ export function FinanceCashRemittanceSection({
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'gross'}
           onClose={() => setInfoModal(null)}
           title="Gross Order Value"
@@ -301,6 +328,7 @@ export function FinanceCashRemittanceSection({
           ]}
         />
         <FormulaBreakdownModal
+          currencyCode={activeCurrencyCode}
           open={infoModal === 'net'}
           onClose={() => setInfoModal(null)}
           title="Expected Net"

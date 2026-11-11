@@ -1,5 +1,7 @@
 import { Modal } from '~/components/ui/modal';
-import { formatNaira } from '~/lib/format-amount';
+import { formatMoney } from '~/lib/format-amount';
+import { useCurrenciesCatalog } from '~/contexts/currencies-catalog-context';
+import { currencyByCode } from '@yannis/shared';
 
 export function RemittanceInfoIcon({ onClick }: { onClick: () => void }) {
   return (
@@ -17,7 +19,14 @@ export function RemittanceInfoIcon({ onClick }: { onClick: () => void }) {
   );
 }
 
-export type FormulaLine = { label: string; amount: number; type: 'value' | 'deduction' | 'result'; count?: number };
+export type FormulaLine = {
+  label: string;
+  amount: number;
+  type: 'value' | 'deduction' | 'result';
+  count?: number;
+  /** Show this line in its own currency (e.g. a per-country breakdown). Defaults to the modal's currency. */
+  currencyCode?: string;
+};
 
 export function FormulaBreakdownModal({
   open,
@@ -25,13 +34,20 @@ export function FormulaBreakdownModal({
   title,
   description,
   lines,
+  currencyCode,
+  note,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   description: string;
   lines: FormulaLine[];
+  /** Currency the amounts are in (defaults to NGN). */
+  currencyCode?: string;
+  /** Short footnote under the lines (e.g. "Converted to ₦ at current FX rates."). */
+  note?: string;
 }) {
+  const catalog = useCurrenciesCatalog();
   return (
     <Modal open={open} onClose={onClose} maxWidth="max-w-md">
       <div className="space-y-5 p-5">
@@ -61,12 +77,13 @@ export function FormulaBreakdownModal({
                       ? 'text-red-500'
                       : 'text-app-fg'
                 }`}>
-                  {formatNaira(Math.round(Math.abs(line.amount)))}
+                  {formatMoney(Math.round(Math.abs(line.amount)), currencyByCode(catalog, line.currencyCode ?? currencyCode ?? 'NGN'))}
                 </span>
               </div>
             );
           })}
         </div>
+        {note && <p className="text-xs text-app-fg-muted leading-relaxed">{note}</p>}
       </div>
     </Modal>
   );
