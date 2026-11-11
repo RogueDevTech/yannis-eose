@@ -210,9 +210,19 @@ export class VoipService {
       // Auto-transition pre-engagement statuses to CS_ENGAGED when the agent
       // initiates a call.  This is the natural flow: clicking "Call customer"
       // on an UNPROCESSED / CS_ASSIGNED order means engagement has started.
-      if (foundOrder.status !== 'CS_ENGAGED') {
+      //
+      // ONLY pre-engagement statuses move. A call on a CONFIRMED (or later) order
+      // is a follow-up call (e.g. agreeing a delivery day) and must keep its
+      // status: CONFIRMED → CS_ENGAGED is the managers' retrack move, and this
+      // path used to take it for any closer, silently un-confirming orders
+      // (YNS-145591 / 146209 / 146479 / 146505, Nov 2026).
+      const CALLABLE_WITHOUT_STATUS_CHANGE = ['CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'];
+      if (!CALLABLE_WITHOUT_STATUS_CHANGE.includes(foundOrder.status)) {
         const currentStatus = foundOrder.status as import('@yannis/shared').OrderStatus;
-        if (!isTransitionAllowed(currentStatus, 'CS_ENGAGED')) {
+        if (
+          (currentStatus !== 'UNPROCESSED' && currentStatus !== 'CS_ASSIGNED') ||
+          !isTransitionAllowed(currentStatus, 'CS_ENGAGED')
+        ) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
             message: `Cannot initiate call: order is in ${foundOrder.status} status`,
