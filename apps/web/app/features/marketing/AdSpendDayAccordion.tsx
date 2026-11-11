@@ -56,8 +56,22 @@ function canEditLine(
   return !!currentUserId && line.mediaBuyerId === currentUserId;
 }
 
+/** Team supervisors approve their team's lines, never their own. HoM / admin
+ *  (teamOnly = false) can moderate every line they see. */
+function canModerateLine(
+  line: AdSpendGroupLine,
+  currentUserId: string | undefined,
+  canModerate: boolean,
+  teamOnly: boolean,
+): boolean {
+  if (!canModerate) return false;
+  if (!teamOnly) return true;
+  return !!currentUserId && line.mediaBuyerId !== currentUserId;
+}
+
 function buildAdSpendLineColumns(
   canModerate: boolean,
+  teamOnly: boolean,
   currentUserId: string | undefined,
   actionUrl: string,
   onPreviewReceipt: (line: AdSpendGroupLine) => void,
@@ -181,8 +195,8 @@ function buildAdSpendLineColumns(
       <AdSpendLineActionsCell
         line={line}
         actionUrl={actionUrl}
-        canModerate={canModerate}
-        canEdit={canEditLine(line, currentUserId, canModerate)}
+        canModerate={canModerateLine(line, currentUserId, canModerate, teamOnly)}
+        canEdit={canEditLine(line, currentUserId, canModerate && !teamOnly)}
         onEdit={onEdit}
       />
     ),
@@ -408,8 +422,10 @@ interface AdSpendDayAccordionProps {
   groups: AdSpendGroup[];
   /** Show MB column inside expanded rows + on the header (HoM/admin only). */
   showMediaBuyerColumn: boolean;
-  /** When true, per-line approve/reject buttons render (HoM/admin only). */
+  /** When true, per-line approve/reject buttons render (HoM/admin, or a team supervisor). */
   canModerate: boolean;
+  /** Team supervisor: approve/reject only other people's lines (their team), never their own. */
+  teamOnlyModeration?: boolean;
   /** Current viewer's id — used to gate per-line "Edit" actions. MB sees Edit
    *  only on rows they own; moderators see Edit on any non-approved row. */
   currentUserId?: string;
@@ -434,6 +450,7 @@ export function AdSpendDayAccordion({
   groups,
   showMediaBuyerColumn,
   canModerate,
+  teamOnlyModeration = false,
   currentUserId,
   page,
   totalPages,
@@ -445,12 +462,14 @@ export function AdSpendDayAccordion({
   onToggleSelect,
 }: AdSpendDayAccordionProps) {
   const selectionEnabled = !!selectedIds && !!onToggleSelect;
+  const isSelectableLine = (line: AdSpendGroupLine) =>
+    line.status === 'PENDING' && canModerateLine(line, currentUserId, canModerate, teamOnlyModeration);
   // Default to fully collapsed so long lists stay scannable.
   const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
 
   const lineColumns = useMemo(
-    () => buildAdSpendLineColumns(canModerate, currentUserId, actionUrl, onPreviewReceipt, onEdit),
-    [canModerate, currentUserId, actionUrl, onPreviewReceipt, onEdit],
+    () => buildAdSpendLineColumns(canModerate, teamOnlyModeration, currentUserId, actionUrl, onPreviewReceipt, onEdit),
+    [canModerate, teamOnlyModeration, currentUserId, actionUrl, onPreviewReceipt, onEdit],
   );
 
   const toggle = (key: string) => {
@@ -495,7 +514,7 @@ export function AdSpendDayAccordion({
             >
               <div className="flex items-center">
                 {selectionEnabled && (() => {
-                  const pendingLines = g.lines.filter((l) => l.status === 'PENDING');
+                  const pendingLines = g.lines.filter((l) => isSelectableLine(l));
                   if (pendingLines.length === 0) return <span className="w-7 shrink-0" />;
                   const allSelected = pendingLines.every((l) => selectedIds.has(l.id));
                   const someSelected = !allSelected && pendingLines.some((l) => selectedIds.has(l.id));
@@ -613,7 +632,7 @@ export function AdSpendDayAccordion({
                       rowKey={(line) => line.id}
                       selection={selectionEnabled ? {
                         selectedIds: selectedIds!,
-                        isSelectable: (line) => line.status === 'PENDING',
+                        isSelectable: (line) => isSelectableLine(line),
                         onToggle: onToggleSelect!,
                       } : undefined}
                     />
@@ -622,7 +641,7 @@ export function AdSpendDayAccordion({
                   <div className="md:hidden divide-y divide-app-border">
                     {g.lines.map((line) => (
                       <div key={line.id} className="px-3 py-2.5">
-                        {selectionEnabled && line.status === 'PENDING' && (
+                        {selectionEnabled && isSelectableLine(line) && (
                           <div className="mb-2 flex justify-end border-b border-app-border/80 pb-2">
                             <Checkbox
                               checked={selectedIds!.has(line.id)}
@@ -633,8 +652,8 @@ export function AdSpendDayAccordion({
                         )}
                         <LineCardMobile
                           line={line}
-                          canModerate={canModerate}
-                          canEdit={canEditLine(line, currentUserId, canModerate)}
+                          canModerate={canModerateLine(line, currentUserId, canModerate, teamOnlyModeration)}
+                          canEdit={canEditLine(line, currentUserId, canModerate && !teamOnlyModeration)}
                           actionUrl={actionUrl}
                           onPreviewReceipt={onPreviewReceipt}
                           onEdit={onEdit}

@@ -149,6 +149,8 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     canSendFunding,
     canReverseFunding = false,
     canRefundFunding = false,
+    canPeerTransfer = false,
+    canApprovePeerTransfers = false,
     canReconcileFunding = false,
     canRequestFunding,
     canDistribute,
@@ -901,8 +903,8 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             Reconciliation
           </Link>
         )}
-        {/* Peer send is MB-only; HoM/Admin already use Send Funding. */}
-        {isMediaBuyer && (
+        {/* Peer send: Media Buyers and team supervisors; HoM/Admin use Send Funding. */}
+        {(isMediaBuyer || canPeerTransfer) && (
           <Button
             variant={displaySection === 'peer' ? 'primary' : 'secondary'}
             size="sm"
@@ -1089,7 +1091,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             limit={peerTransfers.limit}
             currentUserId={currentUserId}
             currentUserRole={currentUserRole}
-            canApprove={canSendFunding}
+            canApprove={canApprovePeerTransfers}
             mediaBuyers={peerTransfers.mediaBuyers}
             filters={filters}
             direction={peerTransfers.direction}

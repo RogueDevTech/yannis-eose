@@ -139,6 +139,31 @@ async function applyMarketingSupervisorScope<
   };
 }
 
+/**
+ * Ad spend rows a viewer may see. A rank-and-file Media Buyer sees only their
+ * own. A Media Buyer who supervises a marketing team sees their own plus their
+ * team's, whatever branch is picked in the top bar (they approve the team's
+ * entries). Everyone else keeps the existing supervisor / branch scoping.
+ */
+async function scopeAdSpendForViewer<T extends { mediaBuyerId?: string; mediaBuyerIds?: string[] }>(
+  ctx: { user: SessionUser; currentBranchId: string | null },
+  input: T,
+): Promise<T> {
+  if (ctx.user.role !== 'MEDIA_BUYER') return applyMarketingSupervisorScope(ctx, input);
+  const team =
+    ctx.user.isMarketingTeamSupervisorOnActiveBranch === true
+      ? await getBranchTeamsService().listMarketingSuperviseeIdsAnywhere(ctx.user.id)
+      : [];
+  if (team.length === 0) return { ...input, mediaBuyerId: ctx.user.id, mediaBuyerIds: undefined };
+  const allowed = [ctx.user.id, ...team];
+  if (input.mediaBuyerId) {
+    return allowed.includes(input.mediaBuyerId)
+      ? { ...input, mediaBuyerIds: undefined }
+      : { ...input, mediaBuyerId: ctx.user.id, mediaBuyerIds: undefined };
+  }
+  return { ...input, mediaBuyerId: undefined, mediaBuyerIds: allowed };
+}
+
 function seesFullMarketingTeamSurfaces(user: SessionUser): boolean {
   if (isAdminLevel(user)) return true;
   if (user.role === 'HEAD_OF_MARKETING') return true;
@@ -604,11 +629,8 @@ export const marketingRouter = router({
   listAdSpend: authedProcedure
     .input(listAdSpendSchema)
     .query(async ({ input, ctx }) => {
-      // Media Buyers may only see their own ad spend
-      let effectiveInput = ctx.user.role === 'MEDIA_BUYER'
-        ? { ...input, mediaBuyerId: ctx.user.id }
-        : input;
-      effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
+      // Media Buyers see their own ad spend; team supervisors also their team's.
+      const effectiveInput = await scopeAdSpendForViewer(ctx, input);
       return getMarketingService().listAdSpend(effectiveInput, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
@@ -620,18 +642,14 @@ export const marketingRouter = router({
   listAdSpendGrouped: authedProcedure
     .input(listAdSpendGroupedSchema)
     .query(async ({ input, ctx }) => {
-      let effectiveInput =
-        ctx.user.role === 'MEDIA_BUYER' ? { ...input, mediaBuyerId: ctx.user.id } : input;
-      effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
+      const effectiveInput = await scopeAdSpendForViewer(ctx, input);
       return getMarketingService().listAdSpendGrouped(effectiveInput, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
   adSpendStatusCounts: authedProcedure
     .input(adSpendStatusCountsSchema)
     .query(async ({ input, ctx }) => {
-      let effectiveInput =
-        ctx.user.role === 'MEDIA_BUYER' ? { ...input, mediaBuyerId: ctx.user.id } : input;
-      effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
+      const effectiveInput = await scopeAdSpendForViewer(ctx, input);
       return getMarketingService().adSpendStatusCounts(effectiveInput, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
@@ -1869,8 +1887,9 @@ export const marketingRouter = router({
         limit: input.campaignsLimit,
         ...(pinToSelf ? { mediaBuyerId: ctx.user.id } : {}),
       };
-      adSpendCountsScope = await applyMarketingSupervisorScope(ctx, adSpendCountsScope);
-      campaignsScope = await applyMarketingSupervisorScope(ctx, campaignsScope);
+      // Same scope as listAdSpend, so the status strip matches the table.
+      adSpendCountsScope = await scopeAdSpendForViewer(ctx, adSpendCountsScope);
+      campaignsScope = await scopeAdSpendForViewer(ctx, campaignsScope);
 
       const supervisorBuyerIds =
         isMarketingSupervisor && campaignsScope.mediaBuyerIds && campaignsScope.mediaBuyerIds.length > 0
@@ -2576,9 +2595,16 @@ export const marketingRouter = router({
       return getMarketingService().listMbFundTransfers(input, ctx.user.id, ctx.user.role, ctx.currentBranchId, ctx.effectiveBranchIds);
     }),
 
-  /** All active branch members for the fund transfer recipient selector. */
+  /** Recipients for the peer transfer selector (branch members, or company marketers for supervisors). */
   listBranchMembersForTransfer: authedProcedure
     .query(async ({ ctx }) => {
+      // Team supervisors send to any marketer in their company, any branch.
+      if (
+        ctx.user.role === 'MEDIA_BUYER' &&
+        (await getBranchTeamsService().isMarketingTeamSupervisorAnywhere(ctx.user.id))
+      ) {
+        return getMarketingService().listCompanyMarketersForTransfer(ctx.user.id);
+      }
       if (!ctx.currentBranchId) return [];
       return getMarketingService().listBranchMembersForTransfer(ctx.currentBranchId);
     }),

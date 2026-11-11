@@ -53,7 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Pass the full user so the helper can honour `isMarketingTeamSupervisorOnActiveBranch`
   // — supervisors get the same chrome as Head of Marketing on this page
   // (CEO directive 2026-05-11). Passing just `user.role` would skip that branch.
-  const { isMediaBuyer, isFundingAdmin, canRequestFunding, canReverseFunding, canRefundFunding, canReconcileFunding } =
+  const { isMediaBuyer, isFundingAdmin, canRequestFunding, canReverseFunding, canRefundFunding, canReconcileFunding, canPeerTransfer, canApprovePeerTransfers } =
     getMarketingRoleFlags(user);
 
   // HoM/Admin can disburse to MBs; Media Buyers cannot. Drives whether Section 2 renders.
@@ -464,6 +464,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canReverseFunding,
     canRefundFunding,
     canReconcileFunding,
+    canPeerTransfer,
+    canApprovePeerTransfers,
     canRequestFunding,
     canDistribute,
     activeSection,
@@ -497,6 +499,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       canReverseFunding,
       canRefundFunding,
       canReconcileFunding,
+      canPeerTransfer,
     },
     pageData,
   });

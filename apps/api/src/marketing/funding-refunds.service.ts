@@ -21,7 +21,7 @@ import { withActor, type Tx } from '../common/db/with-actor';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevel } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
-import { lockFundingBalance } from './funding-balance-terms';
+import { lockFundingBalance, userCompanyIds } from './funding-balance-terms';
 
 type Db = PostgresJsDatabase<typeof schema>;
 
@@ -77,20 +77,6 @@ export class FundingRefundsService {
 
   private get db() {
     return this.deps.db;
-  }
-
-  /** Companies (branch groups) a user belongs to, via branch membership or primary branch. */
-  private async userGroupIds(tx: Tx, userId: string): Promise<string[]> {
-    const rows = await tx.execute<{ group_id: string }>(sql`
-      SELECT DISTINCT b.group_id
-      FROM branches b
-      WHERE b.group_id IS NOT NULL
-        AND (
-          b.id IN (SELECT ub.branch_id FROM user_branches ub WHERE ub.user_id = ${userId})
-          OR b.id = (SELECT u.primary_branch_id FROM users u WHERE u.id = ${userId})
-        )
-    `);
-    return (rows as unknown as Array<{ group_id: string }>).map((r) => r.group_id);
   }
 
   // ── Refunds ───────────────────────────────────────────────────────────────
@@ -186,8 +172,8 @@ export class FundingRefundsService {
       // one company or several. Company-money funders (Admin / Finance) with no
       // branch membership act for every company.
       const [refunderGroups, funderGroups] = await Promise.all([
-        this.userGroupIds(tx, actor.id),
-        this.userGroupIds(tx, funder.id),
+        userCompanyIds(tx, actor.id),
+        userCompanyIds(tx, funder.id),
       ]);
       let groupId: string | null = null;
       if (funderGroups.length === 0 && COMPANY_FUNDER_ROLES.has(funder.role)) {

@@ -146,3 +146,21 @@ export async function loadFundingExtraTermsForUser(
 export async function lockFundingBalance(tx: Tx, userId: string): Promise<void> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${'funding-balance:' + userId}))`);
 }
+
+/**
+ * Companies (branch_groups) a user belongs to, through their branch
+ * memberships or primary branch. Two people "share a company" when these
+ * overlap. Used by refunds and peer transfers so money never crosses companies.
+ */
+export async function userCompanyIds(db: Db, userId: string): Promise<string[]> {
+  const rows = await db.execute<{ group_id: string }>(sql`
+    SELECT DISTINCT b.group_id
+    FROM branches b
+    WHERE b.group_id IS NOT NULL
+      AND (
+        b.id IN (SELECT ub.branch_id FROM user_branches ub WHERE ub.user_id = ${userId})
+        OR b.id = (SELECT u.primary_branch_id FROM users u WHERE u.id = ${userId})
+      )
+  `);
+  return (rows as unknown as Array<{ group_id: string }>).map((r) => r.group_id);
+}

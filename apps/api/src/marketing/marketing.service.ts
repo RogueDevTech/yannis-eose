@@ -81,9 +81,11 @@ import {
   extraNet,
   loadFundingExtraTerms,
   loadFundingExtraTermsForUser,
+  userCompanyIds,
   type FundingExtraTerms,
 } from './funding-balance-terms';
 import { FundingRefundsService } from './funding-refunds.service';
+
 import { FundingReconciliationService } from './funding-reconciliation.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevel, canViewAllBranches } from '../common/authz';
@@ -98,6 +100,9 @@ import {
   appendOrdersAggregateScopeConditions,
   type OrdersAggregateSupervisorScope,
 } from '../orders/orders.service';
+
+/** Who a team supervisor may send a peer transfer to (same company, any branch). */
+const PEER_TRANSFER_RECEIVER_ROLES = new Set(['MEDIA_BUYER', 'HEAD_OF_MARKETING']);
 
 /** Default profitability config when `MARKETING_PROFITABILITY` system setting is unset. */
 /** Form Analytics visitor list: what a form visitor did next on that form. */
@@ -3890,24 +3895,25 @@ export class MarketingService {
   private async assertMayApproveOrRejectAdSpend(
     actor: SessionUser,
     mediaBuyerId: string,
-    campaignBranchId: string | null,
   ): Promise<void> {
     const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
     if (perms.includes(canonicalPermissionCode('marketing.adSpend.approve'))) {
       return;
     }
-    const sessionBranch = actor.currentBranchId ?? null;
-    if (!sessionBranch || !campaignBranchId || sessionBranch !== campaignBranchId) {
+    // Team supervisor (HoM request 2026-11-11): approve / reject the ad spend of
+    // Media Buyers they supervise in a marketing team, on any branch and any
+    // top-bar selection. Never their own entries.
+    if (mediaBuyerId === actor.id) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Cannot moderate ad spend for this record.',
+        message: 'You cannot approve or reject your own ad spend.',
       });
     }
-    const ok = await this.branchTeams.isMarketingSupervisorOf(actor.id, mediaBuyerId, sessionBranch);
+    const ok = await this.branchTeams.isMarketingSupervisorOfAnywhere(actor.id, mediaBuyerId);
     if (!ok) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Cannot moderate ad spend for this record.',
+        message: 'You can only approve ad spend for Media Buyers on your team.',
       });
     }
   }
@@ -3937,18 +3943,7 @@ export class MarketingService {
       });
     }
 
-    // For new-flow (daily) rows without a campaign, derive branch from the MB's primary branch.
-    let branchId = joined.campaignBranchId ?? null;
-    if (!branchId) {
-      const [mbRow] = await this.db
-        .select({ primaryBranchId: schema.users.primaryBranchId })
-        .from(schema.users)
-        .where(eq(schema.users.id, existing.mediaBuyerId))
-        .limit(1);
-      branchId = mbRow?.primaryBranchId ?? null;
-    }
-
-    await this.assertMayApproveOrRejectAdSpend(actor, existing.mediaBuyerId, branchId);
+    await this.assertMayApproveOrRejectAdSpend(actor, existing.mediaBuyerId);
 
     const updated = await withActor(this.db, { id: approverId }, async (tx) => {
       const [row] = await tx
@@ -3996,17 +3991,7 @@ export class MarketingService {
       });
     }
 
-    let branchId = joined.campaignBranchId ?? null;
-    if (!branchId) {
-      const [mbRow] = await this.db
-        .select({ primaryBranchId: schema.users.primaryBranchId })
-        .from(schema.users)
-        .where(eq(schema.users.id, existing.mediaBuyerId))
-        .limit(1);
-      branchId = mbRow?.primaryBranchId ?? null;
-    }
-
-    await this.assertMayApproveOrRejectAdSpend(actor, existing.mediaBuyerId, branchId);
+    await this.assertMayApproveOrRejectAdSpend(actor, existing.mediaBuyerId);
 
     const updated = await withActor(this.db, { id: rejectorId }, async (tx) => {
       const [row] = await tx
@@ -4198,12 +4183,24 @@ export class MarketingService {
     if (actor.id === input.receiverMbId) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot send funds to yourself' });
     }
+    // Team supervisors (HoM request 2026-11-11) may send to any marketer in
+    // their company, on any branch. Everyone else keeps the same-branch rule.
+    // Looked up before the transaction: it reads on its own connection.
+    const senderIsSupervisor = await this.branchTeams.isMarketingTeamSupervisorAnywhere(actor.id);
 
     return withActor(this.db, actor, async (tx) => {
       // Validate sender + receiver exist
       const [sender, receiver] = await Promise.all([
-        tx.select({ role: schema.users.role, name: schema.users.name }).from(schema.users).where(eq(schema.users.id, actor.id)).limit(1),
-        tx.select({ role: schema.users.role, name: schema.users.name }).from(schema.users).where(eq(schema.users.id, input.receiverMbId)).limit(1),
+        tx
+          .select({ role: schema.users.role, name: schema.users.name, primaryBranchId: schema.users.primaryBranchId })
+          .from(schema.users)
+          .where(eq(schema.users.id, actor.id))
+          .limit(1),
+        tx
+          .select({ role: schema.users.role, name: schema.users.name, status: schema.users.status })
+          .from(schema.users)
+          .where(eq(schema.users.id, input.receiverMbId))
+          .limit(1),
       ]);
       if (!sender[0]) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Sender not found' });
@@ -4212,8 +4209,25 @@ export class MarketingService {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Recipient not found' });
       }
 
-      // Validate same branch
-      if (branchId) {
+      if (senderIsSupervisor) {
+        if (receiver[0].status !== 'ACTIVE' || !PEER_TRANSFER_RECEIVER_ROLES.has(receiver[0].role)) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Peer transfers can only go to an active Media Buyer, supervisor or Head of Marketing.',
+          });
+        }
+        const [senderCompanies, receiverCompanies] = await Promise.all([
+          userCompanyIds(tx, actor.id),
+          userCompanyIds(tx, input.receiverMbId),
+        ]);
+        if (!senderCompanies.some((g) => receiverCompanies.includes(g))) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'You and this person are not in the same company.',
+          });
+        }
+      } else if (branchId) {
+        // Validate same branch
         const [senderBranch, receiverBranch] = await Promise.all([
           tx.select({ branchId: schema.userBranches.branchId }).from(schema.userBranches).where(and(eq(schema.userBranches.userId, actor.id), eq(schema.userBranches.branchId, branchId))).limit(1),
           tx.select({ branchId: schema.userBranches.branchId }).from(schema.userBranches).where(and(eq(schema.userBranches.userId, input.receiverMbId), eq(schema.userBranches.branchId, branchId))).limit(1),
@@ -4227,6 +4241,16 @@ export class MarketingService {
       const balance = await this.computeMbBalanceInTx(tx, actor.id, branchId, effectiveBranchIds);
       this.assertSufficientMbBalance(balance, input.amount);
 
+      const senderPrimaryMembership =
+        branchId || sender[0].primaryBranchId
+          ? []
+          : await tx
+              .select({ branchId: schema.userBranches.branchId })
+              .from(schema.userBranches)
+              .where(eq(schema.userBranches.userId, actor.id))
+              .orderBy(desc(schema.userBranches.isPrimary), asc(schema.userBranches.branchId))
+              .limit(1);
+
       const [transfer] = await tx
         .insert(schema.mbFundTransfers)
         .values({
@@ -4235,7 +4259,8 @@ export class MarketingService {
           amount: sql`${input.amount}::numeric`,
           reason: input.reason ?? null,
           status: 'PENDING',
-          branchId: branchId ?? undefined,
+          // The sender's branch: the Head of Marketing's approval inbox filters on it.
+          branchId: branchId ?? sender[0].primaryBranchId ?? senderPrimaryMembership[0]?.branchId ?? undefined,
         })
         .returning();
 
@@ -4299,12 +4324,55 @@ export class MarketingService {
     });
   }
 
+  /**
+   * Who may approve a peer transfer. It had no check at all: any signed-in
+   * user could approve, and a receiver approving collapses approve + accept,
+   * so a Media Buyer could pull a pending transfer into their own balance.
+   * Now: never the sender; the Head of Marketing (or a holder of
+   * marketing.funding.approve) in the sender's company; admins; or a team
+   * supervisor when both people are on their team and they are not the receiver.
+   */
+  private async assertMayApprovePeerTransfer(transferId: string, actor: SessionUser): Promise<void> {
+    const [t] = await this.db
+      .select({ senderMbId: schema.mbFundTransfers.senderMbId, receiverMbId: schema.mbFundTransfers.receiverMbId })
+      .from(schema.mbFundTransfers)
+      .where(eq(schema.mbFundTransfers.id, transferId))
+      .limit(1);
+    if (!t) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+    if (t.senderMbId === actor.id) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You cannot approve your own transfer.' });
+    }
+    if (isAdminLevel(actor)) return;
+
+    const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const isApprover =
+      actor.role === 'HEAD_OF_MARKETING' || perms.includes(canonicalPermissionCode('marketing.funding.approve'));
+    if (isApprover) {
+      const [mine, senders] = await Promise.all([
+        userCompanyIds(this.db, actor.id),
+        userCompanyIds(this.db, t.senderMbId),
+      ]);
+      // Org-wide approvers with no branch are not company-bound.
+      if (mine.length > 0 && senders.length > 0 && !mine.some((g) => senders.includes(g))) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'This transfer belongs to another company.' });
+      }
+      return;
+    }
+
+    if (actor.id !== t.receiverMbId) {
+      const team = await this.branchTeams.listMarketingSuperviseeIdsAnywhere(actor.id);
+      if (team.includes(t.senderMbId) && team.includes(t.receiverMbId)) return;
+    }
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the Head of Marketing can approve this transfer.' });
+  }
+
   async approveMbFundTransfer(
     transferId: string,
     actor: SessionUser,
     branchId: string | null,
     effectiveBranchIds?: string[] | null,
   ) {
+    await this.assertMayApprovePeerTransfer(transferId, actor);
     const result = await withActor(this.db, actor, async (tx) => {
       const [transfer] = await tx
         .select()
@@ -4424,6 +4492,17 @@ export class MarketingService {
   }
 
   async rejectMbFundTransfer(transferId: string, rejectionReason: string, actor: SessionUser) {
+    // The sender (cancel) and receiver (decline) may reject. So may whoever is
+    // allowed to approve it: the HoM's approval inbox needs a Reject that works.
+    const [parties] = await this.db
+      .select({ senderMbId: schema.mbFundTransfers.senderMbId, receiverMbId: schema.mbFundTransfers.receiverMbId })
+      .from(schema.mbFundTransfers)
+      .where(eq(schema.mbFundTransfers.id, transferId))
+      .limit(1);
+    if (!parties) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+    const isParty = parties.senderMbId === actor.id || parties.receiverMbId === actor.id;
+    if (!isParty) await this.assertMayApprovePeerTransfer(transferId, actor);
+
     const result = await withActor(this.db, actor, async (tx) => {
       const [transfer] = await tx
         .select()
@@ -4432,12 +4511,7 @@ export class MarketingService {
         .limit(1);
 
       if (!transfer) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
-      // Only a party to the transfer may reject it. acceptMbFundTransfer has
-      // always enforced this for the receiver; reject had no check at all, so
-      // any authenticated user could reject another company's pending transfer.
-      if (transfer.receiverMbId !== actor.id && transfer.senderMbId !== actor.id) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only a party to this transfer can reject it.' });
-      }
+      // Who may reject was checked above (a party, or an allowed approver).
       if (transfer.status !== 'PENDING') throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer is not pending' });
 
       const [updated] = await tx
@@ -4665,6 +4739,28 @@ export class MarketingService {
   }
 
   /** List all active users in a branch (for fund transfer recipient selector). */
+  /**
+   * Peer-transfer recipients for a team supervisor: active Media Buyers,
+   * supervisors and Heads of Marketing who share a company with them, any branch.
+   */
+  async listCompanyMarketersForTransfer(userId: string): Promise<Array<{ id: string; name: string }>> {
+    const companies = await userCompanyIds(this.db, userId);
+    if (companies.length === 0) return [];
+    const rows = await this.db.execute<{ id: string; name: string }>(sql`
+      SELECT DISTINCT u.id, u.name
+      FROM users u
+      JOIN branches b
+        ON b.id = u.primary_branch_id
+        OR b.id IN (SELECT ub.branch_id FROM user_branches ub WHERE ub.user_id = u.id)
+      WHERE u.status = 'ACTIVE'
+        AND u.role IN ('MEDIA_BUYER', 'HEAD_OF_MARKETING')
+        AND u.id <> ${userId}
+        AND b.group_id IN (${sql.join(companies.map((g) => sql`${g}::uuid`), sql`, `)})
+      ORDER BY u.name
+    `);
+    return rows as unknown as Array<{ id: string; name: string }>;
+  }
+
   async listBranchMembersForTransfer(
     branchId: string,
   ): Promise<Array<{ id: string; name: string }>> {
