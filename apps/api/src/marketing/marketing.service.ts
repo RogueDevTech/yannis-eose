@@ -4649,6 +4649,12 @@ export class MarketingService {
     actorRole: string,
     branchId: string | null,
     effectiveBranchIds?: string[] | null,
+    /**
+     * Media Buyer callers only: the team they supervise (excluding self). In
+     * the approval inbox they see only transfers between two team members,
+     * the same rule `assertMayApprovePeerTransfer` enforces.
+     */
+    supervisedTeamIds?: string[],
   ) {
     const conditions: Parameters<typeof and>[0][] = [];
 
@@ -4660,6 +4666,15 @@ export class MarketingService {
       if (branchId) conditions.push(eq(schema.mbFundTransfers.branchId, branchId));
       if (effectiveBranchIds?.length) {
         conditions.push(inArray(schema.mbFundTransfers.branchId, effectiveBranchIds));
+      }
+      if (actorRole === 'MEDIA_BUYER') {
+        const team = supervisedTeamIds ?? [];
+        if (team.length === 0) {
+          conditions.push(sql`false`);
+        } else {
+          conditions.push(inArray(schema.mbFundTransfers.senderMbId, team));
+          conditions.push(inArray(schema.mbFundTransfers.receiverMbId, team));
+        }
       }
     } else if (actorRole === 'MEDIA_BUYER') {
       if (input.direction === 'sent') {
@@ -5882,6 +5897,7 @@ export class MarketingService {
   async getOtherExpensesSummary(
     input: {
       mediaBuyerId?: string;
+      mediaBuyerIds?: string[];
       startDate?: string;
       endDate?: string;
     },
@@ -5900,6 +5916,9 @@ export class MarketingService {
     ];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
+    }
+    if (input.mediaBuyerIds && input.mediaBuyerIds.length > 0) {
+      conditions.push(inArray(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerIds));
     }
     if (input.startDate) {
       conditions.push(gte(schema.adSpendLogs.spendDate, nigeriaDayStart(input.startDate)));
