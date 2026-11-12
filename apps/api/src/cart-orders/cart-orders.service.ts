@@ -1954,9 +1954,9 @@ export class CartOrdersService {
    * IMPORTANT (exactly-once): the only caller sites are guarded by the source
    * row's `graduatedOrderId` link, which is set inside the graduation tx. A
    * second graduation attempt short-circuits before calling this, so stock is
-   * deducted exactly once. `completeDeliveryInventory` also releases only
-   * `min(lineQty, reservedCount)`, so it is safe even though cart/follow-up
-   * orders were never reserved (reservedCount is 0 for them).
+   * deducted exactly once. Cart/follow-up orders were never reserved, so the
+   * delivery runs with `releaseReservation: false`: releasing would take units
+   * reserved by other live orders at the same location.
    */
   private async applyGraduationStockAndLedger(
     orderId: string,
@@ -1980,10 +1980,13 @@ export class CartOrdersService {
       // and only posts the Dr COGS / Cr Stock pair when it is > 0 — without this
       // stamp a graduated cart order recorded 100% margin (Pillar 3 breach).
       // Mirrors the normal delivery path (orders.service.ts DELIVERED handler).
+      // Graduated copies were never reserved: do not release (it would take
+      // units reserved by other live orders at this location).
       const { landedCost } = await this.inventoryService.completeDeliveryInventory(
         orderId,
         logisticsLocationId,
         systemActor,
+        { releaseReservation: false },
       );
       if (landedCost > 0) {
         await withActor(this.db, systemActor, async (tx) => {

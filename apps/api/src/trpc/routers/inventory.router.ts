@@ -249,6 +249,44 @@ export const inventoryRouter = router({
     }),
 
   /**
+   * Orders holding the reserved stock of one product at one location, with
+   * days waiting and the "Overdue at logistics" flag (30+ days).
+   */
+  reservationHolders: permissionProcedure('inventory.read')
+    .input(z.object({ productId: z.string().uuid(), locationId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      denyTpl(ctx.user);
+      return getInventoryService().listReservationHolders(
+        input.productId,
+        input.locationId,
+        ctx.effectiveBranchIds,
+        ctx.activeGroupId,
+      );
+    }),
+
+  /**
+   * Release the reserved stock of orders still with logistics (they keep their
+   * status). Reservations are also released automatically after the company's
+   * STOCK_RESERVATION_RELEASE_CONFIG days; this is the early, manual release.
+   */
+  releaseReservations: permissionProcedure('inventory.reservations.release')
+    .input(
+      z.object({
+        orderIds: z.array(z.string().uuid()).min(1).max(500),
+        reason: z.string().trim().min(10, 'Add a reason of at least 10 characters').max(500),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      denyTpl(ctx.user);
+      return getInventoryService().releaseHeldReservations(
+        input.orderIds,
+        ctx.user,
+        input.reason,
+        ctx.effectiveBranchIds,
+      );
+    }),
+
+  /**
    * Stock intake — receive new stock batch.
    * Stock Manager or SuperAdmin only.
    */

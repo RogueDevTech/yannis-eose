@@ -13,6 +13,7 @@ import { InlineNotification } from '~/components/ui/inline-notification';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { EmptyState } from '~/components/ui/empty-state';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { OverdueAllocationBadge } from '~/components/ui/overdue-allocation-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useAgentStateBroadcast } from '~/hooks/useSocket';
@@ -1832,6 +1833,7 @@ export function OrderDetailPage({
             </span>
           )}
           <OrderStatusBadge status={order.status} />
+          <OverdueAllocationBadge status={order.status} allocatedAt={order.allocatedAt} reservationReleasedAt={order.reservationReleasedAt} />
         </div>
       </div>
 

@@ -42,6 +42,10 @@ export interface Order {
   cartId?: string | null;
   /** Duplicate flag: FLAGGED | POSSIBLY_DUPLICATE | MERGED | DISMISSED | null */
   isDuplicate?: string | null;
+  /** When the order was allocated to logistics; drives the "Overdue" tag. */
+  allocatedAt?: string | null;
+  /** When its reserved stock was released while still with logistics (migration 0362). */
+  reservationReleasedAt?: string | null;
   /** "Check price": form submit matched no active offer; blocks Confirm until cleared. */
   offerCheck?: string | null;
   cartOrderCheck?: string | null;
@@ -89,6 +93,8 @@ export interface OrderDetail {
   createdAt: string;
   confirmedAt: string | null;
   allocatedAt: string | null;
+  /** When its reserved stock was released while still with logistics (migration 0362). */
+  reservationReleasedAt?: string | null;
   dispatchedAt: string | null;
   deliveredAt: string | null;
   /** Who marked this order DELIVERED (from timeline). */

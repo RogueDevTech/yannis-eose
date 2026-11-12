@@ -88,6 +88,7 @@ import type { Order } from './types';
 import { AbandonedCartDetailModal } from '~/features/cs/AbandonedCartDetailModal';
 import type { PendingCart } from '~/features/cs/types';
 import { AlreadyCartOrderBadge, CheckPriceBadge } from '~/components/ui/check-price-badge';
+import { OverdueAllocationBadge } from '~/components/ui/overdue-allocation-badge';
 import {
   isPreferredDeliveryDueToday,
   isPreferredDeliveryOverdue,
@@ -1367,6 +1368,7 @@ function OrdersListPageImpl({
               )}
               <CheckPriceBadge offerCheck={order.offerCheck} />
               <AlreadyCartOrderBadge cartOrderCheck={order.cartOrderCheck} />
+              <OverdueAllocationBadge status={order.status} allocatedAt={order.allocatedAt} reservationReleasedAt={order.reservationReleasedAt} />
             </span>
           );
         },
@@ -1505,6 +1507,7 @@ function OrdersListPageImpl({
                 )}
                 <CheckPriceBadge offerCheck={order.offerCheck} />
                 <AlreadyCartOrderBadge cartOrderCheck={order.cartOrderCheck} />
+                <OverdueAllocationBadge status={order.status} allocatedAt={order.allocatedAt} reservationReleasedAt={order.reservationReleasedAt} />
               </span>
             )}
             <span className="whitespace-nowrap text-xs text-app-fg-muted">

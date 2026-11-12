@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   updateSystemSettingSchema,
   notificationEmailConfigSchema,
@@ -9,6 +10,8 @@ import {
   updateDuplicateRulesSchema,
   updateClientUiConfigSchema,
   type AppThemeId,
+  RESERVATION_RELEASE_SETTING_KEY,
+  MAX_RESERVATION_RELEASE_DAYS,
 } from '@yannis/shared';
 import {
   NOTIFICATION_EMAIL_CONFIG_KEY,
@@ -248,6 +251,28 @@ export const settingsRouter = router({
     }),
 
   /**
+   * Reserved stock release rule for the active company: release the
+   * reservation of orders still with logistics after N days (0 = never).
+   * Company required (a company-less set would match every company's row).
+   */
+  updateReservationReleaseDays: permissionProcedure('settings.write')
+    .input(z.object({ days: z.number().int().min(0).max(MAX_RESERVATION_RELEASE_DAYS) }))
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.activeGroupId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Select a company first. This rule is set per company.' });
+      }
+      await getSettingsService().set(
+        RESERVATION_RELEASE_SETTING_KEY,
+        { days: input.days },
+        ctx.user.id,
+        undefined,
+        ctx.activeGroupId,
+      );
+      await invalidateSystemSettingsCache();
+      return { success: true };
+    }),
+
+  /**
    * Update a system setting.
    * SUPER_ADMIN only — changes are audit-logged.
    */
@@ -257,6 +282,9 @@ export const settingsRouter = router({
       // Duplicate rules have their own validated, company-required endpoint.
       if (input.key === DUPLICATE_RULES_SETTING_KEY) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Use Settings > Duplicate rules to change duplicate rules.' });
+      }
+      if (input.key === RESERVATION_RELEASE_SETTING_KEY) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Change this from Inventory > Actions > Reserved stock release.' });
       }
       await getSettingsService().set(input.key, input.value, ctx.user.id, undefined, ctx.activeGroupId);
       await invalidateSystemSettingsCache();

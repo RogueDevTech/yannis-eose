@@ -3,6 +3,13 @@ import { TRPCError } from '@trpc/server';
 import { eq, and, or, asc, desc, count, sql, inArray, gt, lt, like, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
+import {
+  formatOrderNumber,
+  isOverdueAllocation,
+  daysSinceAllocation,
+  RESERVATION_RELEASE_SETTING_KEY,
+  resolveReservationReleaseDays,
+} from '@yannis/shared';
 import type {
   StockIntakeInput,
   StockTransferInput,
@@ -4222,6 +4229,24 @@ export class InventoryService {
   /**
    * ALLOCATED side effect: bump reserved_count at the 3PL and append ALLOCATION movements in one transaction.
    */
+  /**
+   * True when this order's reservation was already released while it was with
+   * logistics (auto after N days, or manually; migration 0362). Every release
+   * path checks this first: releasing again would take units reserved by
+   * OTHER live orders at the same location.
+   */
+  private async reservationAlreadyReleased(
+    orderId: string,
+    ex: InventoryDbTx | PostgresJsDatabase<typeof schema> = this.db,
+  ): Promise<boolean> {
+    const [row] = await ex
+      .select({ releasedAt: schema.orders.reservationReleasedAt })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    return !!row?.releasedAt;
+  }
+
   async reserveForAllocateWithMovements(orderId: string, locationId: string, actor: SessionUser): Promise<void> {
     await withActor(this.db, actor, async (tx) => {
       await this.reserveOrderStockInTx(tx, orderId, locationId, actor.id);
@@ -4311,6 +4336,13 @@ export class InventoryService {
         });
       }
     }
+
+    // The order holds its reservation again (reallocation, retrack back into
+    // transit): clear any earlier release so the next exit releases it.
+    await tx
+      .update(schema.orders)
+      .set({ reservationReleasedAt: null })
+      .where(and(eq(schema.orders.id, orderId), sql`${schema.orders.reservationReleasedAt} IS NOT NULL`));
   }
 
   /**
@@ -4324,6 +4356,7 @@ export class InventoryService {
     orderId: string,
     locationId: string,
   ): Promise<void> {
+    if (await this.reservationAlreadyReleased(orderId, tx)) return;
     const byProduct = await this.loadAggregatedOrderLineQuantities(orderId, tx);
     for (const [productId, qty] of byProduct) {
       await this.releaseReservedAtLocationInTx(tx, productId, locationId, qty);
@@ -4331,9 +4364,218 @@ export class InventoryService {
   }
 
   /**
+   * Release the reserved stock of ONE order that is still with logistics,
+   * without changing its status (migration 0362). Used by the N-days auto
+   * release and by authorised users. Idempotent: an order that is no longer
+   * with logistics, or was already released, is left alone (returns false).
+   * The release is clamped to what is actually reserved at the location.
+   * Records a RESERVATION stock movement per product (same convention as the
+   * reallocation release), the release time on the order, and a timeline entry.
+   */
+  async releaseHeldReservation(
+    orderId: string,
+    actor: { id: string; name?: string | null },
+    reason: string,
+    opts?: { automatic?: boolean },
+  ): Promise<boolean> {
+    const automatic = opts?.automatic === true;
+    const released = await withActor(this.db, { id: actor.id }, async (tx) => {
+      const [order] = await tx
+        .select({
+          status: schema.orders.status,
+          locationId: schema.orders.logisticsLocationId,
+          releasedAt: schema.orders.reservationReleasedAt,
+          branchId: schema.orders.branchId,
+        })
+        .from(schema.orders)
+        .where(eq(schema.orders.id, orderId))
+        .for('update');
+      if (
+        !order ||
+        !order.locationId ||
+        order.releasedAt ||
+        !['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'].includes(order.status)
+      ) {
+        return false;
+      }
+      const byProduct = await this.loadAggregatedOrderLineQuantities(orderId, tx);
+      for (const [productId, qty] of byProduct) {
+        await this.releaseReservedAtLocationInTx(tx, productId, order.locationId, qty);
+        await tx.insert(schema.stockMovements).values({
+          productId,
+          movementType: 'RESERVATION',
+          quantity: qty,
+          fromLocationId: order.locationId,
+          referenceId: orderId,
+          reason: `Reservation released (order still with logistics): ${reason}`,
+          actorId: actor.id,
+        });
+      }
+      await tx
+        .update(schema.orders)
+        .set({ reservationReleasedAt: new Date() })
+        .where(eq(schema.orders.id, orderId));
+      await tx.insert(schema.orderTimelineEvents).values({
+        orderId,
+        eventType: 'STOCK_RESERVATION_RELEASED',
+        // Automatic releases are written as "System" (no user row), like the
+        // other automated timeline entries.
+        actorId: automatic ? null : actor.id,
+        actorName: automatic ? 'System' : (actor.name ?? null),
+        description: `Reserved stock released, the order stays with logistics. ${reason}`,
+        metadata: { reason },
+        branchId: order.branchId ?? null,
+      });
+      return true;
+    });
+    return released;
+  }
+
+  /**
+   * Manual release by an authorised user (`inventory.reservations.release`):
+   * release the reserved stock of the selected orders, which stay with
+   * logistics. Orders outside the caller's company are refused per order.
+   */
+  async releaseHeldReservations(
+    orderIds: string[],
+    actor: SessionUser,
+    reason: string,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<{ released: number; skipped: number; total: number }> {
+    const inScope = await this.db
+      .select({ id: schema.orders.id })
+      .from(schema.orders)
+      .where(
+        and(
+          inArray(schema.orders.id, orderIds),
+          ...(effectiveBranchIds && effectiveBranchIds.length > 0
+            ? [inArray(schema.orders.servicingBranchId, effectiveBranchIds)]
+            : []),
+        ),
+      );
+    let released = 0;
+    for (const { id } of inScope) {
+      if (await this.releaseHeldReservation(id, { id: actor.id, name: actor.name }, `Released by ${actor.name ?? 'staff'}: ${reason}`)) {
+        released += 1;
+      }
+    }
+    return { released, skipped: orderIds.length - released, total: orderIds.length };
+  }
+
+  /**
+   * Which orders hold the reserved stock of one product at one logistics
+   * location (reserved-stock ticket 2026-11-12). An order reserves its lines
+   * (bundles expanded to components) when allocated, and holds them while
+   * AGENT_ASSIGNED / DISPATCHED / IN_TRANSIT. `unlinkedReserved` is reserved
+   * stock with no live order behind it (drift), shown so it is never hidden.
+   */
+  async listReservationHolders(
+    productId: string,
+    locationId: string,
+    effectiveBranchIds?: string[] | null,
+    groupId?: string | null,
+  ): Promise<{
+    reserved: number;
+    heldByOrders: number;
+    unlinkedReserved: number;
+    /** Company rule: reservations are released after this many days (0 = never). */
+    releaseAfterDays: number;
+    orders: Array<{
+      orderId: string;
+      orderNumber: string;
+      status: string;
+      allocatedAt: string | null;
+      daysWaiting: number | null;
+      overdue: boolean;
+      quantity: number;
+      closerName: string | null;
+    }>;
+  }> {
+    if (groupId) {
+      const [product] = await this.db
+        .select({ groupId: schema.products.groupId })
+        .from(schema.products)
+        .where(eq(schema.products.id, productId))
+        .limit(1);
+      if (!product || (product.groupId && product.groupId !== groupId)) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
+      }
+    }
+    const branchFilter =
+      effectiveBranchIds && effectiveBranchIds.length > 0
+        ? sql`AND o.servicing_branch_id IN (${sql.join(effectiveBranchIds.map((id) => sql`${id}::uuid`), sql`, `)})`
+        : sql``;
+    const rows = (await this.db.execute(sql`
+      SELECT o.id AS order_id, o.order_number, bg.order_prefix, o.status, o.allocated_at,
+             u.name AS closer_name,
+             sum(oi.quantity * coalesce(bc.quantity, 1))::int AS qty
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN product_bundle_components bc ON bc.bundle_product_id = oi.product_id
+      LEFT JOIN users u ON u.id = o.assigned_cs_id
+      LEFT JOIN branches b ON b.id = o.servicing_branch_id
+      LEFT JOIN branch_groups bg ON bg.id = b.group_id
+      WHERE o.status IN ('AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT')
+        AND o.reservation_released_at IS NULL
+        AND o.logistics_location_id = ${locationId}::uuid
+        AND coalesce(bc.component_product_id, oi.product_id) = ${productId}::uuid
+        ${branchFilter}
+      GROUP BY o.id, o.order_number, bg.order_prefix, o.status, o.allocated_at, u.name
+      ORDER BY o.allocated_at NULLS FIRST, o.order_number
+    `)) as unknown as Array<{
+      order_id: string;
+      order_number: number;
+      order_prefix: string | null;
+      status: string;
+      allocated_at: Date | string | null;
+      closer_name: string | null;
+      qty: number;
+    }>;
+
+    const [level] = await this.db
+      .select({ reserved: sql<number>`coalesce(sum(${schema.inventoryLevels.reservedCount}), 0)::int` })
+      .from(schema.inventoryLevels)
+      .where(
+        and(
+          eq(schema.inventoryLevels.productId, productId),
+          eq(schema.inventoryLevels.locationId, locationId),
+        ),
+      );
+
+    const releaseAfterDays = resolveReservationReleaseDays(
+      await this.settings.get(RESERVATION_RELEASE_SETTING_KEY, groupId ?? null),
+    );
+    const now = new Date();
+    const orders = rows.map((r) => {
+      const allocatedAt = r.allocated_at ? new Date(r.allocated_at).toISOString() : null;
+      return {
+        orderId: r.order_id,
+        orderNumber: formatOrderNumber(Number(r.order_number), r.order_prefix),
+        status: r.status,
+        allocatedAt,
+        daysWaiting: daysSinceAllocation(allocatedAt, now),
+        overdue: releaseAfterDays > 0 && isOverdueAllocation(r.status, allocatedAt, now, releaseAfterDays),
+        quantity: Number(r.qty ?? 0),
+        closerName: r.closer_name,
+      };
+    });
+    const reserved = Number(level?.reserved ?? 0);
+    const heldByOrders = orders.reduce((sum, o) => sum + o.quantity, 0);
+    return {
+      reserved,
+      heldByOrders,
+      unlinkedReserved: Math.max(0, reserved - heldByOrders),
+      releaseAfterDays,
+      orders,
+    };
+  }
+
+  /**
    * Reverse {@link reserveForAllocateWithMovements} at a prior 3PL when reallocating ALLOCATED → ALLOCATED.
    */
   async releaseAllocationReserveAtLocation(orderId: string, locationId: string, actor: SessionUser): Promise<void> {
+    // Already released after N days with logistics (or manually): nothing held.
+    if (await this.reservationAlreadyReleased(orderId)) return;
     const byProduct = await this.loadAggregatedOrderLineQuantities(orderId);
     if (byProduct.size === 0) return;
 
@@ -4409,7 +4651,18 @@ export class InventoryService {
     orderId: string,
     logisticsLocationId: string,
     actor: SessionUser,
+    opts?: {
+      /**
+       * Release this order's allocation reserve (default true). Pass false for
+       * graduated cart / follow-up copies: they were never reserved, and the
+       * release would take units reserved by OTHER live orders at the same
+       * location (prod 2026-11-12: ~112 units under-reserved this way).
+       */
+      releaseReservation?: boolean;
+    },
   ): Promise<{ landedCost: number }> {
+    const releaseReservation =
+      opts?.releaseReservation !== false && !(await this.reservationAlreadyReleased(orderId));
     const byProduct = await this.loadAggregatedOrderLineQuantities(orderId);
     if (byProduct.size === 0) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items for delivery.' });
@@ -4447,7 +4700,9 @@ export class InventoryService {
           insufficient: 'Cannot record delivery: shelf count at location is below shipped quantity.',
         });
 
-        await this.releaseReservedAtLocationInTx(tx, productId, logisticsLocationId, lineQty);
+        if (releaseReservation) {
+          await this.releaseReservedAtLocationInTx(tx, productId, logisticsLocationId, lineQty);
+        }
       }
     });
 
@@ -4658,8 +4913,11 @@ export class InventoryService {
 
       // The whole reservation goes: delivered units left the shelf above, and
       // the returned units are back on the shelf as free (unreserved) stock.
-      for (const [productId, qty] of fullByProduct) {
-        await this.releaseReservedAtLocationInTx(tx, productId, logisticsLocationId, qty);
+      // Skipped when the reservation was already released (migration 0362).
+      if (!(await this.reservationAlreadyReleased(orderId, tx))) {
+        for (const [productId, qty] of fullByProduct) {
+          await this.releaseReservedAtLocationInTx(tx, productId, logisticsLocationId, qty);
+        }
       }
     });
 
