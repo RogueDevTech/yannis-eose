@@ -23,7 +23,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, formatCustomerPhoneForDisplay, toInternationalPhone, type CallablePhone, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode, STRICT_PHONE_MODE_KEY, isStrictPhoneModeOn, isStrictPhoneModeRole, resolveDuplicateRules, type DuplicateRules } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, SYSTEM_ACTOR_ID, canonicalPermissionCode, formatOrderNumber, buildOrderClipboardSummaryText, formatPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, formatCustomerPhoneForDisplay, toInternationalPhone, type CallablePhone, resolveOrderClipboardPhone, retrackCategoryLabel, normalizePhoneForHash, phoneSearchVariants, symbolForCurrencyCode, STRICT_PHONE_MODE_KEY, isStrictPhoneModeOn, isStrictPhoneModeRole, resolveDuplicateRules, type DuplicateRules, STOCK_HOLDING_STATUSES } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { importStatusForAssignee } from './import-status';
 import { withActor, withActorAndBranch, type Tx } from '../common/db/with-actor';
@@ -3644,7 +3644,7 @@ export class OrdersService {
   async upsertImportOrderByExternalId(
     input: ImportOrderInput & { importExternalId: string },
     actorId: string,
-  ): Promise<{ id: string; created: boolean }> {
+  ): Promise<{ id: string; created: boolean; heldByLogisticsStatus?: string }> {
     const customerPhoneHash = this.hashPhone(input.customerPhone);
     const targetStatus = importStatusForAssignee(input.targetStatus, input.assignedCsId);
 
@@ -3699,6 +3699,31 @@ export class OrdersService {
             .orderBy(schema.orders.createdAt, schema.orders.id)
             .limit(1);
           existingIdByIdentity = byIdentity[0]?.id ?? null;
+        }
+      }
+
+      // An order already with logistics (allocated, dispatched, in transit)
+      // holds reserved stock. Overwriting its status/items here would skip the
+      // stock release (and the delivery deduction), leaving the reservation
+      // stuck forever. Leave it untouched; the row is reported as a warning.
+      const existingId =
+        existingIdByIdentity ??
+        (
+          await tx
+            .select({ id: schema.orders.id })
+            .from(schema.orders)
+            .where(eq(schema.orders.importExternalId, input.importExternalId))
+            .limit(1)
+        )[0]?.id ??
+        null;
+      if (existingId) {
+        const [current] = await tx
+          .select({ status: schema.orders.status })
+          .from(schema.orders)
+          .where(eq(schema.orders.id, existingId))
+          .limit(1);
+        if (current && (STOCK_HOLDING_STATUSES as readonly string[]).includes(current.status)) {
+          return { id: existingId, created: false, heldByLogisticsStatus: current.status as string };
         }
       }
 
@@ -6480,6 +6505,9 @@ export class OrdersService {
       branchId: schema.orders.branchId,
       logisticsProviderId: schema.orders.logisticsProviderId,
       logisticsLocationId: schema.orders.logisticsLocationId,
+      // Allocation time: drives the "Overdue at logistics" tag (30+ days).
+      allocatedAt: schema.orders.allocatedAt,
+      reservationReleasedAt: schema.orders.reservationReleasedAt,
       riderId: schema.orders.riderId,
       // Back-link to the abandoned cart this order was recovered from (migration 0142).
       // Surfaced so list rows can offer a "View cart" quick-detail action.
@@ -7832,8 +7860,12 @@ export class OrdersService {
         // NEW lines. All in this one tx — if the new quantities don't fit in
         // free stock, the re-reserve throws and the edit rolls back whole.
         const RESERVED_STATUSES = ['AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'];
+        // An order whose reservation was already released (N days with
+        // logistics, migration 0362) holds nothing: no release, no re-reserve.
         const syncReservation =
-          RESERVED_STATUSES.includes(order.status) && !!order.logisticsLocationId;
+          RESERVED_STATUSES.includes(order.status) &&
+          !!order.logisticsLocationId &&
+          !order.reservationReleasedAt;
         if (syncReservation) {
           await this.inventoryService.releaseOrderReservationInTx(
             tx,

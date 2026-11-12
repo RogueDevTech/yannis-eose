@@ -66,6 +66,12 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
     action: 'warehouses.write',
     description: 'Create / update Yannis-owned warehouses',
   },
+  {
+    code: 'inventory.reservations.release',
+    resource: 'inventory',
+    action: 'reservations.release',
+    description: 'Release the reserved stock of orders with logistics (the order keeps its status)',
+  },
   { code: 'transfers.read', resource: 'transfers', action: 'read', description: 'View transfers' },
   { code: 'returns.read', resource: 'returns', action: 'read', description: 'View returns' },
   { code: 'logistics.read', resource: 'logistics', action: 'read', description: 'View logistics' },
@@ -504,6 +510,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     // visibility after the 2026-05 split into per-page codes.
     'logistics.providers.view',
     'logistics.partner_transfers.view',
+    'inventory.reservations.release',
   ],
   STOCK_MANAGER: [
     'inventory.read',
@@ -535,6 +542,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     // visibility after the 2026-05 split into per-page codes.
     'logistics.providers.view',
     'logistics.partner_transfers.view',
+    'inventory.reservations.release',
   ],
   TPL_MANAGER: [
     'inventory.read',

@@ -138,6 +138,10 @@ export const orders = pgTable('orders', {
    * No FK on purpose: written on the intake path (see 0359).
    */
   cartOrderCheck: uuid('cart_order_check'),
+  /** When this order's reserved stock was released while it was still with
+   *  logistics (auto after N days, or manually). NULL = still holds it.
+   *  Migration 0362. Stops a later delivery/return from releasing it twice. */
+  reservationReleasedAt: timestamp('reservation_released_at', { withTimezone: true }),
   /**
    * How the order was captured (migration 0353). NULL = submitted by the
    * customer (or created by staff). 'UNSUBMITTED_FORM' = a properly filled form

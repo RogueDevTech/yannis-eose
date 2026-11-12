@@ -574,6 +574,8 @@ export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
   'ORDER_REMITTED',
   'OFFER_CHECK_FLAGGED',
   'OFFER_CHECK_CLEARED',
+  // Migration 0362: reserved stock released for an order still with logistics.
+  'STOCK_RESERVATION_RELEASED',
 ]);
 
 /** Staff onboarding workflow — non-blocking record-keeping flow. */

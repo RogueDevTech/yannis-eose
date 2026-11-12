@@ -388,6 +388,8 @@ export {
   rejectMbFundTransferSchema,
   acceptMbFundTransferSchema,
   listMbFundTransfersSchema,
+  FUNDING_AMOUNT_MAX,
+  FUNDING_AMOUNT_MAX_MESSAGE,
 } from './marketing';
 
 export type {

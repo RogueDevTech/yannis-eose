@@ -1,3 +1,4 @@
+import { RESERVATION_RELEASE_SETTING_KEY, MAX_RESERVATION_RELEASE_DAYS, resolveReservationReleaseDays } from '@yannis/shared';
 import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
@@ -240,6 +241,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const threshold = (lowStockRow?.value as { threshold?: number } | null)?.threshold;
   if (typeof threshold === 'number' && threshold > 0) lowStockThreshold = threshold;
 
+  // Reserved stock release rule (per company; default 30 days, 0 = never).
+  const releaseAfterDays = resolveReservationReleaseDays(
+    settingsRows.find((s) => s.key === RESERVATION_RELEASE_SETTING_KEY)?.value ?? null,
+  );
+
   const lowStockAlertsData: LowStockAlertsResult =
     bundle?.lowStockAlerts ?? { threshold: lowStockThreshold, items: [] };
 
@@ -301,6 +307,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.shipments.read')),
     canAdjust:
       isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.adjust')),
+    canReleaseReservations:
+      isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.reservations.release')),
+    releaseAfterDays,
     // Inventory CSV export is permission-gated via `inventory.export`. Admin-class
     // bypasses; STOCK_MANAGER and HoLogistics get it by default in the catalog.
     // Other roles can be granted ad-hoc via the user permission overrides UI.
@@ -355,6 +364,22 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to adjust stock') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
+  }
+
+  if (intent === 'updateReservationRelease') {
+    const days = parseInt(formData.get('days')?.toString() ?? '', 10);
+    if (!Number.isInteger(days) || days < 0 || days > MAX_RESERVATION_RELEASE_DAYS) {
+      return json({ error: `Days must be between 0 and ${MAX_RESERVATION_RELEASE_DAYS}` }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/settings.updateReservationReleaseDays', {
+      method: 'POST',
+      cookie,
+      body: { days },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to save the release rule') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true, message: days === 0 ? 'Automatic release turned off' : `Reserved stock now releases after ${days} days` });
   }
 
   if (intent === 'updateLowStockThreshold') {

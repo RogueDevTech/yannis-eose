@@ -49,6 +49,8 @@ import {
 } from '@yannis/shared';
 import {
   requestFundingRefundSchema,
+  FUNDING_AMOUNT_MAX,
+  FUNDING_AMOUNT_MAX_MESSAGE,
   reviewFundingRefundSchema,
   fundingRefundIdSchema,
   listFundingRefundsSchema,
@@ -448,7 +450,10 @@ export const marketingRouter = router({
     .meta({ branchScopedMutation: true })
     .input(
       z.object({
-        amount: z.coerce.number().positive('Funding amount must be greater than zero'),
+        amount: z.coerce
+          .number()
+          .positive('Funding amount must be greater than zero')
+          .max(FUNDING_AMOUNT_MAX, FUNDING_AMOUNT_MAX_MESSAGE),
         reason: z.string().max(500).optional().default(''),
         branchId: z.string().uuid().optional(),
         /**

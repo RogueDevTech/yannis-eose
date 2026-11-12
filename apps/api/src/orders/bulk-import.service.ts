@@ -1404,12 +1404,27 @@ export class BulkImportService {
         lastRowSeen = rowIndex;
         try {
           const { input, unresolved } = this.mapRow(record, config, codeMaps);
-          await this.ordersService.upsertImportOrderByExternalId(input, job.createdBy);
+          const upserted = await this.ordersService.upsertImportOrderByExternalId(input, job.createdBy);
           newProcessed += 1;
-          // Row imported, but one or more codes didn't resolve → non-fatal
-          // warning. The field is NULL; fixing the code on the sheet and
-          // re-importing back-fills it (idempotent upsert).
-          if (unresolved.length > 0) {
+          if (upserted.heldByLogisticsStatus) {
+            // Order is already with logistics (holds reserved stock): left
+            // unchanged so its reservation is not orphaned. Non-fatal warning.
+            newWarnings += 1;
+            const warnReason = `Not updated: this order is already with logistics (${upserted.heldByLogisticsStatus}). Update it in the app instead.`;
+            if (failures.length < MAX_ERROR_LOG) {
+              failures.push({
+                row: rowIndex,
+                externalId: input.importExternalId,
+                severity: 'warning',
+                unresolved: [],
+                reason: warnReason,
+              });
+            }
+            rowRecords.push({ rowIndex, status: 'WARNING', externalId: input.importExternalId, reason: warnReason, rawData: null });
+          } else if (unresolved.length > 0) {
+            // Row imported, but one or more codes didn't resolve → non-fatal
+            // warning. The field is NULL; fixing the code on the sheet and
+            // re-importing back-fills it (idempotent upsert).
             newWarnings += 1;
             const warnReason = `Imported with unresolved: ${unresolved
               .map((u) => `${u.field}="${u.code}"`)

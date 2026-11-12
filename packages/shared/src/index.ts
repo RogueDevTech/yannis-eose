@@ -32,6 +32,7 @@ export * from './orders/retrack-category-meta';
 export * from './orders/customer-phone-display';
 export * from './orders/strict-phone-mode';
 export * from './orders/format-order-number';
+export * from './orders/overdue-allocation';
 export * from './users/format-user-number';
 export * as db from './db/index';
 // `runSqlMigrations` is server-only (uses node:fs / node:path). Re-exporting it

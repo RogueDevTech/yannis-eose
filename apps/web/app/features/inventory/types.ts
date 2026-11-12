@@ -135,6 +135,10 @@ export interface InventoryStreamData {
   canReadShipments?: boolean;
   /** When false, the row-level "Edit" (stock adjust) action is hidden. */
   canAdjust?: boolean;
+  /** `inventory.reservations.release`: may release reserved stock of orders with logistics. */
+  canReleaseReservations?: boolean;
+  /** Company rule: reserved stock of orders with logistics is released after this many days (0 = never). */
+  releaseAfterDays?: number;
   /** When false, the Generate report button is hidden. SuperAdmin/Admin + STOCK_MANAGER only. */
   canExport?: boolean;
   /** TPL combined view: transfers, returns, reconciliations */

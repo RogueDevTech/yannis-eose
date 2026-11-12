@@ -2574,10 +2574,13 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       // and only posts the Dr COGS / Cr Stock pair when it is > 0 — without this
       // stamp a graduated follow-up order recorded 100% margin (Pillar 3 breach).
       // Mirrors the normal delivery path (orders.service.ts DELIVERED handler).
+      // Graduated copies were never reserved: do not release (it would take
+      // units reserved by other live orders at this location).
       const { landedCost } = await this.inventoryService.completeDeliveryInventory(
         orderId,
         logisticsLocationId,
         systemActor,
+        { releaseReservation: false },
       );
       if (landedCost > 0) {
         await withActor(this.db, systemActor, async (tx) => {

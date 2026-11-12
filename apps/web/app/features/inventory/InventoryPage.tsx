@@ -1,3 +1,4 @@
+import { ReservationHoldersModal } from './ReservationHoldersModal';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
@@ -207,6 +208,8 @@ export function InventoryPage(props: InventoryStreamData) {
     canIntake = false,
     canReadShipments = false,
     canAdjust = false,
+    canReleaseReservations = false,
+    releaseAfterDays = 30,
     canExport = false,
     transfers, returnedOrders, reconciliations, locationsWithLock,
     lowStockThreshold = 100, canEditLowStock = false, canEditGlobalThreshold = false, lowStockAlerts,
@@ -413,6 +416,14 @@ export function InventoryPage(props: InventoryStreamData) {
     setLocationDrafts((prev) => new Map(prev).set(id, value));
   };
 
+  // Reserved stock release rule (admin, per company).
+  const [showReleaseRuleModal, setShowReleaseRuleModal] = useState(false);
+  const [draftReleaseDays, setDraftReleaseDays] = useState(releaseAfterDays);
+  const releaseRuleFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
+  const releaseRuleSurface = useFetcherActionSurface(releaseRuleFetcher);
+  useFetcherToast(releaseRuleFetcher.data, { skipErrorToast: showReleaseRuleModal });
+  useCloseOnFetcherSuccess(releaseRuleFetcher, () => setShowReleaseRuleModal(false));
+
   // Bulk save fetcher — org-wide + all changed locations in one submit.
   const bulkThresholdFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const bulkThresholdSurface = useFetcherActionSurface(bulkThresholdFetcher);
@@ -460,6 +471,8 @@ export function InventoryPage(props: InventoryStreamData) {
 
   // ── Peek modal state (mobile card tap → detail sheet) ──
   const [peekLevel, setPeekLevel] = useState<InventoryLevel | null>(null);
+  /** Reserved breakdown: which orders hold this product's reserved stock at this location. */
+  const [reservedLevel, setReservedLevel] = useState<InventoryLevel | null>(null);
 
   const pageStockSum = levels.reduce((sum, l) => sum + l.stockCount, 0);
   const pageReservedSum = levels.reduce((sum, l) => sum + l.reservedCount, 0);
@@ -565,9 +578,22 @@ export function InventoryPage(props: InventoryStreamData) {
       header: 'Reserved',
       align: 'right',
       hideOnMobile: true,
-      render: (level) => (
-        <span className="text-warning-600 dark:text-warning-400 tabular-nums">{level.reservedCount}</span>
-      ),
+      render: (level) =>
+        level.reservedCount > 0 && !isEmptyLocationRow(level.id) ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setReservedLevel(level);
+            }}
+            title="See which orders hold this stock"
+            className="text-warning-600 dark:text-warning-400 tabular-nums underline decoration-dotted underline-offset-2 hover:text-warning-700"
+          >
+            {level.reservedCount}
+          </button>
+        ) : (
+          <span className="text-warning-600 dark:text-warning-400 tabular-nums">{level.reservedCount}</span>
+        ),
     },
     {
       key: 'available',
@@ -824,6 +850,22 @@ export function InventoryPage(props: InventoryStreamData) {
                 >
                   Alert &lt; <strong className="text-app-fg">{lowStockThreshold}</strong> units
                 </Button>
+                {canEditGlobalThreshold && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setDraftReleaseDays(releaseAfterDays);
+                      setShowReleaseRuleModal(true);
+                    }}
+                  >
+                    Reserved stock release:{' '}
+                    <strong className="text-app-fg">{releaseAfterDays > 0 ? `${releaseAfterDays} days` : 'off'}</strong>
+                  </Button>
+                )}
                 {canIntake && (
                   <Button
                     variant="secondary"
@@ -1192,6 +1234,62 @@ export function InventoryPage(props: InventoryStreamData) {
       )}
 
       {/* Peek modal — mobile card tap shows row details + actions */}
+      {showReleaseRuleModal && (
+        <Modal
+          open
+          onClose={() => setShowReleaseRuleModal(false)}
+          maxWidth="max-w-sm"
+          contentClassName="p-5 space-y-4 bg-app-elevated"
+        >
+          <div>
+            <h3 className="text-base font-semibold text-app-fg">Reserved stock release</h3>
+            <p className="text-sm text-app-fg-muted mt-1">
+              Orders with logistics longer than this get their reserved stock released. The order keeps its status.
+            </p>
+          </div>
+          <ModalFetcherInlineError message={releaseRuleSurface.rawError} />
+          <releaseRuleFetcher.Form method="post" className="space-y-4">
+            <input type="hidden" name="intent" value="updateReservationRelease" />
+            <input type="hidden" name="days" value={draftReleaseDays} />
+            <div className="flex items-center gap-2">
+              <NumberInput
+                id="reservation-release-days"
+                min={0}
+                max={365}
+                fallbackValue={0}
+                value={draftReleaseDays}
+                onValueChange={setDraftReleaseDays}
+                wrapperClassName="w-28"
+              />
+              <span className="text-xs text-app-fg-muted">days (0 = never)</span>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setShowReleaseRuleModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={releaseRuleFetcher.state !== 'idle' || draftReleaseDays === releaseAfterDays}
+              >
+                Save
+              </Button>
+            </div>
+          </releaseRuleFetcher.Form>
+        </Modal>
+      )}
+
+      {reservedLevel && (
+        <ReservationHoldersModal
+          productId={reservedLevel.productId}
+          locationId={reservedLevel.locationId}
+          productName={productName(reservedLevel.productId)}
+          locationName={locationName(reservedLevel.locationId)}
+          canRelease={canReleaseReservations}
+          onClose={() => setReservedLevel(null)}
+        />
+      )}
+
       {peekLevel && (
         <Modal
           open
@@ -1281,6 +1379,19 @@ export function InventoryPage(props: InventoryStreamData) {
                 )}
               </div>
             </div>
+          )}
+
+          {peekLevel.reservedCount > 0 && !isEmptyLocationRow(peekLevel.id) && (
+            <button
+              type="button"
+              onClick={() => {
+                setReservedLevel(peekLevel);
+                setPeekLevel(null);
+              }}
+              className="w-full rounded-lg border border-app-border px-3 py-2 text-sm font-medium text-app-fg hover:bg-app-hover"
+            >
+              Held by orders ({peekLevel.reservedCount} reserved)
+            </button>
           )}
 
           {/* Actions */}
