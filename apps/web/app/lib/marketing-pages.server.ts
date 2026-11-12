@@ -1,4 +1,5 @@
 import { json } from '@remix-run/node';
+import { FUNDING_AMOUNT_MAX, FUNDING_AMOUNT_MAX_MESSAGE } from '@yannis/shared';
 import { apiRequest, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
@@ -547,6 +548,9 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
     const amount = formData.get('amount')?.toString() ?? '';
     if (!amount || Number.isNaN(Number(amount)) || Number(amount) < 0) {
       return json({ error: 'Valid amount is required' }, { status: 400 });
+    }
+    if (Number(amount) > FUNDING_AMOUNT_MAX) {
+      return json({ error: FUNDING_AMOUNT_MAX_MESSAGE }, { status: 400 });
     }
     const targetUserId = formData.get('targetUserId')?.toString().trim() || undefined;
     const res = await apiRequest<unknown>('/trpc/marketing.requestFunding', {

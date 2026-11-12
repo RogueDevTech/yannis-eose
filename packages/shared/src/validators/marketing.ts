@@ -22,9 +22,14 @@ const optionalAssetUrl = z
 // Marketing Funding Validators
 // ============================================
 
+/** Largest single funding amount (₦1bn). Funding columns are numeric(12,2) and
+ *  overflow at ₦10bn; a typo with extra zeros must get a clear message, not a 500. */
+export const FUNDING_AMOUNT_MAX = 1_000_000_000;
+export const FUNDING_AMOUNT_MAX_MESSAGE = 'Amount is too large: the maximum is ₦1,000,000,000';
+
 export const createFundingSchema = z.object({
   receiverId: z.string().uuid(),
-  amount: z.coerce.number().min(0).multipleOf(0.01),
+  amount: z.coerce.number().min(0).max(FUNDING_AMOUNT_MAX, FUNDING_AMOUNT_MAX_MESSAGE).multipleOf(0.01),
   receiptUrl: optionalAssetUrl,
   paymentMethod: z.string().max(100).optional(),
   notes: z.string().max(500).optional(),
@@ -140,7 +145,7 @@ export type GetFundingBalanceInput = z.infer<typeof getFundingBalanceSchema>;
 export const approveFundingRequestSchema = z.object({
   requestId: z.string().uuid(),
   /** Amount actually sent (must be ≤ requested amount; server enforces cap). */
-  amount: z.coerce.number().positive().multipleOf(0.01),
+  amount: z.coerce.number().positive().max(FUNDING_AMOUNT_MAX, FUNDING_AMOUNT_MAX_MESSAGE).multipleOf(0.01),
   receiptUrl: optionalAssetUrl,
 });
 export type ApproveFundingRequestInput = z.infer<typeof approveFundingRequestSchema>;
@@ -816,7 +821,7 @@ export type FundingLedgerInput = z.infer<typeof fundingLedgerSchema>;
 
 export const createMbFundTransferSchema = z.object({
   receiverMbId: z.string().uuid(),
-  amount: z.number().positive(),
+  amount: z.number().positive().max(FUNDING_AMOUNT_MAX, FUNDING_AMOUNT_MAX_MESSAGE),
   reason: z.string().max(500).optional(),
 });
 export type CreateMbFundTransferInput = z.infer<typeof createMbFundTransferSchema>;
