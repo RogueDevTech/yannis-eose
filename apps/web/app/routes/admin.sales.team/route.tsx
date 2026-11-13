@@ -1,8 +1,10 @@
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
+import { defer, json, type ActionFunctionArgs, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
+import type { CloserCountryGap } from '~/features/cs/CloserCountryGapsNotice';
 import { resolveMarketingDateFilters, buildLeaderboardInput } from '~/lib/marketing-pages.server';
 import { CSTeamPage } from '~/features/cs/CSTeamPage';
 import { CSTeamLoadingShell } from '~/features/cs/CSDeferredLoadingShells';
@@ -135,6 +137,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       cartCounts?: Record<string, number>;
       crossTableDeliveredTotal?: number;
       crossTableConfirmedTotal?: number;
+      countryGaps?: CloserCountryGap[];
+      canGrantCountry?: boolean;
     };
     const bundle = bundleRes.ok
       ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
@@ -287,10 +291,47 @@ export async function loader({ request }: LoaderFunctionArgs) {
       cartTableCounts: bundle?.cartCounts ?? {},
       crossTableDeliveredTotal: bundle?.crossTableDeliveredTotal ?? 0,
       crossTableConfirmedTotal: bundle?.crossTableConfirmedTotal ?? 0,
+      countryGaps: bundle?.countryGaps ?? [],
+      canGrantCountry: bundle?.canGrantCountry === true,
     };
   })();
 
   return defer({ teamShell, pageData });
+}
+
+/** "Add <country>" on the hidden-closer warning. The API checks `users.update`. */
+export async function action({ request }: ActionFunctionArgs) {
+  await requirePermissionOrRoles(request, {
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
+    permission: 'cs.teamOverview',
+  });
+  const cookie = getSessionCookie(request);
+  if (!cookie) throw new Response('Session cookie missing', { status: 401 });
+  const formData = await request.formData();
+  if (formData.get('intent')?.toString() !== 'grantCloserCountry') {
+    return json({ error: 'Unknown action' }, { status: 400 });
+  }
+  const userId = formData.get('userId')?.toString() ?? '';
+  const branchId = formData.get('branchId')?.toString() ?? '';
+  const res = await apiRequest<unknown>('/trpc/users.grantCloserCountry', {
+    method: 'POST',
+    cookie,
+    body: { userId, branchId },
+  });
+  if (!res.ok) {
+    return json(
+      { error: extractApiErrorMessage(res.data, 'Could not add country access') },
+      { status: safeStatus(res.status) },
+    );
+  }
+  const data = (res.data as { result?: { data?: { userName: string; currencyCode: string; companyName: string } } })
+    ?.result?.data;
+  return json({
+    success: true,
+    message: data
+      ? `${data.userName} can now be assigned ${data.currencyCode} orders in ${data.companyName}`
+      : 'Country access added',
+  });
 }
 
 export const clientLoader = cachedClientLoader;
@@ -327,6 +368,8 @@ export default function CSTeamRoute() {
             cartTableCounts={data.cartTableCounts}
             crossTableDeliveredTotal={data.crossTableDeliveredTotal}
             crossTableConfirmedTotal={data.crossTableConfirmedTotal}
+            countryGaps={data.countryGaps}
+            canGrantCountry={data.canGrantCountry}
           />
         )}
     </CachedAwait>
