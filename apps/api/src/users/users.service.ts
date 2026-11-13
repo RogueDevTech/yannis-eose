@@ -1816,8 +1816,9 @@ export class UsersService {
 
   /**
    * Fix one gap from `listCloserCountryGaps`: grant the closer the branch's
-   * country in the branch's company. Never narrows access: a closer with no
-   * grant in that company today has NGN implicitly, so NGN is written too.
+   * country in the branch's company. NGN is written too only when the closer
+   * had no grant there and also sits in a Nigerian branch of that company;
+   * otherwise a foreign closer would land in the Nigeria Assign lists.
    */
   async grantCloserCountryGap(
     input: { userId: string; branchId: string },
@@ -1839,9 +1840,34 @@ export class UsersService {
           eq(schema.userCountries.userId, gap.userId),
           eq(schema.userCountries.groupId, gap.companyId),
         ));
-      const codes = existing.length === 0 && gap.currencyCode !== 'NGN'
-        ? ['NGN', gap.currencyCode]
-        : [gap.currencyCode];
+      // Keep NGN only for a closer who also works a Nigerian branch of this
+      // company. Writing it for everyone put East African closers into the
+      // Nigeria Assign lists (Nov 2026 ticket).
+      let keepNgn = false;
+      if (existing.length === 0 && gap.currencyCode !== 'NGN') {
+        const res = await tx.execute(sql`
+          SELECT 1
+          FROM user_branches ub
+          JOIN branches b ON b.id = ub.branch_id AND b.status = 'ACTIVE'
+          WHERE ub.user_id = ${gap.userId}::uuid
+            AND b.group_id = ${gap.companyId}::uuid
+            AND b.id <> ${gap.branchId}::uuid
+            AND 'NGN' = (
+              SELECT upper(coalesce(o.currency_code, 'NGN'))
+              FROM orders o
+              WHERE o.servicing_branch_id = b.id
+                AND o.created_at > now() - interval '30 days'
+                AND o.deleted_at IS NULL AND o.status <> 'DELETED'
+              GROUP BY 1
+              ORDER BY count(*) DESC, 1
+              LIMIT 1
+            )
+          LIMIT 1
+        `);
+        const rows = Array.isArray(res) ? res : ((res as unknown as { rows?: unknown[] })?.rows ?? []);
+        keepNgn = rows.length > 0;
+      }
+      const codes = keepNgn ? ['NGN', gap.currencyCode] : [gap.currencyCode];
       await tx
         .insert(schema.userCountries)
         .values(codes.map((currencyCode) => ({ userId: gap.userId, groupId: gap.companyId, currencyCode })))
