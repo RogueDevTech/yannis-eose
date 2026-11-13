@@ -1969,6 +1969,11 @@ export const ordersRouter = router({
         effEnd = `${y}-${m}-${d}`;
       }
 
+      // Closers the Assign lists hide (no grant for their branch's country).
+      // Never fails the page: a warning that cannot load is just not shown.
+      const countryGapsPromise = getUsersService()
+        .listCloserCountryGaps(eIds)
+        .catch(() => []);
       const [team, workloads, leaderboard, inactiveAgents, supplementary, funnelStatusCounts, offlineStatusCounts, totalOrdersStatusCounts, deliveredFollowUpStatusCounts, followUpCounts, cartCounts] = await Promise.all([
         getUsersService().listCSTeam(branchId, eIds),
         getOrdersService().getCSCloserWorkloads(branchId, eIds, undefined, cats, ctx.effectiveCurrencyCodes),
@@ -2067,11 +2072,21 @@ export const ordersRouter = router({
         sumConfirmed(followUpCounts) +
         sumConfirmed(cartCounts);
 
+      const countryGaps = await countryGapsPromise;
+      const canGrantCountry =
+        ctx.user.role === 'SUPER_ADMIN' ||
+        ctx.user.role === 'SUPPORT' ||
+        (ctx.user.permissions ?? []).some(
+          (p) => canonicalPermissionCode(p) === canonicalPermissionCode('users.update'),
+        );
+
       return {
         team,
         workloads,
         leaderboard,
         inactiveAgents,
+        countryGaps,
+        canGrantCountry,
         offlineCount: supplementary.offlineCount,
         categoryCounts,
         totalOrdersFromMainTable,

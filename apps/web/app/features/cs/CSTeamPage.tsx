@@ -27,6 +27,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { CONTROL_HEIGHT_CLASS } from '~/components/ui/_control-heights';
 import { SortMenu, type SortMenuOption, type SortMenuValue } from '~/components/ui/sort-menu';
 import type { CSTeamMemberOverview } from './types';
+import { CloserCountryGapsNotice, type CloserCountryGap } from './CloserCountryGapsNotice';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import {
   confirmationRateColorClass,
@@ -79,6 +80,10 @@ export interface CSTeamPageProps {
   crossTableDeliveredTotal?: number;
   /** Cross-table confirmed total (main + follow-up + cart tables) — matches Dashboard. */
   crossTableConfirmedTotal?: number;
+  /** Closers hidden from Assign lists (no access to their branch's country). */
+  countryGaps?: CloserCountryGap[];
+  /** Caller may fix a gap in one click (`users.update`). */
+  canGrantCountry?: boolean;
 }
 
 function StatInfoIcon({ onClick }: { onClick: () => void }) {
@@ -475,6 +480,8 @@ export function CSTeamPage({
   cartTableCounts = {},
   crossTableDeliveredTotal,
   crossTableConfirmedTotal,
+  countryGaps = [],
+  canGrantCountry = false,
 }: CSTeamPageProps) {
   // Parse flat sort string (e.g. "total-desc") into SortMenu value
   const sortMenuValue = useMemo((): SortMenuValue => {
@@ -830,6 +837,8 @@ export function CSTeamPage({
           periodAllTime={dateFilters.periodAllTime}
         />
       ) : null}
+
+      <CloserCountryGapsNotice gaps={countryGaps} canGrant={canGrantCountry} />
 
       <ExportModal
         open={showExportModal}

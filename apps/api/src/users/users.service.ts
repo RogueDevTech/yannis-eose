@@ -35,6 +35,18 @@ import { permissionRequestTypeTextEq } from '../common/db/permission-request-typ
 
 type DbTx = Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
 
+/** A CS closer the Assign lists hide in a branch: see `listCloserCountryGaps`. */
+export type CloserCountryGap = {
+  userId: string;
+  userName: string;
+  branchId: string;
+  branchName: string;
+  companyId: string;
+  companyName: string;
+  currencyCode: string;
+  orders30d: number;
+};
+
 /** Strip ILIKE metacharacters so user input cannot widen patterns (aligned with searchForPushTarget). */
 function sanitizeListUsersSearch(raw: string): string {
   return raw.replace(/[%_\\]/g, ' ').trim();
@@ -1715,6 +1727,156 @@ export class UsersService {
       .offset(skip);
 
     return rows;
+  }
+
+  /**
+   * CS closers who sit in a country branch but hold no grant for that country
+   * in the branch's company, so every Assign list hides them there
+   * (`closerInCountriesCondition`). Nov 2026: Felicia (Ghana) and Faith
+   * (Kenya) vanished from Assign this way after the country filter shipped.
+   *
+   * A branch's country = the currency most of its serviced orders used in the
+   * last 30 days (branches carry no currency of their own). Same access rule
+   * as the Assign filter: `countries.view_all`, a `user_countries` row for
+   * that company + currency, or no grant at all in that company and NGN.
+   */
+  async listCloserCountryGaps(
+    effectiveBranchIds?: string[] | null,
+    only?: { userId: string; branchId: string },
+  ): Promise<CloserCountryGap[]> {
+    const branchScope =
+      effectiveBranchIds && effectiveBranchIds.length > 0
+        ? sql`AND o.servicing_branch_id IN (${sql.join(effectiveBranchIds.map((id) => sql`${id}::uuid`), sql`, `)})`
+        : sql``;
+    const onlyFilter = only
+      ? sql`AND u.id = ${only.userId}::uuid AND b.id = ${only.branchId}::uuid`
+      : sql``;
+    const result = await this.db.execute(sql`
+      WITH branch_country AS (
+        SELECT DISTINCT ON (o.servicing_branch_id)
+               o.servicing_branch_id AS branch_id,
+               upper(coalesce(o.currency_code, 'NGN')) AS currency_code,
+               count(*)::int AS orders
+        FROM orders o
+        WHERE o.created_at > now() - interval '30 days'
+          AND o.deleted_at IS NULL
+          AND o.status <> 'DELETED'
+          AND o.servicing_branch_id IS NOT NULL
+          ${branchScope}
+        GROUP BY 1, 2
+        ORDER BY 1, 3 DESC, 2
+      )
+      SELECT u.id AS user_id, u.name AS user_name,
+             b.id AS branch_id, b.name AS branch_name,
+             bg.id AS company_id, bg.name AS company_name,
+             bc.currency_code, bc.orders
+      FROM branch_country bc
+      JOIN branches b ON b.id = bc.branch_id AND b.status = 'ACTIVE'
+      JOIN branch_groups bg ON bg.id = b.group_id
+      JOIN user_branches ub ON ub.branch_id = b.id
+      JOIN users u ON u.id = ub.user_id AND u.role = 'CS_CLOSER' AND u.status = 'ACTIVE'
+      WHERE NOT EXISTS (
+          SELECT 1 FROM user_permissions up
+          JOIN permissions p ON p.id = up.permission_id
+          WHERE up.user_id = u.id AND up.granted AND p.code = 'countries.view_all'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM user_countries uc
+          WHERE uc.user_id = u.id AND uc.group_id = bg.id
+            AND upper(uc.currency_code) = bc.currency_code
+        )
+        AND NOT (
+          bc.currency_code = 'NGN'
+          AND NOT EXISTS (
+            SELECT 1 FROM user_countries uc2
+            WHERE uc2.user_id = u.id AND uc2.group_id = bg.id
+          )
+        )
+        ${onlyFilter}
+      ORDER BY bg.name, b.name, u.name
+    `);
+    type Row = {
+      user_id: string; user_name: string; branch_id: string; branch_name: string;
+      company_id: string; company_name: string; currency_code: string; orders: number;
+    };
+    const rows: Row[] = Array.isArray(result)
+      ? (result as unknown as Row[])
+      : ((result as unknown as { rows?: Row[] })?.rows ?? []);
+    return rows.map((r) => ({
+      userId: r.user_id,
+      userName: r.user_name,
+      branchId: r.branch_id,
+      branchName: r.branch_name,
+      companyId: r.company_id,
+      companyName: r.company_name,
+      currencyCode: r.currency_code,
+      orders30d: Number(r.orders ?? 0),
+    }));
+  }
+
+  /**
+   * Fix one gap from `listCloserCountryGaps`: grant the closer the branch's
+   * country in the branch's company. NGN is written too only when the closer
+   * had no grant there and also sits in a Nigerian branch of that company;
+   * otherwise a foreign closer would land in the Nigeria Assign lists.
+   */
+  async grantCloserCountryGap(
+    input: { userId: string; branchId: string },
+    actor: SessionUser,
+    effectiveBranchIds?: string[] | null,
+  ): Promise<{ userName: string; currencyCode: string; companyName: string }> {
+    const [gap] = await this.listCloserCountryGaps(effectiveBranchIds, input);
+    if (!gap) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'This closer already has access to that country, or the branch is outside your scope.',
+      });
+    }
+    await withActor(this.db, actor, async (tx) => {
+      const existing = await tx
+        .select({ currencyCode: schema.userCountries.currencyCode })
+        .from(schema.userCountries)
+        .where(and(
+          eq(schema.userCountries.userId, gap.userId),
+          eq(schema.userCountries.groupId, gap.companyId),
+        ));
+      // Keep NGN only for a closer who also works a Nigerian branch of this
+      // company. Writing it for everyone put East African closers into the
+      // Nigeria Assign lists (Nov 2026 ticket).
+      let keepNgn = false;
+      if (existing.length === 0 && gap.currencyCode !== 'NGN') {
+        const res = await tx.execute(sql`
+          SELECT 1
+          FROM user_branches ub
+          JOIN branches b ON b.id = ub.branch_id AND b.status = 'ACTIVE'
+          WHERE ub.user_id = ${gap.userId}::uuid
+            AND b.group_id = ${gap.companyId}::uuid
+            AND b.id <> ${gap.branchId}::uuid
+            AND 'NGN' = (
+              SELECT upper(coalesce(o.currency_code, 'NGN'))
+              FROM orders o
+              WHERE o.servicing_branch_id = b.id
+                AND o.created_at > now() - interval '30 days'
+                AND o.deleted_at IS NULL AND o.status <> 'DELETED'
+              GROUP BY 1
+              ORDER BY count(*) DESC, 1
+              LIMIT 1
+            )
+          LIMIT 1
+        `);
+        const rows = Array.isArray(res) ? res : ((res as unknown as { rows?: unknown[] })?.rows ?? []);
+        keepNgn = rows.length > 0;
+      }
+      const codes = keepNgn ? ['NGN', gap.currencyCode] : [gap.currencyCode];
+      await tx
+        .insert(schema.userCountries)
+        .values(codes.map((currencyCode) => ({ userId: gap.userId, groupId: gap.companyId, currencyCode })))
+        .onConflictDoNothing();
+    });
+    this.logger.log(
+      `Country grant: ${gap.currencyCode} @ ${gap.companyName} for closer ${gap.userId} by ${actor.id}`,
+    );
+    return { userName: gap.userName, currencyCode: gap.currencyCode, companyName: gap.companyName };
   }
 
   /**

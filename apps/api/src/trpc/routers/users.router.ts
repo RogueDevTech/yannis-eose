@@ -323,6 +323,26 @@ export const usersRouter = router({
     }),
 
   /**
+   * One-click fix for a "hidden from Assign" closer (Team Analysis warning):
+   * grants the branch's country in the branch's company. The service re-checks
+   * the gap inside the caller's company scope, so only a listed gap can be fixed.
+   */
+  grantCloserCountry: permissionProcedure('users.update')
+    .input(z.object({ userId: z.string().uuid(), branchId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const res = await getUsersService().grantCloserCountryGap(
+        input,
+        ctx.user,
+        ctx.effectiveBranchIds ?? null,
+      );
+      await invalidatePermissionsUserMatrixCache();
+      await getSessionStore()
+        .refreshUserCountryMemberships(input.userId)
+        .catch(() => {});
+      return res;
+    }),
+
+  /**
    * Re-stamp the user's permission snapshot from the current template baseline.
    *
    * Use case: a user was created during a window when `role_template_permissions`
