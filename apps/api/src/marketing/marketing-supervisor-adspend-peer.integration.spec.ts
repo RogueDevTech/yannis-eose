@@ -356,4 +356,35 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing team supervisors: ad spend approval an
     expect(ids).not.toContain(s.mb3.id);
     expect(ids).not.toContain(s.cs.id);
   });
+
+  it('a Head of Marketing sends to a marketer on another branch of their company', async () => {
+    const svc = mkMarketing();
+    const s = await setup();
+    await setSessionActor(pgClient, s.admin.id);
+    // Setup has the HoM giving S1 200,000; top up so the HoM holds 100,000.
+    await db.insert(schema.marketingFunding).values({
+      senderId: s.admin.id,
+      receiverId: s.hom.id,
+      amount: sql`${300_000}::numeric`,
+      status: 'COMPLETED',
+      sentAt: new Date(),
+      verifiedAt: new Date(),
+    });
+    // The branch campaign lookup reads on its own connection; this harness has one.
+    (svc as any).getBranchCampaignIds = async () => null;
+    // HoM sits on branch A only; S2 is on branch B. The old same-branch rule refused this.
+    const transfer = (await svc.createMbFundTransfer({ receiverMbId: s.s2.id, amount: 5_000 }, s.hom, s.branchA.id, [
+      s.branchA.id,
+      s.branchB.id,
+    ])) as any;
+    expect(transfer.status).toBe('PENDING');
+  });
+
+  it('a Head of Marketing cannot send to another company', async () => {
+    const svc = mkMarketing();
+    const s = await setup();
+    await expect(
+      svc.createMbFundTransfer({ receiverMbId: s.mb3.id, amount: 1_000 }, s.hom, s.branchA.id, [s.branchA.id, s.branchB.id]),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('same company') });
+  });
 });
