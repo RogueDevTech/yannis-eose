@@ -2639,13 +2639,15 @@ export const marketingRouter = router({
       );
     }),
 
-  /** Recipients for the peer transfer selector (branch members, or company marketers for supervisors). */
+  /** Recipients for the peer transfer selector (branch members, or company marketers for Heads of Marketing and supervisors). */
   listBranchMembersForTransfer: authedProcedure
     .query(async ({ ctx }) => {
-      // Team supervisors send to any marketer in their company, any branch.
+      // Heads of Marketing and team supervisors send to any marketer in their
+      // company, any branch (same rule as createMbFundTransfer).
       if (
-        ctx.user.role === 'MEDIA_BUYER' &&
-        (await getBranchTeamsService().isMarketingTeamSupervisorAnywhere(ctx.user.id))
+        ctx.user.role === 'HEAD_OF_MARKETING' ||
+        (ctx.user.role === 'MEDIA_BUYER' &&
+          (await getBranchTeamsService().isMarketingTeamSupervisorAnywhere(ctx.user.id)))
       ) {
         return getMarketingService().listCompanyMarketersForTransfer(ctx.user.id);
       }

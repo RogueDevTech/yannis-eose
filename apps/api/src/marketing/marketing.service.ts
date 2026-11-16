@@ -4183,10 +4183,13 @@ export class MarketingService {
     if (actor.id === input.receiverMbId) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot send funds to yourself' });
     }
-    // Team supervisors (HoM request 2026-11-11) may send to any marketer in
-    // their company, on any branch. Everyone else keeps the same-branch rule.
-    // Looked up before the transaction: it reads on its own connection.
-    const senderIsSupervisor = await this.branchTeams.isMarketingTeamSupervisorAnywhere(actor.id);
+    // Heads of Marketing (2026-11-16: two Remote HoMs could not find each
+    // other from their home branch) and team supervisors (HoM request
+    // 2026-11-11) may send to any marketer in their company, on any branch.
+    // Everyone else keeps the same-branch rule. The supervisor lookup runs
+    // before the transaction: it reads on its own connection.
+    const senderIsCompanyWide =
+      actor.role === 'HEAD_OF_MARKETING' || (await this.branchTeams.isMarketingTeamSupervisorAnywhere(actor.id));
 
     return withActor(this.db, actor, async (tx) => {
       // Validate sender + receiver exist
@@ -4217,7 +4220,7 @@ export class MarketingService {
         });
       }
 
-      if (senderIsSupervisor) {
+      if (senderIsCompanyWide) {
         const [senderCompanies, receiverCompanies] = await Promise.all([
           userCompanyIds(tx, actor.id),
           userCompanyIds(tx, input.receiverMbId),
