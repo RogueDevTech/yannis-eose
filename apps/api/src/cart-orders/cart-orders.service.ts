@@ -16,6 +16,7 @@ import {
 } from './cart-order-real-order-match';
 import { branchScopeCondition, closerBranchOrAssignedCondition } from '../common/db/branch-scope-condition';
 import { countryScopeCondition } from '../common/db/country-scope-condition';
+import { loadCloserServicingBranchResolver } from '../common/db/closer-servicing-branch';
 import { assertEntityInScopeAny } from '../common/db/assert-entity-in-scope';
 import { nigeriaDayStart, nigeriaDayEnd, nigeriaCarryOverMonthStart } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -847,18 +848,19 @@ export class CartOrdersService {
   async assignToCS(orderId: string, closerId: string, actor: SessionUser, effectiveBranchIds?: string[] | null) {
     await this.assertCartOrderInScope(orderId, effectiveBranchIds);
     const [order] = await this.db
-      .select({ id: schema.cartOrders.id, servicingBranchId: schema.cartOrders.servicingBranchId })
+      .select({
+        id: schema.cartOrders.id,
+        branchId: schema.cartOrders.branchId,
+        servicingBranchId: schema.cartOrders.servicingBranchId,
+      })
       .from(schema.cartOrders)
       .where(eq(schema.cartOrders.id, orderId))
       .limit(1);
     if (!order) throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart order not found' });
 
-    // Resolve the closer's primary branch
-    const [closerBranch] = await this.db
-      .select({ branchId: schema.userBranches.branchId })
-      .from(schema.userBranches)
-      .where(eq(schema.userBranches.userId, closerId))
-      .limit(1);
+    // The order moves to the closer's branch, but never out of its own company.
+    const resolveBranch = await loadCloserServicingBranchResolver(this.db, [closerId], [order]);
+    const closerBranchId = resolveBranch(order, closerId);
 
     return withActor(this.db, actor, async (tx) => {
       const [updated] = await tx
@@ -866,7 +868,7 @@ export class CartOrdersService {
         .set({
           assignedCsId: closerId,
           status: 'CS_ASSIGNED',
-          ...(closerBranch ? { servicingBranchId: closerBranch.branchId } : {}),
+          ...(closerBranchId ? { servicingBranchId: closerBranchId } : {}),
           updatedAt: new Date(),
         })
         .where(eq(schema.cartOrders.id, orderId))
@@ -911,14 +913,14 @@ export class CartOrdersService {
               (o.branchId != null && effectiveBranchIds.includes(o.branchId)),
           );
 
-    // Resolve closer names + branches in parallel
+    // Resolve closer names + branches in parallel. An order moves to its
+    // closer's branch, but never out of its own company.
     const uniqueCloserIds = [...new Set(closerIds)];
-    const [closerRows, closerBranchRows] = await Promise.all([
+    const [closerRows, resolveBranch] = await Promise.all([
       this.db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(inArray(schema.users.id, uniqueCloserIds)),
-      this.db.select({ userId: schema.userBranches.userId, branchId: schema.userBranches.branchId }).from(schema.userBranches).where(inArray(schema.userBranches.userId, uniqueCloserIds)),
+      loadCloserServicingBranchResolver(this.db, uniqueCloserIds, cartOrders),
     ]);
     const closerNameMap = new Map(closerRows.map((u) => [u.id, u.name]));
-    const closerBranchMap = new Map(closerBranchRows.map((r) => [r.userId, r.branchId]));
 
     // Build assignment plan (round-robin)
     const assignments: Array<{ orderId: string; closerId: string; closerName: string; branchId: string | null }> = [];
@@ -932,21 +934,23 @@ export class CartOrdersService {
         orderId,
         closerId,
         closerName: closerNameMap.get(closerId) ?? 'Unknown',
-        branchId: closerBranchMap.get(closerId) ?? co.servicingBranchId,
+        branchId: resolveBranch(co, closerId) ?? co.servicingBranchId,
       });
     }
 
     if (assignments.length > 0) {
       await withActor(this.db, actor, async (tx) => {
-        const byCloser = new Map<string, string[]>();
+        // Group by (closer, target branch): orders from different companies
+        // given to the same closer land in different branches.
+        const byTarget = new Map<string, { closerId: string; branchId: string | null; ids: string[] }>();
         for (const a of assignments) {
-          const list = byCloser.get(a.closerId) ?? [];
-          list.push(a.orderId);
-          byCloser.set(a.closerId, list);
+          const key = `${a.closerId}|${a.branchId ?? ''}`;
+          const entry = byTarget.get(key) ?? { closerId: a.closerId, branchId: a.branchId, ids: [] };
+          entry.ids.push(a.orderId);
+          byTarget.set(key, entry);
         }
 
-        for (const [closerId, ids] of byCloser) {
-          const branch = closerBranchMap.get(closerId);
+        for (const { closerId, branchId: branch, ids } of byTarget.values()) {
           await tx
             .update(schema.cartOrders)
             .set({
