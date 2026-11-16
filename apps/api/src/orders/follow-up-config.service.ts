@@ -28,6 +28,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { DuplicateRulesService } from '../settings/duplicate-rules.service';
 import { parseOrderNumberSearch } from '../common/utils/parse-order-number';
+import { loadCloserServicingBranchResolver } from '../common/db/closer-servicing-branch';
 import { randomUUID } from 'node:crypto';
 
 /** Valid values for the order_timeline_events.event_type enum.
@@ -1617,7 +1618,11 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
   async assignFollowUpOrder(orderId: string, closerId: string, actor: SessionUser, force = false) {
     // Check if the closer already worked the source order
     const [fuOrder] = await this.db
-      .select({ sourceOrderId: schema.followUpOrders.sourceOrderId })
+      .select({
+        sourceOrderId: schema.followUpOrders.sourceOrderId,
+        branchId: schema.followUpOrders.branchId,
+        servicingBranchId: schema.followUpOrders.servicingBranchId,
+      })
       .from(schema.followUpOrders)
       .where(eq(schema.followUpOrders.id, orderId))
       .limit(1);
@@ -1640,12 +1645,9 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       }
     }
 
-    // Resolve the closer's primary branch so the order moves to their branch
-    const [closerBranch] = await this.db
-      .select({ branchId: schema.userBranches.branchId })
-      .from(schema.userBranches)
-      .where(eq(schema.userBranches.userId, closerId))
-      .limit(1);
+    // The order moves to the closer's branch, but never out of its own company.
+    const resolveBranch = await loadCloserServicingBranchResolver(this.db, [closerId], [fuOrder]);
+    const closerBranchId = resolveBranch(fuOrder, closerId);
 
     return withActor(this.db, actor, async (tx) => {
       const [updated] = await tx
@@ -1653,7 +1655,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         .set({
           assignedCsId: closerId,
           status: 'CS_ASSIGNED',
-          ...(closerBranch ? { servicingBranchId: closerBranch.branchId } : {}),
+          ...(closerBranchId ? { servicingBranchId: closerBranchId } : {}),
           updatedAt: new Date(),
         })
         .where(eq(schema.followUpOrders.id, orderId))
@@ -1681,6 +1683,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
       .select({
         id: schema.followUpOrders.id,
         sourceOrderId: schema.followUpOrders.sourceOrderId,
+        branchId: schema.followUpOrders.branchId,
         servicingBranchId: schema.followUpOrders.servicingBranchId,
       })
       .from(schema.followUpOrders)
@@ -1698,12 +1701,12 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
 
     // Resolve closer names + branches in parallel
     const uniqueCloserIds = [...new Set(closerIds)];
-    const [closerRows, closerBranchRows] = await Promise.all([
+    // An order moves to its closer's branch, but never out of its own company.
+    const [closerRows, resolveBranch] = await Promise.all([
       this.db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users).where(inArray(schema.users.id, uniqueCloserIds)),
-      this.db.select({ userId: schema.userBranches.userId, branchId: schema.userBranches.branchId }).from(schema.userBranches).where(inArray(schema.userBranches.userId, uniqueCloserIds)),
+      loadCloserServicingBranchResolver(this.db, uniqueCloserIds, fuOrders),
     ]);
     const closerNameMap = new Map(closerRows.map((u) => [u.id, u.name]));
-    const closerBranchMap = new Map(closerBranchRows.map((r) => [r.userId, r.branchId]));
 
     // Build assignment plan
     const sameCloserSkipped: string[] = [];
@@ -1725,7 +1728,7 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
         orderId,
         closerId,
         closerName: closerNameMap.get(closerId) ?? 'Unknown',
-        branchId: fu.servicingBranchId,
+        branchId: resolveBranch(fu, closerId) ?? fu.servicingBranchId,
       });
     }
 
@@ -1733,14 +1736,16 @@ export class FollowUpConfigService implements OnApplicationBootstrap {
     if (assignments.length > 0) {
       await withActor(this.db, actor, async (tx) => {
         // Bulk update all orders at once per closer
-        const byCloser = new Map<string, string[]>();
+        // Group by (closer, target branch): orders from different companies
+        // given to the same closer land in different branches.
+        const byTarget = new Map<string, { closerId: string; branchId: string | null; ids: string[] }>();
         for (const a of assignments) {
-          const list = byCloser.get(a.closerId) ?? [];
-          list.push(a.orderId);
-          byCloser.set(a.closerId, list);
+          const key = `${a.closerId}|${a.branchId ?? ''}`;
+          const entry = byTarget.get(key) ?? { closerId: a.closerId, branchId: a.branchId, ids: [] };
+          entry.ids.push(a.orderId);
+          byTarget.set(key, entry);
         }
-        for (const [closerId, ids] of byCloser) {
-          const closerBranch = closerBranchMap.get(closerId);
+        for (const { closerId, branchId: closerBranch, ids } of byTarget.values()) {
           await tx
             .update(schema.followUpOrders)
             .set({
