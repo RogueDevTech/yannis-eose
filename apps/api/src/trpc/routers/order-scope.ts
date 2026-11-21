@@ -16,7 +16,7 @@ import { getCartOrdersService } from './cart-orders.router';
  * tables — `getClipboardSummaryText` and `listAllocatableLocations` both
  * document that fallback inline, and the guard was the only thing stopping it.
  * The other two (`listItemOffers` → `listOrderItemOffers`,
- * `listProductsForAdjust` → `isOrderNonBaseCurrency`) are still orders-table
+ * `listProductsForAdjust` → `listProductsForAdjustOffers`) are still orders-table
  * only in the service: they were already degraded for cart / follow-up BEFORE
  * the guard existed, and widening the guard is correct but not by itself
  * sufficient to make them serve those pipelines. Giving those two a real

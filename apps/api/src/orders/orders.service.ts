@@ -2109,23 +2109,115 @@ export class OrdersService {
   }
 
   /**
-   * True when the order's currency differs from the company's base (default)
-   * currency — i.e. a foreign-currency order. Used to strip base-currency-only
-   * embedded offers from pickers that can't price them in the order's currency.
+   * The order's currency code when it differs from the company's base (default)
+   * currency, else null. Non-null means preset prices must come from the
+   * per-currency sibling tables (offer_template_prices / offer_group_item_prices);
+   * base prices and embedded product offers are NGN only and never shown
+   * relabelled with a foreign symbol.
    */
-  async isOrderNonBaseCurrency(orderId: string): Promise<boolean> {
-    // The shared order detail page calls this for all three pipelines, so resolve
-    // the id across `orders` -> `follow_up_orders` -> `cart_orders`. Looking only
-    // at `orders` silently fell back to NGN for a cart / follow-up order, which
-    // showed base-currency embedded offers relabelled with a foreign symbol.
-    const orderCode = (await this.resolveOrderCurrencyCode(orderId)).toUpperCase();
+  private async nonBaseCurrencyCode(orderCurrencyCode: string | null | undefined): Promise<string | null> {
+    const orderCode = (orderCurrencyCode ?? 'NGN').toUpperCase();
     const [baseCur] = await this.db
       .select({ code: schema.currencies.code })
       .from(schema.currencies)
       .where(and(eq(schema.currencies.isDefault, true), eq(schema.currencies.active, true)))
       .limit(1);
     const baseCode = (baseCur?.code ?? 'NGN').toUpperCase();
-    return orderCode !== baseCode;
+    return orderCode !== baseCode ? orderCode : null;
+  }
+
+  /**
+   * Price of a preset tier in the order's currency. Base-currency order: the
+   * base price. Foreign-currency order: the per-currency price, or null when the
+   * tier is not priced in that currency (absent or <= 0), so the caller drops it.
+   * Same rule as the forms, which hide an unpriced tier.
+   */
+  private presetTierPrice(
+    nonBaseCode: string | null,
+    id: string,
+    basePrice: string | number,
+    perCurrency: Map<string, number>,
+  ): number | null {
+    if (!nonBaseCode) return Number(basePrice);
+    const priced = perCurrency.get(id);
+    return priced != null && priced > 0 ? priced : null;
+  }
+
+  /**
+   * Offer tiers, priced in the order's currency, for the product-swap picker in
+   * the Adjust order items modal. Every product passed in is returned, with or
+   * without offers: one with no offers in this currency is still pickable and the
+   * modal falls back to Custom entry. Hiding offer-less products left a ZK order
+   * able to pick only the product it already had (ticket 2026-11-21).
+   *
+   * - Base-currency order: embedded product offers, else active offer templates.
+   * - Foreign-currency order: active offer templates that HAVE a price in that
+   *   currency. Embedded offers and template base prices are NGN only, so they
+   *   are never shown relabelled with a foreign symbol.
+   */
+  async listProductsForAdjustOffers(
+    orderId: string,
+    products: Array<{ id: string; name: string; offers?: unknown; baseSalePrice?: string | number | null }>,
+  ): Promise<
+    Array<{ id: string; name: string; offers: Array<{ label: string; qty: number; price: number }> }>
+  > {
+    if (products.length === 0) return [];
+    const nonBaseCode = await this.nonBaseCurrencyCode(await this.resolveOrderCurrencyCode(orderId));
+
+    const templates = await this.db
+      .select({
+        id: schema.offerTemplates.id,
+        productId: schema.offerTemplates.productId,
+        name: schema.offerTemplates.name,
+        price: schema.offerTemplates.price,
+        quantity: schema.offerTemplates.quantity,
+      })
+      .from(schema.offerTemplates)
+      .where(
+        and(
+          inArray(
+            schema.offerTemplates.productId,
+            products.map((p) => p.id),
+          ),
+          eq(schema.offerTemplates.status, 'ACTIVE'),
+        ),
+      )
+      // Stable order: the modal auto-selects the first tier on a product swap.
+      .orderBy(
+        asc(schema.offerTemplates.quantity),
+        asc(schema.offerTemplates.price),
+        asc(schema.offerTemplates.id),
+      );
+    const perCurrency = nonBaseCode
+      ? await this.loadOfferTemplatePricesForCode(templates.map((t) => t.id), nonBaseCode)
+      : new Map<string, number>();
+
+    type AdjustOffer = { label: string; qty: number; price: number };
+    const templateOffers = new Map<string, AdjustOffer[]>();
+    for (const t of templates) {
+      const price = this.presetTierPrice(nonBaseCode, t.id, t.price, perCurrency);
+      if (price == null) continue;
+      const list = templateOffers.get(t.productId) ?? [];
+      list.push({ label: t.name, qty: t.quantity ?? 1, price });
+      templateOffers.set(t.productId, list);
+    }
+
+    return products.map((p) => {
+      let offers: AdjustOffer[] = [];
+      if (!nonBaseCode && Array.isArray(p.offers) && p.offers.length > 0) {
+        offers = (p.offers as Array<{ label?: unknown; qty?: unknown; price?: unknown }>)
+          .map((o) => ({
+            label: typeof o.label === 'string' ? o.label : 'Offer',
+            qty: typeof o.qty === 'number' && o.qty >= 1 ? o.qty : 1,
+            // An embedded offer without a price falls back to the product's base
+            // sale price, as in listOrderItemOffers (never a silent 0).
+            price: Number(o.price ?? p.baseSalePrice ?? Number.NaN),
+          }))
+          .filter((o) => Number.isFinite(o.price) && o.price > 0);
+      }
+      if (offers.length === 0) offers = templateOffers.get(p.id) ?? [];
+      return { id: p.id, name: p.name, offers };
+    });
   }
 
   /**
@@ -2225,16 +2317,9 @@ export class OrdersService {
     // Per-currency offer pricing: for a non-base-currency order (e.g. GHS), each
     // preset offer must show ITS OWN price in that currency (from the sibling
     // offer_template_prices / offer_group_item_prices tables), not the base (NGN)
-    // price relabelled with the foreign symbol. Mirrors the edge-form tamper gate.
-    const orderCode = (order.currencyCode ?? 'NGN').toUpperCase();
-    const [baseCur] = await this.db
-      .select({ code: schema.currencies.code })
-      .from(schema.currencies)
-      .where(and(eq(schema.currencies.isDefault, true), eq(schema.currencies.active, true)))
-      .limit(1);
-    const baseCode = (baseCur?.code ?? 'NGN').toUpperCase();
-    // Non-base only when the order's currency differs from the base currency.
-    const nonBaseCode = orderCode !== baseCode ? orderCode : null;
+    // price relabelled with the foreign symbol. A tier with no price in that
+    // currency is dropped, as the forms hide it.
+    const nonBaseCode = await this.nonBaseCurrencyCode(order.currencyCode);
 
     type Tier = { label: string; quantity: number; unitPrice: number };
     const tiersByProduct = new Map<string, Tier[]>();
@@ -2266,14 +2351,15 @@ export class OrdersService {
               eq(schema.offerGroupItems.status, 'ACTIVE'),
             ),
           );
-        // Per-currency prices keyed by offer-group-item id; base fallback when a
-        // tier has no price in the order's currency (mirrors the form).
+        // Per-currency prices keyed by offer-group-item id; a tier with no price
+        // in the order's currency is dropped (the form hides it too).
         const perCurrency = nonBaseCode
           ? await this.loadOfferGroupItemPricesForCode(rows.map((r) => r.id), nonBaseCode)
           : new Map<string, number>();
         for (const r of rows) {
+          const unitPrice = this.presetTierPrice(nonBaseCode, r.id, r.price, perCurrency);
+          if (unitPrice == null) continue;
           const list = tiersByProduct.get(r.productId) ?? [];
-          const unitPrice = nonBaseCode && perCurrency.has(r.id) ? perCurrency.get(r.id)! : Number(r.price);
           list.push({ label: r.label, quantity: r.quantity ?? 1, unitPrice });
           tiersByProduct.set(r.productId, list);
         }
@@ -2303,11 +2389,10 @@ export class OrdersService {
           const perCurrency = nonBaseCode
             ? await this.loadOfferTemplatePricesForCode(templates.map((t) => t.id), nonBaseCode)
             : new Map<string, number>();
-          let tiers: Tier[] = templates.map((t) => ({
-            label: t.name,
-            quantity: t.quantity ?? 1,
-            unitPrice: nonBaseCode && perCurrency.has(t.id) ? perCurrency.get(t.id)! : Number(t.price),
-          }));
+          let tiers: Tier[] = templates.flatMap((t) => {
+            const unitPrice = this.presetTierPrice(nonBaseCode, t.id, t.price, perCurrency);
+            return unitPrice == null ? [] : [{ label: t.name, quantity: t.quantity ?? 1, unitPrice }];
+          });
 
           // Embedded product offers + baseSalePrice are BASE-currency (NGN) only —
           // they have no per-currency sibling. For a foreign-currency order we skip
@@ -2368,8 +2453,9 @@ export class OrdersService {
         ? await this.loadOfferTemplatePricesForCode(templates.map((t) => t.id), nonBaseCode)
         : new Map<string, number>();
       for (const t of templates) {
+        const unitPrice = this.presetTierPrice(nonBaseCode, t.id, t.price, perCurrency);
+        if (unitPrice == null) continue;
         const list = tiersByProduct.get(t.productId) ?? [];
-        const unitPrice = nonBaseCode && perCurrency.has(t.id) ? perCurrency.get(t.id)! : Number(t.price);
         list.push({ label: t.name, quantity: t.quantity ?? 1, unitPrice });
         tiersByProduct.set(t.productId, list);
       }

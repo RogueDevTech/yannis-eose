@@ -742,24 +742,25 @@ export const ordersRouter = router({
   listProductsForAdjust: permissionProcedure('orders.read')
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
-      // Embedded product offers (products.offers JSON) are BASE-currency (NGN)
-      // only — they have no per-currency price. For a foreign-currency order,
-      // strip them so the product-swap picker doesn't show an NGN price mislabelled
-      // with the foreign symbol; the modal falls back to Custom entry. Matches
-      // listOrderItemOffers' embedded-offer handling.
+      // Offers come back priced in the order's currency (a ZK order gets ZK
+      // offer-template prices, never NGN relabelled). Every active product is
+      // returned, with or without offers, so CS can swap to any of them.
       await assertOrderIdInAnyTableScope(input.orderId, ctx.effectiveBranchIds);
-      const isForeignCurrency = await getOrdersService().isOrderNonBaseCurrency(input.orderId);
       const result = await getProductsService().list(
         { page: 1, limit: 200, status: 'ACTIVE', sortBy: 'name', sortOrder: 'asc' },
         ctx.user.id,
         ctx.user.role,
         ctx.activeGroupId,
       );
-      return (result?.products ?? []).map((p: { id: string; name: string; offers?: unknown }) => ({
-        id: p.id,
-        name: p.name,
-        offers: isForeignCurrency ? [] : p.offers,
-      }));
+      return getOrdersService().listProductsForAdjustOffers(
+        input.orderId,
+        (result?.products ?? []) as Array<{
+          id: string;
+          name: string;
+          offers?: unknown;
+          baseSalePrice?: string | number | null;
+        }>,
+      );
     }),
 
   /**
