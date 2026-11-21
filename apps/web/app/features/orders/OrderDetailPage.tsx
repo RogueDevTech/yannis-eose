@@ -1473,12 +1473,13 @@ export function OrderDetailPage({
     }
     return m;
   }, [itemOffers, productsForAdjust]);
-  // Product options for the product-swap SearchableSelect in Adjust modal — only products with offers
+  // Product options for the product-swap SearchableSelect in Adjust modal: every
+  // active product, with or without offers in this order's currency. One without
+  // offers falls back to Custom entry. Filtering to "has offers" left foreign
+  // currency orders able to pick only the product already on the order.
   const productOptionsForAdjust = useMemo(() => {
-    return productsForAdjust
-      .filter((p) => offersByProduct.has(p.id) && (offersByProduct.get(p.id)?.length ?? 0) > 0)
-      .map((p) => ({ value: p.id, label: p.name }));
-  }, [productsForAdjust, offersByProduct]);
+    return productsForAdjust.map((p) => ({ value: p.id, label: p.name }));
+  }, [productsForAdjust]);
   // Sales closer can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
   const canPerformCSActionsOnOrder =
     isElevated ||
@@ -1531,6 +1532,12 @@ export function OrderDetailPage({
     if (row.quantity !== srv.quantity) return true;
     return false;
   });
+  // A product swapped in (not on the order before) must carry a price: a 0 line
+  // would ship the product free. Lines already on the order keep their price,
+  // so an existing free line stays editable.
+  const hasUnpricedNewProduct = editedItems.some(
+    (row) => row.unitPrice <= 0 && !order.orderItems.some((o) => o.productId === row.productId),
+  );
   // CS closers who lack direct edit rights must go through approval for ANY
   // item change — price, offer tier, or quantity (CEO directive 2026-05-28).
   const priceDriftProposing = !canEditLinePrices && itemsChanged;
@@ -4561,7 +4568,9 @@ export function OrderDetailPage({
                           if (newProductId === item.productId) return;
                           const newProduct = productsForAdjust.find((p) => p.id === newProductId);
                           const newOffers = offersByProduct.get(newProductId) ?? [];
-                          // Auto-select first offer if available, otherwise go to custom
+                          // Auto-select first offer if available, otherwise go to Custom
+                          // and keep the line's current quantity + price as a starting
+                          // point (never a silent 0 the closer might not notice).
                           const firstOffer = newOffers[0];
                           setEditedItems((prev) =>
                             prev.map((p, i) => {
@@ -4581,8 +4590,6 @@ export function OrderDetailPage({
                                 productId: newProductId,
                                 productName: newProduct?.name ?? null,
                                 offerLabel: null,
-                                quantity: 1,
-                                unitPrice: 0,
                               };
                             }),
                           );
@@ -4743,6 +4750,11 @@ export function OrderDetailPage({
               <p className="text-sm font-semibold text-app-fg mb-4">
                 Total: <NairaPrice amount={editedItems.reduce((sum, i) => sum + i.unitPrice, 0)} decimals={2} currencyCode={order.currencyCode} />
               </p>
+              {hasUnpricedNewProduct && (
+                <p className="-mt-2 mb-4 text-xs text-warning-700 dark:text-warning-300">
+                  Enter a price for the new product before saving.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2 justify-end">
                 <Button
                   type="button"
@@ -4762,6 +4774,7 @@ export function OrderDetailPage({
                       priceRequestFetcher.state === 'submitting' ||
                       adjustItemsFetcher.state === 'submitting' ||
                       editedItems.some((i) => i.quantity < 1 || i.unitPrice < 0) ||
+                      hasUnpricedNewProduct ||
                       priceApprovalReason.trim().length < 10 ||
                       !!order.pendingOrderLinePriceRequestId
                     }
@@ -4802,6 +4815,7 @@ export function OrderDetailPage({
                       adjustItemsFetcher.state === 'submitting' ||
                       priceRequestFetcher.state === 'submitting' ||
                       editedItems.some((i) => i.quantity < 1 || i.unitPrice < 0) ||
+                      hasUnpricedNewProduct ||
                       (itemsChanged && priceApprovalReason.trim().length < 10)
                     }
                     loading={adjustItemsFetcher.state === 'submitting'}
