@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { randomUUID } from 'crypto';
+import { eq } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb } from '../test/setup-integration';
 import { createTestBranch, createTestProduct } from '../test/factories/order.factory';
@@ -196,6 +197,27 @@ describe.skipIf(SKIP_IF_NO_DB)('duplicate cleanup lookback', () => {
     const rows = await db.execute<FollowUpCopyDuplicateRow>(followUpCopyDuplicatesQuery(rules));
     return new Map(rows.map((r) => [r.follow_up_id, r]));
   }
+
+  it.each([true, false])('never deletes an order because its own follow-up was delivered (locked: %s)', async (frozen) => {
+    const ctx = await setup();
+    const source = await order(ctx, { createdAt: daysAgo(9), status: 'CS_ENGAGED', frozen });
+    const fu = await followUp(ctx, { createdAt: daysAgo(5), status: 'DELIVERED', sourceOrderId: source });
+    const copy = await order(ctx, { createdAt: daysAgo(5), status: 'DELIVERED', deliveredAt: daysAgo(1) });
+    await db.update(schema.orders).set({ sourceFollowUpOrderId: fu }).where(eq(schema.orders.id, copy));
+    const found = await losers(ctx.rules);
+    expect(found.has(source)).toBe(false);
+    expect(found.has(copy)).toBe(false);
+  });
+
+  it('never deletes a new order in favour of one locked for follow-up, but still removes its real copies', async () => {
+    const ctx = await setup();
+    await order(ctx, { createdAt: daysAgo(9), status: 'CS_ENGAGED', frozen: true });
+    const fresh = await order(ctx, { createdAt: daysAgo(2), status: 'UNPROCESSED' });
+    const repeat = await order(ctx, { createdAt: daysAgo(1), status: 'UNPROCESSED' });
+    const found = await losers(ctx.rules);
+    expect(found.has(fresh)).toBe(false);
+    expect(found.get(repeat)).toBe(fresh);
+  });
 
   it('matches an open follow-up copy once the customer orders again, never its own source', async () => {
     const ctx = await setup();

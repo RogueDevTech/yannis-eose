@@ -104,6 +104,10 @@ export type DuplicateLoserRow = {
  * Phone digits are worked out once per order and matched with two equality
  * joins (hash, last 9 digits) instead of a regex inside an OR join, so the
  * wider scan stays cheap.
+ *
+ * Orders locked for follow-up are left out on both sides, and an order is never
+ * matched with the graduated copy of its own follow-up (2026-11-25: valid
+ * originals and new orders were being deleted).
  */
 export function duplicateLosersQuery(opts: {
   companyRules: Array<{ groupId: string } & CleanupCronRule>;
@@ -133,7 +137,7 @@ export function duplicateLosersQuery(opts: {
     base AS MATERIALIZED (
       SELECT o.id, o.order_number, o.status, o.is_duplicate, o.customer_name,
              o.customer_phone, o.customer_phone_hash, o.media_buyer_id, o.campaign_id,
-             o.branch_id, o.currency_code, o.created_at, o.delivered_at,
+             o.branch_id, o.currency_code, o.created_at, o.delivered_at, o.source_follow_up_order_id,
              (o.status::text IN ('UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED') OR (${DELETABLE_CONFIRMED})) AS deletable,
              COALESCE(cfg.mode, ${fallback.mode}::text) AS rule_mode,
              COALESCE(cfg.window_days, ${fallback.windowDays}::int) AS window_days,
@@ -148,6 +152,10 @@ export function duplicateLosersQuery(opts: {
       LEFT JOIN cfg ON cfg.group_id = b.group_id
       WHERE o.deleted_at IS NULL
         AND o.status NOT IN ('CANCELLED', 'DELETED')
+        -- Locked for follow-up: the follow-up copy is the live order, so the
+        -- original is neither a duplicate nor the order to keep. Copies are
+        -- handled by followUpCopyDuplicatesQuery.
+        AND NOT o.frozen_for_follow_up
         AND ${horizon}
     ),
     -- Same phone = phone_hash OR last 9 digits: '0803…' and '803…' hash differently.
@@ -216,6 +224,13 @@ export function duplicateLosersQuery(opts: {
         w.status IN ('DELIVERED', 'REMITTED')
         AND w.delivered_at IS NOT NULL
         AND w.delivered_at < l.created_at
+      )
+      -- An order and the graduated copy of its own follow-up are one order, not
+      -- a pair (holds even if the original was unlocked again).
+      AND NOT EXISTS (
+        SELECT 1 FROM follow_up_orders f
+        WHERE (f.id = w.source_follow_up_order_id AND f.source_order_id = l.id)
+           OR (f.id = l.source_follow_up_order_id AND f.source_order_id = w.id)
       )
       AND (
         w.rank > l.rank
