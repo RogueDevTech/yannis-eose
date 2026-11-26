@@ -156,7 +156,7 @@ function RulesTab({
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
               <span>
-                {r.sourceBranchName ?? 'All branches'} → {r.targetBranchName ?? 'Round-robin'}
+                {r.sourceBranchName ?? 'All branches'} → {r.targetBranchName ?? 'Form branch'}
               </span>
               {showCurrency && (
                 <span className="shrink-0 rounded-full bg-app-hover px-1.5 py-0.5 text-[10px] font-medium text-app-fg">
@@ -177,7 +177,7 @@ function RulesTab({
             { key: 'priority', header: '#', render: (r: RoutingRule) => <span className="text-xs text-gray-500">{r.priority}</span>, className: 'w-12 text-center' },
             { key: 'name', header: 'Rule Name', render: (r: RoutingRule) => <span className="font-medium text-sm">{r.name}</span> },
             { key: 'source', header: 'Source', render: (r: RoutingRule) => r.sourceBranchName ?? 'All branches' },
-            { key: 'target', header: 'Target', render: (r: RoutingRule) => r.targetBranchName ?? 'Round-robin' },
+            { key: 'target', header: 'Target', render: (r: RoutingRule) => r.targetBranchName ?? 'Form branch' },
             ...(showCurrency
               ? [{ key: 'country', header: 'Country', render: (r: RoutingRule) => countryLabelForRule(r) }]
               : []),
@@ -292,14 +292,14 @@ function RuleFormModal({
 
         <SearchableSelect
           label="Target branch (CS)"
-          placeholder="Round-robin across all CS branches"
+          placeholder="Keep on the form's branch"
           options={branchOptions}
           value={targetBranchId ?? ''}
           onChange={(v) => setTargetBranchId(v || null)}
           clearable
         />
         <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
-          Route matching cart orders to this branch. Leave empty for round-robin.
+          Route matching cart orders to this branch. Leave empty to keep them on the form's branch.
         </p>
 
         {showCurrency && currencyOptions.length > 1 && (
