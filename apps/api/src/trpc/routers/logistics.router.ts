@@ -476,7 +476,10 @@ export const logisticsRouter = router({
       );
     }),
 
-  markDeliveryRemittanceReceived: permissionProcedure('finance.approve')
+  // Same codes as the web action and the service: a custom role or per-user grant
+  // of `finance.cashRemittance.markReceived` (an accountant on another role) must
+  // not be stopped here by `finance.approve` alone.
+  markDeliveryRemittanceReceived: permissionProcedure('finance.approve', 'finance.cashRemittance.markReceived')
     .input(markDeliveryRemittanceReceivedSchema)
     .mutation(async ({ input, ctx }) => {
       return getLogisticsService().markDeliveryRemittanceReceived(input, ctx.user, ctx.effectiveBranchIds);
