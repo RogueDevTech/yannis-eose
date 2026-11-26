@@ -26,6 +26,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { GeneralLedgerService } from '../finance/general-ledger.service';
 import { DuplicateRulesService } from '../settings/duplicate-rules.service';
 import { FULL_FORM_CART_SQL, PULL_HOLD_MINUTES } from './unsubmitted-form';
+import { noTargetServicingBranch } from './cart-routing-no-target';
 import { CART_LINE_PRICE_SQL } from './cart-line-price';
 import { parseOrderNumberSearch } from '../common/utils/parse-order-number';
 // Raw SQL pull/backfill calls PostgreSQL uuidv7().
@@ -3118,13 +3119,20 @@ export class CartOrdersService {
       const activeBranches = await this.getActiveCsBranchIds(rrAnchor);
       if (activeBranches.length === 0) return null;
 
-      // Simple round-robin: use current count of today's cart orders as offset
-      const todayCount = await this.db
-        .select({ c: count() })
-        .from(schema.cartOrders)
-        .where(gte(schema.cartOrders.createdAt, nigeriaDayStart(new Date().toISOString().slice(0, 10))));
-      const idx = (todayCount[0]?.c ?? 0) % activeBranches.length;
-      return { branchId: activeBranches[idx]!, ruleId: rule.id, ruleName: rule.name, teamId: rule.teamId };
+      // No target: the cart stays on its own form branch (like a funnel order).
+      // Round-robin is only the fallback for a form branch with no CS, because
+      // it cannot see a branch's country (2B21 Nigerian carts went abroad).
+      let offset = 0;
+      if (!campaignBranchId || !activeBranches.includes(campaignBranchId)) {
+        const todayCount = await this.db
+          .select({ c: count() })
+          .from(schema.cartOrders)
+          .where(gte(schema.cartOrders.createdAt, nigeriaDayStart(new Date().toISOString().slice(0, 10))));
+        offset = Number(todayCount[0]?.c ?? 0);
+      }
+      const branchId = noTargetServicingBranch(campaignBranchId, activeBranches, offset);
+      if (!branchId) return null;
+      return { branchId, ruleId: rule.id, ruleName: rule.name, teamId: rule.teamId };
     }
 
     return null;
